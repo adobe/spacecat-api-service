@@ -44,6 +44,7 @@ function makeTransport(overrides = {}) {
     updateProjectTag: sinon.stub().resolves({
       id: TAG_IDS.categoryRunningShoes, name: 'Footwear', parent_id: TAG_IDS.categoryRoot,
     }),
+    deleteProjectTags: sinon.stub().resolves(null),
     listProjectTags: makeListProjectTagsStub(),
     publishProject: sinon.stub().resolves({}),
     ...overrides,
@@ -1251,33 +1252,57 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
       expect(transport.updateProjectTag).to.not.have.been.called;
     });
 
-    // LLMO-6984 regression. The guard reads the target's DIMENSION, so it must keep
-    // holding whichever name the project's intent root carries. Were the raw upstream
-    // name to reach it, `$abv_tags$intent` would not be in SERVER_OWNED_DIMENSIONS and
-    // the guard would fail OPEN on exactly the projects the rename has reached — the
-    // client could then rename `Informational`, and the next server write would mint a
-    // second one beside it.
-    [
-      { label: 'renamed', levels: dimensionTreeLevels() },
-      { label: 'pre-rename', levels: dimensionTreeLevels({}, { legacyIntentRoot: true }) },
-    ].forEach(({ label, levels }) => {
-      it(`400s a rename of an intent value on a ${label} project`, async () => {
-        const transport = makeTransport({ listProjectTags: makeListProjectTagsStub(levels) });
-        const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
-        const err = await handler.handleUpdateTag(
-          transport,
-          dataAccess,
-          BRAND,
-          WORKSPACE,
-          TAG_IDS.intentCommercial,
-          { name: 'Shopping', geoTargetId: 2840, languageCode: 'en' },
-          fakeLog(),
-        ).then(() => null, (e) => e);
-
-        expect(err.status).to.equal(400);
-        expect(err.message).to.match(/server-owned "intent" dimension cannot be renamed or re-parented/);
-        expect(transport.updateProjectTag).to.not.have.been.called;
+    // The guard reads the target's DIMENSION, not the raw upstream root name. Were
+    // the raw name to reach it, `$abv_tags$intent` would not be in
+    // SERVER_OWNED_DIMENSIONS and the guard would fail OPEN — the client could then
+    // rename `Informational`, and the next server write would mint a second one
+    // beside it.
+    it('400s a rename of an intent value', async () => {
+      const transport = makeTransport({
+        listProjectTags: makeListProjectTagsStub(dimensionTreeLevels()),
       });
+      const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
+      const err = await handler.handleUpdateTag(
+        transport,
+        dataAccess,
+        BRAND,
+        WORKSPACE,
+        TAG_IDS.intentCommercial,
+        { name: 'Shopping', geoTargetId: 2840, languageCode: 'en' },
+        fakeLog(),
+      ).then(() => null, (e) => e);
+
+      expect(err.status).to.equal(400);
+      expect(err.message).to.match(/server-owned "intent" dimension cannot be renamed or re-parented/);
+      expect(transport.updateProjectTag).to.not.have.been.called;
+    });
+
+    // The same guard on a project the intent rename never reached, whose root is
+    // still named `intent`. `dimensionOfRootName` is identity for that name, so the
+    // fold still yields the intent dimension and the guard still holds. This is why
+    // the bare spelling stays in RESERVED_ROOT_NAMES, and it is what keeps an
+    // un-swept project safe rather than merely degraded — so it is asserted, not
+    // assumed, for as long as such a project can exist.
+    it('400s a rename of a value under a pre-rename `intent` root', async () => {
+      const levels = dimensionTreeLevels();
+      levels[''] = levels[''].map(
+        (t) => (t.name === INTENT_ROOT_NAME ? { ...t, name: 'intent' } : t),
+      );
+      const transport = makeTransport({ listProjectTags: makeListProjectTagsStub(levels) });
+      const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
+      const err = await handler.handleUpdateTag(
+        transport,
+        dataAccess,
+        BRAND,
+        WORKSPACE,
+        TAG_IDS.intentCommercial,
+        { name: 'Shopping', geoTargetId: 2840, languageCode: 'en' },
+        fakeLog(),
+      ).then(() => null, (e) => e);
+
+      expect(err.status).to.equal(400);
+      expect(err.message).to.match(/server-owned "intent" dimension cannot be renamed or re-parented/);
+      expect(transport.updateProjectTag).to.not.have.been.called;
     });
 
     // LLMO-6665 regression. `source` is server-owned but OPEN, so it is
@@ -1790,6 +1815,263 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
           expect(err.code).to.equal('tagNotFound');
         });
       expect(transport.updateProjectTag).to.not.have.been.called;
+    });
+  });
+
+  describe('handleDeleteTag (flat mode) — DELETE /serenity/tags/:tagId', () => {
+    let handler;
+    beforeEach(async () => {
+      handler = await import('../../../../src/support/serenity/handlers/tags.js');
+    });
+
+    const query = { geoTargetId: 2840, languageCode: 'en' };
+
+    it('deletes a prompt-less leaf category and republishes (204)', async () => {
+      const transport = makeTransport();
+      const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
+      const res = await handler.handleDeleteTag(
+        transport,
+        dataAccess,
+        BRAND,
+        WORKSPACE,
+        TAG_IDS.subCategoryHuman,
+        query,
+        fakeLog(),
+      );
+      expect(res.status).to.equal(204);
+      expect(transport.deleteProjectTags)
+        .to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-1', [TAG_IDS.subCategoryHuman]);
+      expect(transport.publishProject).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-1');
+    });
+
+    // The whole subtree is composed and deleted in ONE upstream batch call —
+    // never left to whatever upstream does with a parent-with-children delete.
+    it('deletes a parent category and its whole subtree in one batch call', async () => {
+      const transport = makeTransport();
+      const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
+      const res = await handler.handleDeleteTag(
+        transport,
+        dataAccess,
+        BRAND,
+        WORKSPACE,
+        TAG_IDS.categoryRunningShoes,
+        query,
+        fakeLog(),
+      );
+      expect(res.status).to.equal(204);
+      expect(transport.deleteProjectTags).to.have.been.calledOnceWithExactly(
+        WORKSPACE,
+        'proj-1',
+        [TAG_IDS.categoryRunningShoes, TAG_IDS.subCategoryHuman],
+      );
+    });
+
+    it('400s a delete targeting a dimension root', async () => {
+      const transport = makeTransport();
+      const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
+      for (const rootId of [TAG_IDS.categoryRoot, TAG_IDS.intentRoot]) {
+        // eslint-disable-next-line no-await-in-loop
+        await expect(handler.handleDeleteTag(
+          transport,
+          dataAccess,
+          BRAND,
+          WORKSPACE,
+          rootId,
+          query,
+          fakeLog(),
+        )).to.be.rejected.then((err) => expect(err.status).to.equal(400));
+      }
+      expect(transport.deleteProjectTags).to.not.have.been.called;
+    });
+
+    it('400s a delete targeting a server-owned dimension value', async () => {
+      const transport = makeTransport();
+      const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
+      const err = await handler.handleDeleteTag(
+        transport,
+        dataAccess,
+        BRAND,
+        WORKSPACE,
+        TAG_IDS.intentTask,
+        query,
+        fakeLog(),
+      ).then(() => null, (e) => e);
+      expect(err.status).to.equal(400);
+      expect(err.message).to.match(/server-owned "intent" dimension cannot be deleted/);
+      expect(transport.deleteProjectTags).to.not.have.been.called;
+    });
+
+    it('404s tagNotFound for an id absent from the tree, without calling upstream', async () => {
+      const transport = makeTransport();
+      const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
+      await expect(handler.handleDeleteTag(
+        transport,
+        dataAccess,
+        BRAND,
+        WORKSPACE,
+        'ghost',
+        query,
+        fakeLog(),
+      )).to.be.rejected.then((err) => {
+        expect(err.status).to.equal(404);
+        expect(err.code).to.equal('tagNotFound');
+      });
+      expect(transport.deleteProjectTags).to.not.have.been.called;
+    });
+
+    it('404s (marketNotFound) when no project backs the slice', async () => {
+      const transport = makeTransport();
+      const dataAccess = makeDataAccess(null);
+      await expect(handler.handleDeleteTag(
+        transport,
+        dataAccess,
+        BRAND,
+        WORKSPACE,
+        TAG_IDS.subCategoryHuman,
+        query,
+        fakeLog(),
+      )).to.be.rejected.then((err) => {
+        expect(err.status).to.equal(404);
+        expect(err.code).to.equal('marketNotFound');
+      });
+    });
+
+    it('400s on a missing tagId', async () => {
+      const transport = makeTransport();
+      const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
+      await expect(handler.handleDeleteTag(
+        transport,
+        dataAccess,
+        BRAND,
+        WORKSPACE,
+        '',
+        query,
+        fakeLog(),
+      )).to.be.rejected.then((err) => expect(err.status).to.equal(400));
+      expect(transport.deleteProjectTags).to.not.have.been.called;
+    });
+
+    it('400s on a non-positive geoTargetId or malformed languageCode', async () => {
+      const transport = makeTransport();
+      const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
+      const bad = [
+        { geoTargetId: 0, languageCode: 'en' },
+        { geoTargetId: 2840, languageCode: 'EN_US!' },
+      ];
+      for (const q of bad) {
+        // eslint-disable-next-line no-await-in-loop
+        await expect(handler.handleDeleteTag(
+          transport,
+          dataAccess,
+          BRAND,
+          WORKSPACE,
+          TAG_IDS.subCategoryHuman,
+          q,
+          fakeLog(),
+        )).to.be.rejected.then((err) => expect(err.status).to.equal(400));
+      }
+    });
+
+    it('propagates an upstream failure from the delete call', async () => {
+      const boom = Object.assign(new Error('upstream 502'), { status: 502 });
+      const transport = makeTransport({ deleteProjectTags: sinon.stub().rejects(boom) });
+      const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
+      await expect(handler.handleDeleteTag(
+        transport,
+        dataAccess,
+        BRAND,
+        WORKSPACE,
+        TAG_IDS.subCategoryHuman,
+        query,
+        fakeLog(),
+      )).to.be.rejectedWith('upstream 502');
+    });
+
+    it('propagates a quotaExceeded 409 when the post-delete republish 405s on quota (SITES-49206)', async () => {
+      const transport = makeTransport({
+        publishProject: sinon.stub().rejects(
+          new SerenityTransportError(405, 'publish failed: 405', '<html>405 Not Allowed</html>'),
+        ),
+      });
+      const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
+      const err = await handler.handleDeleteTag(
+        transport,
+        dataAccess,
+        BRAND,
+        WORKSPACE,
+        TAG_IDS.subCategoryHuman,
+        query,
+        fakeLog(),
+      ).then(() => null, (e) => e);
+      expect(err).to.not.equal(null);
+      expect(err.status).to.equal(409);
+      expect(err.code).to.equal(ERROR_CODES.QUOTA_EXCEEDED);
+      expect(transport.deleteProjectTags).to.have.been.calledOnce;
+      expect(transport.publishProject).to.have.been.calledOnce;
+    });
+  });
+
+  describe('handleDeleteTagSubworkspace', () => {
+    const query = { geoTargetId: 2840, languageCode: 'en' };
+
+    async function loadHandler(resolveProjectStub) {
+      return esmock('../../../../src/support/serenity/handlers/tags.js', {
+        '../../../../src/support/serenity/subworkspace-projects.js': {
+          resolveProject: resolveProjectStub,
+        },
+      });
+    }
+
+    it('resolves the project live and deletes the tag (204)', async () => {
+      const handler = await loadHandler(sinon.stub().resolves({ id: 'proj-sub-1' }));
+      const transport = makeTransport();
+      const res = await handler.handleDeleteTagSubworkspace(
+        transport,
+        WORKSPACE,
+        TAG_IDS.subCategoryHuman,
+        query,
+        fakeLog(),
+      );
+      expect(res.status).to.equal(204);
+      expect(transport.deleteProjectTags)
+        .to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-sub-1', [TAG_IDS.subCategoryHuman]);
+    });
+
+    it('400s a delete targeting a dimension root', async () => {
+      const handler = await loadHandler(sinon.stub().resolves({ id: 'proj-sub-1' }));
+      const transport = makeTransport();
+      await expect(handler.handleDeleteTagSubworkspace(
+        transport,
+        WORKSPACE,
+        TAG_IDS.categoryRoot,
+        query,
+        fakeLog(),
+      )).to.be.rejected.then((err) => expect(err.status).to.equal(400));
+      expect(transport.deleteProjectTags).to.not.have.been.called;
+    });
+
+    it('404s (marketNotFound) when the slice has no live project', async () => {
+      const handler = await loadHandler(sinon.stub().resolves(null));
+      const transport = makeTransport();
+      await expect(handler.handleDeleteTagSubworkspace(
+        transport,
+        WORKSPACE,
+        TAG_IDS.subCategoryHuman,
+        query,
+        fakeLog(),
+      )).to.be.rejected.then((err) => {
+        expect(err.status).to.equal(404);
+        expect(err.code).to.equal('marketNotFound');
+      });
+    });
+
+    it('404s tagNotFound for an id absent from the tree', async () => {
+      const handler = await loadHandler(sinon.stub().resolves({ id: 'proj-sub-1' }));
+      const transport = makeTransport();
+      await expect(handler.handleDeleteTagSubworkspace(transport, WORKSPACE, 'ghost', query, fakeLog())).to.be.rejected.then((err) => {
+        expect(err.status).to.equal(404);
+        expect(err.code).to.equal('tagNotFound');
+      });
     });
   });
 });

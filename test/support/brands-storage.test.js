@@ -978,7 +978,7 @@ describe('brands-storage', () => {
   // so tests can verify which filters were applied to queries.
   function createCapturingClient(tableMap) {
     const calls = {
-      upsert: [], update: [], delete: [], or: [], neq: [],
+      upsert: [], update: [], delete: [], or: [], neq: [], eq: [],
     };
     const callCounts = {};
     const makeQuery = (table) => {
@@ -1020,6 +1020,12 @@ describe('brands-storage', () => {
           if (prop === 'neq') {
             return (col, val) => {
               calls.neq.push({ table, col, val });
+              return new Proxy({}, handler);
+            };
+          }
+          if (prop === 'eq') {
+            return (col, val) => {
+              calls.eq.push({ table, col, val });
               return new Proxy({}, handler);
             };
           }
@@ -1075,6 +1081,7 @@ describe('brands-storage', () => {
           { data: null, error: null }, // existing lookup OK (no brand)
           { data: null, error: { code: '23505', message: 'brands_base_site_unique' } }, // upsert 409
         ],
+        sites: { data: { id: 'some-site-id' }, error: null }, // site belongs to org
       });
 
       const err = await upsertBrand({
@@ -1118,6 +1125,7 @@ describe('brands-storage', () => {
           { data: { id: BRAND_ID, name: 'Test' }, error: null },
           { data: fullBrandRow, error: null },
         ],
+        sites: { data: { id: 'site-uuid' }, error: null }, // site belongs to org
       });
 
       const result = await upsertBrand({
@@ -1136,6 +1144,7 @@ describe('brands-storage', () => {
           { data: { id: BRAND_ID, name: 'Test' }, error: null }, // upsert result
           { data: makeBrandRow({ name: 'Test', site_id: 'new-site' }), error: null },
         ],
+        sites: { data: { id: 'new-site' }, error: null }, // site belongs to org
       });
 
       await upsertBrand({
@@ -1190,7 +1199,7 @@ describe('brands-storage', () => {
       expect(brandsUpsert.row).to.not.have.property('semrush_sub_workspace_id');
     });
 
-    it('keeps the brand active with a null site_id when only a semrush_sub_workspace_id anchors it (no baseSiteId)', async () => {
+    it('downgrades to pending with a null site_id when only a semrush_sub_workspace_id is supplied (SITES-49449, no baseSiteId)', async () => {
       const client = createCapturingClient({
         brands: [
           { data: null, error: null },
@@ -1207,10 +1216,10 @@ describe('brands-storage', () => {
       });
 
       const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
-      expect(brandsUpsert.row.status).to.equal('active');
+      // SITES-49449: semrush_sub_workspace_id is no longer a substitute anchor —
+      // site_id is required for 'active', so this downgrades to 'pending' instead.
+      expect(brandsUpsert.row.status).to.equal('pending');
       expect(brandsUpsert.row.semrush_sub_workspace_id).to.equal('ws-1');
-      // A fresh create always writes an explicit site_id — null when no baseSiteId
-      // is supplied. The sub-workspace is what keeps it active (LLMO-6405).
       expect(brandsUpsert.row.site_id).to.equal(null);
     });
 
@@ -1221,6 +1230,7 @@ describe('brands-storage', () => {
           { data: { id: BRAND_ID, name: 'Test' }, error: null },
           { data: makeBrandRow({ name: 'Test' }), error: null },
         ],
+        sites: { data: { id: 'primary-site-id' }, error: null }, // site belongs to org
       });
 
       await upsertBrand({
@@ -1351,8 +1361,117 @@ describe('brands-storage', () => {
       });
 
       const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
-      expect(brandsUpsert.row).to.not.have.property('site_id');
+      // The attempted change to 'different-site' is rejected (warns, doesn't
+      // apply), but site_id must still be carried forward as the EXISTING
+      // value rather than omitted from the row entirely — an omitted column
+      // is not preserved by the upsert and would trip
+      // chk_active_brand_has_site_id on write (see the fix above this branch).
+      expect(brandsUpsert.row.site_id).to.equal('original-site');
       expect(log.warn).to.have.been.calledWithMatch('immutable');
+    });
+
+    it('carries forward site_id when re-upserting an already-anchored brand with the SAME baseSiteId', async () => {
+      // The exact case that was silently broken: a caller (e.g. a migration
+      // script) reads a brand back and re-submits its own already-correct
+      // baseSiteId verbatim. None of the three original branches matched this
+      // (existing !== null, existing.site_id already set, and the "changed"
+      // branch's inequality check is false), so site_id was omitted from the
+      // upsert row entirely — silently clearing an already-anchored brand and
+      // tripping chk_active_brand_has_site_id with a 400 on a request that
+      // never intended to touch the anchor.
+      const client = createCapturingClient({
+        brands: [
+          { data: { site_id: 'same-site' }, error: null }, // existing lookup
+          { data: { id: BRAND_ID, name: 'Test' }, error: null }, // upsert result
+          { data: makeBrandRow({ name: 'Test', site_id: 'same-site' }), error: null },
+        ],
+      });
+
+      await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test', baseSiteId: 'same-site' },
+        postgrestClient: client,
+      });
+
+      const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
+      expect(brandsUpsert.row.site_id).to.equal('same-site');
+    });
+
+    it('carries forward site_id when re-upserting an already-anchored brand with NO baseSiteId in the body', async () => {
+      // Same underlying gap, different trigger: a partial upsert that omits
+      // baseSiteId altogether on an already-anchored brand also hit none of
+      // the three original branches (all three require hasText(baseSiteId)
+      // except the existing===null branch), dropping site_id the same way.
+      const client = createCapturingClient({
+        brands: [
+          { data: { site_id: 'existing-site' }, error: null },
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: makeBrandRow({ name: 'Test', site_id: 'existing-site' }), error: null },
+        ],
+      });
+
+      await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test' },
+        postgrestClient: client,
+      });
+
+      const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
+      expect(brandsUpsert.row.site_id).to.equal('existing-site');
+    });
+
+    it('rejects a fresh create whose baseSiteId belongs to a different org (serenity-docs#346)', async () => {
+      const client = createCapturingClient({
+        brands: [
+          { data: null, error: null }, // no existing brand
+        ],
+        sites: { data: null, error: null }, // site not found under this org
+      });
+
+      const err = await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test', baseSiteId: 'other-orgs-site' },
+        postgrestClient: client,
+      }).catch((e) => e);
+
+      expect(err.status).to.equal(409);
+      expect(err.code).to.equal('brand_site_org_mismatch');
+      expect(err.message).to.contain('other-orgs-site');
+      expect(client.capturedCalls.upsert).to.have.lengthOf(0);
+
+      // Verify the guard queried with the RIGHT siteId/organizationId pair,
+      // not just that a `sites` lookup happened at all — a swapped or
+      // mismatched pair here would still 409 in this test's fake, but would
+      // be a real cross-tenant hole against a real database.
+      const sitesEq = client.capturedCalls.eq.filter((c) => c.table === 'sites');
+      expect(sitesEq).to.deep.include({ table: 'sites', col: 'id', val: 'other-orgs-site' });
+      expect(sitesEq).to.deep.include({ table: 'sites', col: 'organization_id', val: ORG_ID });
+    });
+
+    it('fails closed with an untyped error when the sites org-membership lookup errors (serenity-docs#346)', async () => {
+      const client = createCapturingClient({
+        brands: [
+          { data: null, error: null }, // no existing brand
+        ],
+        sites: { data: null, error: { message: 'connection reset' } }, // PostgREST failure
+      });
+
+      const err = await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test', baseSiteId: 'some-site' },
+        postgrestClient: client,
+      }).catch((e) => e);
+
+      expect(err.message).to.equal(
+        'Failed to verify primary site org for brand "Test": connection reset',
+      );
+      // Deliberately untyped: a DB-read failure is not the same class of
+      // problem as a genuine org mismatch, so it must NOT carry the 409
+      // brand_site_org_mismatch status/code — it surfaces as a plain 500
+      // via the controller's generic error path instead.
+      expect(err.status).to.be.undefined;
+      expect(err.code).to.be.undefined;
+      expect(client.capturedCalls.upsert).to.have.lengthOf(0);
     });
 
     it('does not warn when re-upserting with the same site_id', async () => {
@@ -1385,6 +1504,7 @@ describe('brands-storage', () => {
           { data: { id: BRAND_ID, name: 'Test' }, error: null }, // upsert result
           { data: makeBrandRow({ name: 'Test', site_id: 'new-site' }), error: null },
         ],
+        sites: { data: { id: 'new-site' }, error: null }, // site belongs to org
       });
 
       await upsertBrand({
@@ -2199,6 +2319,118 @@ describe('brands-storage', () => {
       expect(result.region).to.deep.equal(['42']);
     });
 
+    it('normalizes GL to US on create, case-insensitively and whitespace-trimmed (#3168)', async () => {
+      const client = createCapturingClient({
+        brands: [
+          { data: null, error: null }, // no existing brand
+          { data: { id: BRAND_ID, name: 'Test' }, error: null }, // upsert result
+          { data: makeBrandRow({ regions: ['US', 'DE'] }), error: null },
+        ],
+      });
+
+      await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test', region: ['GL', ' gl ', 'DE'] },
+        postgrestClient: client,
+      });
+
+      const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
+      expect(brandsUpsert.row.regions).to.deep.equal(['US', 'DE']);
+    });
+
+    it('leaves non-GL region values untouched on create', async () => {
+      const client = createCapturingClient({
+        brands: [
+          { data: null, error: null },
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: makeBrandRow({ regions: ['FR'] }), error: null },
+        ],
+      });
+
+      await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test', region: ['FR'] },
+        postgrestClient: client,
+      });
+
+      const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
+      expect(brandsUpsert.row.regions).to.deep.equal(['FR']);
+    });
+
+    it('normalizes GL to US in aliases, competitors, social accounts, and earned '
+      + 'content on create (#3168)', async () => {
+      const client = createCapturingClient({
+        brands: [
+          { data: null, error: null },
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: makeBrandRow({ name: 'Test' }), error: null },
+        ],
+      });
+
+      await upsertBrand({
+        organizationId: ORG_ID,
+        brand: {
+          name: 'Test',
+          brandAliases: [{ name: 'Alias', regions: ['GL'] }],
+          competitors: [{ name: 'Rival', url: 'https://rival.com', regions: ['GL'] }],
+          socialAccounts: [{ url: 'https://x.com/test', regions: ['GL'] }],
+          earnedContent: [{ name: 'Blog', url: 'https://blog.com', regions: ['GL'] }],
+        },
+        postgrestClient: client,
+      });
+
+      const aliasesUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brand_aliases');
+      expect(aliasesUpsert.row[0].regions).to.deep.equal(['US']);
+
+      const competitorsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'competitors');
+      expect(competitorsUpsert.row[0].regions).to.deep.equal(['US']);
+
+      const socialUpsert = client.capturedCalls.upsert
+        .find((c) => c.table === 'brand_social_accounts');
+      expect(socialUpsert.row[0].regions).to.deep.equal(['US']);
+
+      const earnedUpsert = client.capturedCalls.upsert
+        .find((c) => c.table === 'brand_earned_sources');
+      expect(earnedUpsert.row[0].regions).to.deep.equal(['US']);
+    });
+
+    it('dedupes GL alongside an explicit US in aliases, competitors, social '
+      + 'accounts, and earned content on create', async () => {
+      const client = createCapturingClient({
+        brands: [
+          { data: null, error: null },
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: makeBrandRow({ name: 'Test' }), error: null },
+        ],
+      });
+
+      await upsertBrand({
+        organizationId: ORG_ID,
+        brand: {
+          name: 'Test',
+          brandAliases: [{ name: 'Alias', regions: ['GL', 'US'] }],
+          competitors: [{ name: 'Rival', url: 'https://rival.com', regions: ['GL', 'US'] }],
+          socialAccounts: [{ url: 'https://x.com/test', regions: ['GL', 'US'] }],
+          earnedContent: [{ name: 'Blog', url: 'https://blog.com', regions: ['GL', 'US'] }],
+        },
+        postgrestClient: client,
+      });
+
+      const aliasesUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brand_aliases');
+      expect(aliasesUpsert.row[0].regions).to.deep.equal(['US']);
+
+      const competitorsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'competitors');
+      expect(competitorsUpsert.row[0].regions).to.deep.equal(['US']);
+
+      const socialUpsert = client.capturedCalls.upsert
+        .find((c) => c.table === 'brand_social_accounts');
+      expect(socialUpsert.row[0].regions).to.deep.equal(['US']);
+
+      const earnedUpsert = client.capturedCalls.upsert
+        .find((c) => c.table === 'brand_earned_sources');
+      expect(earnedUpsert.row[0].regions).to.deep.equal(['US']);
+    });
+
     it('accepts string aliases (not objects) in brandAliases', async () => {
       const fullBrandRow = makeBrandRow({
         brand_aliases: [{ alias: 'StringAlias', regions: [] }],
@@ -2356,6 +2588,8 @@ describe('brands-storage', () => {
   });
 
   describe('setBrandClaimsEnabled', () => {
+    const SITE_ID = '55555555-5555-4555-8555-555555555555';
+
     it('throws when postgrestClient is missing', async () => {
       await expect(setBrandClaimsEnabled({
         brandId: BRAND_ID, enabled: true, postgrestClient: null,
@@ -2376,7 +2610,7 @@ describe('brands-storage', () => {
 
     it('writes brand_claims_enabled, excludes deleted brands, and returns the updated brand', async () => {
       const client = createCapturingClient({
-        brands: [{ data: { id: BRAND_ID, name: 'Acme' }, error: null }],
+        brands: [{ data: { id: BRAND_ID, name: 'Acme', site_id: SITE_ID }, error: null }],
       });
 
       const result = await setBrandClaimsEnabled({
@@ -2388,7 +2622,9 @@ describe('brands-storage', () => {
       expect(brandsUpdate.row.updated_by).to.equal('slack:U1');
       const neqFilter = client.capturedCalls.neq.find((c) => c.table === 'brands' && c.col === 'status');
       expect(neqFilter?.val).to.equal('deleted');
-      expect(result).to.deep.equal({ id: BRAND_ID, name: 'Acme' });
+      // site_id (the brand's primary site) is returned so callers can toggle the
+      // per-site brand-claims audit in lock-step with the flag.
+      expect(result).to.deep.equal({ id: BRAND_ID, name: 'Acme', site_id: SITE_ID });
     });
 
     it('returns null when no brand matches the id', async () => {
@@ -2461,6 +2697,7 @@ describe('brands-storage', () => {
           // 2nd call: update fails with unique constraint
           { data: null, error: { code: '23505', message: 'brands_base_site_unique' } },
         ],
+        sites: { data: { id: 'some-site-id' }, error: null }, // site belongs to org
       });
 
       const err = await updateBrand({
@@ -2472,6 +2709,59 @@ describe('brands-storage', () => {
 
       expect(err.message).to.equal('This site is already the primary URL for another brand');
       expect(err.status).to.equal(409);
+    });
+
+    it('rejects setting baseSiteId to a site owned by a different org (serenity-docs#346)', async () => {
+      const postgrestClient = createCapturingClient({
+        brands: [
+          // 1st call: select current site_id (null → allow setting)
+          { data: { site_id: null }, error: null },
+        ],
+        sites: { data: null, error: null }, // site not found under this org
+      });
+
+      const err = await updateBrand({
+        organizationId: ORG_ID,
+        brandId: BRAND_ID,
+        updates: { baseSiteId: 'other-orgs-site' },
+        postgrestClient,
+      }).catch((e) => e);
+
+      expect(err.status).to.equal(409);
+      expect(err.code).to.equal('brand_site_org_mismatch');
+      expect(postgrestClient.capturedCalls.update).to.have.lengthOf(0);
+
+      // Same query-argument check as upsertBrand's guard test — proves the
+      // guard used THIS brand's org and THIS candidate site, not just that
+      // some sites lookup happened.
+      const sitesEq = postgrestClient.capturedCalls.eq.filter((c) => c.table === 'sites');
+      expect(sitesEq).to.deep.include({ table: 'sites', col: 'id', val: 'other-orgs-site' });
+      expect(sitesEq).to.deep.include({ table: 'sites', col: 'organization_id', val: ORG_ID });
+    });
+
+    it('rejects re-pointing a pending brand to a cross-org site (serenity-docs#346)', async () => {
+      // Distinct code path from the "first set" test above: this brand already
+      // HAS a site_id, so the guard only fires via the isPending re-point
+      // sub-condition, not the !existing?.site_id one.
+      const client = createCapturingClient({
+        brands: [
+          { data: { name: 'Pending Re-pointer', site_id: 'old-site', status: 'pending' }, error: null },
+        ],
+        sites: { data: null, error: null }, // site not found under this org
+      });
+
+      const err = await updateBrand({
+        organizationId: ORG_ID,
+        brandId: BRAND_ID,
+        updates: { baseSiteId: 'other-orgs-site' },
+        postgrestClient: client,
+      }).catch((e) => e);
+
+      expect(err.status).to.equal(409);
+      expect(err.code).to.equal('brand_site_org_mismatch');
+      // Uses the fetched brand's name, not the raw brandId, in the message.
+      expect(err.message).to.contain('Pending Re-pointer');
+      expect(client.capturedCalls.update).to.have.lengthOf(0);
     });
 
     it('sets baseSiteId when brand has no site_id yet', async () => {
@@ -2486,6 +2776,7 @@ describe('brands-storage', () => {
           // 3rd call: getBrandById re-fetch
           { data: fullBrandRow, error: null },
         ],
+        sites: { data: { id: 'new-site-id' }, error: null }, // site belongs to org
       });
 
       const result = await updateBrand({
@@ -2498,28 +2789,115 @@ describe('brands-storage', () => {
       expect(result).to.not.be.null;
     });
 
-    it('ignores baseSiteId when brand already has a site_id (immutable)', async () => {
-      const fullBrandRow = makeBrandRow({ site_id: 'existing-site-id' });
-
-      const postgrestClient = createTableMockClient({
+    it('re-points baseSiteId on an already-anchored brand — the deliberate #349 path (was immutable)', async () => {
+      // serenity-docs#349: an explicit updateBrand re-point now MOVES an existing
+      // primary site (the controller validates eligibility + drives Semrush first).
+      // The SILENT-overwrite guard stays in upsertBrand, not here.
+      const client = createCapturingClient({
         brands: [
-          // 1st call: select current site_id (already set → ignore)
-          { data: { site_id: 'existing-site-id' }, error: null },
-          // 2nd call: update succeeds (without site_id in patch)
+          // 1st call: select current row — brand already anchored to a different site
+          { data: { site_id: 'existing-site-id', status: 'active' }, error: null },
+          // 2nd call: update succeeds (site_id now in the patch)
           { data: { id: BRAND_ID }, error: null },
           // 3rd call: getBrandById re-fetch
-          { data: fullBrandRow, error: null },
+          { data: makeBrandRow({ site_id: 'different-site-id' }), error: null },
         ],
+        sites: { data: { id: 'different-site-id' }, error: null }, // target belongs to org
       });
 
       const result = await updateBrand({
         organizationId: ORG_ID,
         brandId: BRAND_ID,
         updates: { baseSiteId: 'different-site-id' },
-        postgrestClient,
+        postgrestClient: client,
       });
 
       expect(result).to.not.be.null;
+      const brandsUpdate = client.capturedCalls.update.find((c) => c.table === 'brands');
+      expect(brandsUpdate.row.site_id).to.equal('different-site-id');
+    });
+
+    it('re-points baseSiteId to a site that is already one of the brand\'s OWN '
+      + 'secondary siteIds (serenity-docs#349 live-testing regression: this must NOT '
+      + 'be treated as a no-op)', async () => {
+      // Live e2e testing on a real org found that re-pointing a brand's primary site
+      // onto a site that was already listed among the brand's own secondary siteIds
+      // (via brand_sites) came back as a silent no-op: 200, but baseSiteId/updatedAt
+      // unchanged. This function has no code path that even reads brand_sites when
+      // deciding whether to write site_id (updateBrand's own pre-write `existing`
+      // read is a plain `site_id` column read, not a brand_sites join), so a target
+      // already known to the brand must be re-pointed exactly like any other target.
+      const client = createCapturingClient({
+        brands: [
+          // 1st call: select current row — brand anchored to OLD_SITE.
+          { data: { site_id: 'old-primary-site-id', status: 'active' }, error: null },
+          // 2nd call: the UPDATE's own RETURNING (BRAND_SELECT embed) — what a real
+          // PostgREST `Prefer: return=representation` response looks like on this
+          // UPDATE. site_id now NEW_SITE, and brand_sites still lists OLD_SITE +
+          // NEW_SITE + a third secondary (mirrors the live bug report: the target
+          // was already a secondary URL before the re-point). This call is
+          // guaranteed to land on the writer (see updateBrand's comment), so — per
+          // the fix — updateBrand builds its result directly from THIS row when
+          // (as here) no child-table collection was touched by the same PATCH.
+          {
+            data: makeBrandRow({
+              site_id: 'new-secondary-site-id',
+              base_site: { id: 'new-secondary-site-id', base_url: 'https://example.com' },
+              status: 'active',
+              updated_at: '2026-01-02T00:00:00Z',
+              brand_sites: [
+                { site_id: 'old-primary-site-id', paths: [], sites: { base_url: 'https://haha.com' } },
+                { site_id: 'new-secondary-site-id', paths: [], sites: { base_url: 'https://example.com' } },
+                { site_id: 'third-site-id', paths: [], sites: { base_url: 'https://you.com' } },
+              ],
+            }),
+            error: null,
+          },
+          // 3rd call: getBrandById re-fetch. Deliberately modeled as STALE — still
+          // shows the OLD site_id/updatedAt — to simulate the CONFIRMED production
+          // mechanism (serenity-docs#349 follow-up): this env's postgrestClient
+          // points at `data-svc-balanced.internal`, where a bare GET can be served
+          // by a lagging Aurora reader replica even though the write already
+          // committed on the writer. Because this PATCH touches no child-table
+          // collection, the fix never issues this call at all. If a future change
+          // reintroduced the old unconditional getBrandById() re-fetch, this stale
+          // fixture would make the assertions below fail — proving this test
+          // actually exercises the race, not just a mock that was never stale.
+          {
+            data: makeBrandRow({
+              site_id: 'old-primary-site-id',
+              base_site: { id: 'old-primary-site-id', base_url: 'https://haha.com' },
+              status: 'active',
+              updated_at: '2026-01-01T00:00:00Z',
+              brand_sites: [
+                { site_id: 'old-primary-site-id', paths: [], sites: { base_url: 'https://haha.com' } },
+                { site_id: 'new-secondary-site-id', paths: [], sites: { base_url: 'https://example.com' } },
+                { site_id: 'third-site-id', paths: [], sites: { base_url: 'https://you.com' } },
+              ],
+            }),
+            error: null,
+          },
+        ],
+        sites: { data: { id: 'new-secondary-site-id' }, error: null }, // target belongs to org
+      });
+
+      const result = await updateBrand({
+        organizationId: ORG_ID,
+        brandId: BRAND_ID,
+        updates: { baseSiteId: 'new-secondary-site-id' },
+        postgrestClient: client,
+      });
+
+      expect(result).to.not.be.null;
+      const brandsUpdate = client.capturedCalls.update.find((c) => c.table === 'brands');
+      // The write itself must carry the NEW site_id — never silently dropped or
+      // reverted because the target was already a known secondary.
+      expect(brandsUpdate.row.site_id).to.equal('new-secondary-site-id');
+      expect(result.baseSiteId).to.equal('new-secondary-site-id');
+      expect(result.updatedAt).to.equal('2026-01-02T00:00:00Z');
+      expect(result.siteIds).to.include.members([
+        'old-primary-site-id', 'new-secondary-site-id', 'third-site-id',
+      ]);
     });
 
     it('clears site_id when a pending brand passes baseSiteId: null (LLMO-5870)', async () => {
@@ -2578,6 +2956,7 @@ describe('brands-storage', () => {
           // 3rd call: getBrandById re-fetch
           { data: makeBrandRow({ site_id: 'different-site-id', status: 'pending' }), error: null },
         ],
+        sites: { data: { id: 'different-site-id' }, error: null }, // site belongs to org
       });
 
       await updateBrand({
@@ -2599,6 +2978,7 @@ describe('brands-storage', () => {
           // 2nd call: update fails with unique constraint
           { data: null, error: { code: '23505', message: 'brands_base_site_unique' } },
         ],
+        sites: { data: { id: 'taken-site-id' }, error: null }, // site belongs to org
       });
 
       const err = await updateBrand({
@@ -2667,9 +3047,13 @@ describe('brands-storage', () => {
     });
 
     it('normalizes brand guidance fields in update patch', async () => {
+      // No baseSiteId/status/expectedUpdatedAt here, so there is no pre-read: the
+      // 1st brands call IS the UPDATE's own RETURNING. Since this PATCH touches no
+      // child-table collection, updateBrand returns straight off this row (no
+      // follow-up read at all) — so it must already carry the applied values, the
+      // same way a real `Prefer: return=representation` response would.
       const client = createCapturingClient({
         brands: [
-          { data: { id: BRAND_ID }, error: null },
           {
             data: makeBrandRow({
               brand_context: null,
@@ -2872,11 +3256,13 @@ describe('brands-storage', () => {
     });
 
     it('handles non-string region values in updates', async () => {
+      // region-only patch: no child-table collection touched, so updateBrand
+      // returns straight off the UPDATE's own RETURNING row (1st/only brands call)
+      // — no follow-up read.
       const fullBrandRow = makeBrandRow({ regions: ['42'] });
 
       const postgrestClient = createTableMockClient({
         brands: [
-          { data: { id: BRAND_ID }, error: null },
           { data: fullBrandRow, error: null },
         ],
       });
@@ -2888,6 +3274,42 @@ describe('brands-storage', () => {
         postgrestClient,
       });
       expect(result.region).to.deep.equal(['42']);
+    });
+
+    it('normalizes GL to US on update, case-insensitively and whitespace-trimmed (#3168)', async () => {
+      const client = createCapturingClient({
+        brands: [
+          { data: makeBrandRow({ regions: ['US', 'DE'] }), error: null },
+        ],
+      });
+
+      await updateBrand({
+        organizationId: ORG_ID,
+        brandId: BRAND_ID,
+        updates: { region: ['GL', ' gl ', 'DE'] },
+        postgrestClient: client,
+      });
+
+      const brandsUpdate = client.capturedCalls.update.find((c) => c.table === 'brands');
+      expect(brandsUpdate.row.regions).to.deep.equal(['US', 'DE']);
+    });
+
+    it('leaves non-GL region values untouched on update', async () => {
+      const client = createCapturingClient({
+        brands: [
+          { data: makeBrandRow({ regions: ['FR'] }), error: null },
+        ],
+      });
+
+      await updateBrand({
+        organizationId: ORG_ID,
+        brandId: BRAND_ID,
+        updates: { region: ['FR'] },
+        postgrestClient: client,
+      });
+
+      const brandsUpdate = client.capturedCalls.update.find((c) => c.table === 'brands');
+      expect(brandsUpdate.row.regions).to.deep.equal(['FR']);
     });
 
     it('handles null values for array update fields', async () => {
@@ -3181,6 +3603,7 @@ describe('brands-storage', () => {
             },
           },
         ],
+        sites: { data: { id: 'site-1' }, error: null }, // site belongs to org
       });
 
       const err = await upsertBrand({

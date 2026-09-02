@@ -41,6 +41,30 @@ export function hostnameFromUrlString(value) {
 }
 
 /**
+ * Normalizes the case of a URL's host component only, leaving scheme, path,
+ * query, and fragment exactly as submitted. Hostnames are case-insensitive
+ * (RFC 3986 / WHATWG URL spec), but paths are not — so this must not reuse
+ * `new URL(value).href` (which would also alter/re-encode the rest of the
+ * URL) or rely on `hostname` from a parsed `URL` object without re-inserting
+ * it into the original string. Returns the input unchanged if it doesn't
+ * parse as `scheme://host...`.
+ *
+ * @param {string} value - a URL string
+ * @returns {string} the same URL with only its host segment lowercased
+ */
+export function normalizeHostCase(value) {
+  if (!hasText(value)) {
+    return value;
+  }
+  const match = value.match(/^([a-zA-Z][a-zA-Z\d+\-.]*:\/\/)([^/?#]+)(.*)$/s);
+  if (!match) {
+    return value;
+  }
+  const [, scheme, host, rest] = match;
+  return `${scheme}${host.toLowerCase()}${rest}`;
+}
+
+/**
  * Extracts the path of a URL — e.g. for logging a failed upstream call's
  * `endpoint`, where the host adds nothing (it is fixed per environment) and
  * the path is what identifies the operation. Returns undefined for a missing
@@ -57,42 +81,6 @@ export function endpointOf(url) {
     return new URL(url).pathname;
   } catch {
     return undefined;
-  }
-}
-
-/**
- * Derives a stable "site identity" from a URL or host string: the lowercased
- * host PLUS its normalized path, no scheme/credentials/port/query/fragment.
- * Unlike {@link hostnameFromUrlString} (host only) this keeps the path, so a
- * subpath- or subdomain-scoped brand (`nba.com/kings`, `quickbooks.intuit.com`)
- * is recorded as what it actually tracks — this is the value written to
- * Semrush's `settings.ai.primary_url`, distinct from the host-only `domain`.
- *
- * Normalization rules mirror `siteIdentityFromUrlString` in
- * `@adobe/spacecat-shared-utils` (switch to that import once the version
- * exporting it is published): lowercase host / case-sensitive path; strip a
- * single trailing slash so `x.com/a/` and `x.com/a` agree; preserve a trailing
- * `.html` (SITES-49656); do NOT collapse `www.`; null on unparseable input.
- *
- * @param {string} value - a URL or host(/path) string, with or without scheme
- * @returns {string|null} the site identity, or null when absent/unparseable
- */
-export function siteIdentityFromUrlString(value) {
-  if (!value || !hasText(value)) {
-    return null;
-  }
-  try {
-    const url = new URL(value.includes('://') ? value : `https://${value}`);
-    const host = url.hostname.toLowerCase();
-    if (!host) {
-      return null;
-    }
-    const pathname = url.pathname.endsWith('/')
-      ? url.pathname.slice(0, -1)
-      : url.pathname;
-    return `${host}${pathname}`;
-  } catch {
-    return null;
   }
 }
 

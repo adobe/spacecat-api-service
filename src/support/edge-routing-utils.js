@@ -11,6 +11,7 @@
  */
 
 import { promises as dns } from 'dns';
+import { getDomain } from 'tldts';
 import { isObject, isValidUrl, tracingFetch as fetch } from '@adobe/spacecat-shared-utils';
 import { calculateForwardedHost } from '@adobe/spacecat-shared-tokowaka-client';
 import { CDN_TYPES } from '../controllers/llmo/llmo-utils.js';
@@ -47,6 +48,28 @@ export const EDGE_OPTIMIZE_MARKING_DELAY_SECONDS = 300;
 
 const PROBE_TIMEOUT_MS = 5000;
 const CDN_CALL_TIMEOUT_MS = 5000;
+const MAX_REDIRECT_HOPS = 3;
+
+// Combined product identity for the canonical-host probe. Some WAF-protected sites (e.g.
+// www.indiafirstlife.com) 400 the bare EDGE_OPTIMIZE_USER_AGENT but allow this combined one.
+const CANONICAL_HOST_PROBE_USER_AGENT = 'Spacecat/1.0 AdobeEdgeOptimize/1.0';
+
+// HTTP status codes that carry a Location header we follow when probing for the serving host.
+const REDIRECT_STATUSES = new Set([301, 302, 307, 308]);
+
+/**
+ * Whether `host` is the site's apex (`rootHost`) or its www variant.
+ */
+const isSameSite = (host, rootHost) => (
+  host.startsWith('www.') ? host.slice(4) : host
+) === rootHost;
+
+/**
+ * The registrable domain of a hostname via the Public Suffix List (tldts).
+ * Handles multi-part TLDs correctly (e.g. "racq.com.au" -> "racq.com.au").
+ * Returns null when there is no registrable domain (e.g. "localhost").
+ */
+const registrableDomain = (host) => getDomain(host);
 
 /**
  * Strips the leading "www." from a URL's hostname.
@@ -68,6 +91,100 @@ export function getHostnameWithoutWww(url, log) {
     log.error(`Error getting hostname from URL ${url}: ${error.message}`);
     throw new Error(`Error getting hostname from URL ${url}: ${error.message}`);
   }
+}
+
+/**
+ * Fetches `probeURL` to find the host it actually serves from, following up to
+ * {@link MAX_REDIRECT_HOPS} redirects one at a time — each `Location` is validated as staying on
+ * the site's domain *before* it is requested, so an off-domain hop is never contacted.
+ * Never throws: a failed probe, an off-domain hop, or exceeding the hop cap all return null.
+ *
+ * @param {string} probeURL - The URL to probe (must include scheme, same-domain by construction).
+ * @param {string} rootHost - The site's apex hostname (lowercased); every hop must match this or
+ *   its www variant, or it's treated as off-domain.
+ * @param {object} [log] - Logger.
+ * @returns {Promise<string|null>} The final serving host, or null when undetermined.
+ */
+async function followToServingHost(probeURL, rootHost, log) {
+  let currentURL = probeURL;
+  let currentHost = new URL(probeURL).hostname.toLowerCase();
+
+  for (let hop = 0; hop <= MAX_REDIRECT_HOPS; hop += 1) {
+    let res;
+    try {
+      // eslint-disable-next-line no-await-in-loop -- each hop depends on the previous Location
+      res = await fetch(currentURL, {
+        method: 'GET',
+        redirect: 'manual',
+        headers: { 'User-Agent': CANONICAL_HOST_PROBE_USER_AGENT },
+        timeout: PROBE_TIMEOUT_MS,
+      });
+    } catch (e) {
+      log?.info(`[edge-routing-utils] Canonical probe of ${currentURL} failed: ${e.message}`);
+      return null;
+    }
+
+    if (!REDIRECT_STATUSES.has(res.status)) {
+      log?.info(`[edge-routing-utils] ${probeURL} resolves to ${currentHost}`);
+      return currentHost;
+    }
+
+    const location = res.headers.get('location');
+    if (!location) {
+      return null;
+    }
+
+    let nextURL;
+    try {
+      nextURL = new URL(location, currentURL);
+    } catch {
+      return null;
+    }
+
+    const nextHost = nextURL.hostname.toLowerCase();
+    if (!isSameSite(nextHost, rootHost)) {
+      log?.info(`[edge-routing-utils] ${currentURL} redirects off-domain to ${nextHost}; ignoring`);
+      return null;
+    }
+
+    currentURL = nextURL.toString();
+    currentHost = nextHost;
+  }
+
+  log?.info(`[edge-routing-utils] ${probeURL} exceeded ${MAX_REDIRECT_HOPS} redirect hops; ignoring`);
+  return null;
+}
+
+/**
+ * Resolves the canonical origin host: calculateForwardedHost's www candidate, corrected for
+ * compound TLDs via the PSL, then confirmed by following its redirect chain (falls back to the
+ * candidate itself if the probe fails or lands off-domain).
+ *
+ * @param {string} baseURL - Site base URL (must include scheme).
+ * @param {object} log - Logger.
+ * @returns {Promise<string>} The canonical origin host.
+ * @throws {Error} If the base URL is unparseable.
+ */
+export async function resolveCanonicalHost(baseURL, log) {
+  const originalHost = new URL(baseURL).hostname.toLowerCase();
+
+  let candidate = calculateForwardedHost(baseURL, log).toLowerCase();
+  const isMisclassifiedCompoundTldApex = candidate === originalHost
+    && !originalHost.startsWith('www.')
+    && registrableDomain(originalHost) === originalHost;
+  if (isMisclassifiedCompoundTldApex) {
+    candidate = `www.${originalHost}`;
+  }
+
+  // Already www, or a real subdomain — nothing to probe.
+  if (candidate === originalHost) {
+    return candidate;
+  }
+
+  const candidateURL = new URL(baseURL);
+  candidateURL.hostname = candidate;
+  const served = await followToServingHost(candidateURL.toString(), originalHost, log);
+  return served || candidate;
 }
 
 /**
@@ -104,7 +221,7 @@ export async function probeSiteAndResolveDomain(siteUrl, log) {
   const probeResponse = await fetch(siteUrl, {
     method: 'GET',
     headers: { 'User-Agent': EDGE_OPTIMIZE_USER_AGENT },
-    signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+    timeout: PROBE_TIMEOUT_MS,
   });
 
   if (probeResponse.ok) {
@@ -190,7 +307,7 @@ export async function callCdnRoutingApi(
       Authorization: `Bearer ${spToken}`,
     },
     body: JSON.stringify(cdnBody),
-    signal: AbortSignal.timeout(CDN_CALL_TIMEOUT_MS),
+    timeout: CDN_CALL_TIMEOUT_MS,
   });
 
   if (!cdnResponse.ok) {

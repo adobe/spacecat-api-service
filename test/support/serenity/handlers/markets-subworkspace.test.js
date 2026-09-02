@@ -33,11 +33,12 @@ import { TAG_IDS, dimensionTreeLevels, makeListProjectTagsStub } from '../fixtur
 use(chaiAsPromised);
 use(sinonChai);
 
-// Every generated prompt carries the two standard values (origin=ai,
-// intent=Informational) plus the producing `source/semrush` value; the last tag
-// is the per-prompt computed `type`. Order matches the write site:
-// [...standardIds, sourceId, typeId].
-const STANDARD_IDS = [TAG_IDS.originAi, TAG_IDS.intentInformational];
+// Every generated prompt carries the seeded default intent (Informational —
+// `origin` is retired, tag-display-names.md §3: STANDARD_PROMPT_TAG_VALUES no
+// longer contributes an `origin/ai` id here) plus the producing
+// `source/semrush` value; the last tag is the per-prompt computed `type`.
+// Order matches the write site: [intentId, sourceId, typeId].
+const STANDARD_IDS = [TAG_IDS.intentInformational];
 const GENERATED_IDS = [...STANDARD_IDS, TAG_IDS.sourceSemrush];
 
 // Matches one v3 create item `{ name, metadata }` (LLMO-6289). These handlers
@@ -964,6 +965,52 @@ describe('markets-subworkspace handlers', () => {
       expect(res.body.error).to.equal('unknownLanguage');
     });
 
+    it('PATCHes the tracked url the create body cannot carry', async () => {
+      const transport = makeTransport();
+      const res = await handleCreateMarketSubworkspace(transport, makeBrand(), PARENT, {
+        ...createBody, primaryUrl: 'nba.com/kings',
+      }, log);
+
+      expect(res.status).to.be.oneOf([200, 201]);
+      // Flat, with the required type — `model.ProjectUpdateRequest` has no
+      // `settings` member, and the nested spelling is accepted then ignored.
+      expect(transport.updateProject).to.have.been.calledOnceWith(sinon.match.string, 'new-proj', { type: 'ai', primary_url: 'nba.com/kings' });
+      // Before the publish, or the corrected value would sit in draft.
+      expect(transport.updateProject).to.have.been.calledBefore(transport.publishProject);
+    });
+
+    it('falls back to the brandDomain identity when no tracked url is supplied', async () => {
+      const transport = makeTransport();
+      await handleCreateMarketSubworkspace(transport, makeBrand(), PARENT, createBody, log);
+
+      expect(transport.updateProject.firstCall.args[2].primary_url)
+        .to.equal(createBody.brandDomain);
+    });
+
+    it('a failed primary_url PATCH is non-fatal — the market still goes live', async () => {
+      // This handler has no orphan-cleanup seam, and failing a whole market create
+      // because the tracked url could not be refined is worse than a market live on
+      // its apex — which is the state every market is in today. The data-service
+      // reconcile repairs primary_url in place afterwards.
+      const transport = makeTransport({
+        updateProject: sinon.stub().rejects(new Error('upstream 503')),
+      });
+      // Built here, not reused from the module-scope `log`: a fake created at module
+      // scope lands on sinon's default sandbox, where any other spec's
+      // sinon.restore() silently empties it and its call history then leaks between
+      // tests. See the sandbox rules in the repo CLAUDE.md.
+      const spyLog = { info: sinon.spy(), error: sinon.spy(), warn: sinon.spy() };
+      const res = await handleCreateMarketSubworkspace(transport, makeBrand(), PARENT, {
+        ...createBody, primaryUrl: 'nba.com/kings',
+      }, spyLog);
+
+      expect(res.status).to.be.oneOf([200, 201]);
+      expect(transport.publishProject).to.have.been.called;
+      expect(spyLog.warn).to.have.been.calledWithMatch(
+        'SERENITY_MARKET_PRIMARY_URL_DIVERGENCE',
+      );
+    });
+
     it('502s when createProject returns no id', async () => {
       const transport = makeTransport({ createProject: sinon.stub().resolves({ id: '' }) });
       const res = await handleCreateMarketSubworkspace(
@@ -1130,6 +1177,7 @@ describe('markets-subworkspace handlers', () => {
         name: 'category:Sneakers',
         parentId: 'root-1',
         childrenCount: 0,
+        promptsCount: 0,
         path: [{ id: 'root-1', name: 'category:Footwear' }],
       }]);
       expect(transport.listPromptsByTags).to.not.have.been.called;
@@ -1702,7 +1750,6 @@ describe('markets-subworkspace — defensive branch coverage', () => {
   // the Informational default. Prompts are partitioned by their (type, intent)
   // id pair, one upstream call per distinct pair.
   it('generateAndAttachPrompts: applies the classified intent per prompt and defaults an unclassified one', async () => {
-    const SOURCE_AI_ID = TAG_IDS.originAi;
     const handler = await esmock(
       '../../../../src/support/serenity/handlers/markets-subworkspace.js',
       {
@@ -1731,8 +1778,8 @@ describe('markets-subworkspace — defensive branch coverage', () => {
     );
     expect(res.status).to.equal(201);
     // Both are non-branded ('Trail' not mentioned); intent differs, so two calls.
-    expect(transport.createPromptsWithMetadata).to.have.been.calledWithExactly(WS, 'new-proj', [genItemMatch('buy now')], [SOURCE_AI_ID, TAG_IDS.intentTransactional, TAG_IDS.sourceSemrush, TAG_IDS.typeNonBranded]);
-    expect(transport.createPromptsWithMetadata).to.have.been.calledWithExactly(WS, 'new-proj', [genItemMatch('about it')], [SOURCE_AI_ID, TAG_IDS.intentInformational, TAG_IDS.sourceSemrush, TAG_IDS.typeNonBranded]);
+    expect(transport.createPromptsWithMetadata).to.have.been.calledWithExactly(WS, 'new-proj', [genItemMatch('buy now')], [TAG_IDS.intentTransactional, TAG_IDS.sourceSemrush, TAG_IDS.typeNonBranded]);
+    expect(transport.createPromptsWithMetadata).to.have.been.calledWithExactly(WS, 'new-proj', [genItemMatch('about it')], [TAG_IDS.intentInformational, TAG_IDS.sourceSemrush, TAG_IDS.typeNonBranded]);
   });
 
   // Boundary: at exactly AI_GEN_CLASSIFY_MAX + 1 texts, only the first MAX are
@@ -1772,8 +1819,8 @@ describe('markets-subworkspace — defensive branch coverage', () => {
     expect(classifySpy).to.have.been.calledOnce;
     expect(classifySpy.firstCall.args[0]).to.deep.equal(['p1', 'p2']);
     // p1/p2 classified Transactional; p3 (beyond the cap) defaults Informational.
-    expect(transport.createPromptsWithMetadata).to.have.been.calledWithExactly(WS, 'new-proj', [genItemMatch('p1'), genItemMatch('p2')], [...STANDARD_IDS.slice(0, 1), TAG_IDS.intentTransactional, TAG_IDS.sourceSemrush, TAG_IDS.typeNonBranded]);
-    expect(transport.createPromptsWithMetadata).to.have.been.calledWithExactly(WS, 'new-proj', [genItemMatch('p3')], [...STANDARD_IDS.slice(0, 1), TAG_IDS.intentInformational, TAG_IDS.sourceSemrush, TAG_IDS.typeNonBranded]);
+    expect(transport.createPromptsWithMetadata).to.have.been.calledWithExactly(WS, 'new-proj', [genItemMatch('p1'), genItemMatch('p2')], [TAG_IDS.intentTransactional, TAG_IDS.sourceSemrush, TAG_IDS.typeNonBranded]);
+    expect(transport.createPromptsWithMetadata).to.have.been.calledWithExactly(WS, 'new-proj', [genItemMatch('p3')], [TAG_IDS.intentInformational, TAG_IDS.sourceSemrush, TAG_IDS.typeNonBranded]);
     // The cap-hit is observable, not silent.
     expect(capLog.info).to.have.been.calledWithMatch(
       'generateAndAttachPrompts: AI-gen classify cap hit — tail defaults to Informational',

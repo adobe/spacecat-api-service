@@ -3007,7 +3007,7 @@ describe('LlmoController', () => {
       expect(triggerBrandProfileAgentStub).to.have.been.calledOnce;
     });
 
-    it('should pass tempOnboarding when temp-onboarding is true', async () => {
+    it('should ignore a temp-onboarding body field (LLMO-7141: flag removed, registration always runs)', async () => {
       const LlmoControllerOnboard = await esmock('../../../src/controllers/llmo/llmo.js', {
         '../../../src/controllers/llmo/llmo-onboarding.js': {
           validateSiteNotOnboarded: validateSiteNotOnboardedStub,
@@ -3050,7 +3050,9 @@ describe('LlmoController', () => {
 
       expect(result.status).to.equal(200);
       expect(performLlmoOnboardingStub).to.have.been.calledOnce;
-      expect(performLlmoOnboardingStub.firstCall.args[0].tempOnboarding).to.equal(true);
+      // The temp-onboarding flag no longer exists — a caller still sending it must not
+      // be forwarded as tempOnboarding into performLlmoOnboarding.
+      expect(performLlmoOnboardingStub.firstCall.args[0]).to.not.have.property('tempOnboarding');
     });
 
     ['data', 'domain', 'brandName', 'authInfo', 'profile', 'tenants', 'tenant ID'].forEach((field) => {
@@ -3587,6 +3589,143 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(200);
       const responseBody = await result.json();
       expect(responseBody.imsOrgId).to.equal(upperCaseImsOrgId);
+    });
+
+    it('surfaces brandActivation in the ok() response when performLlmoOnboarding returns it (LLMO-7218 AC4)', async () => {
+      const brandActivation = {
+        brandalfTriggered: true,
+        brandalfError: null,
+        promptGenerationJobId: null,
+        promptGenerationError: null,
+        promptSuggestionSchedules: [
+          { providerId: 'prompt_generation_semrush', status: 'created' },
+        ],
+        promptSuggestionSchedulesTimedOut: false,
+        requiredWorkFailed: false,
+      };
+      const onboardWithBrandActivation = sinon.stub().resolves({
+        siteId: 'new-site-id',
+        organizationId: 'new-org-id',
+        baseURL: 'https://example.com',
+        dataFolder: 'dev/example-com',
+        message: 'LLMO onboarding completed successfully',
+        brandActivation,
+      });
+      const LlmoControllerOnboard = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/controllers/llmo/llmo-onboarding.js': {
+          validateSiteNotOnboarded: validateSiteNotOnboardedStub,
+          performLlmoOnboarding: onboardWithBrandActivation,
+          generateDataFolder: (baseURL, env) => {
+            const url = new URL(baseURL);
+            const dataFolderName = url.hostname.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
+            return env === 'prod' ? dataFolderName : `dev/${dataFolderName}`;
+          },
+        },
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+        '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+          Config: { toDynamoItem: sinon.stub().returnsArg(0) },
+        },
+        '@adobe/spacecat-shared-utils': {
+          SPACECAT_USER_AGENT: TEST_USER_AGENT,
+          tracingFetch: tracingFetchStub,
+          hasText: (text) => text && text.trim().length > 0,
+          isObject: (obj) => obj !== null && typeof obj === 'object',
+          llmoConfig,
+          schemas: {},
+          composeBaseURL: (domain) => (domain.startsWith('http') ? domain : `https://${domain}`),
+        },
+        '../../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+        },
+        ...getCommonMocks(),
+      });
+      const testController = LlmoControllerOnboard(mockContext);
+
+      const result = await testController.onboardCustomer(onboardingContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      // Admin onboarding surfaces the full submission-outcome summary so a caller can
+      // branch on the degraded-step case (requiredWorkFailed) without reading logs.
+      expect(responseBody.brandActivation).to.deep.equal(brandActivation);
+      expect(responseBody.status).to.equal('completed');
+    });
+  });
+
+  describe('onboardSiteOnly', () => {
+    it('response does NOT include a brandActivation field (siteOnly skips brand activation)', async () => {
+      const mockOrg = {
+        getId: sinon.stub().returns('paid-org-id'),
+        getImsOrgId: sinon.stub().returns('paid-ims-org@AdobeOrg'),
+      };
+      mockDataAccess.Organization = {
+        findById: sinon.stub().resolves(mockOrg),
+      };
+      // siteOnly onboarding returns NO brandActivation (brand activation never runs).
+      const siteOnlyPerformStub = sinon.stub().resolves({
+        siteId: 'so-site-id',
+        organizationId: 'paid-org-id',
+        baseURL: 'https://example.com',
+        dataFolder: 'dev/example-com',
+        message: 'LLMO onboarding completed successfully',
+      });
+      const LlmoControllerSiteOnly = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/controllers/llmo/llmo-onboarding.js': {
+          validateSiteNotOnboarded: sinon.stub().resolves({ isValid: true }),
+          performLlmoOnboarding: siteOnlyPerformStub,
+          postLlmoAlert: sinon.stub().resolves(),
+          generateDataFolder: (baseURL, env) => {
+            const url = new URL(baseURL);
+            const dataFolderName = url.hostname.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
+            return env === 'prod' ? dataFolderName : `dev/${dataFolderName}`;
+          },
+        },
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+        '@adobe/spacecat-shared-tier-client': {
+          default: {
+            createForOrg: () => ({
+              checkValidEntitlement: sinon.stub().resolves({
+                entitlement: { getTier: () => 'PAID' },
+              }),
+            }),
+          },
+        },
+        '@adobe/spacecat-shared-utils': {
+          SPACECAT_USER_AGENT: TEST_USER_AGENT,
+          tracingFetch: tracingFetchStub,
+          hasText: (text) => text && text.trim().length > 0,
+          isObject: (obj) => obj !== null && typeof obj === 'object',
+          isValidUrl: (url) => {
+            try {
+              return Boolean(new URL(url));
+            } catch {
+              return false;
+            }
+          },
+          llmoConfig,
+          schemas: {},
+          composeBaseURL: (domain) => (domain.startsWith('http') ? domain : `https://${domain}`),
+        },
+        ...getCommonMocks(),
+      });
+      const testController = LlmoControllerSiteOnly(mockContext);
+
+      const context = {
+        ...mockContext,
+        params: { spaceCatId: 'paid-org-id' },
+        data: { domain: 'example.com', brandName: 'Test Brand' },
+      };
+
+      const result = await testController.onboardSiteOnly(context);
+
+      expect(result.status).to.equal(201);
+      const responseBody = await result.json();
+      // siteOnly onboarding never runs brand activation, so the response must not
+      // carry a brandActivation summary.
+      expect(responseBody).to.not.have.property('brandActivation');
+      expect(responseBody.status).to.equal('processing');
+      // Confirm the controller actually took the siteOnly orchestration path.
+      expect(siteOnlyPerformStub.firstCall.args[0].siteOnly).to.equal(true);
     });
   });
 
@@ -7669,18 +7808,18 @@ describe('LlmoController', () => {
 
   describe('updateQueryIndex', () => {
     let updateQueryIndexController;
-    let appendRowsStub;
+    let reindexStub;
     let previewAndPublishStub;
 
     before(async () => {
-      appendRowsStub = sinon.stub().resolves();
+      reindexStub = sinon.stub().resolves();
       previewAndPublishStub = sinon.stub().resolves();
 
       const LlmoControllerForQueryIndex = await esmock(
         '../../../src/controllers/llmo/llmo.js',
         {
           '../../../src/controllers/llmo/llmo-onboarding.js': {
-            appendRowsToQueryIndex: (...args) => appendRowsStub(...args),
+            reindexQueryIndexPaths: (...args) => reindexStub(...args),
             previewAndPublishQueryIndex: (...args) => previewAndPublishStub(...args),
           },
           '@adobe/spacecat-shared-http-utils': mockHttpUtils,
@@ -7708,8 +7847,8 @@ describe('LlmoController', () => {
     });
 
     beforeEach(() => {
-      appendRowsStub.reset();
-      appendRowsStub.resolves();
+      reindexStub.reset();
+      reindexStub.resolves();
       previewAndPublishStub.reset();
       previewAndPublishStub.resolves();
       mockDataAccess.Site.findByBaseURL = sinon.stub().resolves(mockSite);
@@ -7725,9 +7864,9 @@ describe('LlmoController', () => {
 
       expect(result.status).to.equal(200);
       const body = await result.json();
-      expect(body.message).to.include('updated, previewed, and published');
-      expect(body.entriesAdded).to.equal(2);
-      expect(appendRowsStub).to.have.been.calledOnce;
+      expect(body.message).to.include('reindexed, previewed, and published');
+      expect(body.entriesReindexed).to.equal(2);
+      expect(reindexStub).to.have.been.calledOnce;
       expect(previewAndPublishStub).to.have.been.calledOnce;
     });
 
@@ -7736,7 +7875,7 @@ describe('LlmoController', () => {
         '../../../src/controllers/llmo/llmo.js',
         {
           '../../../src/controllers/llmo/llmo-onboarding.js': {
-            appendRowsToQueryIndex: sinon.stub(),
+            reindexQueryIndexPaths: sinon.stub(),
             previewAndPublishQueryIndex: sinon.stub(),
           },
           '@adobe/spacecat-shared-http-utils': mockHttpUtils,
@@ -7810,6 +7949,60 @@ describe('LlmoController', () => {
       expect(body.message).to.equal('Each fileName must be a non-empty string');
     });
 
+    it('should return bad request when a fileName contains a ".." traversal segment', async () => {
+      const ctx = {
+        ...mockContext,
+        data: { domain: 'example.com', fileNames: ['../other-folder/secret'] },
+      };
+      const ctrl = updateQueryIndexController(ctx);
+      const result = await ctrl.updateQueryIndex(ctx);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Each fileName must be a relative path of alphanumerics, hyphens, underscores, dots, or slashes, with no ".." segments');
+      expect(reindexStub).to.not.have.been.called;
+    });
+
+    it('should return bad request when a fileName has a leading slash (absolute path)', async () => {
+      const ctx = {
+        ...mockContext,
+        data: { domain: 'example.com', fileNames: ['/etc/passwd'] },
+      };
+      const ctrl = updateQueryIndexController(ctx);
+      const result = await ctrl.updateQueryIndex(ctx);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('Each fileName must be a relative path of alphanumerics, hyphens, underscores, dots, or slashes, with no ".." segments');
+      expect(reindexStub).to.not.have.been.called;
+    });
+
+    it('should accept a fileName with a legitimate subdirectory segment', async () => {
+      const ctx = {
+        ...mockContext,
+        data: { domain: 'example.com', fileNames: ['brand-presence/2026-w28-chatgpt'] },
+      };
+      const ctrl = updateQueryIndexController(ctx);
+      const result = await ctrl.updateQueryIndex(ctx);
+
+      expect(result.status).to.equal(200);
+      expect(reindexStub).to.have.been.calledWith(TEST_FOLDER, ['brand-presence/2026-w28-chatgpt'], sinon.match.any, sinon.match.any);
+    });
+
+    it('should return bad request when fileNames exceeds the per-request cap', async () => {
+      const ctx = {
+        ...mockContext,
+        data: { domain: 'example.com', fileNames: Array.from({ length: 201 }, (_, i) => `file${i}`) },
+      };
+      const ctrl = updateQueryIndexController(ctx);
+      const result = await ctrl.updateQueryIndex(ctx);
+
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.equal('fileNames must not exceed 200 entries per request');
+      expect(reindexStub).to.not.have.been.called;
+    });
+
     it('should return not found when site does not exist', async () => {
       mockDataAccess.Site.findByBaseURL.resolves(null);
 
@@ -7838,8 +8031,8 @@ describe('LlmoController', () => {
       expect(body.message).to.include('dataFolder is missing');
     });
 
-    it('should return internal server error when appendRows throws', async () => {
-      appendRowsStub.rejects(new Error('SharePoint connection failed'));
+    it('should return internal server error when reindex throws', async () => {
+      reindexStub.rejects(new Error('Reindex failed: 500 Internal Server Error'));
       mockConfig.getLlmoConfig.returns({ dataFolder: TEST_FOLDER });
 
       const ctx = {
@@ -7851,7 +8044,7 @@ describe('LlmoController', () => {
 
       expect(result.status).to.equal(500);
       const body = await result.json();
-      expect(body.message).to.include('SharePoint connection failed');
+      expect(body.message).to.include('Reindex failed: 500 Internal Server Error');
     });
 
     it('should return internal server error when previewAndPublish throws', async () => {

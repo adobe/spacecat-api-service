@@ -12,10 +12,13 @@
 
 import { resolveElementModel, SEP } from '../constants.js';
 import {
+  HIDDEN_TAG_MARKER,
   INTENT_ROOT_NAME,
-  LEGACY_INTENT_ROOT_NAME,
   ORIGIN_ROOT_NAME,
   LEGACY_ORIGIN_ROOT_NAME,
+  DIMENSION,
+  rootNameOfDimension,
+  dimensionOfRootName,
 } from '../../serenity/prompt-tags.js';
 
 /**
@@ -121,47 +124,54 @@ export function transformTopicsForFilterDimensions(raw) {
 }
 
 /**
+ * The `category` dimension's root-name alias set — its current display
+ * spelling ({@link rootNameOfDimension}, IDENTITY PLACEHOLDER today —
+ * tag-display-names.md §1 item 4) and the bare dimension key, deduped. Reused
+ * for both the extraction below and {@link KNOWN_TAG_PREFIXES}, so the two
+ * can never drift from each other.
+ */
+const CATEGORY_ROOT_NAMES = [...new Set([
+  rootNameOfDimension(DIMENSION.CATEGORY), DIMENSION.CATEGORY,
+])];
+
+/**
  * Extracts only "category__"-prefixed entries → `{ id: original tag, label }`,
  * plus `parent_id`/`parent_label` when the tag encodes a "Parent__Child"
- * hierarchy.
+ * hierarchy. Alias-tolerant ({@link CATEGORY_ROOT_NAMES}): both the display
+ * root name and the bare slug are accepted in, mirroring
+ * {@link transformOriginsToFilterDimensions}'s two-spelling tolerance.
  * @param {object} raw - Raw response from the Elements API.
  * @returns {FilterDimensionItem[]}
  */
 export function transformCategoriesToFilterDimensions(raw) {
-  return extractByPrefix(raw, 'category')
-    .map(({ original, stripped }) => ({ id: original, ...splitParent(stripped, 'category__') }));
+  return CATEGORY_ROOT_NAMES.flatMap((root) => {
+    const marker = `${root}${SEP}`;
+    return extractByPrefix(raw, root)
+      .map(({ original, stripped }) => ({ id: original, ...splitParent(stripped, marker) }));
+  });
 }
 
 /**
- * The intent dimension's root names, and therefore its Elements tag prefixes —
- * the current `$abv_tags$intent` and the pre-rename `intent`. The Elements tag
- * encoding is the `__`-joined tag PATH, so a dimension's prefix is literally its
- * root's name and the rename (LLMO-6984) changes what these tags look like on
- * the wire. The rename runs project by project, so both shapes are read; a
- * project carries one or the other, never a mix, and the two prefixes cannot
- * match the same value (`intent__` does not prefix `$abv_tags$intent__…`).
- *
- * LLMO-6986 drops the legacy entry once no project carries it.
+ * The intent dimension's Elements tag prefix. The Elements tag encoding is the
+ * `__`-joined tag PATH, so a dimension's prefix is literally its root's name —
+ * `$abv_tags$intent__` for intent ({@link INTENT_ROOT_NAME}).
  */
-const INTENT_ROOT_NAMES = [INTENT_ROOT_NAME, LEGACY_INTENT_ROOT_NAME];
+const INTENT_MARKER = `${INTENT_ROOT_NAME}${SEP}`;
 
 /**
  * Extracts the intent-prefixed entries → `{ id: original tag, label }`, plus
  * `parent_id`/`parent_label` when the tag encodes a "Parent__Child" hierarchy.
  *
  * `id` stays the original tag value, which is what a caller passes back as a
- * `tags` filter, so it carries whichever prefix that project actually uses. The
- * `label` is the bare value either way — the rename touches only the root.
+ * `tags` filter. The `label` is the bare value — the marker prefixes only the
+ * root, never the five intent values.
  *
  * @param {object} raw - Raw response from the Elements API.
  * @returns {FilterDimensionItem[]}
  */
 export function transformIntentsToFilterDimensions(raw) {
-  return INTENT_ROOT_NAMES.flatMap((root) => {
-    const marker = `${root}${SEP}`;
-    return extractByPrefix(raw, root)
-      .map(({ original, stripped }) => ({ id: original, ...splitParent(stripped, marker) }));
-  });
+  return extractByPrefix(raw, INTENT_ROOT_NAME)
+    .map(({ original, stripped }) => ({ id: original, ...splitParent(stripped, INTENT_MARKER) }));
 }
 
 /**
@@ -203,28 +213,41 @@ export function transformOriginsToFilterDimensions(raw) {
 
 const KNOWN_TAG_PREFIXES = [
   'topic__',
-  'category__',
-  ...INTENT_ROOT_NAMES.map((root) => `${root}${SEP}`),
+  ...CATEGORY_ROOT_NAMES.map((root) => `${root}${SEP}`),
+  INTENT_MARKER,
   ...ORIGIN_ROOT_NAMES.map((root) => `${root}${SEP}`),
 ];
 
 /**
  * Extracts every tag NOT already covered by {@link KNOWN_TAG_PREFIXES} —
- * `topic__`, `category__`, and both the intent and origin spellings
- * (`$abv_tags$intent__`/`intent__`, `origin__`/`source__`) — so
- * newly-introduced Semrush tag types (e.g. `type__branded`) surface in the
- * response without a code change per prefix.
+ * `topic__`, `category__`, `$abv_tags$intent__` and both origin spellings
+ * (`origin__`/`source__`) — so newly-introduced Semrush tag types
+ * (e.g. `type__branded`) surface in the response without a code change per prefix.
  *
- * Both intent and both origin spellings are covered, so a renamed project's tags
- * are claimed by `page_intents`/`origins` rather than resurfacing here as a
- * dynamic `$abv_tags$intent`/`origin` group — this catch-all is where an
- * unrecognised dimension would otherwise leak into the filter payload under its
- * raw upstream name.
+ * The intent prefix and both origin spellings are covered, so those tags are
+ * claimed by `page_intents`/`origins` rather than resurfacing here as a dynamic
+ * `$abv_tags$intent`/`origin` group — this catch-all is where an unrecognised
+ * dimension would otherwise leak into the filter payload under its raw upstream
+ * name.
+ *
+ * Anything carrying the `$abv_tags$` marker is dropped outright, whether or not it
+ * is a known prefix. The marker is what hides a root from the customer-facing Brand
+ * Presence tag filter upstream, so surfacing a marked family here would defeat it.
+ * Gating on the marker rather than on the known-prefix list keeps that control
+ * correct when Semrush adds a second marked root, instead of relying on someone
+ * remembering to extend the list.
  *
  * - `prefix__value` tags are grouped by their prefix into a dynamic key
  *   (e.g. `{ type: [{ id: 'type__branded', label: 'branded' }, ...] }`), unless
  *   `prefix` collides with an entry in `reservedResultKeys`, in which case the
- *   tag is routed to the generic `tags` array instead.
+ *   tag is routed to the generic `tags` array instead. The GROUP KEY is folded
+ *   through {@link dimensionOfRootName} first (tag-display-names.md §1 item 6,
+ *   plan WP-D2 item 8: "dynamic group keys ... stay the stable slug keys") —
+ *   `source`/`type` group under their bare dimension key regardless of
+ *   whether the wire prefix is the slug or the (currently identical) display
+ *   spelling, so the Adobe API contract does not churn as the tree renames.
+ *   The `id`/`parent_id` fields still carry the RAW wire prefix verbatim —
+ *   only the grouping key is normalized.
  * - Bare values with no `__` at all are prefix declarations (e.g. a lone
  *   `category` row announcing the dimension itself, with no value) and are
  *   ignored entirely — they are not tag data.
@@ -251,7 +274,9 @@ const KNOWN_TAG_PREFIXES = [
 export function transformOtherTagsForFilterDimensions(raw, reservedResultKeys = []) {
   const values = (raw?.blocks?.value ?? [])
     .map((item) => String(item.value ?? ''))
-    .filter((value) => value !== '' && !KNOWN_TAG_PREFIXES.some((p) => value.startsWith(p)));
+    .filter((value) => value !== ''
+      && !value.startsWith(HIDDEN_TAG_MARKER)
+      && !KNOWN_TAG_PREFIXES.some((p) => value.startsWith(p)));
 
   const groups = Object.create(null);
   const tags = [];
@@ -262,14 +287,18 @@ export function transformOtherTagsForFilterDimensions(raw, reservedResultKeys = 
       // Bare prefix declaration (e.g. "category") — not tag data, ignore.
       return;
     }
-    const prefix = value.slice(0, sepIdx);
+    const rawPrefix = value.slice(0, sepIdx);
     const rest = value.slice(sepIdx + SEP.length);
+    // Fold the GROUP KEY only (never `id`/`parent_id`, which stay wire-exact)
+    // through the alias map — identity for anything outside the taxonomy, so
+    // an arbitrary/unrecognised prefix groups under itself exactly as before.
+    const prefix = dimensionOfRootName(rawPrefix);
     if (reservedResultKeys.includes(prefix)) {
-      tags.push({ id: value, ...splitParent(rest, `${prefix}${SEP}`) });
+      tags.push({ id: value, ...splitParent(rest, `${rawPrefix}${SEP}`) });
       return;
     }
     groups[prefix] = groups[prefix] ?? [];
-    groups[prefix].push({ id: value, ...splitParent(rest, `${prefix}${SEP}`) });
+    groups[prefix].push({ id: value, ...splitParent(rest, `${rawPrefix}${SEP}`) });
   });
 
   return { ...groups, tags };

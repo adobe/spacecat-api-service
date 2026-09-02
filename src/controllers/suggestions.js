@@ -14,10 +14,12 @@ import {
   badRequest,
   createResponse,
   forbidden,
+  internalServerError,
   noContent,
   notFound,
   ok,
 } from '@adobe/spacecat-shared-http-utils';
+import { HeadObjectCommand } from '@aws-sdk/client-s3';
 import {
   hasText,
   isArray, isNonEmptyArray,
@@ -34,6 +36,8 @@ import {
   Audit,
   Suggestion as SuggestionModel,
   GeoExperiment as GeoExperimentModel,
+  Site as SiteModel,
+  Entitlement as EntitlementModel,
   REVIEW_SOURCES,
   REVIEW_VERDICTS,
   REJECTION_CATEGORIES,
@@ -42,6 +46,7 @@ import {
   toReviewView,
   isAllowedSuggestionTransition,
 } from '@adobe/spacecat-shared-data-access';
+import TierClient from '@adobe/spacecat-shared-tier-client';
 import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
 import { SuggestionDto, SUGGESTION_VIEWS, SUGGESTION_SKIP_REASONS } from '../dto/suggestion.js';
 import { isValidLocale } from '../utils/validations.js';
@@ -65,12 +70,73 @@ import {
 } from '../support/utils.js';
 import AccessControlUtil, { X_PRODUCT_HEADER } from '../support/access-control-util.js';
 import { redactFeedbackContent } from '../support/feedback-redaction.js';
+import { filterOpportunitiesByFacsComposite } from '../support/facs-composite-resolvers.js';
 import { CAP_FIX_ENTITY_CREATE, CAP_SUGGESTION_WRITE } from '../routes/capability-constants.js';
-import { grantSuggestionsForOpportunity } from '../support/grant-suggestions-handler.js';
+import {
+  grantSuggestionsForOpportunity,
+  revokeGrantsForSuggestions,
+} from '../support/grant-suggestions-handler.js';
+import { getImsTokenFromPromiseToken } from '../support/edge-routing-auth.js';
+import { isImsGroupMember } from '../support/ims-group.js';
 import { postSlackMessage } from '../utils/slack/base.js';
 import { createAtomicStrategy, deleteAtomicStrategy } from '../support/atomic-strategy-helper.js';
 
 const VALIDATION_ERROR_NAME = 'ValidationError';
+
+// Freemium (PLG / FREE_TRIAL) orgs cannot be assigned per-user product profiles,
+// so EDS auto-fix is gated behind membership of this IMS group instead. Members
+// of the group are allowed to trigger auto-fix; everyone else is blocked.
+const ASO_EDS_AUTOFIX_GROUP_NAME = 'ASO-EDS-Autofix-Users';
+
+/**
+ * Guidance CSV reference keys carried by `gads-placement-exclusions` suggestions.
+ * Each value is an object `{ uri, row_count, byte_size }` where `uri` is an
+ * `s3://bucket/key` pointer into the `spacecat-{env}-mystique-assets` bucket.
+ * @type {string[]}
+ */
+const GADS_GUIDANCE_REF_KEYS = [
+  'account_auto_ref',
+  'account_pmax_ref',
+  'site_auto_ref',
+  'site_pmax_ref',
+];
+
+// Click-time presigned guidance-CSV download URLs are short-lived (1 hour): the
+// URL is minted on the download request, so it only needs to outlive the click.
+const GADS_GUIDANCE_CSV_TTL_SECONDS = 60 * 60;
+
+// Server-side key prefix that binds a guidance CSV to its site. Mystique writes
+// these CSVs to
+// `gads-placement-exclusions/csv/{site_id}/{customer_id}/{obs_version}/{scope}.{source}.csv`
+// (contract: experience-platform/mystique `s3_bodies.write_csv_body`). Because
+// `data.guidance` is caller-writable, we presign only keys under the AUTHORIZED
+// site's prefix, so a tampered `uri` cannot read another tenant's object within
+// the shared mystique-assets bucket.
+const GADS_GUIDANCE_CSV_KEY_ROOT = 'gads-placement-exclusions/csv';
+
+/**
+ * Parses an `s3://bucket/key` URI into its bucket and key parts.
+ * @param {string} uri - The S3 URI to parse.
+ * @returns {{ bucket: string, key: string }|null} Parsed parts, or null when the
+ *   input is not a well-formed `s3://bucket/key` URI.
+ */
+const parseS3Uri = (uri) => {
+  if (!hasText(uri) || !uri.startsWith('s3://')) {
+    return null;
+  }
+  const withoutScheme = uri.slice('s3://'.length);
+  const slashIndex = withoutScheme.indexOf('/');
+  if (slashIndex <= 0) {
+    return null;
+  }
+  const bucket = withoutScheme.slice(0, slashIndex);
+  const key = withoutScheme.slice(slashIndex + 1);
+  // `slashIndex > 0` guarantees a non-empty bucket segment; only the key can be empty.
+  if (!hasText(key)) {
+    return null;
+  }
+  return { bucket, key };
+};
 
 // Allowed state_transition values on a backoffice review (SITES-43974). Validated
 // so the Learning Agent corpus never receives arbitrary free-text transitions.
@@ -806,6 +872,122 @@ function SuggestionsController(ctx, sqs, env) {
   };
 
   /**
+   * Returns a short-lived presigned download URL for one of a
+   * `gads-placement-exclusions` suggestion's guidance CSV references.
+   *
+   * The browser cannot presign S3 keys, so the URL is minted on the download
+   * request (mirroring `llmo/brand-claims.js`): the CSV's `s3://` uri is resolved
+   * from the suggestion's stored `data.guidance[refKey]`. Because that stored data
+   * is caller-writable, authorization does not trust it: the bucket is pinned
+   * server-side to `S3_MYSTIQUE_BUCKET` (no cross-bucket reads) and the key must
+   * sit under the authorized site's prefix `gads-placement-exclusions/csv/{siteId}/`
+   * (no cross-object/cross-tenant reads). Existence is verified, then a 1-hour
+   * `GetObject` URL is signed. Minting per click needs no long TTL.
+   *
+   * @param {object} context of the request.
+   * @returns {Promise<Response>} `{ presignedUrl, expiresAt }`, or an error response.
+   */
+  const getPresignedGuidanceCsvUrl = async (context) => {
+    const siteId = context.params?.siteId;
+    const opptyId = context.params?.opportunityId || undefined;
+    const suggestionId = context.params?.suggestionId || undefined;
+    const refKey = context.params?.refKey;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+    if (!isValidUUID(opptyId)) {
+      return badRequest('Opportunity ID required');
+    }
+    if (!isValidUUID(suggestionId)) {
+      return badRequest('Suggestion ID required');
+    }
+    if (!GADS_GUIDANCE_REF_KEYS.includes(refKey)) {
+      return badRequest('Invalid guidance CSV reference');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('User does not belong to the organization');
+    }
+
+    // S3 config is an environment-global signal, so this guard is placed after
+    // access control (consistent with the sibling handlers) rather than ahead of it.
+    const { s3 } = ctx;
+    const mystiqueBucket = env?.S3_MYSTIQUE_BUCKET;
+    if (!s3?.s3Client || !s3.getSignedUrl || !s3.GetObjectCommand || !hasText(mystiqueBucket)) {
+      return badRequest('S3 storage is not configured for this environment');
+    }
+
+    const suggestion = await Suggestion.findById(suggestionId);
+    if (!suggestion || suggestion.getOpportunityId() !== opptyId) {
+      return notFound('Suggestion not found');
+    }
+    const opportunity = await suggestion.getOpportunity();
+    if (!opportunity || opportunity.getSiteId() !== siteId) {
+      return notFound();
+    }
+    if (await getIsSummitPlgEnabled(site, ctx, context, accessControlUtil)
+      && !(await SuggestionGrant.isSuggestionGranted(suggestion.getId()))) {
+      return notFound('Suggestion not found');
+    }
+
+    const parsed = parseS3Uri(suggestion.getData()?.guidance?.[refKey]?.uri);
+    if (!parsed) {
+      return notFound('Guidance CSV not available');
+    }
+    // `data` is caller-writable (PATCH/POST persist it verbatim), so neither the
+    // ref's bucket nor its key is trusted for authorization. Bucket must be the
+    // pinned mystique-assets bucket (no cross-bucket reads)...
+    if (parsed.bucket !== mystiqueBucket) {
+      context.log.warn(`Refusing to presign guidance CSV for suggestion ${suggestionId}: ref ${refKey} names bucket ${parsed.bucket}, expected ${mystiqueBucket}`);
+      return notFound('Guidance CSV not available');
+    }
+    // ...and key must sit under the AUTHORIZED site's CSV prefix, binding the
+    // signed object to the site (closes cross-object/cross-tenant reads within
+    // the shared bucket). `siteId` is already access-checked above.
+    const expectedKeyPrefix = `${GADS_GUIDANCE_CSV_KEY_ROOT}/${siteId}/`;
+    if (!parsed.key.startsWith(expectedKeyPrefix)) {
+      context.log.warn(`Refusing to presign guidance CSV for suggestion ${suggestionId}: ref ${refKey} key is outside the site prefix ${expectedKeyPrefix}`);
+      return notFound('Guidance CSV not available');
+    }
+
+    try {
+      // Presigning never verifies existence; HeadObject yields a clean 404 when
+      // the object is missing (e.g. a ref written ahead of its CSV).
+      await s3.s3Client.send(new HeadObjectCommand({ Bucket: mystiqueBucket, Key: parsed.key }));
+      const command = new s3.GetObjectCommand({ Bucket: mystiqueBucket, Key: parsed.key });
+      const presignedUrl = await s3.getSignedUrl(
+        s3.s3Client,
+        command,
+        { expiresIn: GADS_GUIDANCE_CSV_TTL_SECONDS },
+      );
+      return ok({
+        presignedUrl,
+        expiresAt: new Date(Date.now() + GADS_GUIDANCE_CSV_TTL_SECONDS * 1000).toISOString(),
+      });
+    } catch (err) {
+      if (err.name === 'NotFound' || err.$metadata?.httpStatusCode === 404) {
+        context.log.warn(`Guidance CSV object missing for suggestion ${suggestionId} ref ${refKey}: ${parsed.key}`);
+        return notFound('Guidance CSV not available');
+      }
+      // A server-side S3 failure is not the client's fault: return 5xx (503 for
+      // throttling/transient so clients retry, 500 otherwise) with a generic
+      // message — the internal error text stays in the log, not the response.
+      context.log.error(`Failed to presign guidance CSV for suggestion ${suggestionId} ref ${refKey}: ${err.message}`);
+      const status = err.$metadata?.httpStatusCode;
+      const transient = status === 429 || status === 503
+        || ['ThrottlingException', 'TooManyRequestsException', 'SlowDown', 'RequestLimitExceeded', 'ServiceUnavailable'].includes(err.name);
+      return transient
+        ? createResponse({ message: 'Guidance CSV service temporarily unavailable' }, 503)
+        : internalServerError('Error retrieving guidance CSV');
+    }
+  };
+
+  /**
    * Creates one or more suggestions for a given site and opportunity
    * @param {Object} context of the request
    * @returns {Promise<Response>} Array of suggestions response.
@@ -840,10 +1022,35 @@ function SuggestionsController(ctx, sqs, env) {
       return forbidden('User does not belong to the organization');
     }
 
+    // suggestionKey is a protected identity field (readOnly on the ORM schema,
+    // collision-checked only via the internal rekey_bbl_suggestion RPC used by
+    // Mystique's in-process projector). Setting it on create via this public API
+    // is restricted to callers with an explicit grant — either a scoped S2S
+    // suggestion:write capability or plain admin access Any caller without that grant has
+    // suggestionKey silently dropped rather than erroring, so ordinary suggestion
+    // creation (the overwhelmingly common case) is unaffected.
+    const suggKeyS2SResult = await accessControlUtil.hasS2SCapability(CAP_SUGGESTION_WRITE);
+    const canSetSuggestionKey = suggKeyS2SResult.allowed || accessControlUtil.hasAdminAccess();
+
     const suggestionPromises = context.data.map(async (suggData, index) => {
       try {
         // eslint-disable-next-line no-param-reassign
         suggData.opportunityId = opptyId;
+
+        if (hasText(suggData.suggestionKey)) {
+          if (!canSetSuggestionKey) {
+            // eslint-disable-next-line no-param-reassign
+            delete suggData.suggestionKey;
+          } else if (!suggData.suggestionKey.startsWith(`site:${siteId}:`)) {
+            // Check to make sure the suggestionKey is scoped to the correct site
+            return {
+              index,
+              message: `suggestionKey must be scoped to site ${siteId}`,
+              statusCode: 400,
+            };
+          }
+        }
+
         const suggestionEntity = await Suggestion.create(suggData);
         return {
           index,
@@ -1391,6 +1598,87 @@ function SuggestionsController(ctx, sqs, env) {
       return forbidden(accessControlUtil.llmoForbiddenMessage('Only LLMO administrators can trigger auto-fix'));
     }
 
+    if (site.getDeliveryType() === SiteModel.DELIVERY_TYPES.AEM_EDGE) {
+      try {
+        const asoProductCode = EntitlementModel.PRODUCT_CODES.ASO;
+        const tierClient = await TierClient.createForSite(context, site, asoProductCode);
+        const { entitlement, siteEnrollment } = await tierClient.checkValidEntitlement();
+        const blockedTiers = [EntitlementModel.TIERS.PLG, EntitlementModel.TIERS.FREE_TRIAL];
+        if (blockedTiers.includes(entitlement?.getTier()) && siteEnrollment) {
+          // Crosswalk and Dark Alley (da.live) EDS sites author with the caller's
+          // OWN IMS token, so their existing permissions govern the write and the
+          // IMS group is NOT required — they are exempt from the group gate. Only
+          // Google Drive / SharePoint sources are written via a service account
+          // disconnected from the caller and therefore need the group. Fail-closed:
+          // exempt ONLY known user-token sources (authoringType cs/crosswalk, or a
+          // `markup` content source resolved from the stored type or the source URL);
+          // an unknown/absent source is still gated.
+          //
+          // NOTE: authoringType `documentauthoring` is NOT a reliable user-token
+          // signal — it is the DEFAULT for EDS (getAuthoringType returns DA for every
+          // hlx-hosted site, and the UI flattens all non-crosswalk EDS sites to it on
+          // save), so Google Drive / SharePoint sites carry it too. Exempting on it
+          // would skip the group gate for exactly the service-account sources it
+          // protects. Dark Alley is instead identified by its `markup` source below.
+          const authoringType = site.getAuthoringType?.();
+          const contentSource = site.getHlxConfig?.()?.content?.source;
+          const contentSourceType = contentSource?.type;
+          const contentSourceUrl = contentSource?.url ?? '';
+          // da.live (Dark Alley) and the `/franklin.delivery/` bin path (crosswalk)
+          // are user-token `markup` sources even when the stored `type` is absent —
+          // resolve from the URL, mirroring the UI's detectContentSourceType.
+          const isMarkupSource = contentSourceType === 'markup'
+            || contentSourceUrl.includes('da.live')
+            || contentSourceUrl.includes('/franklin.delivery/');
+          const isUserTokenContentSource = authoringType === SiteModel.AUTHORING_TYPES.CS_CW
+            || isMarkupSource;
+
+          if (isUserTokenContentSource) {
+            context.log.info(`Auto-fix allowed for site ${siteId}: AEM Edge user-token content source (authoringType=${authoringType}, contentSourceType=${contentSourceType}); IMS group not required`);
+          } else {
+            // Freemium EDS auto-fix on a service-account source (Google Drive /
+            // SharePoint) applies changes via a service account disconnected from
+            // the caller, so authorize the caller only when they belong to the
+            // dedicated IMS group. Recover the caller's IMS identity by exchanging
+            // the forwarded promise token — safe to consume here because these EDS
+            // fixes run under service credentials (not this token), unlike
+            // promise-based CS authoring.
+            //
+            // Once the user is CONFIRMED freemium (blocked tier + active
+            // enrollment) on a service-account source, the gate is fail-closed: any
+            // error resolving the org, token, or group membership denies. This
+            // inner try/catch is separate from the outer one on purpose — the outer
+            // catch stays fail-open for the tier-determination phase (so a transient
+            // TierClient error never blocks paid users), but must not swallow errors
+            // here and let a confirmed freemium caller through ungated.
+            try {
+              const org = await site.getOrganization();
+              const imsOrgId = org?.getImsOrgId();
+              let imsUserToken;
+              try {
+                imsUserToken = await getImsTokenFromPromiseToken(context);
+              } catch (tokenErr) {
+                context.log?.warn(`Auto-fix group check: could not resolve IMS token for site ${siteId}: ${tokenErr.message}`);
+              }
+              const isGroupMember = await isImsGroupMember(context, {
+                imsOrgId, imsUserToken, groupName: ASO_EDS_AUTOFIX_GROUP_NAME,
+              }, context.log);
+              if (!isGroupMember) {
+                context.log.warn(`Auto-fix blocked for site ${siteId}: AEM Edge Freemium caller not in '${ASO_EDS_AUTOFIX_GROUP_NAME}' IMS group`);
+                return forbidden(`Deploying auto-fixes on this Edge Delivery site requires membership of the '${ASO_EDS_AUTOFIX_GROUP_NAME}' IMS group`);
+              }
+              context.log.info(`Auto-fix allowed for site ${siteId}: AEM Edge Freemium caller in '${ASO_EDS_AUTOFIX_GROUP_NAME}' IMS group`);
+            } catch (gateErr) {
+              context.log.warn(`Auto-fix blocked for site ${siteId}: freemium authorization gate error: ${gateErr.message}`);
+              return forbidden('Could not verify Edge Delivery auto-fix authorization; please try again');
+            }
+          }
+        }
+      } catch (e) {
+        context.log?.warn(`Failed to check entitlement tier for site ${siteId}: ${e.message}`);
+      }
+    }
+
     const opportunity = await Opportunity.findById(opportunityId);
     if (!opportunity || opportunity.getSiteId() !== siteId) {
       return notFound('Opportunity not found');
@@ -1728,6 +2016,12 @@ function SuggestionsController(ctx, sqs, env) {
 
     if (!suggestion || suggestion.getOpportunityId() !== opportunityId) {
       return notFound('Suggestion not found');
+    }
+
+    try {
+      await revokeGrantsForSuggestions(SuggestionGrant, [suggestionId]);
+    } catch (revokeError) {
+      context.log.warn(`Failed to revoke grants for suggestion ${suggestionId}`, revokeError?.message ?? revokeError);
     }
 
     try {
@@ -2436,6 +2730,101 @@ function SuggestionsController(ctx, sqs, env) {
     response.suggestions.sort((a, b) => a.index - b.index);
     context.log.info(`[edge-deploy] response: ${JSON.stringify(response)}`);
     return createResponse(response, 207);
+  };
+
+  /**
+   * Returns the URLs already deployed to the edge by the site's non-prerender ELMO
+   * ("Tokowaka") opportunities, as `[{ url, sources: [opportunityType] }]`.
+   *
+   * The ELMO Overview uses this to derive prerender / Content-Visibility gains: if a URL
+   * was edge-deployed by another Tokowaka opportunity, prerendering is effectively enabled
+   * for it. Previously the UI computed this by fanning out one `getSuggestions` call per
+   * opportunity (~N per site) and doing it twice; this endpoint collapses that to a single
+   * server-side read with a tiny payload.
+   *
+   * Implementation deliberately avoids a per-opportunity fan-out: it runs two queries —
+   * all of the site's opportunities, then all suggestions for the relevant ones via a
+   * single `opportunity_id IN (...)` filter. LaunchDarkly per-type gating stays client-side
+   * (the endpoint has no visibility into UI flags), which is why each entry carries its
+   * source opportunity `type`.
+   */
+  const getEdgeDeployedUrls = async (context) => {
+    const { siteId } = context.params;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('User does not have access to this site');
+    }
+
+    // 1. All opportunities for the site (single query, auto-paginated). Keep the stable
+    //    Tokowaka set: non-prerender AND tagged `isElmo` — the same filter the UI applied
+    //    before per-opportunity type gating (which remains client-side).
+    // ReBAC composite scope (D4): narrow to the caller's permitted opportunity
+    // types before exposing edge-deployed URLs (which surface the opportunity
+    // type per URL), so a type-scoped caller cannot see other types. No-op for
+    // site-wide / non-FACS / admin callers.
+    const opportunities = filterOpportunitiesByFacsComposite(
+      context,
+      await Opportunity.allBySiteId(siteId),
+    );
+    const opptyTypeById = new Map();
+    for (const oppty of opportunities) {
+      if (oppty.getType() === 'prerender') {
+        // eslint-disable-next-line no-continue
+        continue;
+      }
+      const tags = oppty.getTags() ?? [];
+      if (!tags.includes('isElmo')) {
+        // eslint-disable-next-line no-continue
+        continue;
+      }
+      opptyTypeById.set(oppty.getId(), oppty.getType());
+    }
+
+    if (opptyTypeById.size === 0) {
+      return ok([]);
+    }
+
+    // 2. All suggestions across those opportunities in one query (no per-opportunity
+    //    fan-out) via an `opportunity_id IN (...)` filter; auto-paginated.
+    const suggestions = await Suggestion.all(
+      {},
+      { where: (attrs, op) => op.in(attrs.opportunityId, [...opptyTypeById.keys()]) },
+    );
+
+    // 3. Build [{ url, sources: [opportunityType] }] over edge-deployed suggestions,
+    //    deduping by raw url and aggregating the source opportunity types.
+    const byUrl = new Map();
+    for (const suggestion of suggestions) {
+      const data = suggestion.getData() ?? {};
+      if (!data.edgeDeployed || !hasText(data.url)) {
+        // eslint-disable-next-line no-continue
+        continue;
+      }
+      const type = opptyTypeById.get(suggestion.getOpportunityId());
+      if (!type) {
+        // eslint-disable-next-line no-continue
+        continue;
+      }
+      const existing = byUrl.get(data.url);
+      if (existing) {
+        if (!existing.sources.includes(type)) {
+          existing.sources.push(type);
+        }
+      } else {
+        byUrl.set(data.url, { url: data.url, sources: [type] });
+      }
+    }
+
+    return ok([...byUrl.values()]);
   };
 
   /**
@@ -3336,6 +3725,7 @@ function SuggestionsController(ctx, sqs, env) {
     autofixSuggestions,
     createSuggestions,
     deploySuggestionToEdge,
+    getEdgeDeployedUrls,
     listGeoExperiments,
     getGeoExperiment,
     getGeoExperimentResults,
@@ -3349,6 +3739,7 @@ function SuggestionsController(ctx, sqs, env) {
     getAllForOpportunity,
     getAllForOpportunityPaged,
     getByID,
+    getPresignedGuidanceCsvUrl,
     getByStatus,
     getByStatusPaged,
     getSuggestionFixes,

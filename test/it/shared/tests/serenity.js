@@ -12,9 +12,10 @@
 
 import { expect } from 'chai';
 import {
-  ORG_1_ID, BRAND_1_ID, SITE_1_ID,
+  ORG_1_ID, BRAND_1_ID, SITE_1_ID, SITE_2_ID,
 } from '../seed-ids.js';
 import { INTENT_ROOT_NAME } from '../../../../src/support/serenity/prompt-tags.js';
+import { SERENITY_CLASSIFY_JOB_ID } from '../../postgres/seed-data/async-jobs.js';
 
 /**
  * End-to-end tests for the /serenity/* surface (LLMO-5190), driven against the
@@ -261,6 +262,40 @@ export default function serenityTests(
     });
   });
 
+  describe('Serenity API — poll a prompt-import (classify) job (serenity-docs#33 Layer 1)', () => {
+    const base = `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/serenity`;
+
+    it('GET /serenity/prompts/jobs/:jobId returns the secret-free status contract for an owned COMPLETED job', async () => {
+      const res = await getHttpClient().admin.get(`${base}/prompts/jobs/${SERENITY_CLASSIFY_JOB_ID}`);
+      expect(res.status).to.equal(200);
+      // Exactly the four camelCase fields the UI is built against — nothing else.
+      expect(Object.keys(res.body).sort()).to.deep.equal(['error', 'jobId', 'result', 'status']);
+      expect(res.body.jobId).to.equal(SERENITY_CLASSIFY_JOB_ID);
+      expect(res.body.status).to.equal('COMPLETED');
+      expect(res.body.result).to.deep.include({ published: true, pendingClassificationCount: 0 });
+      expect(res.body.error).to.equal(null);
+      // The job's internal metadata (promise token etc.) must never leak.
+      expect(res.body).to.not.have.property('metadata');
+      expect(JSON.stringify(res.body)).to.not.match(/promise/i);
+    });
+
+    it('GET /serenity/prompts/jobs/:jobId 404s for an unknown job id', async () => {
+      const res = await getHttpClient().admin.get(`${base}/prompts/jobs/eeee9999-9999-4999-a999-999999999999`);
+      expect(res.status).to.equal(404);
+    });
+
+    it('GET /serenity/prompts/jobs/:jobId 404s (does not leak) for a job owned by another brand', async () => {
+      // The seeded COMPLETED preflight job carries no matching brandId.
+      const res = await getHttpClient().admin.get(`${base}/prompts/jobs/eeee1111-1111-4111-b111-111111111111`);
+      expect(res.status).to.equal(404);
+    });
+
+    it('GET /serenity/prompts/jobs/:jobId 400s on a non-UUID jobId', async () => {
+      const res = await getHttpClient().admin.get(`${base}/prompts/jobs/not-a-uuid`);
+      expect(res.status).to.equal(400);
+    });
+  });
+
   describe('Serenity API — sub-workspace lifecycle (mutating, live mock)', () => {
     // These mutate Project Engine mock state: a market provisions a project and
     // PUBLISHES it (the publish step needs PE mock >= 1.3.1, which fixed the
@@ -308,6 +343,20 @@ export default function serenityTests(
       expect(res.status).to.equal(201);
       expect(res.body.geoTargetId).to.equal(US_GEO);
       expect(res.body.languageCode).to.equal('en');
+    });
+
+    it('POST /serenity/markets treats a supplied siteId as authoritative over a conflicting brandDomain', async () => {
+      // SITE_2 (site2.example.com) is a real, distinct ORG_1 Site from the literal
+      // brandDomain sent alongside it — the created market must track SITE_2's
+      // domain, not the literal string also supplied.
+      const created = await getHttpClient().admin.post(`${base}/markets`, {
+        market: 'US', languageCode: 'en', siteId: SITE_2_ID, brandDomain: 'example.com', brandNames: ['Test Brand'],
+      });
+      expect(created.status).to.equal(201);
+
+      const detail = await getHttpClient().admin.get(`${base}/markets/${US_GEO}/en`);
+      expect(detail.status).to.equal(200);
+      expect(detail.body.domain).to.equal('site2.example.com');
     });
 
     it('DELETE /serenity/markets/:geo/:lang removes a siteId-linked market and cleans up (LLMO-6405 R12)', async () => {
@@ -554,6 +603,184 @@ export default function serenityTests(
       expect(res.status).to.equal(400);
     });
 
+    // category-delete.md: a real delete, not the old untag-only behavior. A
+    // prompt-less category was previously a no-op forever; here it is gone.
+    it('DELETE /serenity/tags/:tagId removes a prompt-less category for good', async () => {
+      await createUsMarket();
+      const category = await createTag('Photography');
+
+      const del = await getHttpClient().admin.delete(
+        `${base}/tags/${category.body.id}?geoTargetId=${US_GEO}&languageCode=en`,
+      );
+      expect(del.status).to.equal(204);
+
+      const roots = await getHttpClient().admin.get(
+        `${base}/tags?geoTargetId=${US_GEO}&languageCode=en&parentId=`,
+      );
+      const categoryRoot = roots.body.items.find((t) => t.name === 'category');
+      const children = await getHttpClient().admin.get(
+        `${base}/tags?geoTargetId=${US_GEO}&languageCode=en&parentId=${categoryRoot.id}`,
+      );
+      expect(children.body.items.map((t) => t.id)).to.not.include(category.body.id);
+
+      // Idempotent: deleting the already-gone id again is a clean 404, not a
+      // resurrection or a 500 — the id-keyed-route convention.
+      const again = await getHttpClient().admin.delete(
+        `${base}/tags/${category.body.id}?geoTargetId=${US_GEO}&languageCode=en`,
+      );
+      expect(again.status).to.equal(404);
+    });
+
+    // The whole subtree is composed and deleted in ONE proxy-side batch call —
+    // deleting the parent takes every sub-category with it.
+    it('DELETE /serenity/tags/:tagId deletes a parent category and its whole subtree', async () => {
+      await createUsMarket();
+      const parent = await createTag('Footwear');
+      const child = await createTag('Sneakers', parent.body.id);
+
+      const del = await getHttpClient().admin.delete(
+        `${base}/tags/${parent.body.id}?geoTargetId=${US_GEO}&languageCode=en`,
+      );
+      expect(del.status).to.equal(204);
+
+      const orphanCheck = await getHttpClient().admin.get(
+        `${base}/tags?geoTargetId=${US_GEO}&languageCode=en&parentId=${parent.body.id}`,
+      );
+      // The parent itself is gone, so its former children level reads empty.
+      expect(orphanCheck.body.items).to.deep.equal([]);
+
+      const rootsAfter = await getHttpClient().admin.get(
+        `${base}/tags?geoTargetId=${US_GEO}&languageCode=en&parentId=`,
+      );
+      const categoryRoot = rootsAfter.body.items.find((t) => t.name === 'category');
+      const remaining = await getHttpClient().admin.get(
+        `${base}/tags?geoTargetId=${US_GEO}&languageCode=en&parentId=${categoryRoot.id}`,
+      );
+      expect(remaining.body.items.map((t) => t.id)).to.not.include.members([
+        parent.body.id, child.body.id,
+      ]);
+    });
+
+    // Multi-branch shape: the parent has TWO children, and only ONE of them has
+    // its own child. The single-branch-chain test above cannot catch a bug in
+    // the per-level fan-out (e.g. only capturing the last frontier node's
+    // children); this one exercises the shape the headline "whole subtree"
+    // guarantee actually depends on.
+    it('DELETE /serenity/tags/:tagId deletes a parent with multiple children, only one of which has its own child', async () => {
+      await createUsMarket();
+      const parent = await createTag('Outdoor Gear');
+      const childWithGrandchild = await createTag('Tents', parent.body.id);
+      const grandchild = await createTag('Backpacking Tents', childWithGrandchild.body.id);
+      const leafChild = await createTag('Sleeping Bags', parent.body.id);
+
+      const del = await getHttpClient().admin.delete(
+        `${base}/tags/${parent.body.id}?geoTargetId=${US_GEO}&languageCode=en`,
+      );
+      expect(del.status).to.equal(204);
+
+      // `parent` itself is gone, so its former children level reads empty —
+      // this is the only check that can distinguish "both children deleted"
+      // from "only the branch with a grandchild followed" (a fan-out bug that
+      // only captures the LAST frontier node's children would still delete
+      // childWithGrandchild and leave leafChild behind as an orphan the
+      // category-root-level check alone could never catch, since leafChild
+      // was never a category-root-level node to begin with).
+      const underParent = await getHttpClient().admin.get(
+        `${base}/tags?geoTargetId=${US_GEO}&languageCode=en&parentId=${parent.body.id}`,
+      );
+      expect(underParent.body.items).to.deep.equal([]);
+      expect(underParent.body.items.map((t) => t.id)).to.not.include.members([
+        childWithGrandchild.body.id, leafChild.body.id,
+      ]);
+
+      // The deeper grandchild is gone too — proves the walk followed the
+      // WITH-grandchild branch to its own second level, not just its first.
+      const underChildWithGrandchild = await getHttpClient().admin.get(
+        `${base}/tags?geoTargetId=${US_GEO}&languageCode=en&parentId=${childWithGrandchild.body.id}`,
+      );
+      expect(underChildWithGrandchild.body.items).to.deep.equal([]);
+      expect(underChildWithGrandchild.body.items.map((t) => t.id)).to.not.include(
+        grandchild.body.id,
+      );
+
+      const rootsAfter = await getHttpClient().admin.get(
+        `${base}/tags?geoTargetId=${US_GEO}&languageCode=en&parentId=`,
+      );
+      const categoryRoot = rootsAfter.body.items.find((t) => t.name === 'category');
+      const remaining = await getHttpClient().admin.get(
+        `${base}/tags?geoTargetId=${US_GEO}&languageCode=en&parentId=${categoryRoot.id}`,
+      );
+      expect(remaining.body.items.map((t) => t.id)).to.not.include(parent.body.id);
+    });
+
+    // Prompt preservation is the upstream detach, not client choreography: the
+    // delete never reads or writes a prompt, and the prompt survives fully
+    // present, just no longer carrying the deleted category tag.
+    it('DELETE /serenity/tags/:tagId preserves carrying prompts, unassigned', async () => {
+      await createUsMarket();
+      const category = await createTag('Photography');
+      const created = await getHttpClient().admin.post(`${base}/prompts`, {
+        prompts: [{
+          text: 'What is the best mirrorless camera?',
+          tagIds: [category.body.id],
+          geoTargetId: US_GEO,
+          languageCode: 'en',
+        }],
+      });
+      expect(created.status).to.equal(200);
+      const promptId = created.body.created[0].semrushPromptId;
+
+      const del = await getHttpClient().admin.delete(
+        `${base}/tags/${category.body.id}?geoTargetId=${US_GEO}&languageCode=en`,
+      );
+      expect(del.status).to.equal(204);
+
+      const byOldTag = await getHttpClient().admin.get(
+        `${base}/prompts?geoTargetId=${US_GEO}&languageCode=en&tagIds=${category.body.id}`,
+      );
+      // The deleted tag id no longer resolves to anything, so filtering by it
+      // finds nothing — not an error, and not a resurrection of the tag.
+      expect(byOldTag.status).to.equal(200);
+      expect(byOldTag.body.items.map((p) => p.semrushPromptId)).to.not.include(promptId);
+
+      const all = await getHttpClient().admin.get(
+        `${base}/prompts?geoTargetId=${US_GEO}&languageCode=en`,
+      );
+      expect(all.body.items.map((p) => p.semrushPromptId)).to.include(promptId);
+    });
+
+    it('DELETE /serenity/tags/:tagId 400s a delete of a dimension root', async () => {
+      await createUsMarket();
+      const roots = await getHttpClient().admin.get(
+        `${base}/tags?geoTargetId=${US_GEO}&languageCode=en&parentId=`,
+      );
+      const categoryRoot = roots.body.items.find((t) => t.name === 'category');
+      const res = await getHttpClient().admin.delete(
+        `${base}/tags/${categoryRoot.id}?geoTargetId=${US_GEO}&languageCode=en`,
+      );
+      expect(res.status).to.equal(400);
+    });
+
+    it('DELETE /serenity/tags/:tagId 400s a delete of a server-owned dimension value', async () => {
+      await createUsMarket();
+      const originValue = await getHttpClient().admin.post(`${base}/tags`, {
+        type: 'origin', name: 'ai', geoTargetId: US_GEO, languageCode: 'en',
+      });
+      expect(originValue.status).to.equal(200);
+      const res = await getHttpClient().admin.delete(
+        `${base}/tags/${originValue.body.id}?geoTargetId=${US_GEO}&languageCode=en`,
+      );
+      expect(res.status).to.equal(400);
+    });
+
+    it('DELETE /serenity/tags/:tagId 404s an id absent from this market tree', async () => {
+      await createUsMarket();
+      const res = await getHttpClient().admin.delete(
+        `${base}/tags/00000000-0000-4000-8000-000000000000?geoTargetId=${US_GEO}&languageCode=en`,
+      );
+      expect(res.status).to.equal(404);
+    });
+
     it('POST /serenity/prompts creates a prompt by id-based tagIds (serenity-docs#24)', async () => {
       await createUsMarket();
       const category = await createTag('Photography');
@@ -570,17 +797,18 @@ export default function serenityTests(
       expect(created.status).to.equal(200);
       expect(created.body.created).to.have.lengthOf(1);
       expect(created.body.created[0].semrushPromptId).to.be.a('string').that.is.not.empty;
-      // The write path server-stamps FOUR dimensions the caller may not set: a
-      // branded/non-branded `type:` tag (classified from the text), the derived
-      // `origin:` tag (`human`, on a user-authenticated create — origin-dimension.md
-      // §3 / WP-O2b), the producing `source:` tag (`config` on this proxy-create
-      // path — source-dimension.md §1 / WP-S2, LLMO-6282), AND an `intent:<Value>`
-      // tag (serenity-docs#31, #32). Azure OpenAI is not configured in this IT
-      // environment, so intent deterministically defaults to `intent:Informational`
-      // (never null/omitted — see the fallback ladder). So the created prompt
-      // carries the two supplied tags plus the four computed ones.
+      // The write path server-stamps THREE dimensions the caller may not set: a
+      // branded/non-branded `type:` tag (classified from the text), the producing
+      // `source:` tag (`config` on this proxy-create path — source-dimension.md
+      // §1 / WP-S2, LLMO-6282), AND an `intent:<Value>` tag (serenity-docs#31,
+      // #32). Azure OpenAI is not configured in this IT environment, so intent
+      // deterministically defaults to `intent:Informational` (never null/omitted
+      // — see the fallback ladder). `origin` no longer gets its own tag
+      // (tag-display-names.md §3 — authorship folds into `source` via
+      // `deriveSource`, WP-D2/SITES-50446). So the created prompt carries the
+      // two supplied tags plus the three computed ones.
       expect(created.body.created[0].tagIds).to.include.members([category.body.id, child.body.id]);
-      expect(created.body.created[0].tagIds).to.have.lengthOf(6);
+      expect(created.body.created[0].tagIds).to.have.lengthOf(5);
       expect(created.body.failed).to.deep.equal([]);
 
       // by_tags correlation: the id-based create embeds the tag ids, so filtering the prompt list
@@ -607,9 +835,16 @@ export default function serenityTests(
         brandNames: ['Test Brand'],
         markets: [{ market: 'US', languageCode: 'en' }],
       });
-      // 207 Multi-Status: per-market results, each a published 201.
-      expect(activated.status).to.equal(207);
+      // 200, not 207: every market published AND the brand_sites mirror linked, which
+      // is what full activation means. 207 is the partial-failure code — the brand stays
+      // active but something in the chain did not land. This asserted 207 for as long as
+      // the organization was read from the Brand entity, which has no accessor for it:
+      // `ensureMarketSite` got `undefined`, returned null through its one silent early
+      // return, and the site link failed on every single activation.
+      expect(activated.status).to.equal(200);
       expect(activated.body.status).to.equal('active');
+      // Only the 200 body carries it, and only a real linked Site produces one.
+      expect(activated.body.baseSiteId).to.be.a('string').and.not.empty;
       expect(activated.body.markets).to.be.an('array').that.is.not.empty;
       expect(activated.body.markets[0].status).to.equal(201);
       expect(activated.body.markets[0].body.published).to.equal(true);
@@ -660,12 +895,39 @@ export default function serenityTests(
       // absent key).
       expect(slice.promptsCount).to.equal(0);
       expect(slice.modelsCount).to.equal(0);
-      // NOTE (LLMO-6405): the sub-workspace market DTO also carries `siteId`
-      // (enriched from the brand_to_semrush_projects mapping row). The round-trip
-      // siteId assertions were removed pending live verification of the mapping-row
-      // enrichment in the IT stack — the field is additive and the UI degrades to
-      // domain-keying when it is null, so this does not block the feature. Unit
-      // coverage for the create-time binding lives in site-linkage.test.js.
+    });
+
+    it('binds each market to its OWN site, so two markets of one brand differ', async () => {
+      // The point of serenity-docs#356. `brand_to_semrush_projects.site_id` is
+      // the per-market source of truth for the url a project tracks, but every
+      // derivation used to resolve ONE url per brand and apply it to every market
+      // in that brand's sub-workspace — so a brand whose GB market genuinely
+      // tracks a different site than its US market could not be expressed at all.
+      //
+      // Same language, two countries: the two markets differ only in the Site
+      // they were created from, which is exactly the axis under test.
+      const GB_GEO = 2826; // GB: 2000 + ISO numeric 826.
+      const us = await getHttpClient().admin.post(`${base}/markets`, {
+        market: 'US', languageCode: 'en', siteId: SITE_1_ID, brandNames: ['Test Brand'],
+      });
+      expect(us.status).to.equal(201);
+      const gb = await getHttpClient().admin.post(`${base}/markets`, {
+        market: 'GB', languageCode: 'en', siteId: SITE_2_ID, brandNames: ['Test Brand'],
+      });
+      expect(gb.status).to.equal(201);
+
+      const res = await getHttpClient().admin.get(`${base}/markets`);
+      expect(res.status).to.equal(200);
+      const bySlice = (geo) => res.body.items.find(
+        (m) => m.geoTargetId === geo && m.languageCode === 'en',
+      );
+      expect(bySlice(US_GEO), 'the US market should round-trip').to.exist;
+      expect(bySlice(GB_GEO), 'the GB market should round-trip').to.exist;
+      // Each row carries the Site it was created from. Binding by brand instead
+      // would give both markets whichever site was resolved first.
+      expect(bySlice(US_GEO).siteId).to.equal(SITE_1_ID);
+      expect(bySlice(GB_GEO).siteId).to.equal(SITE_2_ID);
+      expect(bySlice(US_GEO).siteId).to.not.equal(bySlice(GB_GEO).siteId);
     });
 
     it('GET /serenity/markets/:geo/:lang resolves a created+published market', async () => {
@@ -1486,6 +1748,41 @@ export default function serenityTests(
       expect(res.status).to.equal(200);
 
       expect(aliasesOf((await benchmarkNamed('Rival Uno')).row)).to.include('rival incorporated');
+    });
+
+    it('accepts an edit whose competitors all sit on the brand\'s own host', async () => {
+      // The Sacramento Kings shape (serenity-docs#358): a brand tracked on a subpath
+      // of a shared host, with sibling competitors on other subpaths of it. Folded to
+      // hosts, all four read as the project's own domain, so every one was rejected as
+      // self-referential, `kept` came back empty, and the whole edit was refused with a
+      // 400 that blamed the customer's data. They are distinct sites, and a Semrush
+      // project holds several benchmarks on one domain discriminated by brand_name.
+      await createUsMarketWithBenchmark();
+
+      const competitors = [
+        { name: 'Phoenix Suns', url: 'https://www.example.com/suns', regions: ['WW'] },
+        { name: 'Golden State Warriors', url: 'https://www.example.com/warriors', regions: ['WW'] },
+        { name: 'Los Angeles Lakers', url: 'https://www.example.com/lakers', regions: ['WW'] },
+        { name: 'Los Angeles Clippers', url: 'https://www.example.com/clippers', regions: ['WW'] },
+      ];
+      const res = await getHttpClient().admin.patch(brandPath, { competitors });
+      expect(res.status).to.equal(200);
+
+      // Stored in full: the drop happened at write time, so a rejected competitor was
+      // erased from the brand row as well as skipped in the sync.
+      expect((res.body.competitors || []).map((c) => c.name).sort())
+        .to.deep.equal(competitors.map((c) => c.name).sort());
+
+      // The benchmarks themselves are NOT asserted here. The PE mock's batch-create
+      // treats `domain` as a conflict token alongside brand name and alias, so four
+      // benchmarks on one domain are a 409 and the sync's writes are absorbed by the
+      // brand-edit's accept-drift seam. Live does not behave that way: probed against
+      // Project Engine 2026-08-19, a create on a domain another benchmark already
+      // holds is ACCEPTED, and a batch of two benchmarks sharing one domain is
+      // ACCEPTED, while a duplicate brand_name is refused with the 409 — which is the
+      // asymmetry this whole change rests on. The mock is over-strict (its own 409
+      // reads 'duplicate brand name or alias' and never mentions domain); until it is
+      // corrected, the sibling-benchmark write is covered by the unit suite.
     });
   });
 }

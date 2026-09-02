@@ -107,6 +107,7 @@ import DrsBpPgAuditController from './controllers/drs-bp-pg-audit.js';
 import routeRequiredCapabilities, { INTERNAL_ROUTES } from './routes/required-capabilities.js';
 import routeFacsCapabilities from './routes/facs-capabilities.js';
 import { secondaryResolvers } from './support/facs-secondary-resolvers.js';
+import { compositeResolvers } from './support/facs-composite-resolvers.js';
 import ContactSalesLeadsController from './controllers/contact-sales-leads.js';
 import PageRelationshipsController from './controllers/page-relationships.js';
 import PlgOnboardingController from './controllers/plg/plg-onboarding.js';
@@ -164,7 +165,7 @@ function localCORSWrapper(fn) {
       response.headers.set(
         'Access-Control-Allow-Headers',
         'Content-Type, Authorization, x-api-key, x-ims-org-id, x-client-type, x-import-api-key, '
-        + 'x-trigger-audits, x-requested-with, origin, accept, x-view-as-trial, x-product, x-promise-token, x-promise-audience',
+        + 'x-trigger-audits, x-requested-with, origin, accept, x-view-as-trial, x-view-full-experience, x-product, x-promise-token, x-promise-audience',
       );
       response.headers.set('Access-Control-Max-Age', '86400');
     }
@@ -227,7 +228,7 @@ async function run(request, context) {
   if (method === 'OPTIONS') {
     return noContent({
       'access-control-allow-methods': 'GET, HEAD, PATCH, POST, OPTIONS, DELETE',
-      'access-control-allow-headers': 'x-api-key, authorization, origin, x-requested-with, content-type, accept, x-import-api-key, x-client-type, x-trigger-audits, x-view-as-trial, x-promise-token, x-promise-audience',
+      'access-control-allow-headers': 'x-api-key, authorization, origin, x-requested-with, content-type, accept, x-import-api-key, x-client-type, x-trigger-audits, x-view-as-trial, x-view-full-experience, x-promise-token, x-promise-audience',
       'access-control-max-age': '86400',
       'access-control-allow-origin': '*',
     });
@@ -484,7 +485,7 @@ const wrappedMain = wrap(run)
   // Enforces the hybrid MAC/FACS model (JWT facs_permissions ∪ state-layer grants)
   // for FACS-governed external callers; internal identities and non-enrolled orgs
   // bypass. See routeFacsCapabilities for route → capability classification.
-  .with(facsWrapper, { routeFacsCapabilities, secondaryResolvers })
+  .with(facsWrapper, { routeFacsCapabilities, secondaryResolvers, compositeResolvers })
   .with(readOnlyAdminWrapper, {
     routeCapabilities: routeRequiredCapabilities,
     internalRoutes: INTERNAL_ROUTES,

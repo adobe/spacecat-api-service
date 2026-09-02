@@ -50,6 +50,8 @@ npm run docs:lint         # Validate OpenAPI specs
 npm run docs:serve        # Preview docs locally
 ```
 
+**`docs/index.html` non-determinism:** `docs:build` regenerates this file's styled-components CSS as inline hashed class names, and the hash assignment order is not stable across Redocly CLI/Node versions — an environment other than the canonical CI toolchain can produce a diff of tens of thousands of lines that is pure hash/markup churn, not a content change (verify by diffing for the actual OpenAPI content you touched, e.g. `grep` for the field/path name in old vs new). Don't commit a hash-noise diff from a non-canonical environment: either regenerate on the canonical CI toolchain, or note the exception in the PR description (spec files are the source of truth and are what reviewers should verify) and leave `docs/index.html` as committed on `main`.
+
 ### Deployment
 ```bash
 npm run build             # Build production bundle with Helix Deploy
@@ -315,7 +317,7 @@ Agents in `src/agents/` use `@langchain/langgraph` for workflow orchestration.
 2. **Specification Sync**: Keep OpenAPI specs and implementation in sync
    - Run `npm run docs:lint` after modifying specs
    - Run `npm run docs:build` before completing implementation
-3. **Routing Consistency**: Add routes to BOTH `src/index.js` and `src/routes/index.js`
+3. **Routing Consistency**: Add routes to `src/routes/index.js`. `src/index.js` only wires each domain's controller into context (e.g. `SerenityController(context, log, context.env)`) — it does not list individual routes, so it needs a change only when adding a new controller/pattern, not for a new route on an existing one.
 4. **Access Control**: Always use `AccessControlUtil` for tenant data
 5. **DTO Usage**: Transform all responses through DTOs
 6. **HTTP Helpers**: Use shared helpers from `@adobe/spacecat-shared-http-utils` (`ok`, `badRequest`, `notFound`, `forbidden`, `accepted`, etc.)
@@ -469,6 +471,21 @@ shared/tests/sites.js → postgres/sites.test.js (uses Docker PostgreSQL + Postg
 - Test access control paths (authorized, forbidden, admin-only)
 - Test DTO transformations
 - Test error handling and validation
+
+### No raw NUL bytes in tracked source
+
+**Write `\0`, never a literal U+0000 byte.** `test/no-nul-bytes.test.js` scans every
+tracked regular blob and fails on a raw NUL, because a file containing one is
+classified as binary by whole-file scanners — `grep -r`, recursive `rg`, `file` — which
+then skip it. The skip is silent: a search still returns hits from other files, so an
+incomplete result set reads as complete, and it is easy to conclude a symbol has no
+definition, no other callers, or no test coverage in a file that was never read.
+
+Git does not surface this, which is why nothing in review or CI reacted to it before.
+Git sniffs only the first 8000 bytes for a NUL, so a byte past that window leaves
+`git grep` and `git diff` behaving normally — and renders the byte as whitespace in a
+diff, so it looks like an ordinary space. The guard test is that missing signal, and it
+covers every tracked file type, not just JS.
 
 ## Configuration Hierarchy
 

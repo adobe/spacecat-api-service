@@ -69,34 +69,65 @@ export const DIMENSION_PROVISION_ORDER = Object.freeze([
 ]);
 
 /**
- * The upstream ROOT NAME of the `intent` dimension.
+ * The agreed marker that hides a tag tree entry from the customer-facing Brand
+ * Presence tag filter: Semrush suppresses any entry whose name starts with it.
  *
- * Semrush hides a tag tree entry whose name starts with the agreed `$abv_tags$`
- * marker from the customer-facing Brand Presence tag filter, so the intent root
- * is named `$abv_tags$intent` upstream. `intent` remains the DIMENSION KEY
- * everywhere else — the `type` a client names on the tag endpoints, the key of
- * the closed vocabularies, the value elmo reads — and only the root's upstream
- * name carries the marker. The five intent VALUES stay bare-named
- * (`Informational`, `Commercial`, …); the rename does not touch them.
+ * This is a data-exposure control, not a naming convention, so anything deciding
+ * what reaches a customer-visible payload keys on THIS rather than on a list of
+ * known marked names.
  */
-export const INTENT_ROOT_NAME = '$abv_tags$intent';
+export const HIDDEN_TAG_MARKER = '$abv_tags$';
 
 /**
- * The pre-rename intent root name, identical to the dimension key.
+ * The upstream ROOT NAME of the `intent` dimension.
  *
- * TEMPORARY — the rename runs project by project from the data-service migration
- * CLI (LLMO-6985), so a project can carry either spelling until that sweep
- * completes. Both the tag-tree resolver and the Elements read path tolerate this
- * one; LLMO-6986 removes the tolerance once no live project carries it.
- *
- * Each of the three tolerances logs when it fires, under its own `event` key, so
- * "has the sweep finished?" is a query rather than a judgement call:
- * `intent-rename-legacy-root-adopted` (tag-tree resolved the pre-rename root),
- * `intent-rename-legacy-retry` (the Elements enrichment fell back), and
- * `intent-rename-legacy-tags-present` (filter dimensions still saw `intent__`
- * tags). LLMO-6986 is safe once all three have gone quiet.
+ * The intent root carries {@link HIDDEN_TAG_MARKER}, so it is named
+ * `$abv_tags$intent` upstream. `intent` remains the DIMENSION KEY everywhere else
+ * — the `type` a client names on the tag endpoints, the key of the closed
+ * vocabularies, the value elmo reads — and only the root's upstream name carries
+ * the marker. The five intent VALUES stay bare-named (`Informational`,
+ * `Commercial`, …); the rename does not touch them.
  */
-export const LEGACY_INTENT_ROOT_NAME = DIMENSION.INTENT;
+export const INTENT_ROOT_NAME = `${HIDDEN_TAG_MARKER}intent`;
+
+/**
+ * The customer-facing DISPLAY root name for a dimension whose root gets renamed
+ * (tag-display-names.md §1 item 4) — `category` → `Category`, `type` → `Type`,
+ * `source` → `Source`. `intent` is excluded (permanently hidden under
+ * {@link INTENT_ROOT_NAME}, no display rename) and `origin` is excluded (retired
+ * by remap rather than renamed, tag-display-names.md §3).
+ *
+ * IDENTITY PLACEHOLDER — serenity-docs#407 (the vocabulary sign-off PR) is not
+ * yet merged, so every value here is its own key, verbatim. Do NOT add or remove
+ * keys here; only the orchestrator swaps these VALUES in once #407 merges and the
+ * vocabulary is frozen (tag-display-names.md §7 gate 1).
+ */
+export const ROOT_DISPLAY_NAME = Object.freeze({
+  [DIMENSION.CATEGORY]: DIMENSION.CATEGORY,
+  [DIMENSION.TYPE]: DIMENSION.TYPE,
+  [DIMENSION.SOURCE]: DIMENSION.SOURCE,
+});
+
+/**
+ * The upstream root NAME a dimension's root is provisioned and resolved by
+ * TODAY — {@link INTENT_ROOT_NAME} for `intent`, {@link ROOT_DISPLAY_NAME} for
+ * the three renaming dimensions, the dimension key itself for everything else
+ * (`origin`, and anything outside the taxonomy). Anything outside the taxonomy
+ * maps to itself, so a caller gets the name it asked for rather than `undefined`
+ * flowing into a create.
+ *
+ * {@link RESERVED_ROOT_NAMES} is derived through this function, so a change to the
+ * mapping widens or narrows what a customer tag may not shadow.
+ *
+ * @param {string} dimension - a dimension key.
+ * @returns {string} the upstream root name.
+ */
+export function rootNameOfDimension(dimension) {
+  if (dimension === DIMENSION.INTENT) {
+    return INTENT_ROOT_NAME;
+  }
+  return ROOT_DISPLAY_NAME[/** @type {keyof ROOT_DISPLAY_NAME} */ (dimension)] ?? dimension;
+}
 
 /**
  * The origin (authorship) dimension root name — who authored the prompt. Named
@@ -119,23 +150,43 @@ export const ORIGIN_ROOT_NAME = DIMENSION.ORIGIN;
  * an un-reshaped project, or a producing-system value on a reshaped one — and the
  * two cannot be told apart at this prefix. The origins read tolerates `source__`
  * for the un-reshaped case and accepts that producing-system values ride along on
- * reshaped projects until a dedicated source dimension claims them. Unlike
- * LLMO-6986's intent tolerance, this one is not cleanly observable from the read
- * surface (producing-system `source__` masks it), so there is no transition log.
+ * reshaped projects until a dedicated source dimension claims them. That
+ * ambiguity is also why this tolerance carries no transition log: a `source__`
+ * tag on the read surface does not tell you whether any project is still
+ * un-reshaped, so the sweep has to be proved from the tag trees themselves.
  */
 export const LEGACY_ORIGIN_ROOT_NAME = 'source';
 
 /**
- * Every name reserved at the root level: the four roots named after their
- * dimension, plus BOTH intent spellings — the upstream `$abv_tags$intent` and
- * the pre-rename `intent`, which stays reserved while any project still carries
- * it. A customer value may shadow neither, or the tree would hold two tags a
+ * Every name reserved at the root level: each dimension's key AND its upstream
+ * root name. Those coincide for four of the five; for `intent` they differ, so
+ * both `intent` and `$abv_tags$intent` are reserved.
+ *
+ * The bare `intent` is reserved even though no root is named that, because
+ * {@link dimensionOfRootName} maps it to the intent dimension: a name shadowing
+ * it would be READ as the dimension itself, leaving the tree with two entries a
  * reader cannot tell apart at the level that decides a tag's dimension.
+ *
+ * Its most reachable effect today is on {@link canonicalizeSource}, which reuses
+ * this list to refuse a free-text `prompts.source` that folds onto a dimension
+ * name. The root-level create paths are already closed by other means — a create
+ * without a parent is placed under its dimension's own root, one with a parent
+ * must prove in-dimension ancestry, and a patch cannot promote a tag to root — so
+ * treat this as defence in depth there rather than the only guard.
+ *
+ * Both halves are derived from `DIMENSION_PROVISION_ORDER` rather than listed, so
+ * a future tidy-up that maps the spread through {@link rootNameOfDimension} —
+ * which is what the other consumer of that list does — cannot silently drop the
+ * bare spelling and with it the shadowing guard.
  */
-export const RESERVED_ROOT_NAMES = Object.freeze([
+export const RESERVED_ROOT_NAMES = Object.freeze([...new Set([
   ...DIMENSION_PROVISION_ORDER,
-  INTENT_ROOT_NAME,
-]);
+  ...DIMENSION_PROVISION_ORDER.map(rootNameOfDimension),
+])]);
+// ^ Grows automatically with the display root names (tag-display-names.md §1
+// item 5) once ROOT_DISPLAY_NAME's IDENTITY PLACEHOLDER values become real: this
+// is derived through rootNameOfDimension, so no edit is needed here when that
+// happens. The Set dedupes the case that coincides today (display === slug).
 
 /** `origin` values — who authored the prompt. */
 export const ORIGIN_VALUE = Object.freeze({
@@ -171,6 +222,30 @@ export const TYPE_VALUE = Object.freeze({
   BRANDED: 'branded',
   NON_BRANDED: 'non-branded',
 });
+
+/**
+ * `type` value slug → customer-facing display form (tag-display-names.md §1
+ * item 4: `branded` → `Branded`, `non-branded` → `Non-branded`).
+ *
+ * IDENTITY PLACEHOLDER — do not add/remove keys here; only the orchestrator
+ * swaps these VALUES in once serenity-docs#407 is merged + signed off.
+ */
+export const TYPE_VALUE_DISPLAY = Object.freeze({
+  [TYPE_VALUE.BRANDED]: TYPE_VALUE.BRANDED,
+  [TYPE_VALUE.NON_BRANDED]: TYPE_VALUE.NON_BRANDED,
+});
+
+/**
+ * Backing map for {@link valueSlugOfDisplayName}'s `type` branch — built once
+ * from {@link TYPE_VALUE_DISPLAY}, mirroring {@link SOURCE_LABEL_INVERSE}'s
+ * pattern for `source` so the two server-owned display-form inverses stay
+ * structurally consistent as this generalizes to more dimensions.
+ *
+ * @type {Map<string, string>}
+ */
+const TYPE_VALUE_DISPLAY_INVERSE = new Map(
+  Object.entries(TYPE_VALUE_DISPLAY).map(([slug, displayName]) => [displayName, slug]),
+);
 
 /**
  * The CLOSED dimensions and their fixed child vocabularies. A caller may never
@@ -286,38 +361,149 @@ export const PROXY_CREATE_SOURCE_VALUE = 'config';
 export const GENERATED_PROMPT_SOURCE_VALUE = 'semrush';
 
 /**
- * Canonical producing-system slug → customer-facing label. FROZEN and EXHAUSTIVE:
- * one entry per {@link SOURCE_VALUES} value, enforced by a unit test that FAILS
- * the moment a canonical value is added without a label. There is deliberately NO
- * pass-through slug default — a `SOURCE_LABEL[x] ?? x` fallback is exactly the
- * mechanism by which an internal slug reaches a customer silently (source-dimension.md
- * §7), and §3.2's product sign-off protects only the values that exist today.
+ * The `source` values that exist ONLY as the output of {@link deriveSource} —
+ * never a legal `prompts.source` input, never accepted by the v2 create
+ * validator or the create-tag closed-value enum (tag-display-names.md §6 item
+ * 3). `ai-onboarding` is the remap target for the retired `origin` dimension
+ * (tag-display-names.md §3): it is a real, structural slug (not a display
+ * placeholder) — it must be disjoint from {@link SOURCE_VALUES} today, exactly
+ * as it will be once the vocabulary freezes. Python twin:
+ * `DERIVED_PROMPT_SOURCES` beside `KNOWN_PROMPT_SOURCES`
+ * (mysticat-data-service `scripts/serenity_migration/tags.py`); keep the two
+ * in sync (slugs, not labels — no drift risk from the identity placeholders).
+ */
+export const DERIVED_SOURCE_VALUES = Object.freeze(['ai-onboarding']);
+
+/** The single derived `source` slug — the remap target of {@link deriveSource}. */
+const AI_ONBOARDING_SOURCE_VALUE = DERIVED_SOURCE_VALUES[0];
+
+/**
+ * Canonical producing-system slug → customer-facing TAG NAME (the tree-write
+ * boundary map, tag-display-names.md §1 item 3 — "the tag-name map"). Covers
+ * every {@link SOURCE_VALUES} entry that can still reach the tree as its own
+ * tag PLUS every {@link DERIVED_SOURCE_VALUES} entry — together, the full
+ * codomain of {@link deriveSource}. `llm-generated` is deliberately ABSENT: it
+ * folds into `ai-onboarding` at the derivation boundary and never becomes a
+ * tag name of its own (tag-display-names.md §1 item 3, §3) — the exhaustiveness
+ * gate counts it as covered-by-fold, not as needing its own entry (§6 item 1).
  *
- * The label question is OPEN (source-dimension.md §3.2): until product signs off,
- * the labels are the canonical machine-name slugs, verbatim. This map is the SINGLE
- * place a display label would land, so whichever way that call goes it changes here
- * and nowhere else. (elmo ships its own display labels behind `SOURCE_BADGE_CONFIG`;
- * WP-S3.)
+ * FROZEN and EXHAUSTIVE over that set, enforced by a unit test that FAILS the
+ * moment a canonical value is added without an entry. There is deliberately NO
+ * pass-through slug default — a `SOURCE_LABEL[x] ?? x` fallback is exactly the
+ * mechanism by which an internal slug reaches a customer silently
+ * (source-dimension.md §7) — and every value in this map must be UNIQUE
+ * (bijective): two slugs may never share one tag name (tag-display-names.md §1
+ * item 3; a duplicate is a hard upstream 500 at create time and an
+ * unresolvable ambiguity at read time).
+ *
+ * IDENTITY PLACEHOLDER — serenity-docs#407 (the vocabulary sign-off PR) is not
+ * yet merged, so every value here is its own key, verbatim. Do NOT add or
+ * remove keys here; only the orchestrator swaps these VALUES in once #407
+ * merges and the vocabulary is frozen (tag-display-names.md §7 gate 1). (elmo
+ * ships its OWN, separate label map behind `SOURCE_BADGE_CONFIG` — the
+ * Postgres-backed "label map" of §1 item 3, which DOES cover `llm-generated`
+ * many-to-one; that map is WP-D3, out of scope here.)
  */
 export const SOURCE_LABEL = Object.freeze(
-  SOURCE_VALUES.reduce((acc, slug) => {
-    acc[slug] = slug;
-    return acc;
-  }, /** @type {Record<string, string>} */ ({})),
+  [...SOURCE_VALUES.filter((slug) => slug !== 'llm-generated'), ...DERIVED_SOURCE_VALUES]
+    .reduce((acc, slug) => {
+      acc[slug] = slug;
+      return acc;
+    }, /** @type {Record<string, string>} */ ({})),
+);
+
+/** Backing map for {@link displayToSlug} — built once from {@link SOURCE_LABEL}. */
+const SOURCE_LABEL_INVERSE = new Map(
+  Object.entries(SOURCE_LABEL).map(([slug, displayName]) => [displayName, slug]),
 );
 
 /**
- * The closed-dimension values applied to EVERY AI-generated prompt: the `origin`
- * value `ai` (AI-authored) plus the default `Informational` intent (the most
- * common intent for brand-topic prompts; re-classification can refine it later).
- * The `type` value is classified per prompt at generation time (branded vs
- * non-branded — see the handler), so it is NOT seeded here.
+ * The true inverse of {@link SOURCE_LABEL}: a `source`-dimension TAG NAME →
+ * the canonical slug it was minted from. `undefined` for anything that is not
+ * a value in {@link SOURCE_LABEL} — in particular a bare slug is NOT
+ * automatically its own display name unless the map says so (which, under
+ * today's identity placeholders, it does for every entry — see
+ * {@link SOURCE_LABEL}'s docs).
+ *
+ * Built as a real inverse of the map (not a shortcut) so this is a no-op
+ * change when {@link SOURCE_LABEL}'s values stop being identity: the read
+ * side (tolerant tag-tree resolvers, the Elements boundary) always goes
+ * through this function first, exactly as tag-display-names.md §1 item 7
+ * requires, with the slug form accepted as its own alias for as long as
+ * un-migrated projects exist.
+ *
+ * @param {string} displayName - a `source`-dimension tag name.
+ * @returns {string | undefined} the canonical slug, or `undefined`.
+ */
+export function displayToSlug(displayName) {
+  return SOURCE_LABEL_INVERSE.get(displayName);
+}
+
+/**
+ * The customer-facing DISPLAY FORM of a value under a SERVER-OWNED dimension —
+ * the value itself for `intent`/`origin` (no display rename planned for
+ * either; tag-display-names.md §1 item 4), {@link SOURCE_LABEL} for `source`,
+ * {@link TYPE_VALUE_DISPLAY} for `type`. Anything outside those maps falls
+ * back to the value unchanged, matching {@link rootNameOfDimension}'s
+ * "anything outside the taxonomy maps to itself" convention.
+ *
+ * IDENTITY PLACEHOLDER by construction today (both underlying maps are), so
+ * this is a no-op fold until the vocabulary freezes — see
+ * {@link valueSlugOfDisplayName} for the inverse the tolerant resolvers pair
+ * this with.
+ *
+ * @param {string} dimension - a server-owned dimension key.
+ * @param {string} value - a bare value under that dimension's root.
+ * @returns {string} the tag name to create/resolve for that value.
+ */
+export function displayNameOfValue(dimension, value) {
+  if (dimension === DIMENSION.SOURCE) {
+    return SOURCE_LABEL[value] ?? value;
+  }
+  if (dimension === DIMENSION.TYPE) {
+    return TYPE_VALUE_DISPLAY[/** @type {keyof TYPE_VALUE_DISPLAY} */ (value)] ?? value;
+  }
+  return value;
+}
+
+/**
+ * The canonical slug a server-owned dimension's DISPLAY FORM denotes — the
+ * inverse of {@link displayNameOfValue}, generalized across dimensions the way
+ * {@link displayToSlug} is `source`-specific. `undefined` when `displayName`
+ * is not a mapped display form for that dimension (including when it is
+ * simply the bare slug itself — callers that also want to accept the slug as
+ * its own alias check for that separately, exactly as the tolerant tag-tree
+ * resolvers do).
+ *
+ * @param {string} dimension - a server-owned dimension key.
+ * @param {string} displayName - a bare value AS IT WOULD APPEAR on the tree.
+ * @returns {string | undefined} the canonical slug, or `undefined`.
+ */
+export function valueSlugOfDisplayName(dimension, displayName) {
+  if (dimension === DIMENSION.SOURCE) {
+    return displayToSlug(displayName);
+  }
+  if (dimension === DIMENSION.TYPE) {
+    return TYPE_VALUE_DISPLAY_INVERSE.get(displayName);
+  }
+  return undefined;
+}
+
+/**
+ * The closed-dimension values applied to EVERY AI-generated prompt: the
+ * default `Informational` intent (the most common intent for brand-topic
+ * prompts; re-classification can refine it later). The `type` value is
+ * classified per prompt at generation time (branded vs non-branded — see the
+ * handler), so it is NOT seeded here. The `origin` entry this list used to
+ * carry (`{ dimension: 'origin', name: 'ai' }`) is RETIRED
+ * (tag-display-names.md §3): every writer that stamped an `origin` tag stops
+ * doing so, `origin` being derivable from the producer everywhere it still
+ * matters (`derived_source`, above).
  *
  * Each entry names a dimension and the bare value beneath it; the caller resolves
  * the pair to an upstream tag id against the project's tree.
  */
 export const STANDARD_PROMPT_TAG_VALUES = Object.freeze([
-  Object.freeze({ dimension: DIMENSION.ORIGIN, name: ORIGIN_VALUE.AI }),
   Object.freeze({ dimension: DIMENSION.INTENT, name: INTENT_VALUE.INFORMATIONAL }),
 ]);
 
@@ -334,30 +520,46 @@ export function isDimensionRootName(name) {
 }
 
 /**
- * The upstream root NAME a dimension's root is provisioned and resolved by — the
- * dimension key itself for four of the five, {@link INTENT_ROOT_NAME} for
- * `intent`. Anything outside the taxonomy maps to itself, so a caller gets the
- * name it asked for rather than `undefined` flowing into a create.
- *
- * @param {string} dimension - a dimension key.
- * @returns {string} the upstream root name.
+ * `dimensionOfRootName`'s lookup table: every root-name SPELLING a project may
+ * currently carry → its dimension key. Built from {@link DIMENSION_PROVISION_ORDER}
+ * so it can never drift from {@link rootNameOfDimension}: for each dimension it
+ * registers BOTH the bare dimension key (the pre-rename / un-migrated spelling,
+ * tag-display-names.md §1 item 6 — "both forms accepted in") AND
+ * `rootNameOfDimension(dimension)` (today's live spelling — `$abv_tags$intent`
+ * for `intent`, the identity-placeholder display name for the three renaming
+ * dimensions, `origin` unchanged). A `Map` (not a plain object) so a dimension
+ * key that collides with `Object.prototype` can never resolve to an inherited
+ * member.
  */
-export function rootNameOfDimension(dimension) {
-  return dimension === DIMENSION.INTENT ? INTENT_ROOT_NAME : dimension;
-}
+const ROOT_NAME_TO_DIMENSION = new Map(
+  DIMENSION_PROVISION_ORDER.flatMap((dimension) => [
+    [dimension, dimension],
+    [rootNameOfDimension(dimension), dimension],
+  ]),
+);
 
 /**
  * The DIMENSION KEY a root name denotes — the inverse of
- * {@link rootNameOfDimension}, and the fold that keeps `$abv_tags$intent` from
- * leaking out of the tag-tree walk into everything that reasons about dimensions
- * by key. Identity for every other name, the pre-rename `intent` included (it IS
- * the key), so a mid-rename project and a renamed one answer the same thing.
+ * {@link rootNameOfDimension}, tolerant of BOTH the current live spelling and
+ * the bare dimension-key spelling (tag-display-names.md §1 item 6, §5 phase
+ * 1) — resolves `category`/`Category`, `type`/`Type`, `source`/`Source`,
+ * `intent`/`$abv_tags$intent`, and `origin` (unchanged) alike. This is the
+ * fold that keeps `$abv_tags$intent` from leaking out of the tag-tree walk
+ * into everything that reasons about dimensions by key, generalized to every
+ * root that may display-rename.
+ *
+ * Identity for anything NOT in {@link ROOT_NAME_TO_DIMENSION} — a customer
+ * category name, or any future root this taxonomy does not know about. Note
+ * the write and read paths deliberately disagree about a BARE `intent` root:
+ * this fold makes the write path treat its children as server-owned, while
+ * the Elements read path does not claim them as intents. That asymmetry is
+ * intended; do not "fix" one side to match the other.
  *
  * @param {string} rootName - a tag's root-ancestor name, as upstream spells it.
  * @returns {string} the dimension key.
  */
 export function dimensionOfRootName(rootName) {
-  return rootName === INTENT_ROOT_NAME ? DIMENSION.INTENT : rootName;
+  return ROOT_NAME_TO_DIMENSION.get(rootName) ?? rootName;
 }
 
 /**
@@ -431,6 +633,44 @@ export function canonicalizeSource(value) {
     || canonical.length > MAX_TAG_NAME_LEN
     || isDimensionRootName(canonical)) {
     return null;
+  }
+  return canonical;
+}
+
+/**
+ * `derived_source(source, origin)` (tag-display-names.md §3) — the fold that
+ * retires the `origin` dimension into `source` at the single point a slug
+ * becomes a tag name. REAL, structural logic (it operates on slugs, never on
+ * display strings) — NOT an identity placeholder, unlike the maps above.
+ *
+ *  - `canonicalizeSource(source) === 'config' && origin === 'ai'` → the
+ *    `config` bucket's AI-authored half (origin-dimension.md §3's `origin/ai`
+ *    population) remaps to {@link AI_ONBOARDING_SOURCE_VALUE}.
+ *  - `canonicalizeSource(source) === 'llm-generated'` → folds into the same
+ *    derived value (the "AI generated" collapse, tag-display-names.md §1 item
+ *    4) — `prompts.source` keeps recording `llm-generated` verbatim; only the
+ *    TAG folds.
+ *  - otherwise → `canonicalizeSource(source)`, unchanged (a prompt with a
+ *    specific producer — `gsc`, `drs`, … — carries no information in `origin`,
+ *    which is exactly why the dimension can retire).
+ *
+ * `null` propagates from {@link canonicalizeSource}: "do not tag this prompt",
+ * never a substituted default (mirrors `canonicalizeSource`'s own contract).
+ *
+ * @param {unknown} source - a raw or already-canonical `prompts.source` value.
+ * @param {string | null | undefined} origin - the bare `origin` value
+ *   (`ai`/`human`) for THIS write, or `undefined`/`null` on a path that never
+ *   derives origin (e.g. an UPDATE, where `origin` is never re-derived).
+ * @returns {string | null} the `source`-dimension tag slug to attach, or
+ *   `null` when the prompt must not be tagged at all.
+ */
+export function deriveSource(source, origin) {
+  const canonical = canonicalizeSource(source);
+  if (canonical === null) {
+    return null;
+  }
+  if (canonical === 'llm-generated' || (canonical === 'config' && origin === ORIGIN_VALUE.AI)) {
+    return AI_ONBOARDING_SOURCE_VALUE;
   }
   return canonical;
 }

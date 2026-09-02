@@ -1085,11 +1085,6 @@ llmo-onboard:
                 type: string
                 description: The brand name for the site
                 example: "Example Brand"
-              temp-onboarding:
-                type: boolean
-                description: |
-                  When true, skips updating helix-query.yaml in the project-elmo-ui-data GitHub repo
-                  (temporary onboarding; default is false).
               region:
                 type: string
                 pattern: '^[A-Z]{2}$'
@@ -1205,6 +1200,66 @@ llmo-onboard:
                     the request body; omitted when the DRS default ('US')
                     applies.
                   example: "IN"
+                brandActivation:
+                  type: object
+                  description: |
+                    Submission-level outcome of the brand activation / prompt-generation
+                    side-effects (LLMO-7218). "Submission" because Brandalf and prompt
+                    generation both complete asynchronously via a DRS-side callback this
+                    endpoint has no visibility into — this reports whether the required
+                    work was successfully HANDED OFF to DRS, not whether it eventually
+                    succeeded. Omitted for site-only onboarding, which never runs this step.
+                  properties:
+                    brandalfTriggered:
+                      type: boolean
+                      description: True if the Brandalf brand-identification job was
+                        successfully submitted (v2 onboarding mode only; always false in v1).
+                    brandalfError:
+                      type:
+                        - string
+                        - 'null'
+                      description: Reason the Brandalf submission failed or was skipped, if any.
+                    promptGenerationJobId:
+                      type:
+                        - string
+                        - 'null'
+                      description: The v1-mode direct prompt-generation DRS job id, if submitted.
+                    promptGenerationError:
+                      type:
+                        - string
+                        - 'null'
+                      description: Reason the v1-mode prompt-generation submission failed, if any.
+                    promptSuggestionSchedules:
+                      type:
+                        - array
+                        - 'null'
+                      description: Per-pipeline registration result (v2 mode only); null when
+                        registration timed out rather than completed.
+                      items:
+                        type: object
+                        properties:
+                          providerId:
+                            type: string
+                            description: The prompt-suggestion pipeline's provider id.
+                          status:
+                            type: string
+                            enum: ["created", "already-existed", "submitted", "failed"]
+                            description: |
+                              "created"/"already-existed" for a paying site's recurring schedule;
+                              "submitted" for a trial site's one-shot run; "failed" if
+                              registration/submission itself failed.
+                          error:
+                            type: string
+                            description: Present only when status is "failed".
+                    promptSuggestionSchedulesTimedOut:
+                      type: boolean
+                      description: True if prompt-suggestion schedule registration timed out
+                        before completing (v2 mode only).
+                    requiredWorkFailed:
+                      type: boolean
+                      description: True if any required submission for the resolved onboarding
+                        mode failed. When true, `message` reports a degraded outcome instead of
+                        unconditional success.
               required:
                 - message
                 - domain
@@ -6044,6 +6099,10 @@ site-llmo-cloudflare-routes:
       name is not client-supplied. `zoneId` is a Cloudflare identifier (not a SpaceCat entity),
       so it is supplied in the request body.
 
+      The caller supplies the route `pattern` verbatim once it passes the in-domain check below —
+      the service does not re-derive or normalize the host, so the caller can confirm or correct
+      the apex/`www` choice itself.
+
       Before creating the route the service fetches the zone's existing routes and protects the
       customer's current routing using wildcard-aware host-overlap detection (not just exact
       pattern-string matching): if any existing route **bound to a different worker** shares a
@@ -6074,9 +6133,10 @@ site-llmo-cloudflare-routes:
               pattern:
                 type: string
                 description: >-
-                  Cloudflare route pattern. Its host must belong to the site's domain — the
-                  host portion (after stripping any leading wildcard) has to equal the site's
-                  canonical host (base URL host minus a leading `www.`) or be a subdomain of it.
+                  Cloudflare route pattern, used exactly as supplied. Its host must belong to the
+                  site's domain — the host portion (after stripping any leading wildcard) has to
+                  equal the site's canonical host (base URL host minus a leading `www.`) or be a
+                  subdomain of it.
                 example: 'www.example.com/*'
     responses:
       '200':
@@ -6249,6 +6309,86 @@ site-llmo-akamai-properties:
     security:
       - session_token: [ ]
 
+site-llmo-akamai-versions:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/akamaiHost'
+    - $ref: './parameters.yaml#/akamaiClientToken'
+    - $ref: './parameters.yaml#/akamaiClientSecret'
+    - $ref: './parameters.yaml#/akamaiAccessToken'
+    - $ref: './parameters.yaml#/akamaiAccountSwitchKey'
+    - name: propertyId
+      in: query
+      required: true
+      description: Akamai property ID (e.g. `prp_1253269`).
+      schema:
+        type: string
+        pattern: '^prp_[A-Za-z0-9]+$'
+    - name: contractId
+      in: query
+      required: true
+      description: Akamai contract ID (e.g. `ctr_1-ABC123`).
+      schema:
+        type: string
+        pattern: '^ctr_[A-Za-z0-9-]+$'
+    - name: groupId
+      in: query
+      required: true
+      description: Akamai group ID (e.g. `grp_18385`).
+      schema:
+        type: string
+        pattern: '^grp_[A-Za-z0-9]+$'
+  get:
+    operationId: getLlmoAkamaiVersions
+    summary: Get the latest and active Akamai property versions
+    description: |
+      Returns the property's latest (highest-numbered) version plus the version currently ACTIVE on
+      each network (STAGING/PRODUCTION), so the onboarding UI can offer a base version to onboard
+      from (default: latest) and show what is live on each network. Read-only.
+
+      **Note:** This endpoint requires LLMO administrator access for the site.
+    tags:
+      - llmo
+    responses:
+      '200':
+        description: The latest and active versions for the property
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                propertyId:
+                  type: string
+                  example: 'prp_1253269'
+                latestVersion:
+                  type: integer
+                  description: The highest-numbered (newest-created) property version.
+                  example: 5
+                active:
+                  type: object
+                  description: >-
+                    The PAPI activation record currently ACTIVE on each network, keyed by network
+                    name. A network with no active version is absent.
+                  properties:
+                    STAGING:
+                      $ref: '#/akamai-active-activation'
+                    PRODUCTION:
+                      $ref: '#/akamai-active-activation'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '502':
+        $ref: './responses.yaml#/502'
+    security:
+      - session_token: [ ]
+
 site-llmo-akamai-plan:
   parameters:
     - $ref: './parameters.yaml#/siteId'
@@ -6288,6 +6428,12 @@ site-llmo-akamai-plan:
                   type: string
                 latestVersion:
                   type: integer
+                  description: The property's latest (highest-numbered) version.
+                baseVersion:
+                  type: integer
+                  description: >-
+                    The version the plan was built against: the chosen `baseVersion`, else the
+                    property's latest.
                 ruleFormat:
                   type: string
                   description: The property's PAPI rule format (e.g. `v2024-01-01`).
@@ -6803,8 +6949,9 @@ akamai-property-ref:
       type: integer
       minimum: 1
       description: >-
-        (deploy only) Optional property version to copy the new version from. Defaults to the
-        property's latest version.
+        (plan and deploy) Optional property version to operate on. On deploy, the new version is
+        copied from it; on plan, the dry-run preview is built against it. Defaults to the property's
+        latest version.
     retryVersion:
       type: integer
       minimum: 1
@@ -6812,6 +6959,24 @@ akamai-property-ref:
         (deploy only) A version a PRIOR attempt already created but failed to write rules into.
         When supplied, deploy RESUMES into it (writes directly, skipping createVersion) instead of
         minting a fresh version — the guard against piling up empty versions on repeated retries.
+
+akamai-active-activation:
+  type: object
+  additionalProperties: false
+  description: The version currently ACTIVE on a network (projected from the PAPI activation record).
+  properties:
+    activationId:
+      type: string
+      example: 'atv_20135679'
+    propertyVersion:
+      type: integer
+      example: 5
+    network:
+      type: string
+      enum: [STAGING, PRODUCTION]
+    status:
+      type: string
+      example: 'ACTIVE'
 
 akamai-property:
   type: object

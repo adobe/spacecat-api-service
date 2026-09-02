@@ -14,14 +14,14 @@ import {
   ok, badRequest, notFound, forbidden, unauthorized, internalServerError, createResponse,
 } from '@adobe/spacecat-shared-http-utils';
 import { hasText, tracingFetch as fetch } from '@adobe/spacecat-shared-utils';
-import TokowakaClient, { calculateForwardedHost } from '@adobe/spacecat-shared-tokowaka-client';
+import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
 import CloudflareClient from '@adobe/spacecat-shared-cloudflare-client';
 import AccessControlUtil from '../../support/access-control-util.js';
-import { hasSubpath } from '../../support/edge-routing-utils.js';
+import { hasSubpath, resolveCanonicalHost } from '../../support/edge-routing-utils.js';
 import { auditHostname } from './llmo-utils.js';
 import {
-  deriveWorkerName, hostInSiteDomain, registrableDomain, routePatternHost, routePatternHostGlob,
-  routePatternsOverlap,
+  deriveWorkerName, hostInSiteDomain, registrableDomain, routePatternHost,
+  routePatternHostGlob, routePatternsOverlap,
 } from './llmo-cloudflare-utils.js';
 
 // Cap the conflicting-routes list returned in a 409 so a zone with many overlapping routes can't
@@ -331,7 +331,7 @@ function LlmoCloudflareController(ctx) {
    * POST /sites/:siteId/llmo/cdn-onboard/cloudflare/deploy
    * Body: { accountId }
    * The target host is NOT client-supplied — it is derived server-side from the site's own base
-   * URL (see calculateForwardedHost) so the worker always forwards to the canonical host for the
+   * URL (see resolveCanonicalHost) so the worker always forwards to the canonical host for the
    * site, consistent with how the other CDN integrations resolve the origin.
    * Fetches the Edge Optimize worker script from GitHub and deploys it under a name derived
    * from the site (see deriveWorkerName), tagging it with CF_WORKER_OWNER_TAG (+ the caller's
@@ -372,14 +372,14 @@ function LlmoCloudflareController(ctx) {
     const siteId = site.getId();
 
     // targetHost is derived server-side from the site's own base URL — never taken from the client
-    // — so the worker always forwards to the canonical host for the site. calculateForwardedHost
+    // — so the worker always forwards to the canonical host for the site. resolveCanonicalHost
     // normalizes a bare apex (example.com) to its www host, matching how audits/crawls resolve the
-    // origin and keeping host derivation consistent across CDNs (CloudFront uses the same helper).
-    // Known gap: sites served from the apex without a www record still resolve to www here; that
-    // is tracked as a follow-up enhancement.
+    // origin and keeping host derivation consistent across CDNs (CloudFront uses the same helper),
+    // but then confirms that synthesized www host actually resolves in DNS — sites served only from
+    // the apex (no www record) fall back to the apex instead of pointing the worker at a dead host.
     let targetHost;
     try {
-      targetHost = calculateForwardedHost(site.getBaseURL(), log);
+      targetHost = await resolveCanonicalHost(site.getBaseURL(), log);
     } catch (e) {
       log.error(auditLine(context, 'deploy-worker', 'target-host-failed', {
         severity: 'error', siteId, accountId, error: e.message,
@@ -503,11 +503,12 @@ function LlmoCloudflareController(ctx) {
   /**
    * POST /sites/:siteId/llmo/cdn-onboard/cloudflare/routes
    * Body: { zoneId, pattern }
-   * Verifies server-side that the pattern targets the site's own domain and that no existing
-   * route in the zone already targets the same host (compared by resolved host, not raw pattern
-   * string) before creating it, so onboarding cannot silently add a second/overlapping route on
-   * a host the customer already routes. `zoneId` is a Cloudflare identifier (not a SpaceCat
-   * entity), so it is supplied in the body rather than the path.
+   * The client supplies the route pattern (host + path) verbatim once it passes the in-domain
+   * check — no server-side host derivation, so the client can confirm or correct the apex/www
+   * choice itself. Before creating it, verifies that no existing route in the zone already targets
+   * the same host (compared by resolved host, not raw pattern string) so onboarding cannot silently
+   * add a second/overlapping route on a host the customer already routes. `zoneId` is a Cloudflare
+   * identifier (not a SpaceCat entity), so it is supplied in the body rather than the path.
    */
   const addRoute = async (context) => {
     const result = await getSiteAndCheckAccess(context);
@@ -527,7 +528,7 @@ function LlmoCloudflareController(ctx) {
       return nameError;
     }
 
-    const { zoneId, pattern } = context.data || {};
+    const { zoneId, pattern: clientPattern } = context.data || {};
 
     if (!hasText(zoneId)) {
       return badRequest('Missing zoneId in request body');
@@ -535,14 +536,21 @@ function LlmoCloudflareController(ctx) {
     if (!CF_ID_RE.test(zoneId)) {
       return badRequest('zoneId must be a 32-character hexadecimal Cloudflare zone ID');
     }
-    if (!hasText(pattern)) {
+    if (!hasText(clientPattern)) {
       return badRequest('Missing pattern in request body');
     }
-    if (!hostInSiteDomain(routePatternHost(pattern), site.getBaseURL())) {
+    if (!hostInSiteDomain(routePatternHost(clientPattern), site.getBaseURL())) {
       return badRequest('route pattern must target the site\'s domain');
     }
 
     const siteId = site.getId();
+
+    // Once the pattern passes the in-domain check above, use it exactly as the client submitted —
+    // no server-side host derivation. This preserves the client's ability to confirm/override the
+    // root host themselves (e.g. resubmitting `racq.com.au/*` after a suggested
+    // `www.racq.com.au/*`) rather than have it silently re-derived on every call.
+    const pattern = clientPattern;
+
     log.info(auditLine(context, 'add-route', 'started', {
       siteId, zoneId, scriptName, pattern,
     }));

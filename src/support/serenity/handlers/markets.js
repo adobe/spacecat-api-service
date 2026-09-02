@@ -12,7 +12,7 @@
 
 // @ts-check
 
-import { hasText } from '@adobe/spacecat-shared-utils';
+import { hasText, isValidUUID } from '@adobe/spacecat-shared-utils';
 
 import { ErrorWithStatusCode } from '../../utils.js';
 import {
@@ -20,8 +20,8 @@ import {
 } from '../errors.js';
 import { normalizeLanguageCode, normalizeGeoTargetId } from '../validation.js';
 import { resolveLocation } from '../locations.js';
-import { resolveSiteIdentity } from '../site-linkage.js';
-import { siteIdentityFromUrlString } from '../../url-utils.js';
+import { resolveSiteIdentity, resolveMarketIdentity, logMarketCreated } from '../site-linkage.js';
+import { createProvisionAndPublishProject, CreateNoProjectIdError } from '../project-provisioning.js';
 import { alertQuotaRejection } from '../quota-alerts.js';
 
 /** @typedef {import('../rest-transport.js').SerenityTransport} SerenityTransport */
@@ -223,10 +223,17 @@ function validateCreateBody(body) {
     errors.push('languageCode must match ^[a-z]{2,3}(-[a-z]{2,4})?$');
   }
   // brandDomain OR siteId (LLMO-6405 Phase 2): a caller may supply the market's
-  // SpaceCat Site UUID instead of a raw domain — the controller derives the
-  // domain from it (resolveSiteDomain). One of the two is required.
+  // SpaceCat Site UUID instead of a raw domain — the controller derives both the
+  // domain and the tracked url from it (resolveSiteUrls). One of the two is required.
   if (!hasText(body?.brandDomain) && !hasText(body?.siteId)) {
     errors.push('brandDomain or siteId is required');
+  }
+  // Validated even though only the sub-workspace path resolves it: flat mode
+  // records it straight onto `brand_to_semrush_projects.site_id`, a uuid column,
+  // so a malformed value that gets this far surfaces as a write failure rather
+  // than as the bad request it is.
+  if (hasText(body?.siteId) && !isValidUUID(body.siteId)) {
+    errors.push('siteId must be a valid UUID');
   }
   if (!Array.isArray(body?.brandNames) || body.brandNames.length === 0
       || !body.brandNames.every(hasText)) {
@@ -376,29 +383,29 @@ export async function handleCreateMarket(
     ? String(body.name)
     : defaultMarketName(body.market, languageCode);
 
-  // brandDomain OR siteId (LLMO-6405 Phase 2): when the caller supplied a Site
-  // UUID instead of a raw domain, derive the Semrush project domain from it. The
-  // flat handler holds full `dataAccess` (incl. Site), so it self-derives — the
-  // subworkspace handler cannot (narrowed dataAccess) and relies on the controller.
-  // A supplied-but-unresolvable siteId is a hard 400 (never silently proceeds).
-  // Derive BOTH values a Semrush project tracks from the same source
-  // (serenity-docs#348): host-only `domain` (unchanged) and the full
-  // `primaryUrl` identity (may carry subdomain/subpath) written to
-  // `settings.ai.primary_url`. A caller-threaded `body.primaryUrl` (the raw
-  // tracked URL) wins over the host-only `brandDomain` fallback.
-  let brandDomain;
-  let brandPrimaryUrl;
-  if (hasText(body.brandDomain)) {
-    brandDomain = body.brandDomain;
-    brandPrimaryUrl = siteIdentityFromUrlString(
-      hasText(body.primaryUrl) ? body.primaryUrl : body.brandDomain,
-    );
-  } else {
-    const identity = await resolveSiteIdentity(dataAccess, body.siteId, log);
-    brandDomain = identity?.domain ?? null;
-    brandPrimaryUrl = identity?.primaryUrl ?? null;
-  }
-  if (!hasText(brandDomain)) {
+  // siteId is authoritative over brandDomain (LLMO-6405 Phase 2, siteId-first):
+  // when the caller supplies a Site UUID, its resolved identity ALWAYS wins,
+  // even alongside a caller-supplied brandDomain that differs from it — a
+  // mismatch is the normal, intended Add Market shape and is never compared or
+  // rejected. brandDomain is only consulted when no siteId was supplied. The
+  // flat handler holds full `dataAccess` (incl. Site), so it self-derives here
+  // — the subworkspace handler cannot (narrowed dataAccess) and relies on the
+  // controller doing the same siteId-first resolution before either mode
+  // dispatches. A supplied-but-unresolvable siteId is a hard 400 below (never
+  // silently falls back to brandDomain). `domain` stays host-only (a path there
+  // is a hard 400 upstream); `primaryUrl` keeps whatever subdomain or subpath
+  // the source carried.
+  const siteIdSupplied = hasText(body.siteId);
+  const siteIdentity = siteIdSupplied
+    ? await resolveSiteIdentity(dataAccess, body.siteId, log)
+    : null;
+  const { domain: brandDomain, primaryUrl } = resolveMarketIdentity(
+    siteIdentity,
+    siteIdSupplied,
+    body.brandDomain,
+    body.primaryUrl,
+  );
+  if (!brandDomain || !hasText(brandDomain)) {
     return {
       status: 400,
       body: {
@@ -421,86 +428,33 @@ export async function handleCreateMarket(
     language_id: languageId,
   };
 
-  const createResp = await transport.createProject(semrushWorkspaceId, upstreamBody);
-  const semrushProjectId = String(createResp?.id || '');
-  if (!hasText(semrushProjectId)) {
-    return {
-      status: 502,
-      body: {
-        error: 'createNoProjectId',
-        message: 'Upstream createProject returned no id',
-      },
-    };
-  }
-
-  // serenity-docs#348: set `settings.ai.primary_url` (the tracked URL, kept
-  // distinct from the host-only `domain`) via PATCH before publish — Semrush
-  // ignores it on create. Best-effort: a failed PATCH must not abort an
-  // otherwise-valid market; the data-service backfill reconciles it later.
-  // Truthy check (not hasText) so tsc narrows `string | null` -> `string`.
-  if (brandPrimaryUrl) {
-    try {
-      await transport.updateProject(semrushWorkspaceId, semrushProjectId, {
-        type: 'ai',
-        primary_url: brandPrimaryUrl,
-      });
-    } catch (e) {
-      log?.warn?.('handleCreateMarket: best-effort primary_url PATCH failed; project left without primary_url', {
-        brandId,
-        semrushWorkspaceId,
-        semrushProjectId,
-        primaryUrl: brandPrimaryUrl,
-        error: e.message,
-      });
-    }
-  }
-
+  // create -> PATCH primary_url -> publish. The middle step is not optional for a
+  // brand whose site is a subdomain or a subpath: `domain` cannot carry a path and
+  // the upstream folds it to the registrable domain, so without the PATCH the
+  // project tracks the parent domain. See project-provisioning.js.
+  let semrushProjectId;
   try {
-    await transport.publishProject(semrushWorkspaceId, semrushProjectId);
-  } catch (e) {
-    // Best-effort upstream cleanup so the documented retry contract holds.
-    // A retry now sends a byte-identical `createProject` body (the name is
-    // derived from the slice, not freshly randomized), but Semrush accepts no
-    // idempotency key, so an identical body still creates a SECOND project
-    // rather than resolving to the first. The 409 gate can't catch it either —
-    // it only fires when a DB row exists, and never sees orphan upstream
-    // projects. Hence deleting the orphan here.
-    //
-    // Swallow the delete's own errors: the publishProject error is what we
-    // need to propagate to the caller, and we don't want a follow-on cleanup
-    // failure to mask it. Both outcomes are logged so an operator can still
-    // reconcile if cleanup itself fails.
-    let cleanedUp = false;
-    try {
-      await transport.deleteProject(semrushWorkspaceId, semrushProjectId);
-      cleanedUp = true;
-    } catch (cleanupErr) {
-      log?.error?.(
-        'handleCreateMarket: best-effort cleanup deleteProject failed; orphan upstream project remains',
-        {
-          brandId,
-          semrushWorkspaceId,
-          semrushProjectId,
-          geoTargetId: location.geoTargetId,
-          languageCode,
-          error: cleanupErr.message,
-        },
-      );
-    }
-    log?.error?.(
-      cleanedUp
-        ? 'handleCreateMarket: publish failed; upstream project cleaned up'
-        : 'handleCreateMarket: orphaned upstream project after publish failure',
+    semrushProjectId = await createProvisionAndPublishProject(
+      transport,
+      semrushWorkspaceId,
+      upstreamBody,
       {
-        brandId,
-        semrushWorkspaceId,
-        semrushProjectId,
-        geoTargetId: location.geoTargetId,
-        languageCode,
-        error: e.message,
-        cleanedUp,
+        primaryUrl,
+        log,
+        caller: 'handleCreateMarket',
+        logContext: { brandId, geoTargetId: location.geoTargetId, languageCode },
       },
     );
+  } catch (e) {
+    if (e instanceof CreateNoProjectIdError) {
+      return {
+        status: 502,
+        body: {
+          error: 'createNoProjectId',
+          message: 'Upstream createProject returned no id',
+        },
+      };
+    }
     throw e;
   }
 
@@ -510,6 +464,15 @@ export async function handleCreateMarket(
       semrushProjectId,
       geoTargetId: location.geoTargetId,
       languageCode,
+      // The market's own Site, when the caller named one — the per-market source
+      // of truth for the url this project tracks. It is the identity the project
+      // was just provisioned against (`resolveSiteIdentity` above derived both
+      // `brandDomain` and `primaryUrl` from it), so recording it here is what
+      // stops the market resolving to its brand's anchor by fallback later.
+      // A `brandDomain`-only create records none: flat mode resolves no Site from
+      // a raw domain, and inventing the brand's anchor would assert a per-market
+      // fact nobody stated.
+      ...(siteIdSupplied ? { siteId: body.siteId } : {}),
     });
   } catch (e) {
     log?.error?.(
@@ -531,6 +494,20 @@ export async function handleCreateMarket(
       },
     };
   }
+
+  // This path never generates prompts — the sub-workspace path is the only
+  // one that does, so it always reports generatePrompts:false here.
+  logMarketCreated(log, {
+    brandId,
+    geoTargetId: location.geoTargetId,
+    languageCode,
+    siteId: siteIdSupplied ? body.siteId : null,
+    brandDomain,
+    primaryUrl,
+    semrushWorkspaceId,
+    semrushProjectId,
+    generatePrompts: false,
+  });
 
   return {
     status: 201,
@@ -804,7 +781,8 @@ export async function listTagsForProject(transport, semrushWorkspaceId, projectI
  *   every item, as every pre-existing caller does.
  * @returns {Promise<{ items: Array<{
  *   id: string, name: string, parentId: string | null,
- *   childrenCount: number, path: Array<{ id: string, name: string }> | null,
+ *   childrenCount: number, promptsCount: number,
+ *   path: Array<{ id: string, name: string }> | null,
  * }> }>}
  */
 export async function listProjectTagTree(
@@ -834,6 +812,7 @@ export async function listProjectTagTree(
           name: typeof t.name === 'string' ? t.name : '',
           parentId: typeof t.parent_id === 'string' && t.parent_id ? t.parent_id : null,
           childrenCount: typeof t.children_count === 'number' ? t.children_count : 0,
+          promptsCount: typeof t.prompts_count === 'number' ? t.prompts_count : 0,
           path: Array.isArray(t.path)
             ? t.path.map((p) => ({
               id: typeof p?.id === 'string' ? p.id : '',

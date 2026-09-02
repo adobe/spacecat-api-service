@@ -37,9 +37,11 @@ describe('LLMO Onboarding Functions', () => {
       Site: {
         findByBaseURL: sinon.stub(),
         create: sinon.stub(),
-        // Default: no pre-cutoff sites → mode resolution returns v2 (the default).
-        // Tests that need v1 mode should set LLMO_ONBOARDING_DEFAULT_VERSION='v1'
-        // in context.env to use the global kill switch.
+        // Mode resolution defaults to v2. Tests that need v1 mode set
+        // LLMO_ONBOARDING_DEFAULT_VERSION='v1' in context.env (global kill switch).
+        // allByOrganizationId is no longer read by resolveLlmoOnboardingMode
+        // (the legacy-site cutoff was removed in LLMO-7108) — kept as a harmless
+        // default for other code paths.
         allByOrganizationId: sinon.stub().resolves([]),
       },
       Organization: {
@@ -159,6 +161,13 @@ describe('LLMO Onboarding Functions', () => {
     return sandbox.stub().resolves({ ok, status, statusText });
   };
 
+  // Safe only when the code under test never reaches a settleWithin-wrapped call (this fires
+  // ANY setTimeout synchronously, so it forces settleWithin's timeout branch to win every race).
+  // v1 onboarding has no settleWithin calls at all, so it's unaffected here. Any V2 test whose
+  // outcome depends on settleWithin actually resolving (tier lookup, schedule registration)
+  // must use `sinon.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })` + `clock.tickAsync`
+  // instead - using this helper there previously caused 5 tests to assert a false
+  // schedule-registration-timeout outcome unrelated to what they were testing (LLMO-7218).
   const mockSetTimeoutImmediate = (sandbox = sinon) => {
     const original = global.setTimeout;
     global.setTimeout = sandbox.stub().callsFake((fn) => {
@@ -1396,9 +1405,7 @@ describe('LLMO Onboarding Functions', () => {
       expect(mockDataAccess.Site.findByBaseURL).to.have.been.calledWith('https://example.com');
       expect(mockSite.getOrganizationId).to.have.been.called;
       expect(mockSite.setOrganizationId).to.have.been.calledWith('new-org-456');
-      // LLMO-4176: re-parent must be persisted before resolveLlmoOnboardingMode
-      // queries Site.allByOrganizationId, otherwise a legacy site moved into a
-      // brand-new org would be misclassified as v2.
+      // createOrFindSite persists a re-parent immediately via save().
       expect(mockSite.save).to.have.been.calledOnce;
     }).timeout(5000);
 
@@ -1622,6 +1629,10 @@ describe('LLMO Onboarding Functions', () => {
       expect(result.organizationId).to.equal('site-only-org');
       expect(siteConfig.updateLlmoBrand).to.have.been.calledWith('Test Brand');
       expect(mockSite.save).to.have.been.called;
+
+      // LLMO-7218 AC3: siteOnly skips brand activation entirely, so the top-level
+      // result carries no brandActivation summary at all.
+      expect(result.brandActivation).to.be.undefined;
 
       // Always-run path preserved: v2 customer config + brandalf flag
       expect(mockCustomerConfigV2Storage.writeCustomerConfigV2ToPostgres).to.have.been.calledOnce;
@@ -1997,13 +2008,6 @@ describe('LLMO Onboarding Functions', () => {
         organizationId: 'org123',
       });
 
-      // LLMO-4176 regression guard: resolveLlmoOnboardingMode reads
-      // Site.allByOrganizationId, and that read MUST happen after the site
-      // has been created/re-parented — otherwise a legacy site moved into a
-      // brand-new org gets misclassified as v2.
-      expect(mockDataAccess.Site.allByOrganizationId)
-        .to.have.been.calledAfter(mockDataAccess.Site.findByBaseURL);
-
       // Verify site config was updated
       expect(mockSite.getConfig().updateLlmoBrand).to.have.been.calledWith('Test Brand');
       expect(mockSite.getConfig().updateLlmoDataFolder).to.have.been.calledWith('dev/example-com');
@@ -2125,7 +2129,11 @@ describe('LLMO Onboarding Functions', () => {
       const mockConfig = createMockConfig();
       const mockTierClient = createMockTierClient();
       const mockTracingFetch = createMockTracingFetch();
-      originalSetTimeout = mockSetTimeoutImmediate();
+      // Real (fake) timers, not mockSetTimeoutImmediate: the latter fires settleWithin's
+      // timeout branch synchronously, forcing a false schedule-registration timeout that
+      // flips requiredWorkFailed — a fixture artifact unrelated to the brand-write branch
+      // under test. tickAsync fast-forwards the real caps once the fast stubs resolve.
+      const clock = sinon.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
       const mockComposeBaseURL = createMockComposeBaseURL();
       const { mockClient: sharePointClient } = createMockSharePointClient(
         sinon,
@@ -2156,19 +2164,27 @@ describe('LLMO Onboarding Functions', () => {
         sqs: { sendMessage: sinon.stub().resolves() },
       };
 
-      const result = await onboardWithMocks(
-        {
-          domain: 'example.com',
-          imsOrgId: 'ABC123@AdobeOrg',
-          brandName: 'Test Brand',
-        },
-        context,
-      );
+      let result;
+      try {
+        const pending = onboardWithMocks(
+          {
+            domain: 'example.com',
+            imsOrgId: 'ABC123@AdobeOrg',
+            brandName: 'Test Brand',
+          },
+          context,
+        );
+        await clock.tickAsync(60000);
+        result = await pending;
+      } finally {
+        clock.restore();
+      }
 
-      // Onboarding completes despite upsertBrand failure
-      expect(result.message).to.equal(
-        'LLMO onboarding completed successfully',
-      );
+      // Onboarding completes successfully despite the upsertBrand failure: the initial
+      // brand write is best-effort, while the required Brandalf submission + schedule
+      // registration both succeed here, so requiredWorkFailed is false.
+      expect(result.message).to.equal('LLMO onboarding completed successfully');
+      expect(result.brandActivation?.requiredWorkFailed).to.be.false;
       expect(failingUpsertBrand).to.have.been.calledOnce;
       expect(mockLog.warn).to.have.been.calledWith(
         'Failed to create initial brand in normalized table: '
@@ -2241,7 +2257,11 @@ describe('LLMO Onboarding Functions', () => {
       const mockConfig = createMockConfig();
       const mockTierClient = createMockTierClient();
       const mockTracingFetch = createMockTracingFetch();
-      originalSetTimeout = mockSetTimeoutImmediate();
+      // Real (fake) timers, not mockSetTimeoutImmediate: the latter fires settleWithin's
+      // timeout branch synchronously, forcing a false schedule-registration timeout that
+      // flips requiredWorkFailed — a fixture artifact unrelated to the brand-write branch
+      // under test. tickAsync fast-forwards the real caps once the fast stubs resolve.
+      const clock = sinon.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
       const mockComposeBaseURL = createMockComposeBaseURL();
       const { mockClient: sharePointClient } = createMockSharePointClient(
         sinon,
@@ -2272,13 +2292,23 @@ describe('LLMO Onboarding Functions', () => {
         sqs: { sendMessage: sinon.stub().resolves() },
       };
 
-      const result = await onboardWithMocks(
-        { domain: 'example.com', imsOrgId: 'ABC123@AdobeOrg', brandName: 'Test Brand' },
-        context,
-      );
+      let result;
+      try {
+        const pending = onboardWithMocks(
+          { domain: 'example.com', imsOrgId: 'ABC123@AdobeOrg', brandName: 'Test Brand' },
+          context,
+        );
+        await clock.tickAsync(60000);
+        result = await pending;
+      } finally {
+        clock.restore();
+      }
 
-      // Onboarding still completes
+      // Onboarding completes successfully: skipping the collision brand write does not
+      // affect the required Brandalf submission / schedule registration, both of which
+      // succeed here, so requiredWorkFailed is false.
       expect(result.message).to.equal('LLMO onboarding completed successfully');
+      expect(result.brandActivation?.requiredWorkFailed).to.be.false;
       // The existing brand's primary site is NOT touched
       expect(mockUpsertBrand).to.not.have.been.called;
       expect(mockLog.warn).to.have.been.calledWithMatch(
@@ -2347,7 +2377,11 @@ describe('LLMO Onboarding Functions', () => {
       const mockConfig = createMockConfig();
       const mockTierClient = createMockTierClient();
       const mockTracingFetch = createMockTracingFetch();
-      originalSetTimeout = mockSetTimeoutImmediate();
+      // Real (fake) timers, not mockSetTimeoutImmediate: the latter fires settleWithin's
+      // timeout branch synchronously, forcing a false schedule-registration timeout that
+      // flips requiredWorkFailed — a fixture artifact unrelated to the brand-write branch
+      // under test. tickAsync fast-forwards the real caps once the fast stubs resolve.
+      const clock = sinon.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
       const mockComposeBaseURL = createMockComposeBaseURL();
       const { mockClient: sharePointClient } = createMockSharePointClient(
         sinon,
@@ -2378,12 +2412,23 @@ describe('LLMO Onboarding Functions', () => {
         sqs: { sendMessage: sinon.stub().resolves() },
       };
 
-      const result = await onboardWithMocks(
-        { domain: 'example.com', imsOrgId: 'ABC123@AdobeOrg', brandName: 'Test Brand' },
-        context,
-      );
+      let result;
+      try {
+        const pending = onboardWithMocks(
+          { domain: 'example.com', imsOrgId: 'ABC123@AdobeOrg', brandName: 'Test Brand' },
+          context,
+        );
+        await clock.tickAsync(60000);
+        result = await pending;
+      } finally {
+        clock.restore();
+      }
 
+      // Onboarding completes successfully: failing closed on the lookup skips only the
+      // best-effort brand write; the required Brandalf submission / schedule registration
+      // both succeed here, so requiredWorkFailed is false.
       expect(result.message).to.equal('LLMO onboarding completed successfully');
+      expect(result.brandActivation?.requiredWorkFailed).to.be.false;
       expect(mockUpsertBrand).to.not.have.been.called;
       expect(mockLog.warn).to.have.been.calledWithMatch(
         'failed to look up existing brand',
@@ -2452,7 +2497,11 @@ describe('LLMO Onboarding Functions', () => {
       const mockConfig = createMockConfig();
       const mockTierClient = createMockTierClient();
       const mockTracingFetch = createMockTracingFetch();
-      originalSetTimeout = mockSetTimeoutImmediate();
+      // Real (fake) timers, not mockSetTimeoutImmediate: the latter fires settleWithin's
+      // timeout branch synchronously, forcing a false schedule-registration timeout that
+      // flips requiredWorkFailed — a fixture artifact unrelated to the brand-write branch
+      // under test. tickAsync fast-forwards the real caps once the fast stubs resolve.
+      const clock = sinon.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
       const mockComposeBaseURL = createMockComposeBaseURL();
       const { mockClient: sharePointClient } = createMockSharePointClient(
         sinon,
@@ -2483,12 +2532,23 @@ describe('LLMO Onboarding Functions', () => {
         sqs: { sendMessage: sinon.stub().resolves() },
       };
 
-      const result = await onboardWithMocks(
-        { domain: 'example.com', imsOrgId: 'ABC123@AdobeOrg', brandName: 'Test Brand' },
-        context,
-      );
+      let result;
+      try {
+        const pending = onboardWithMocks(
+          { domain: 'example.com', imsOrgId: 'ABC123@AdobeOrg', brandName: 'Test Brand' },
+          context,
+        );
+        await clock.tickAsync(60000);
+        result = await pending;
+      } finally {
+        clock.restore();
+      }
 
+      // Onboarding completes successfully: the brand write proceeds and the required
+      // Brandalf submission / schedule registration both succeed here, so
+      // requiredWorkFailed is false.
       expect(result.message).to.equal('LLMO onboarding completed successfully');
+      expect(result.brandActivation?.requiredWorkFailed).to.be.false;
       expect(mockUpsertBrand).to.have.been.calledOnce;
       expect(mockLog.info).to.have.been.calledWith('Created initial brand "Test Brand" in normalized table for site site123');
     });
@@ -2555,7 +2615,11 @@ describe('LLMO Onboarding Functions', () => {
       const mockConfig = createMockConfig();
       const mockTierClient = createMockTierClient();
       const mockTracingFetch = createMockTracingFetch();
-      originalSetTimeout = mockSetTimeoutImmediate();
+      // Real (fake) timers, not mockSetTimeoutImmediate: the latter fires settleWithin's
+      // timeout branch synchronously, forcing a false schedule-registration timeout that
+      // flips requiredWorkFailed — a fixture artifact unrelated to the brand-write branch
+      // under test. tickAsync fast-forwards the real caps once the fast stubs resolve.
+      const clock = sinon.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
       const mockComposeBaseURL = createMockComposeBaseURL();
       const { mockClient: sharePointClient } = createMockSharePointClient(
         sinon,
@@ -2586,12 +2650,23 @@ describe('LLMO Onboarding Functions', () => {
         sqs: { sendMessage: sinon.stub().resolves() },
       };
 
-      const result = await onboardWithMocks(
-        { domain: 'example.com', imsOrgId: 'ABC123@AdobeOrg', brandName: 'Test Brand' },
-        context,
-      );
+      let result;
+      try {
+        const pending = onboardWithMocks(
+          { domain: 'example.com', imsOrgId: 'ABC123@AdobeOrg', brandName: 'Test Brand' },
+          context,
+        );
+        await clock.tickAsync(60000);
+        result = await pending;
+      } finally {
+        clock.restore();
+      }
 
+      // Onboarding completes successfully: the same-site re-onboard is not a collision,
+      // so the brand write proceeds and the required Brandalf submission / schedule
+      // registration both succeed here, so requiredWorkFailed is false.
       expect(result.message).to.equal('LLMO onboarding completed successfully');
+      expect(result.brandActivation?.requiredWorkFailed).to.be.false;
       expect(mockUpsertBrand).to.have.been.calledOnce;
       expect(mockLog.warn).to.not.have.been.calledWithMatch('already exists with a different primary site');
     });
@@ -3498,7 +3573,7 @@ describe('LLMO Onboarding Functions', () => {
 
       // Verify onboarding completed successfully
       expect(result.siteId).to.equal('site123');
-      expect(result.message).to.equal('LLMO onboarding completed successfully');
+      expect(result.message).to.equal('LLMO onboarding completed with warnings: required brand/prompt-generation work failed');
 
       // Verify DRS was checked but not called (prompt gen is deferred, only Brandalf is checked)
       expect(mockLog.debug).to.have.been.calledWith('DRS client not configured, skipping Brandalf flow');
@@ -3589,7 +3664,7 @@ describe('LLMO Onboarding Functions', () => {
 
       // Verify onboarding completed successfully despite DRS failure
       expect(result.siteId).to.equal('site123');
-      expect(result.message).to.equal('LLMO onboarding completed successfully');
+      expect(result.message).to.equal('LLMO onboarding completed with warnings: required brand/prompt-generation work failed');
 
       // Verify error was logged but didn't fail onboarding
       expect(mockLog.error).to.have.been.calledWith('Failed to start DRS Brandalf flow: Brandalf API connection failed');
@@ -3772,7 +3847,7 @@ describe('LLMO Onboarding Functions', () => {
       );
     });
 
-    it('should skip helix-query.yaml update when tempOnboarding is true', async () => {
+    it('should always update helix-query.yaml, even if a stray tempOnboarding param is passed (LLMO-7141: flag removed)', async () => {
       const mockOrganization = {
         getId: sinon.stub().returns('org123'),
         getImsOrgId: sinon.stub().returns('ABC123@AdobeOrg'),
@@ -3839,13 +3914,12 @@ describe('LLMO Onboarding Functions', () => {
         domain: 'example.com',
         brandName: 'Test Brand',
         imsOrgId: 'ABC123@AdobeOrg',
+        // Stray/unsupported param — must have zero effect now that the temp-onboarding
+        // skip path has been removed. Registration always runs.
         tempOnboarding: true,
       }, context);
 
-      expect(createOrUpdateFileContents).to.not.have.been.called;
-      expect(mockLog.info).to.have.been.calledWith(
-        sinon.match(/Skipping helix-query.yaml update \(temp-onboarding\)/),
-      );
+      expect(createOrUpdateFileContents).to.have.been.called;
     });
 
     it('should call cleanup functions when site.save() throws an error', async () => {
@@ -4396,12 +4470,12 @@ describe('LLMO Onboarding Functions', () => {
       expect(brand.v1SiteId).to.equal('site-123');
       expect(brand.baseUrl).to.equal('https://www.example.com');
       expect(brand.urls).to.deep.equal([{ value: 'https://www.example.com', type: 'base' }]);
-      expect(brand.brandAliases).to.deep.equal([{ name: 'Test Brand', regions: ['gl'] }]);
+      expect(brand.brandAliases).to.deep.equal([{ name: 'Test Brand', regions: ['US'] }]);
       expect(brand.updatedBy).to.equal('tester@example.com');
       expect(brand.prompts).to.deep.equal([]);
     });
 
-    it('seeds the operator-selected market in place of the gl placeholder (LLMO-5645)', async () => {
+    it('seeds the operator-selected market in place of the default US placeholder (LLMO-5645)', async () => {
       const { buildInitialCustomerConfigV2 } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {});
 
       const result = buildInitialCustomerConfigV2({
@@ -4598,9 +4672,9 @@ describe('LLMO Onboarding Functions', () => {
       expect(newBrand.baseUrl).to.equal('https://www.example.com');
       expect(newBrand.status).to.equal('active');
       expect(newBrand.origin).to.equal('system');
-      expect(newBrand.regions).to.deep.equal(['gl']);
+      expect(newBrand.regions).to.deep.equal(['US']);
       expect(newBrand.urls).to.deep.equal([{ value: 'https://www.example.com', type: 'base' }]);
-      expect(newBrand.brandAliases).to.deep.equal([{ name: 'New Brand', regions: ['gl'] }]);
+      expect(newBrand.brandAliases).to.deep.equal([{ name: 'New Brand', regions: ['US'] }]);
 
       expect(mockCustomerConfigV2Storage.writeCustomerConfigV2ToPostgres).to.have.been.calledOnce;
       expect(mockCustomerConfigV2Storage.writeCustomerConfigV2ToPostgres.firstCall.args[0])
@@ -5514,57 +5588,317 @@ describe('LLMO Onboarding Functions', () => {
     });
   });
 
-  describe('appendRowsToQueryIndex', () => {
-    it('should append rows with correct format and timestamps', async () => {
-      const mockAppendRowsToSheet = sinon.stub().resolves();
-      const mockRedirects = { appendRowsToSheet: mockAppendRowsToSheet };
-      const mockSPClient = { getRedirects: sinon.stub().returns(mockRedirects) };
+  describe('reindexQueryIndexPaths', () => {
+    it('should reject an unsafe dataFolder before making any request', async () => {
+      const mockTracingFetch = sinon.stub().resolves({ ok: true, status: 200, statusText: 'OK' });
 
-      const { appendRowsToQueryIndex } = await esmock(
+      const { reindexQueryIndexPaths } = await esmock(
         '../../../src/controllers/llmo/llmo-onboarding.js',
         {
-          '@adobe/spacecat-helix-content-sdk': {
-            createFrom: sinon.stub().resolves(mockSPClient),
+          '@adobe/spacecat-shared-utils': {
+            tracingFetch: mockTracingFetch,
           },
         },
       );
 
-      await appendRowsToQueryIndex('dev/test-com', ['file1', 'file2.json'], mockEnv, mockLog);
+      try {
+        await reindexQueryIndexPaths('../other-folder', ['file1'], mockEnv, mockLog);
+        expect.fail('Should have thrown');
+      } catch (error) {
+        expect(error.message).to.equal('Invalid dataFolder: ../other-folder');
+      }
 
-      expect(mockAppendRowsToSheet).to.have.been.calledOnce;
-      const [sheetPath, rows] = mockAppendRowsToSheet.firstCall.args;
-      expect(sheetPath).to.equal('/dev/test-com/query-index.xlsx');
-      expect(rows).to.have.length(2);
-      expect(rows[0][0]).to.equal('/dev/test-com/file1.json');
-      expect(rows[1][0]).to.equal('/dev/test-com/file2.json');
-      expect(rows[0][1]).to.be.a('number');
-      expect(rows[0][2]).to.be.a('number');
-      expect(mockLog.info).to.have.been.calledWith(sinon.match(/Appending 2 rows/));
-      expect(mockLog.info).to.have.been.calledWith(sinon.match(/Successfully appended rows/));
+      expect(mockTracingFetch).to.not.have.been.called;
+    });
+
+    it('should POST to the Admin API index endpoint for each file', async () => {
+      const mockTracingFetch = sinon.stub().resolves({ ok: true, status: 200, statusText: 'OK' });
+
+      const { reindexQueryIndexPaths } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        {
+          '@adobe/spacecat-shared-utils': {
+            tracingFetch: mockTracingFetch,
+          },
+        },
+      );
+
+      await reindexQueryIndexPaths('dev/test-com', ['file1', 'file2.json'], mockEnv, mockLog);
+
+      expect(mockTracingFetch).to.have.been.calledTwice;
+      expect(mockTracingFetch.firstCall.args[0]).to.equal(
+        'https://admin.hlx.page/index/adobe/project-elmo-ui-data/main/dev/test-com/file1.json',
+      );
+      expect(mockTracingFetch.firstCall.args[1]).to.deep.include({ method: 'POST', timeout: 30000 });
+      expect(mockTracingFetch.secondCall.args[0]).to.equal(
+        'https://admin.hlx.page/index/adobe/project-elmo-ui-data/main/dev/test-com/file2.json',
+      );
+      expect(mockLog.info).to.have.been.calledWith(sinon.match(/Reindexing 2 path\(s\)/));
+      expect(mockLog.info).to.have.been.calledWith(sinon.match(/Successfully reindexed 2 path\(s\)/));
     });
 
     it('should not double-append .json extension for files already ending in .json', async () => {
-      const mockAppendRowsToSheet = sinon.stub().resolves();
-      const mockRedirects = { appendRowsToSheet: mockAppendRowsToSheet };
-      const mockSPClient = { getRedirects: sinon.stub().returns(mockRedirects) };
+      const mockTracingFetch = sinon.stub().resolves({ ok: true, status: 200, statusText: 'OK' });
 
-      const { appendRowsToQueryIndex } = await esmock(
+      const { reindexQueryIndexPaths } = await esmock(
         '../../../src/controllers/llmo/llmo-onboarding.js',
         {
-          '@adobe/spacecat-helix-content-sdk': {
-            createFrom: sinon.stub().resolves(mockSPClient),
+          '@adobe/spacecat-shared-utils': {
+            tracingFetch: mockTracingFetch,
           },
         },
       );
 
-      await appendRowsToQueryIndex('dev/test-com', ['already.json'], mockEnv, mockLog);
+      await reindexQueryIndexPaths('dev/test-com', ['already.json'], mockEnv, mockLog);
 
-      const [, rows] = mockAppendRowsToSheet.firstCall.args;
-      expect(rows[0][0]).to.equal('/dev/test-com/already.json');
+      expect(mockTracingFetch.firstCall.args[0]).to.equal(
+        'https://admin.hlx.page/index/adobe/project-elmo-ui-data/main/dev/test-com/already.json',
+      );
+    });
+
+    it('should throw when HLX_ONBOARDING_TOKEN is not set', async () => {
+      const { reindexQueryIndexPaths } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        {},
+      );
+
+      const envWithoutToken = { ...mockEnv, HLX_ONBOARDING_TOKEN: '' };
+
+      try {
+        await reindexQueryIndexPaths('dev/test-com', ['file1'], envWithoutToken, mockLog);
+        expect.fail('Should have thrown');
+      } catch (error) {
+        expect(error.message).to.equal('HLX_ONBOARDING_TOKEN is not set');
+      }
+    });
+
+    it('should throw and log details (including body) when a reindex call fails', async () => {
+      const mockHeaders = { get: sinon.stub() };
+      mockHeaders.get.withArgs('x-error-code').returns('CONTENT_NOT_FOUND');
+      mockHeaders.get.withArgs('x-error').returns('resource not found');
+
+      const mockTracingFetch = sinon.stub().resolves({
+        ok: false,
+        status: 404,
+        statusText: 'Not Found',
+        headers: mockHeaders,
+        text: sinon.stub().resolves('detailed error body'),
+      });
+
+      const { reindexQueryIndexPaths } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        {
+          '@adobe/spacecat-shared-utils': {
+            tracingFetch: mockTracingFetch,
+          },
+        },
+      );
+
+      try {
+        await reindexQueryIndexPaths('dev/test-com', ['file1'], mockEnv, mockLog);
+        expect.fail('Should have thrown');
+      } catch (error) {
+        expect(error.message).to.equal('Reindex failed for dev/test-com/file1.json: 404 Not Found');
+      }
+
+      expect(mockLog.error).to.have.been.calledWith(
+        sinon.match(/Reindex failed.*404.*x-error-code: CONTENT_NOT_FOUND.*x-error: resource not found.*body: detailed error body/),
+      );
+    });
+
+    it('should handle text() throwing when reading a reindex error body', async () => {
+      const mockTracingFetch = sinon.stub().resolves({
+        ok: false,
+        status: 500,
+        statusText: 'Internal Server Error',
+        headers: { get: sinon.stub().returns('') },
+        text: sinon.stub().rejects(new Error('stream error')),
+      });
+
+      const { reindexQueryIndexPaths } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        {
+          '@adobe/spacecat-shared-utils': {
+            tracingFetch: mockTracingFetch,
+          },
+        },
+      );
+
+      try {
+        await reindexQueryIndexPaths('dev/test-com', ['file1'], mockEnv, mockLog);
+        expect.fail('Should have thrown');
+      } catch (error) {
+        expect(error.message).to.equal('Reindex failed for dev/test-com/file1.json: 500 Internal Server Error');
+      }
+
+      expect(mockLog.error).to.have.been.calledWith(
+        sinon.match(/Reindex failed.*500.*body: $/),
+      );
+    });
+
+    it('should stop at the first failing path without reindexing the rest', async () => {
+      const mockTracingFetch = sinon.stub();
+      mockTracingFetch.onCall(0).resolves({ ok: true, status: 200, statusText: 'OK' });
+      mockTracingFetch.onCall(1).resolves({
+        ok: false,
+        status: 500,
+        statusText: 'Internal Server Error',
+        headers: { get: sinon.stub().returns('') },
+        text: sinon.stub().resolves(''),
+      });
+
+      const { reindexQueryIndexPaths } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        {
+          '@adobe/spacecat-shared-utils': {
+            tracingFetch: mockTracingFetch,
+          },
+        },
+      );
+
+      try {
+        await reindexQueryIndexPaths('dev/test-com', ['file1', 'file2', 'file3'], mockEnv, mockLog);
+        expect.fail('Should have thrown');
+      } catch (error) {
+        expect(error.message).to.equal('Reindex failed for dev/test-com/file2.json: 500 Internal Server Error');
+      }
+
+      expect(mockTracingFetch).to.have.been.calledTwice;
+    });
+
+    it('should identify the failing file when fetch itself throws (network/timeout error)', async () => {
+      const mockTracingFetch = sinon.stub();
+      mockTracingFetch.onCall(0).resolves({ ok: true, status: 200, statusText: 'OK' });
+      mockTracingFetch.onCall(1).rejects(new Error('network timeout'));
+
+      const { reindexQueryIndexPaths } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        {
+          '@adobe/spacecat-shared-utils': {
+            tracingFetch: mockTracingFetch,
+          },
+        },
+      );
+
+      try {
+        await reindexQueryIndexPaths('dev/test-com', ['file1', 'file2', 'file3'], mockEnv, mockLog);
+        expect.fail('Should have thrown');
+      } catch (error) {
+        expect(error.message).to.equal('Reindex failed for dev/test-com/file2.json: network timeout');
+      }
+
+      expect(mockTracingFetch).to.have.been.calledTwice;
+      expect(mockLog.error).to.have.been.calledWith(
+        sinon.match(/Reindex failed for dev\/test-com\/file2\.json after reindexing 1\/3: network timeout/),
+      );
+    });
+  });
+
+  describe('updateIndexConfig', () => {
+    it('registers a new folder when it has no existing entry', async () => {
+      const existingContent = 'default: &default\n  target: /default/query-index.xlsx\n\nlego-com-uk:\n  <<: *default\n  include:\n    - \'/lego-com-uk/**\'\n  target: /lego-com-uk/query-index.xlsx\n';
+      const mockOctokit = createMockOctokit(sinon, { content: existingContent, sha: 'sha-1' });
+
+      const { updateIndexConfig } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        { '@octokit/rest': { Octokit: mockOctokit } },
+      );
+
+      const mockSay = sinon.stub();
+      await updateIndexConfig('lego-com', { log: mockLog, env: mockEnv }, mockSay);
+
+      const octokitInstance = mockOctokit.firstCall.returnValue;
+      expect(octokitInstance.repos.createOrUpdateFileContents).to.have.been.calledOnce;
+      const { content } = octokitInstance.repos.createOrUpdateFileContents.firstCall.args[0];
+      const written = Buffer.from(content, 'base64').toString('utf-8');
+      expect(written).to.match(/^\s*lego-com:/m);
+      expect(mockSay).to.not.have.been.called;
+    });
+
+    it('skips the update when an exact index definition already exists', async () => {
+      const existingContent = 'default: &default\n  target: /default/query-index.xlsx\n\nlego-com:\n  <<: *default\n  include:\n    - \'/lego-com/**\'\n  target: /lego-com/query-index.xlsx\n';
+      const mockOctokit = createMockOctokit(sinon, { content: existingContent, sha: 'sha-1' });
+
+      const { updateIndexConfig } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        { '@octokit/rest': { Octokit: mockOctokit } },
+      );
+
+      const mockSay = sinon.stub();
+      await updateIndexConfig('lego-com', { log: mockLog, env: mockEnv }, mockSay);
+
+      const octokitInstance = mockOctokit.firstCall.returnValue;
+      expect(octokitInstance.repos.createOrUpdateFileContents).to.not.have.been.called;
+      expect(mockSay).to.have.been.calledWith(sinon.match(/already has an index definition/));
+    });
+
+    // Regression for LLMO-6320: a raw substring check (content.includes(dataFolder))
+    // false-positives here because 'lego-com' is a substring of the already-registered
+    // 'lego-com-uk' key, so the folder would be silently left unregistered.
+    it('does not skip a folder whose name is only a substring of an existing key', async () => {
+      const existingContent = 'default: &default\n  target: /default/query-index.xlsx\n\nlego-com-uk:\n  <<: *default\n  include:\n    - \'/lego-com-uk/**\'\n  target: /lego-com-uk/query-index.xlsx\n';
+      const mockOctokit = createMockOctokit(sinon, { content: existingContent, sha: 'sha-1' });
+
+      const { updateIndexConfig } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        { '@octokit/rest': { Octokit: mockOctokit } },
+      );
+
+      await updateIndexConfig('lego-com', { log: mockLog, env: mockEnv });
+
+      const octokitInstance = mockOctokit.firstCall.returnValue;
+      expect(octokitInstance.repos.createOrUpdateFileContents).to.have.been.calledOnce;
+      const { content } = octokitInstance.repos.createOrUpdateFileContents.firstCall.args[0];
+      const written = Buffer.from(content, 'base64').toString('utf-8');
+      expect(written).to.match(/^\s*lego-com:/m);
+    });
+
+    // Regression: dataFolder is interpolated into a RegExp without escaping metacharacters
+    // would treat e.g. the '.' in 'frescopa.coffee' as "match any character", so an
+    // unrelated key like 'frescopaXcoffee:' would incorrectly be treated as an existing
+    // registration and the real folder would never get registered.
+    it('escapes regex metacharacters in the folder name before matching', async () => {
+      const existingContent = 'default: &default\n  target: /default/query-index.xlsx\n\nfrescopaXcoffee:\n  <<: *default\n  include:\n    - \'/frescopaXcoffee/**\'\n  target: /frescopaXcoffee/query-index.xlsx\n';
+      const mockOctokit = createMockOctokit(sinon, { content: existingContent, sha: 'sha-1' });
+
+      const { updateIndexConfig } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        { '@octokit/rest': { Octokit: mockOctokit } },
+      );
+
+      await updateIndexConfig('frescopa.coffee', { log: mockLog, env: mockEnv });
+
+      const octokitInstance = mockOctokit.firstCall.returnValue;
+      expect(octokitInstance.repos.createOrUpdateFileContents).to.have.been.calledOnce;
+      const { content } = octokitInstance.repos.createOrUpdateFileContents.firstCall.args[0];
+      const written = Buffer.from(content, 'base64').toString('utf-8');
+      expect(written).to.match(/^\s*frescopa\.coffee:/m);
     });
   });
 
   describe('previewAndPublishQueryIndex', () => {
+    it('should reject an unsafe dataFolder before making any request', async () => {
+      const mockTracingFetch = sinon.stub().resolves({ ok: true, status: 200, statusText: 'OK' });
+
+      const { previewAndPublishQueryIndex } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        {
+          '@adobe/spacecat-shared-utils': {
+            tracingFetch: mockTracingFetch,
+          },
+        },
+      );
+
+      try {
+        await previewAndPublishQueryIndex('/etc/passwd', mockEnv, mockLog);
+        expect.fail('Should have thrown');
+      } catch (error) {
+        expect(error.message).to.equal('Invalid dataFolder: /etc/passwd');
+      }
+
+      expect(mockTracingFetch).to.not.have.been.called;
+    });
+
     it('should successfully preview and publish with .json path', async () => {
       const mockTracingFetch = sinon.stub();
       mockTracingFetch.onCall(0).resolves({ ok: true, status: 200, statusText: 'OK' });
@@ -6255,12 +6589,17 @@ describe('LLMO Onboarding Functions', () => {
       const context = buildV2Context();
       const params = buildV2Params(context);
       // Resolves (does not reject) despite createFrom throwing.
-      await activateBrandAndGeneratePrompts(params);
+      const result = await activateBrandAndGeneratePrompts(params);
 
       expect(mockDrsClient.createFrom).to.have.been.calledOnce;
       const errorLogs = context.log.error.getCalls().map((c) => c.args[0]);
       expect(errorLogs.some((m) => m.includes('DRS client creation failed'))).to.be.true;
       expect(params.say).to.have.been.calledWithMatch(/DRS client unavailable/);
+      // LLMO-7218 AC4: the reason must be captured on the returned summary, not just logged,
+      // so a caller can recover it without reconstructing from logs.
+      expect(result.brandalfError).to.equal('DRS client init boom');
+      expect(result.brandalfTriggered).to.be.false;
+      expect(result.requiredWorkFailed).to.be.true;
     });
 
     it('warns when schedule registration times out (settleWithin fallback)', async () => {
@@ -6283,11 +6622,15 @@ describe('LLMO Onboarding Functions', () => {
         // Advance past every pending timer (schedule-registration + any sibling
         // settleWithin), flushing microtasks between ticks.
         await clock.tickAsync(60000);
-        await pending;
+        const result = await pending;
 
         const warnLogs = context.log.warn.getCalls().map((c) => c.args[0]);
         expect(warnLogs.some((m) => m.includes('schedule registration timed out'))).to.be.true;
         expect(params.say).to.have.been.calledWithMatch(/schedule registration timed out/);
+        // The promptSuggestionSchedulesTimedOut disjunct of requiredWorkFailed, exercised
+        // directly (not via the .some(status==='failed') or !brandalfTriggered disjuncts).
+        expect(result.promptSuggestionSchedulesTimedOut).to.be.true;
+        expect(result.requiredWorkFailed).to.be.true;
       } finally {
         clock.restore();
       }
@@ -6357,6 +6700,115 @@ describe('LLMO Onboarding Functions', () => {
       // All three trial pipelines surfaced the one-shot failure, none swallowed.
       expect(oneShotLogs).to.have.lengthOf(3);
       expect(params.say).to.have.been.calledWithMatch(/Failed to run\/register DRS .*\(one-shot run\)/);
+    });
+
+    // LLMO-7218 AC3/AC4: the returned submission-outcome summary is the contract
+    // performLlmoOnboarding / the HTTP + Slack layers use to report an honest
+    // outcome. These assert the SHAPE of that object directly (not just a message
+    // string), which nothing else in this suite covered.
+    it('v2 full success: returns brandalfTriggered + all-created schedules + requiredWorkFailed false', async () => {
+      const mockDrsClient = createMockDrsClient(sandbox);
+      const { activateBrandAndGeneratePrompts } = await esmockOnboarding(
+        createCommonEsmockDependencies({
+          mockDrsClient,
+          mockUpsertBrand: sandbox.stub().resolves({ id: 'brand-123', name: 'Test Brand' }),
+        }),
+      );
+
+      const context = buildV2Context();
+      const result = await activateBrandAndGeneratePrompts(buildV2Params(context));
+
+      expect(result.brandalfTriggered).to.be.true;
+      expect(result.brandalfError).to.equal(null);
+      expect(result.promptSuggestionSchedules).to.be.an('array').with.lengthOf(3);
+      expect(result.promptSuggestionSchedules.map((r) => r.status))
+        .to.deep.equal(['created', 'created', 'created']);
+      expect(result.promptSuggestionSchedulesTimedOut).to.be.false;
+      expect(result.requiredWorkFailed).to.be.false;
+      // v2 has no direct prompt-generation submit (deferred to DRS post-Brandalf).
+      expect(result.promptGenerationJobId).to.equal(null);
+      expect(result.promptGenerationError).to.equal(null);
+    });
+
+    it('v2: a per-pipeline failed schedule result flags requiredWorkFailed (not a timeout)', async () => {
+      const err = new Error('DRS POST /schedules failed');
+      err.status = 503;
+      // Only the agentic-traffic pipeline's registration fails; the other two succeed.
+      const createSchedule = sandbox.stub();
+      createSchedule
+        .withArgs(sinon.match((a) => a.providerIds[0] === 'prompt_generation_agentic_traffic'))
+        .rejects(err);
+      createSchedule.resolves({ scheduleId: 'sched-ok', alreadyExisted: false });
+
+      const mockDrsClient = createMockDrsClient(sandbox, { createSchedule });
+      const { activateBrandAndGeneratePrompts } = await esmockOnboarding(
+        createCommonEsmockDependencies({
+          mockDrsClient,
+          mockUpsertBrand: sandbox.stub().resolves({ id: 'brand-123', name: 'Test Brand' }),
+        }),
+      );
+
+      const context = buildV2Context();
+      const result = await activateBrandAndGeneratePrompts(buildV2Params(context));
+
+      // Brandalf succeeded and nothing timed out — the degradation is a genuine
+      // per-pipeline registration failure, surfaced with the documented shape.
+      expect(result.brandalfTriggered).to.be.true;
+      expect(result.promptSuggestionSchedulesTimedOut).to.be.false;
+      const failed = result.promptSuggestionSchedules.filter((r) => r.status === 'failed');
+      expect(failed).to.have.lengthOf(1);
+      expect(failed[0].providerId).to.equal('prompt_generation_agentic_traffic');
+      expect(failed[0].error).to.equal('DRS POST /schedules failed');
+      // requiredWorkFailed is driven by the `.some(r => r.status === 'failed')` branch.
+      expect(result.requiredWorkFailed).to.be.true;
+    });
+
+    it('v1 success: returns promptGenerationJobId, no Brandalf, requiredWorkFailed false', async () => {
+      const mockDrsClient = createMockDrsClient(sandbox);
+      const { activateBrandAndGeneratePrompts } = await esmockOnboarding(
+        createCommonEsmockDependencies({
+          mockDrsClient,
+          mockUpsertBrand: sandbox.stub().resolves({ id: 'brand-123', name: 'Test Brand' }),
+        }),
+      );
+
+      const context = buildV2Context();
+      const result = await activateBrandAndGeneratePrompts({
+        ...buildV2Params(context),
+        onboardingMode: 'v1',
+      });
+
+      const instance = mockDrsClient.createFrom();
+      expect(instance.submitPromptGenerationJob).to.have.been.calledOnce;
+      // v1 never triggers Brandalf or registers recurring schedules.
+      expect(instance.submitJob).to.not.have.been.called;
+      expect(instance.createSchedule).to.not.have.been.called;
+      expect(result.promptGenerationJobId).to.equal('test-drs-job-123');
+      expect(result.promptGenerationError).to.equal(null);
+      expect(result.brandalfTriggered).to.be.false;
+      expect(result.requiredWorkFailed).to.be.false;
+    });
+
+    it('v1 failure: submitPromptGenerationJob with no job_id sets promptGenerationError + requiredWorkFailed', async () => {
+      const mockDrsClient = createMockDrsClient(sandbox, {
+        submitPromptGenerationJob: sandbox.stub().resolves({}), // no job_id
+      });
+      const { activateBrandAndGeneratePrompts } = await esmockOnboarding(
+        createCommonEsmockDependencies({
+          mockDrsClient,
+          mockUpsertBrand: sandbox.stub().resolves({ id: 'brand-123', name: 'Test Brand' }),
+        }),
+      );
+
+      const context = buildV2Context();
+      const result = await activateBrandAndGeneratePrompts({
+        ...buildV2Params(context),
+        onboardingMode: 'v1',
+      });
+
+      expect(result.promptGenerationJobId).to.equal(null);
+      expect(result.promptGenerationError).to.equal('DRS submitPromptGenerationJob returned no job_id');
+      expect(result.requiredWorkFailed).to.be.true;
     });
   });
 });

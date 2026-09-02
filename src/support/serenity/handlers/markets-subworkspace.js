@@ -12,8 +12,7 @@
 
 // @ts-check
 
-import { hasText } from '@adobe/spacecat-shared-utils';
-import { siteIdentityFromUrlString } from '../../url-utils.js';
+import { hasText, siteIdentityFromUrlString } from '@adobe/spacecat-shared-utils';
 
 import { ErrorWithStatusCode } from '../../utils.js';
 import {
@@ -35,7 +34,7 @@ import {
   validateParentIdQuery,
 } from './markets.js';
 import {
-  listMarkets, resolveProject, mapPublishStatus, projectToSlice,
+  listMarkets, resolveProject, mapPublishStatus, projectToSlice, primaryUrlOf,
 } from '../subworkspace-projects.js';
 import { ensureSubworkspace } from '../workspace-lifecycle.js';
 import {
@@ -44,11 +43,17 @@ import {
 import { provisionDimensionTree, ensureServerOwnedValue } from '../tag-tree.js';
 import { classifyBrandedTag, needlesFromNames } from '../branded-classifier.js';
 import { classifyPromptIntents, AI_GEN_CLASSIFY_MAX, computeWriteDeadline } from '../intent-classification.js';
-import { collectBrandUrlEntries, attachBrandUrlsToProject, primaryDomainSet } from '../brand-urls.js';
+import {
+  collectBrandUrlEntries, attachBrandUrlsToProject, primaryDomainSet, primaryIdentitySet,
+} from '../brand-urls.js';
 import { resolveProjects } from '../resolve-projects.js';
-import { buildReservedDomains, syncCompetitorBenchmarksForProject } from '../competitor-benchmarks.js';
+import {
+  buildReservedIdentities,
+  syncCompetitorBenchmarksForProject,
+} from '../competitor-benchmarks.js';
 import { collectAliasNames } from '../brand-aliases.js';
 import { upsertMappingRow, tombstoneMappingRow } from '../mapping-rows.js';
+import { primaryUrlPatchBody } from '../project-provisioning.js';
 
 /** @typedef {import('../rest-transport.js').SerenityTransport} SerenityTransport */
 /** @typedef {import('../rest-transport.js').ProjectCreateBody} ProjectCreateBody */
@@ -290,11 +295,14 @@ function validateCreateBody(body) {
  * Generates topics + prompts for (domain, country) via the AI-SEO service
  * (transport.getBrandTopics) and attaches them to the project. Keeps the top
  * `topicCap` topics by search volume (0 = keep all) and tags every prompt with
- * the standard closed-dimension values ({@link STANDARD_PROMPT_TAG_VALUES}, minus
- * its seeded `intent` default), the producing `source/semrush` value, plus a
- * branded / non-branded `type` value derived from `brandNames` (brand name +
- * aliases) and a per-prompt server-classified `intent` value (serenity-docs#32,
- * replacing the seeded `Informational` default). Returns the topic/prompt counts.
+ * the standard closed-dimension values ({@link STANDARD_PROMPT_TAG_VALUES} —
+ * today just its seeded `intent` default, since the `origin` entry it used to
+ * carry is retired, tag-display-names.md §3 — minus that seeded `intent`
+ * default, which is classified per prompt below instead), the producing
+ * `source/semrush` value, plus a branded / non-branded `type` value derived
+ * from `brandNames` (brand name + aliases) and a per-prompt server-classified
+ * `intent` value (serenity-docs#32, replacing the seeded `Informational`
+ * default). Returns the topic/prompt counts.
  * A generation that yields nothing is a clean no-op (no upstream write).
  *
  * The generated topic name is NOT attached. Under the dimension-root model a
@@ -429,7 +437,10 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
   for (const text of allTexts) {
     const typeValue = classifyBrandedTag(text, needles);
     const intentValue = intentByText.get(text) ?? INTENT_VALUE.INFORMATIONAL;
-    const key = `${typeValue} ${intentValue}`;
+    // `\0` cannot occur in either vocabulary value, so the composite key is
+    // collision-free. Keep it escaped — a literal byte makes whole-file scanners
+    // treat this file as binary and silently skip it.
+    const key = `${typeValue}\0${intentValue}`;
     const bucket = byTagSet.get(key);
     if (bucket) {
       bucket.items.push(text);
@@ -633,17 +644,22 @@ export async function handleCreateMarketSubworkspace(
     }
   }
 
-  // serenity-docs#348: record the URL the brand ACTUALLY tracks in
-  // `settings.ai.primary_url` (may carry a subdomain/subpath), distinct from the
-  // host-only `domain` create sends. Semrush IGNORES primary_url on create and
-  // only honors it via PATCH, so set it here — before the single publish below,
-  // so it's part of the published version. Prefer the caller-threaded full
-  // identity (`body.primaryUrl`, e.g. the wizard's draft URL or a subpath site's
-  // base URL); fall back to the host-only brandDomain (a no-op vs the apex).
-  // Best-effort by design, mirroring the brand-URL enrichment below: a failed
-  // PATCH must not abort a market that is otherwise valid upstream — the
-  // data-service drift/backfill pass (serenity-docs#348 WS3/WS4) reconciles any
-  // project left without its primary_url.
+  // The url the project TRACKS. Create IGNORES `primary_url` — whatever spelling
+  // goes in comes back as the apex — so it can only be set by a PATCH, and that
+  // PATCH has to land before the publish below or the value stays in draft.
+  // Applied on the adopt-a-leftover-draft branch too: such a draft was created by
+  // an earlier attempt that never got this far, so it does not have the value yet.
+  //
+  // Both the caller-threaded url and the brandDomain fallback go through the
+  // identity normalizer, so a caller that hands over a full URL, a trailing slash
+  // or a mixed-case host still writes the one spelling the upstream stores — and
+  // one the drift check compares equal to.
+  //
+  // Best-effort: this handler has no orphan-cleanup seam (unlike handleCreateMarket,
+  // which deletes and rethrows), and failing a whole market create because the
+  // tracked url could not be refined would be a worse outcome than a market that is
+  // live on the apex — the state every market is in today. A divergence is
+  // recoverable by the data-service reconcile, which repairs primary_url in place.
   const primaryUrl = siteIdentityFromUrlString(
     hasText(body?.primaryUrl) ? body.primaryUrl : body?.brandDomain,
   );
@@ -651,13 +667,14 @@ export async function handleCreateMarketSubworkspace(
   // siteIdentityFromUrlString only ever returns a real host string or null.
   if (primaryUrl) {
     try {
-      await transport.updateProject(workspaceId, projectId, {
-        type: 'ai',
-        primary_url: primaryUrl,
-      });
+      await transport.updateProject(
+        workspaceId,
+        projectId,
+        primaryUrlPatchBody(primaryUrl),
+      );
     } catch (e) {
-      log?.warn?.('handleCreateMarketSubworkspace: best-effort primary_url PATCH failed; project left without primary_url', {
-        workspaceId, projectId, primaryUrl, error: e.message,
+      log?.warn?.('handleCreateMarketSubworkspace: SERENITY_MARKET_PRIMARY_URL_DIVERGENCE — could not set primary_url (non-fatal); market tracks its apex domain', {
+        workspaceId, projectId, primaryUrl, error: e?.message,
       });
     }
   }
@@ -731,17 +748,30 @@ export async function handleCreateMarketSubworkspace(
       body.brandDomain,
       ...siblings.map((p) => p?.domain),
     ]);
+    // The same skip keyed on what each market TRACKS. This market's own tracked
+    // url is the one PATCHed above; a sibling's comes from its project, which the
+    // listing already carries.
+    const primaryIdentities = primaryIdentitySet([
+      primaryUrl,
+      ...siblings.map((p) => primaryUrlOf(p)),
+    ]);
     const brandUrlEntries = collectBrandUrlEntries(
       brandUrlSources,
       body.market,
       primaryDomains,
+      primaryIdentities,
     );
     await attachBrandUrlsToProject(
       transport,
       workspaceId,
       projectId,
       brandUrlEntries,
-      { name: body.brandDisplayName, domain: body.brandDomain, aliases: aliasNames },
+      {
+        name: body.brandDisplayName,
+        domain: body.brandDomain,
+        primaryUrl,
+        aliases: aliasNames,
+      },
       log,
     );
   } catch (e) {
@@ -763,7 +793,7 @@ export async function handleCreateMarketSubworkspace(
   try {
     // Reserve the brand's own domains (this market's project domain + the brand's
     // own website URLs) so a competitor can't be one of the brand's own properties.
-    const reservedDomains = buildReservedDomains(
+    const reservedIdentities = buildReservedIdentities(
       [body.brandDomain],
       brandUrlSources?.urls,
     );
@@ -775,7 +805,7 @@ export async function handleCreateMarketSubworkspace(
       [],
       body.market,
       log,
-      reservedDomains,
+      reservedIdentities,
     );
   } catch (e) {
     // Same non-self-healing best-effort seam as the URL attach above — distinct

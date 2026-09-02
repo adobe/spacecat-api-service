@@ -24,7 +24,11 @@ import {
   readCustomerConfigV2FromPostgres,
   writeCustomerConfigV2ToPostgres,
 } from '../../support/customer-config-v2-storage.js';
-import { convertV1ToV2, generateBrandId } from '../../support/customer-config-mapper.js';
+import {
+  convertV1ToV2,
+  generateBrandId,
+  DEFAULT_BRAND_REGION,
+} from '../../support/customer-config-mapper.js';
 import {
   resolveLlmoOnboardingMode,
   LLMO_ONBOARDING_MODE_V1,
@@ -211,13 +215,15 @@ export async function triggerBrandalfOnboardingJob({
 // submitOnboardingPromptGenerationJob removed — prompt generation is now
 // triggered by DRS after Brandalf completes (LLMO-4258, option b).
 
-// LLMO-5645: the initial stub brand uses 'gl' (worldwide) as a placeholder until
-// Brandalf returns the real region. When the operator selected a market we seed
-// it directly so the brand record is correct immediately and stays correct even
-// if Brandalf never completes. `region` is a validated ISO 3166-1 alpha-2 code
-// (e.g. 'US'); absent → keep the 'gl' placeholder that Brandalf overwrites.
+// LLMO-5645: the initial stub brand uses DEFAULT_BRAND_REGION ('US') as a
+// placeholder until Brandalf returns the real region. When the operator
+// selected a market we seed it directly so the brand record is correct
+// immediately and stays correct even if Brandalf never completes. `region`
+// is a validated ISO 3166-1 alpha-2 code (e.g. 'US'); absent → keep the
+// DEFAULT_BRAND_REGION placeholder that Brandalf overwrites. #3168: the
+// previous 'gl' placeholder collided with Greenland's real ISO code.
 export function onboardingStubRegions(region) {
-  return region ? [region] : ['gl'];
+  return region ? [region] : [DEFAULT_BRAND_REGION];
 }
 
 export function buildInitialCustomerConfigV2({
@@ -884,9 +890,16 @@ export async function updateIndexConfig(dataFolder, context, say = () => {}) {
   });
   const content = Buffer.from(file.content, 'base64').toString('utf-8');
 
-  if (content.includes(dataFolder)) {
-    log.warn(`Helix query yaml already contains string ${dataFolder}. Skipping update.`);
-    await say(`Helix query yaml already contains string ${dataFolder}. Skipping GitHub update.`);
+  // Match dataFolder as an actual YAML key, not a substring of one (LLMO-6320) —
+  // see the "substring of an existing key" test below for the failure this prevents.
+  // ^\s*<folder>: (with the m flag) matches any line, so it would also match a nested
+  // key under a different section -- helix-query.yaml is a flat list of top-level
+  // definitions today, so that case can't occur; revisit if that ever changes.
+  const escapedDataFolder = dataFolder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const indexKeyPattern = new RegExp(`^\\s*${escapedDataFolder}:`, 'm');
+  if (indexKeyPattern.test(content)) {
+    log.warn(`Helix query yaml already has an index definition for ${dataFolder}. Skipping update.`);
+    await say(`Helix query yaml already has an index definition for ${dataFolder}. Skipping GitHub update.`);
     return;
   }
 
@@ -1352,7 +1365,21 @@ export async function enqueueLlmoOnboardingPublish(context, site, dataFolder) {
  * @param {string} [params.region] - Optional ISO 3166-1 alpha-2 region.
  * @param {object} params.context - The request context.
  * @param {Function} [params.say] - Optional Slack say callback.
- * @returns {Promise<void>}
+ * @returns {Promise<{
+ *   brandalfTriggered: boolean,
+ *   brandalfError: string|null,
+ *   promptGenerationJobId: string|null,
+ *   promptGenerationError: string|null,
+ *   promptSuggestionSchedules: Array<object>|null,
+ *   promptSuggestionSchedulesTimedOut: boolean,
+ *   requiredWorkFailed: boolean,
+ * }>} A submission-level summary (LLMO-7218 AC3/AC4) of the best-effort DRS side-effects
+ *   this function runs. "Submission" because Brandalf and prompt generation both complete
+ *   asynchronously via a DRS-side callback this repo has no visibility into (LLMO-4258
+ *   option b) — this cannot report whether the async work eventually SUCCEEDED, only
+ *   whether it was successfully HANDED OFF to DRS. `requiredWorkFailed` is true when any
+ *   required submission for the resolved onboarding mode failed, so a caller can tell a
+ *   degraded onboarding apart from a fully successful one instead of always seeing success.
  */
 export async function activateBrandAndGeneratePrompts({
   onboardingMode,
@@ -1367,6 +1394,18 @@ export async function activateBrandAndGeneratePrompts({
   say = () => {},
 }) {
   const { log } = context;
+
+  // LLMO-7218 AC3/AC4: tracked here (not thrown) because every DRS side-effect below stays
+  // best-effort by design — a DRS outage must not fail the site/entitlement/config work this
+  // function's caller already committed. Returned instead so the caller can report an honest
+  // outcome rather than the unconditional "completed successfully" this function previously
+  // gave no way to contradict.
+  let brandalfTriggered = false;
+  let brandalfError = null;
+  let promptGenerationJobId = null;
+  let promptGenerationError = null;
+  let promptSuggestionSchedules = null;
+  let promptSuggestionSchedulesTimedOut = false;
 
   if (onboardingMode === LLMO_ONBOARDING_MODE_V2) {
     const postgrestClient = context.dataAccess?.services?.postgrestClient;
@@ -1406,9 +1445,9 @@ export async function activateBrandAndGeneratePrompts({
         // No collision: proceed with upsert (new brand, existing brand with a
         // null primary site, or a re-onboard of the same site). upsertBrand's
         // own guard keeps an already-set site_id immutable on the last case.
-        // LLMO-5645: seed operator market when supplied; else the 'gl'
-        // placeholder (consistent with the V2 config + brandAliases, both
-        // overwritten by Brandalf's async result).
+        // LLMO-5645: seed operator market when supplied; else the
+        // DEFAULT_BRAND_REGION placeholder (consistent with the V2 config +
+        // brandAliases, both overwritten by Brandalf's async result).
         const stubRegions = onboardingStubRegions(region);
         await upsertBrand({
           organizationId: organization.getId(),
@@ -1441,6 +1480,11 @@ export async function activateBrandAndGeneratePrompts({
     } catch (drsClientError) {
       log.error(`DRS client creation failed, skipping Brandalf + schedules: ${drsClientError.message}`);
       say(':warning: DRS client unavailable (will need manual trigger)');
+      // LLMO-7218 AC4: without this, brandalfError stays null and the returned summary says
+      // requiredWorkFailed=true with no captured reason anywhere in it — exactly the "reconstruct
+      // from logs" outcome AC4 exists to prevent. Mirrors the v1 branch below, which already
+      // records drsError.message from its own DrsClient.createFrom call.
+      brandalfError = drsClientError.message;
     }
 
     if (drsClient) {
@@ -1461,12 +1505,15 @@ export async function activateBrandAndGeneratePrompts({
             log,
             say,
           });
+          brandalfTriggered = true;
         } else {
           log.debug('DRS client not configured, skipping Brandalf flow');
+          brandalfError = 'DRS client not configured';
         }
       } catch (drsError) {
         log.error(`Failed to start DRS Brandalf flow: ${drsError.message}`);
         say(':warning: Failed to start DRS Brandalf flow (will need manual trigger)');
+        brandalfError = drsError.message;
       }
 
       // Run the "prompt suggestion" pipelines, tier-gated (LLMO prompt-suggestion
@@ -1522,6 +1569,9 @@ export async function activateBrandAndGeneratePrompts({
           + `${SCHEDULE_REGISTRATION_TIMEOUT_MS}ms for site ${site.getId()} `
           + '(schedules may still have been created server-side; may need manual verification)');
         say(':warning: DRS schedule registration timed out (may need manual verification)');
+        promptSuggestionSchedulesTimedOut = true;
+      } else {
+        promptSuggestionSchedules = scheduleResult.results;
       }
     }
   } else {
@@ -1562,14 +1612,46 @@ export async function activateBrandAndGeneratePrompts({
         }
         log.info(`Started DRS prompt generation: job=${drsJob.job_id}`);
         say(`:robot_face: Started DRS prompt generation job: ${drsJob.job_id}`);
+        promptGenerationJobId = drsJob.job_id;
       } else {
         log.debug('DRS client not configured, skipping prompt generation');
+        promptGenerationError = 'DRS client not configured';
       }
     } catch (drsError) {
       log.error(`Failed to start DRS prompt generation: ${drsError.message}`);
       say(`:warning: Failed to start DRS prompt generation for site ${site.getId()} (will need manual trigger)`);
+      promptGenerationError = drsError.message;
     }
   }
+
+  // Required-work gate (LLMO-7218 AC3): what counts as "required" differs by mode, since v1 has
+  // no Brandalf step at all. A schedule-registration timeout counts as failed, not merely
+  // unknown — the caller needs an actionable signal, and "unknown" would let this collapse back
+  // into the same silent-success outcome AC3 exists to prevent.
+  //
+  // "DRS client not configured" deliberately counts as failed here too, same as a genuine submit
+  // error: either way the customer ends this onboarding with zero prompts, which is exactly the
+  // gap AC3 exists to surface. This is a real outcome in dev/local environments where DRS secrets
+  // are absent (not merely a test-fixture artifact) — see the two failure-scenario tests the PR
+  // author already treats as legitimate (DRS-not-configured, Brandalf-submission-failure).
+  // A trial-tier one-shot prompt-suggestion run failing counts the same way, even though
+  // trial sites never get the durable recurring schedule PAID sites do (LLMO-7218's schedule
+  // reconciliation scope is PAID-only) — a trial customer whose one-time job failed to submit
+  // also ends this onboarding with zero prompts, so the same signal applies.
+  const requiredWorkFailed = onboardingMode === LLMO_ONBOARDING_MODE_V2
+    ? !brandalfTriggered || promptSuggestionSchedulesTimedOut
+      || Boolean(promptSuggestionSchedules?.some((r) => r.status === 'failed'))
+    : promptGenerationJobId === null;
+
+  return {
+    brandalfTriggered,
+    brandalfError,
+    promptGenerationJobId,
+    promptGenerationError,
+    promptSuggestionSchedules,
+    promptSuggestionSchedulesTimedOut,
+    requiredWorkFailed,
+  };
 }
 
 /**
@@ -1580,8 +1662,6 @@ export async function activateBrandAndGeneratePrompts({
  * @param {string} params.brandName - The brand name
  * @param {string} params.imsOrgId - The IMS Organization ID
  * @param {string} [params.deliveryType] - The delivery type for site creation
- * @param {boolean} [params.tempOnboarding] - When true, skips updating helix-query.yaml in GitHub.
- *   HTTP clients set this via the `temp-onboarding` body field.
  * @param {string} [params.region] - Optional ISO 3166-1 alpha-2 region code forwarded to V1 DRS
  *   prompt generation. Omitted → DRS client default ('US') applies.
  * @param {boolean} [params.siteOnly=false] - Site-only onboarding (LLMO-5606). When true, stands
@@ -1595,7 +1675,7 @@ export async function activateBrandAndGeneratePrompts({
 export async function performLlmoOnboarding(params, context, say = () => {}) {
   const {
     domain, baseURL: providedBaseURL, brandName, imsOrgId, deliveryType,
-    tempOnboarding, region, siteOnly = false,
+    region, siteOnly = false,
   } = params;
   const { env, log } = context;
 
@@ -1611,12 +1691,11 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
     // Create or find organization
     const organization = await createOrFindOrganization(imsOrgId, context, say);
 
-    // Create site BEFORE resolving the onboarding mode. createOrFindSite may
-    // re-parent an existing site into the destination org; resolveLlmoOnboardingMode
-    // reads Site.allByOrganizationId, so the re-parent has to be persisted first
-    // (createOrFindSite saves the site in that branch). Otherwise a legacy
-    // pre-cutoff site moved into a brand-new org would be misclassified as v2
-    // and instantly create the mixed state LLMO-4176 was filed to prevent.
+    // Create the site before resolving the onboarding mode so downstream steps
+    // (entitlement, config, audits) have it. createOrFindSite may re-parent an
+    // existing site into the destination org and persists that immediately.
+    // (This ordering historically also fed resolveLlmoOnboardingMode's
+    // legacy-site cutoff check, which was removed in LLMO-7108.)
     site = await createOrFindSite(baseURL, organization.getId(), context, deliveryType);
 
     const onboardingMode = await resolveLlmoOnboardingMode(organization.getId(), context);
@@ -1635,13 +1714,11 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
       log.warn(`Failed to enqueue ${LLMO_ONBOARDING_PUBLISH_TRIGGER} for site ${site.getId()}: ${error.message}`);
     }
 
-    // Update helix-query.yaml in project-elmo-ui-data (skip for temporary onboarding)
-    if (tempOnboarding) {
-      log.info(`Skipping helix-query.yaml update (temp-onboarding) for data folder ${dataFolder}`);
-      await say(`:information_source: Skipping helix-query.yaml update (temp-onboarding) for ${dataFolder}`);
-    } else {
-      await updateIndexConfig(dataFolder, context, say);
-    }
+    // Update helix-query.yaml in project-elmo-ui-data. This registration must always run
+    // during onboarding (LLMO-7141): the former temp-onboarding skip was a workaround for a
+    // since-fixed (same-day) Helix bulk-indexing capacity issue, and skipping registration was
+    // the root cause of the LLMO-6320 bug class (sites silently going dark in dashboards).
+    await updateIndexConfig(dataFolder, context, say);
 
     // Site-only onboarding (LLMO-5606) omits llmo-customer-analysis entirely — it
     // belongs to the prompt-gen/brand path (Piece 2) which site-only skips, and it
@@ -1745,8 +1822,9 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
     // entity (upsertBrand), no Brandalf job, and no v1 prompt-generation job.
     // ensureInitialCustomerConfigV2 + the brandalf feature flag deliberately stay
     // in the always-run path above.
+    let brandActivationResult = null;
     if (!siteOnly) {
-      await activateBrandAndGeneratePrompts({
+      brandActivationResult = await activateBrandAndGeneratePrompts({
         onboardingMode,
         organization,
         site,
@@ -1771,6 +1849,11 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
       : [...BASIC_AUDITS, 'wikipedia-analysis'];
     await triggerAudits(auditsToTrigger, context, site);
 
+    // LLMO-7218 AC3: the response can no longer claim unconditional success when a required
+    // brand/prompt-generation submission failed - siteOnly onboarding has no brand-activation
+    // step at all, so it is unaffected by this gate.
+    const requiredWorkFailed = brandActivationResult?.requiredWorkFailed ?? false;
+
     return {
       site,
       siteId: site.getId(),
@@ -1778,7 +1861,10 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
       baseURL,
       dataFolder,
       detectedCdn,
-      message: 'LLMO onboarding completed successfully',
+      message: requiredWorkFailed
+        ? 'LLMO onboarding completed with warnings: required brand/prompt-generation work failed'
+        : 'LLMO onboarding completed successfully',
+      ...(brandActivationResult ? { brandActivation: brandActivationResult } : {}),
     };
   } catch (error) {
     log.error(`Error during LLMO onboarding: ${error.message}. Attempting cleanup.`);
@@ -1844,71 +1930,130 @@ export async function performLlmoOffboarding(site, config, context) {
   };
 }
 
-export async function appendRowsToQueryIndex(dataFolder, fileNames, env, log) {
-  const sharepointClient = await createSharePointClient(env);
-  const redirects = sharepointClient.getRedirects();
+// Shared by every project-elmo-ui-data Admin API caller below. Other admin.hlx.page
+// callers in this file (startBulkStatusJob, pollJobStatus, bulkUnpublishPaths) build
+// their own headers (they also need Content-Type) and aren't touched here to keep this
+// change scoped to LLMO-6320; consolidating all of them is a reasonable follow-up.
+const HLX_ADMIN_ORG = 'adobe';
+const HLX_ADMIN_SITE = 'project-elmo-ui-data';
+const HLX_ADMIN_REF = 'main';
+const HLX_ADMIN_BASE_URL = 'https://admin.hlx.page';
 
-  const now = Math.floor(Date.now() / 1000);
-  const rows = fileNames.map((fileName) => {
-    const name = fileName.endsWith('.json') ? fileName : `${fileName}.json`;
-    return [
-      `/${dataFolder}/${name}`,
-      now,
-      now,
-    ];
-  });
+// '/'-separated relative path (e.g. 'brand-presence/2026-w28-chatgpt', or a
+// dataFolder like 'dev/test-com'). Each segment must start with a word character,
+// so '.' and '..' can never match as a whole segment -- this is what rules out
+// '..' traversal and a leading '/' anchor, entirely within the regex.
+const SAFE_RELATIVE_FILE_PATH_RE = /^[\w][\w.-]*(\/[\w][\w.-]*)*$/;
+export const isSafeRelativeFilePath = (value) => typeof value === 'string'
+  && SAFE_RELATIVE_FILE_PATH_RE.test(value);
 
-  log.info(`Appending ${rows.length} rows to query-index.xlsx in ${dataFolder}`);
-  await redirects.appendRowsToSheet(`/${dataFolder}/query-index.xlsx`, rows);
-  log.info(`Successfully appended rows to query-index.xlsx in ${dataFolder}`);
+function buildHlxAdminUrl(action, filePath) {
+  return `${HLX_ADMIN_BASE_URL}/${action}/${HLX_ADMIN_ORG}/${HLX_ADMIN_SITE}/${HLX_ADMIN_REF}/${filePath}`;
 }
 
-export async function previewAndPublishQueryIndex(dataFolder, env, log) {
-  const org = 'adobe';
-  const site = 'project-elmo-ui-data';
-  const ref = 'main';
-  const baseUrl = 'https://admin.hlx.page';
-  const filePath = `${dataFolder}/query-index.json`;
-
+function getHlxAuthHeaders(env) {
   if (!env.HLX_ONBOARDING_TOKEN) {
     throw new Error('HLX_ONBOARDING_TOKEN is not set');
   }
+  return { Cookie: `auth_token=${env.HLX_ONBOARDING_TOKEN}` };
+}
 
-  const headers = {
-    Cookie: `auth_token=${env.HLX_ONBOARDING_TOKEN}`,
-  };
+async function readHlxErrorBody(response) {
+  try {
+    return await response.text();
+  } catch {
+    return '';
+  }
+}
 
+/**
+ * Reindexes a set of already-published files via the Helix Admin API.
+ *
+ * This replaces the previous approach of appending rows directly to
+ * query-index.xlsx via helix-content-sdk's appendRowsToSheet: on a warm Lambda
+ * that client caches the resolved sheet (worksheets[0]) across invocations, so it
+ * can append rows into the wrong sheet of a different workbook (the served
+ * `helix-default` sheet instead of `raw_index`), corrupting the workbook's array
+ * formula (observed twice on heritage-sg, LLMO-6320). The Admin API reindex
+ * endpoint reads the already-published file directly and has no such state.
+ * @param {string} dataFolder - The data folder name
+ * @param {Array<string>} fileNames - File names (with or without .json) to reindex
+ * @param {object} env - Environment variables
+ * @param {object} log - Logger instance
+ * @returns {Promise<void>}
+ */
+export async function reindexQueryIndexPaths(dataFolder, fileNames, env, log) {
+  // Defense-in-depth: dataFolder is database-sourced and admin-controlled today
+  // (the only caller, updateQueryIndex, validates fileNames but trusts the site's
+  // stored dataFolder), but this guards the URL-building itself in case a future
+  // caller lets a less-privileged input reach this parameter.
+  if (!isSafeRelativeFilePath(dataFolder)) {
+    throw new Error(`Invalid dataFolder: ${dataFolder}`);
+  }
+
+  const headers = getHlxAuthHeaders(env);
+
+  log.info(`Reindexing ${fileNames.length} path(s) in ${dataFolder}`);
+
+  // Sequential by design: this is an admin-only, low-QPS path (LLMO administrators
+  // only), and one request at a time avoids bursting the Admin API.
+  let reindexedCount = 0;
+  for (const fileName of fileNames) {
+    const name = fileName.endsWith('.json') ? fileName : `${fileName}.json`;
+    const filePath = `${dataFolder}/${name}`;
+    const reindexUrl = buildHlxAdminUrl('index', filePath);
+
+    let response;
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      response = await fetch(reindexUrl, { method: 'POST', headers, timeout: 30000 });
+    } catch (error) {
+      log.error(`Reindex failed for ${filePath} after reindexing ${reindexedCount}/${fileNames.length}: ${error.message}`);
+      throw new Error(`Reindex failed for ${filePath}: ${error.message}`);
+    }
+    if (!response.ok) {
+      const errorCode = response.headers?.get('x-error-code') || '';
+      const errorMsg = response.headers?.get('x-error') || '';
+      // eslint-disable-next-line no-await-in-loop
+      const bodyText = await readHlxErrorBody(response);
+      log.error(`Reindex failed for ${filePath} after reindexing ${reindexedCount}/${fileNames.length}: ${response.status} ${response.statusText} | x-error-code: ${errorCode} | x-error: ${errorMsg} | body: ${bodyText}`);
+      throw new Error(`Reindex failed for ${filePath}: ${response.status} ${response.statusText}`);
+    }
+    reindexedCount += 1;
+  }
+
+  log.info(`Successfully reindexed ${fileNames.length} path(s) in ${dataFolder}`);
+}
+
+export async function previewAndPublishQueryIndex(dataFolder, env, log) {
+  // Defense-in-depth -- see the matching check in reindexQueryIndexPaths.
+  if (!isSafeRelativeFilePath(dataFolder)) {
+    throw new Error(`Invalid dataFolder: ${dataFolder}`);
+  }
+
+  const filePath = `${dataFolder}/query-index.json`;
+  const headers = getHlxAuthHeaders(env);
   const fetchOptions = { method: 'POST', headers, timeout: 30000 };
 
-  const previewUrl = `${baseUrl}/preview/${org}/${site}/${ref}/${filePath}`;
+  const previewUrl = buildHlxAdminUrl('preview', filePath);
   log.info(`Previewing query-index at ${previewUrl}`);
   const previewResponse = await fetch(previewUrl, fetchOptions);
   if (!previewResponse.ok) {
     const errorCode = previewResponse.headers?.get('x-error-code') || '';
     const errorMsg = previewResponse.headers?.get('x-error') || '';
-    let bodyText = '';
-    try {
-      bodyText = await previewResponse.text();
-    } catch {
-      /* noop */
-    }
+    const bodyText = await readHlxErrorBody(previewResponse);
     log.error(`Preview failed: ${previewResponse.status} ${previewResponse.statusText} | x-error-code: ${errorCode} | x-error: ${errorMsg} | body: ${bodyText}`);
     throw new Error(`Preview failed: ${previewResponse.status} ${previewResponse.statusText}`);
   }
   log.info('Preview of query-index succeeded');
 
-  const publishUrl = `${baseUrl}/live/${org}/${site}/${ref}/${filePath}`;
+  const publishUrl = buildHlxAdminUrl('live', filePath);
   log.info(`Publishing query-index at ${publishUrl}`);
   const publishResponse = await fetch(publishUrl, fetchOptions);
   if (!publishResponse.ok) {
     const errorCode = publishResponse.headers?.get('x-error-code') || '';
     const errorMsg = publishResponse.headers?.get('x-error') || '';
-    let bodyText = '';
-    try {
-      bodyText = await publishResponse.text();
-    } catch {
-      /* noop */
-    }
+    const bodyText = await readHlxErrorBody(publishResponse);
     log.error(`Publish failed: ${publishResponse.status} ${publishResponse.statusText} | x-error-code: ${errorCode} | x-error: ${errorMsg} | body: ${bodyText}`);
     throw new Error(`Publish failed: ${publishResponse.status} ${publishResponse.statusText}`);
   }
