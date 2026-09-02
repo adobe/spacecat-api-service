@@ -17,6 +17,7 @@ import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinonChai from 'sinon-chai';
 import sinon, { stub } from 'sinon';
+import esmock from 'esmock';
 
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import OrganizationSchema from '@adobe/spacecat-shared-data-access/src/models/organization/organization.schema.js';
@@ -1026,6 +1027,236 @@ describe('Organizations Controller', () => {
       expect(context.log.info).to.have.been.calledWithMatch(
         /\[s2s-readall\] GET \/organizations\/by-product-code\/LLMO granted clientId=svc-1 consumerId=consumer-id-1 capability=organization:readAll count=1 requestId=req-bpc-1/,
       );
+    });
+  });
+
+  describe('getByAccessMapSheet', () => {
+    let fetchLlmoSourceStub;
+    let accessMapController;
+
+    // Excel serial date for 2999-12-31 (far future) and 2000-01-01 (long expired),
+    // computed via the same epoch offset the controller uses (25569 days, 1899-12-30 epoch).
+    const FAR_FUTURE_SERIAL = 401768;
+    const LONG_EXPIRED_SERIAL = 36526;
+
+    beforeEach(async () => {
+      fetchLlmoSourceStub = sinon.stub();
+      const { llmoSourceErrorResponse } = await import('../../src/controllers/llmo/llmo-source.js');
+      const OrganizationsControllerMocked = await esmock('../../src/controllers/organizations.js', {
+        '../../src/controllers/llmo/llmo-source.js': {
+          fetchLlmoSource: (...args) => fetchLlmoSourceStub(...args),
+          llmoSourceErrorResponse,
+        },
+      });
+      accessMapController = OrganizationsControllerMocked(context, env);
+      context.params = { productCode: 'LLMO' };
+      context.env = { LLMO_HLX_API_KEY: 'test-hlx-key' };
+      context.invocation = { id: 'req-access-map-1' };
+      mockDataAccess.Site.allByEnrollmentFiltered
+        .resolves({ data: [sites[0], sites[2]], cursor: null });
+      mockDataAccess.Organization.batchGetByKeys
+        .resolves({ data: [organizations[0], organizations[3]] });
+    });
+
+    it('returns 403 for a non-admin caller', async () => {
+      context.attributes.authInfo.withProfile({ is_admin: false });
+
+      const response = await accessMapController.getByAccessMapSheet(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(403);
+      expect(body).to.have.property('message', 'Forbidden: admin access required');
+      expect(mockDataAccess.Site.allByEnrollmentFiltered).to.not.have.been.called;
+      expect(fetchLlmoSourceStub).to.not.have.been.called;
+    });
+
+    it('allows a read-only admin caller', async () => {
+      context.attributes.authInfo.withProfile({ is_admin: false, is_read_only_admin: true, email: 'ro-admin@adobe.com' });
+      fetchLlmoSourceStub.resolves({ status: 200, data: { data: [] } });
+
+      const response = await accessMapController.getByAccessMapSheet(context);
+
+      expect(response.status).to.equal(200);
+    });
+
+    it('returns 400 for an unknown product code', async () => {
+      context.params = { productCode: 'BOGUS' };
+
+      const response = await accessMapController.getByAccessMapSheet(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(400);
+      expect(body.message).to.match(/Invalid product code/);
+      expect(mockDataAccess.Site.allByEnrollmentFiltered).to.not.have.been.called;
+    });
+
+    it('returns 400 when the product code is missing', async () => {
+      context.params = {};
+
+      const response = await accessMapController.getByAccessMapSheet(context);
+
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns an empty array without fetching the sheet when no org is onboarded for the product', async () => {
+      mockDataAccess.Site.allByEnrollmentFiltered.resolves({ data: [], cursor: null });
+
+      const response = await accessMapController.getByAccessMapSheet(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body).to.be.an('array').that.is.empty;
+      expect(fetchLlmoSourceStub).to.not.have.been.called;
+    });
+
+    it('returns 500 when the sheet fetch fails with an unrecognized error', async () => {
+      fetchLlmoSourceStub.rejects(new Error('boom'));
+
+      const response = await accessMapController.getByAccessMapSheet(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(500);
+      expect(body.message).to.match(/Failed to fetch customer access map/);
+      expect(context.log.error).to.have.been.calledWithMatch(/Failed to fetch customer access map sheet: boom/);
+    });
+
+    it('maps a recognized source error (isConfigError) via llmoSourceErrorResponse', async () => {
+      const configError = new Error('LLMO_HLX_API_KEY environment variable is not configured');
+      configError.isConfigError = true;
+      fetchLlmoSourceStub.rejects(configError);
+
+      const response = await accessMapController.getByAccessMapSheet(context);
+
+      expect(response.status).to.equal(500);
+    });
+
+    it('returns the unfiltered organization list when the caller email is not in the sheet', async () => {
+      context.attributes.authInfo.withProfile({ is_admin: true, email: 'not-in-sheet@adobe.com' });
+      fetchLlmoSourceStub.resolves({
+        status: 200,
+        data: {
+          data: [
+            {
+              'Customer IMS Org Id': organizations[3].getImsOrgId(),
+              'Customer Name': 'Some Customer',
+              'User email': 'someone-else@adobe.com',
+              'Access Expires At': String(FAR_FUTURE_SERIAL),
+            },
+          ],
+        },
+      });
+
+      const response = await accessMapController.getByAccessMapSheet(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body).to.be.an('array').with.lengthOf(2);
+      expect(context.log.info).to.have.been.calledWithMatch(/unfiltered \(email not in map\)/);
+    });
+
+    it('returns an empty list when the caller email is in the sheet but every grant is expired', async () => {
+      context.attributes.authInfo.withProfile({ is_admin: true, email: 'expired-user@adobe.com' });
+      fetchLlmoSourceStub.resolves({
+        status: 200,
+        data: {
+          data: [
+            {
+              'Customer IMS Org Id': organizations[3].getImsOrgId(),
+              'Customer Name': 'Some Customer',
+              'User email': 'expired-user@adobe.com',
+              'Access Expires At': String(LONG_EXPIRED_SERIAL),
+            },
+          ],
+        },
+      });
+
+      const response = await accessMapController.getByAccessMapSheet(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body).to.be.an('array').that.is.empty;
+    });
+
+    it('filters to only the organizations with a non-expired grant for the caller email', async () => {
+      context.attributes.authInfo.withProfile({ is_admin: true, email: 'grantee@adobe.com' });
+      fetchLlmoSourceStub.resolves({
+        status: 200,
+        data: {
+          data: [
+            {
+              'Customer IMS Org Id': organizations[3].getImsOrgId(),
+              'Customer Name': 'Org 4',
+              'User email': 'grantee@adobe.com',
+              'Access Expires At': String(FAR_FUTURE_SERIAL),
+            },
+            {
+              'Customer IMS Org Id': organizations[0].getImsOrgId(),
+              'Customer Name': 'Org 1',
+              'User email': 'grantee@adobe.com',
+              'Access Expires At': String(LONG_EXPIRED_SERIAL),
+            },
+          ],
+        },
+      });
+
+      const response = await accessMapController.getByAccessMapSheet(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body).to.be.an('array').with.lengthOf(1);
+      expect(body[0].id).to.equal(organizations[3].getId());
+    });
+
+    it('ignores rows with a non-numeric Access Expires At value', async () => {
+      context.attributes.authInfo.withProfile({ is_admin: true, email: 'grantee@adobe.com' });
+      fetchLlmoSourceStub.resolves({
+        status: 200,
+        data: {
+          data: [
+            {
+              'Customer IMS Org Id': organizations[3].getImsOrgId(),
+              'Customer Name': 'Org 4',
+              'User email': 'grantee@adobe.com',
+              'Access Expires At': 'not-a-number',
+            },
+          ],
+        },
+      });
+
+      const response = await accessMapController.getByAccessMapSheet(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body).to.be.an('array').that.is.empty;
+    });
+
+    it('prefers trial_email over preferred_username and email when resolving the caller', async () => {
+      context.attributes.authInfo.withProfile({
+        is_admin: true,
+        trial_email: 'trial@adobe.com',
+        preferred_username: 'preferred@adobe.com',
+        email: 'guid-not-an-email',
+      });
+      fetchLlmoSourceStub.resolves({
+        status: 200,
+        data: {
+          data: [
+            {
+              'Customer IMS Org Id': organizations[3].getImsOrgId(),
+              'Customer Name': 'Org 4',
+              'User email': 'trial@adobe.com',
+              'Access Expires At': String(FAR_FUTURE_SERIAL),
+            },
+          ],
+        },
+      });
+
+      const response = await accessMapController.getByAccessMapSheet(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body).to.be.an('array').with.lengthOf(1);
+      expect(body[0].id).to.equal(organizations[3].getId());
     });
   });
 
