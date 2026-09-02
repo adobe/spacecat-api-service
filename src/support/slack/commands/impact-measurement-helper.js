@@ -12,22 +12,8 @@
 
 import { isValidUUID } from '@adobe/spacecat-shared-utils';
 
-/**
- * Resolves the GeoExperiment an impact-measurement command should act on for a given site.
- *
- * When {@code geoExperimentIdInput} is provided, that specific experiment is looked up and
- * validated to belong to {@code site}. Otherwise the site's most recently updated experiment
- * is used (allBySiteId is ordered by most recently updated, so the first result is the current
- * one).
- *
- * @param {object} params
- * @param {object} params.GeoExperiment - The GeoExperiment data-access model.
- * @param {object} params.site - The resolved Site model.
- * @param {string} params.baseURL - The site's base URL (for user-facing messages).
- * @param {string} [params.geoExperimentIdInput] - Optional explicit GeoExperiment id.
- * @returns {Promise<{ geoExperiment?: object, errorMessage?: string }>} The resolved experiment,
- *   or a user-facing error message when it cannot be resolved.
- */
+// Resolves the GeoExperiment to act on: the explicit id if given (validated against the site),
+// else the site's most recently updated one. Returns { geoExperiment } or { errorMessage }.
 export async function resolveGeoExperiment({
   GeoExperiment, site, baseURL, geoExperimentIdInput,
 }) {
@@ -55,7 +41,7 @@ export async function resolveGeoExperiment({
     return { errorMessage: `:x: No geo-experiments found for '${baseURL}'.` };
   }
 
-  // allBySiteId is ordered by most recently updated — the first result is the current one.
+  // Ordered by most recently updated — first is current.
   const [geoExperiment] = experiments;
   return { geoExperiment };
 }

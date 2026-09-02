@@ -18,19 +18,9 @@ import { extractURLFromSlackInput, postErrorMessage, postSiteNotFoundMessage } f
 
 const PHRASES = ['trigger-impact-measurement'];
 
-/**
- * Manually (re-)triggers Mystique impact measurement for a site's most recently updated
- * GeoExperiment, given the site's base URL/domain. Mirrors the HTTP
- * `POST /sites/:siteId/geo-experiments/:geoExperimentId/trigger-impact-measurement` endpoint
- * (src/controllers/suggestions.js#triggerImpactMeasurement) but resolves the GeoExperiment by
- * site domain instead of requiring the caller to already have a geoExperimentId, so an operator
- * can act directly from a domain reported in Slack/monitoring. An explicit geoExperimentId can
- * optionally be supplied to target a specific experiment instead of the site's most recent one.
- *
- * See llmo-experimentation-engine's
- * docs/decisions/004-manual-impact-measurement-retrigger.md and
- * docs/decisions/007-manual-impact-measurement-check-completed-status.md.
- */
+// Manually (re-)triggers Mystique impact measurement for a site's geo-experiment, resolved by
+// domain (most recent) or an optional explicit geoExperimentId. Mirrors the HTTP
+// POST /sites/:siteId/geo-experiments/:geoExperimentId/trigger-impact-measurement endpoint.
 export default function TriggerImpactMeasurementCommand(context) {
   const baseCommand = BaseCommand({
     id: 'trigger-impact-measurement',

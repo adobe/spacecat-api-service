@@ -18,21 +18,11 @@ import { extractURLFromSlackInput, postErrorMessage, postSiteNotFoundMessage } f
 
 const PHRASES = ['check-impact-measurement'];
 
-/**
- * Manually checks the in-flight Mystique impact-measurement task for a site's most recently
- * updated GeoExperiment, given the site's base URL/domain. Requests
- * llmo-experimentation-engine to poll Mystique and update the GeoExperiment if the task has
- * finished — this command does not itself return the completion result, since the update
- * happens asynchronously via the llmo-experimentation-engine-queue (fire-and-request, matching
- * trigger-impact-measurement's fire-and-forget shape). Run `get-site {baseURL}` or a follow-up
- * check after a short wait to see the updated phase/status. An explicit geoExperimentId can
- * optionally be supplied to target a specific experiment instead of the site's most recent one.
- *
- * Needed because trigger-impact-measurement can re-arm a COMPLETED experiment while leaving it
- * COMPLETED (invisible to the engine's own cron sweep) — this is the manual entry point to
- * advance it. See llmo-experimentation-engine's
- * docs/decisions/007-manual-impact-measurement-check-completed-status.md.
- */
+// Manually requests a check of an in-flight Mystique impact-measurement task for a site's
+// geo-experiment, resolved by domain (most recent) or an optional explicit geoExperimentId.
+// Fire-and-request: the engine updates the experiment asynchronously if Mystique has finished.
+// Entry point for a COMPLETED experiment re-armed by trigger-impact-measurement (which the
+// engine's own cron sweep can't see).
 export default function CheckImpactMeasurementCommand(context) {
   const baseCommand = BaseCommand({
     id: 'check-impact-measurement',
