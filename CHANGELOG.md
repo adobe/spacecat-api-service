@@ -1,3 +1,10 @@
+# [1.785.0](https://github.com/adobe/spacecat-api-service/compare/v1.784.4...v1.785.0) (2026-09-02)
+
+
+### Features
+
+* **slack:** enrich-brand-claims command for off-site opportunity refresh (LLMO-7312) ([#3188](https://github.com/adobe/spacecat-api-service/issues/3188)) ([cd5ed45](https://github.com/adobe/spacecat-api-service/commit/cd5ed456271449b13ff36b1cf1c7cc65ce939e3e)), closes [experience-platform/mystique#4804](https://github.com/experience-platform/mystique/issues/4804) [adobe/spacecat-audit-worker#2937](https://github.com/adobe/spacecat-audit-worker/issues/2937)
+
 ## [1.784.4](https://github.com/adobe/spacecat-api-service/compare/v1.784.3...v1.784.4) (2026-09-02)
 
 
