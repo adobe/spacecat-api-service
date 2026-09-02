@@ -1,3 +1,10 @@
+## [1.784.2](https://github.com/adobe/spacecat-api-service/compare/v1.784.1...v1.784.2) (2026-09-02)
+
+
+### Bug Fixes
+
+* return authoritative brand collections after updates ([#3182](https://github.com/adobe/spacecat-api-service/issues/3182)) ([cd2b460](https://github.com/adobe/spacecat-api-service/commit/cd2b4607540de1d1d473b0804c50fd181b0abb6d)), closes [Hi#level](https://github.com/Hi/issues/level) [#3179](https://github.com/adobe/spacecat-api-service/issues/3179)
+
 ## [1.784.1](https://github.com/adobe/spacecat-api-service/compare/v1.784.0...v1.784.1) (2026-09-02)
 
 
