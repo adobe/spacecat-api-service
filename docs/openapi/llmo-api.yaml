@@ -5429,6 +5429,7 @@ llmo-referral-traffic-filter-dimensions:
       range. Queries `rpc_referral_traffic_filter_dimensions`.
     operationId: getReferralTrafficFilterDimensions
     parameters:
+      - $ref: './parameters.yaml#/referralUrlPathPrefix'
       - name: source
         in: query
         schema: { $ref: './schemas.yaml#/ReferralTrafficSource' }
@@ -5464,6 +5465,7 @@ llmo-referral-traffic-kpis:
       sources; meaningful for `optel` / `ga4`.
     operationId: getReferralTrafficKpis
     parameters:
+      - $ref: './parameters.yaml#/referralUrlPathPrefix'
       - name: source
         in: query
         schema: { $ref: './schemas.yaml#/ReferralTrafficSource' }
@@ -5504,6 +5506,7 @@ llmo-referral-traffic-trend:
       `cja` sources; null for `optel` / `cdn`.
     operationId: getReferralTrafficTrend
     parameters:
+      - $ref: './parameters.yaml#/referralUrlPathPrefix'
       - name: source
         in: query
         schema: { $ref: './schemas.yaml#/ReferralTrafficSource' }
@@ -5543,6 +5546,7 @@ llmo-referral-traffic-by-platform:
       and `orders` are null for `optel` / `cdn` sources.
     operationId: getReferralTrafficByPlatform
     parameters:
+      - $ref: './parameters.yaml#/referralUrlPathPrefix'
       - name: source
         in: query
         schema: { $ref: './schemas.yaml#/ReferralTrafficSource' }
@@ -5579,6 +5583,7 @@ llmo-referral-traffic-by-region:
     description: Queries `rpc_referral_traffic_by_region`. Returns rows ordered by pageviews descending.
     operationId: getReferralTrafficByRegion
     parameters:
+      - $ref: './parameters.yaml#/referralUrlPathPrefix'
       - name: source
         in: query
         schema: { $ref: './schemas.yaml#/ReferralTrafficSource' }
@@ -5615,6 +5620,7 @@ llmo-referral-traffic-by-page-intent:
     description: Queries `rpc_referral_traffic_by_page_intent`. Returns rows ordered by pageviews descending.
     operationId: getReferralTrafficByPageIntent
     parameters:
+      - $ref: './parameters.yaml#/referralUrlPathPrefix'
       - name: source
         in: query
         schema: { $ref: './schemas.yaml#/ReferralTrafficSource' }
@@ -5659,6 +5665,7 @@ llmo-referral-traffic-by-url:
       28-day window.
     operationId: getReferralTrafficByUrl
     parameters:
+      - $ref: './parameters.yaml#/referralUrlPathPrefix'
       - name: source
         in: query
         schema: { $ref: './schemas.yaml#/ReferralTrafficSource' }
@@ -5785,6 +5792,7 @@ llmo-referral-traffic-by-device:
       sources.
     operationId: getReferralTrafficByDevice
     parameters:
+      - $ref: './parameters.yaml#/referralUrlPathPrefix'
       - name: source
         in: query
         schema: { $ref: './schemas.yaml#/ReferralTrafficSource' }
@@ -5831,6 +5839,7 @@ llmo-referral-traffic-business-impact:
       28-day window.
     operationId: getReferralTrafficBusinessImpact
     parameters:
+      - $ref: './parameters.yaml#/referralUrlPathPrefix'
       - name: source
         in: query
         schema: { $ref: './schemas.yaml#/ReferralTrafficBusinessImpactSource' }

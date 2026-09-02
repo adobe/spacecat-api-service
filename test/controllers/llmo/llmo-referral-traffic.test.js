@@ -51,6 +51,7 @@ function makeWeeksChainClient(
   const chain = {
     select: sinon.stub().returnsThis(),
     eq: sinon.stub().returnsThis(),
+    or: sinon.stub().returnsThis(),
     order: sinon.stub().returnsThis(),
     limit: sinon.stub()
       .onFirstCall().resolves(minResult)
@@ -249,6 +250,68 @@ describe('llmo-referral-traffic', () => {
     });
   });
 
+  // ── urlPathPrefix parsing / normalization (LLMO-7315) ─────────────────────
+  // Exercised through the kpis handler because parseParams + commonRpcParams are
+  // shared by every RPC endpoint, so p_url_path_prefix threading is proven once.
+
+  describe('urlPathPrefix (LLMO-7315)', () => {
+    const kpisPrefix = async (data) => {
+      const client = makeRpcClient({ data: [] });
+      await createReferralTrafficKpisHandler(stubbedValidateAccess)(makeContext({ client, data }));
+      return client.rpc.getCall(0).args[1].p_url_path_prefix;
+    };
+
+    it('threads a normalized prefix into commonRpcParams as p_url_path_prefix', async () => {
+      expect(await kpisPrefix({ urlPathPrefix: '/knicks' })).to.equal('/knicks');
+    });
+
+    it('prepends a missing leading slash', async () => {
+      expect(await kpisPrefix({ urlPathPrefix: 'knicks' })).to.equal('/knicks');
+    });
+
+    it('strips all trailing slashes', async () => {
+      expect(await kpisPrefix({ urlPathPrefix: '/knicks/' })).to.equal('/knicks');
+      expect(await kpisPrefix({ urlPathPrefix: '/knicks///' })).to.equal('/knicks');
+    });
+
+    it('trims surrounding whitespace', async () => {
+      expect(await kpisPrefix({ urlPathPrefix: '  /knicks  ' })).to.equal('/knicks');
+    });
+
+    it('treats an empty string as no filter (null)', async () => {
+      expect(await kpisPrefix({ urlPathPrefix: '' })).to.equal(null);
+    });
+
+    it('treats "/" as no filter (null)', async () => {
+      expect(await kpisPrefix({ urlPathPrefix: '/' })).to.equal(null);
+    });
+
+    it('treats a slashes-only value ("//") as no filter (null)', async () => {
+      expect(await kpisPrefix({ urlPathPrefix: '//' })).to.equal(null);
+    });
+
+    it('ignores a repeated (array) param as no filter (null)', async () => {
+      expect(await kpisPrefix({ urlPathPrefix: ['/knicks', '/nets'] })).to.equal(null);
+    });
+
+    it('ignores an over-long value as no filter (null)', async () => {
+      expect(await kpisPrefix({ urlPathPrefix: `/${'a'.repeat(600)}` })).to.equal(null);
+    });
+
+    it('defaults to null when the param is absent', async () => {
+      expect(await kpisPrefix({})).to.equal(null);
+    });
+
+    it('accepts the url_path_prefix snake_case alias', async () => {
+      expect(await kpisPrefix({ url_path_prefix: '/knicks' })).to.equal('/knicks');
+    });
+
+    it('prefers urlPathPrefix over the snake_case alias', async () => {
+      expect(await kpisPrefix({ urlPathPrefix: '/nets', url_path_prefix: '/knicks' }))
+        .to.equal('/nets');
+    });
+  });
+
   // ── /filter-dimensions ────────────────────────────────────────────────────
 
   describe('filter-dimensions', () => {
@@ -283,6 +346,20 @@ describe('llmo-referral-traffic', () => {
       expect(body.platforms).to.deep.equal([]);
       expect(body.availableSources).to.deep.equal([]);
       expect(body.categories).to.deep.equal([]);
+    });
+
+    it('forwards p_url_path_prefix to the filter-dimensions RPC (LLMO-7315)', async () => {
+      const client = makeRpcClient({ data: [], error: null });
+      const handler = createReferralTrafficFilterDimensionsHandler(stubbedValidateAccess);
+      await handler(makeContext({ client, data: { urlPathPrefix: '/knicks' } }));
+      expect(client.rpc.getCall(0).args[1].p_url_path_prefix).to.equal('/knicks');
+    });
+
+    it('passes p_url_path_prefix=null when no prefix is given (LLMO-7315)', async () => {
+      const client = makeRpcClient({ data: [], error: null });
+      const handler = createReferralTrafficFilterDimensionsHandler(stubbedValidateAccess);
+      await handler(makeContext({ client }));
+      expect(client.rpc.getCall(0).args[1].p_url_path_prefix).to.equal(null);
     });
 
     it('returns 500 on PostgREST error', async () => {
@@ -665,6 +742,19 @@ describe('llmo-referral-traffic', () => {
       expect(client.rpc.getCall(0).args[1].p_url_search).to.equal('blog');
     });
 
+    it('forwards p_url_path_prefix alongside p_url_search (LLMO-7315)', async () => {
+      const client = makeRpcClient({ data: [] });
+      const handler = createReferralTrafficByUrlHandler(stubbedValidateAccess);
+      await handler(makeContext({
+        client,
+        data: { urlPathSearch: 'blog', urlPathPrefix: '/knicks' },
+      }));
+      const rpcArgs = client.rpc.getCall(0).args[1];
+      // Both filters can be set at once; neither clobbers the other.
+      expect(rpcArgs.p_url_search).to.equal('blog');
+      expect(rpcArgs.p_url_path_prefix).to.equal('/knicks');
+    });
+
     it('clamps pageSize above the max', async () => {
       const client = makeRpcClient({ data: [] });
       const handler = createReferralTrafficByUrlHandler(stubbedValidateAccess);
@@ -859,6 +949,15 @@ describe('llmo-referral-traffic', () => {
       expect(rpcArgs.p_start_date).to.equal('2026-01-01');
       expect(rpcArgs.p_end_date).to.equal('2026-01-28');
       expect(rpcArgs.p_platform).to.equal('openai');
+    });
+
+    it('does NOT forward p_url_path_prefix to rpc_referral_traffic_url_trend (LLMO-7315)', async () => {
+      // url_trend does an exact url_path match; the RPC has no p_url_path_prefix
+      // param, so passing one would fail PostgREST overload resolution (PGRST202).
+      const client = makeRpcClient({ data: [] });
+      const handler = createReferralTrafficUrlTrendHandler(stubbedValidateAccess);
+      await handler(makeContext({ client, data: { urlPath: '/blog', urlPathPrefix: '/knicks' } }));
+      expect(client.rpc.getCall(0).args[1]).to.not.have.property('p_url_path_prefix');
     });
 
     it('uses {} when context.data is null', async () => {
@@ -1090,6 +1189,19 @@ describe('llmo-referral-traffic', () => {
       const handler = createReferralTrafficWeeksHandler(stubbedValidateAccess);
       await handler(makeContext({ client }));
       expect(client.from.calledWith('referral_traffic_optel')).to.be.true;
+    });
+
+    it('does not url-path-prefix scope the weeks read even when a prefix is given (LLMO-7315)', async () => {
+      // /weeks is intentionally domain-level: the dashboard scopes the picker to a
+      // sub-path by passing the domain-root siteId, so no PostgREST .or() filter is
+      // applied here (avoids per-source filter-string escaping).
+      const client = makeWeeksChainClient(
+        { data: [{ traffic_date: '2026-01-05' }], error: null },
+        { data: [{ traffic_date: '2026-01-12' }], error: null },
+      );
+      const handler = createReferralTrafficWeeksHandler(stubbedValidateAccess);
+      await handler(makeContext({ client, data: { urlPathPrefix: '/knicks' } }));
+      expect(client.chain.or).to.not.have.been.called;
     });
   });
 
