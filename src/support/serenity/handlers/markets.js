@@ -77,6 +77,19 @@ export function clearLanguageCache() {
 
 const ENGLISH_LANGUAGE_NAMES = new Intl.DisplayNames(['en'], { type: 'language' });
 
+/**
+ * Collapse a catalog language name to its base by dropping a trailing
+ * parenthetical qualifier: `Chinese (Simplified)` → `chinese`. Semrush lists
+ * some languages only under a script/region-qualified name (Chinese is the
+ * known case — LLMO-7309), but the app models them by primary subtag alone
+ * (`zh`), whose English name is the unqualified `Chinese`. Indexing both the
+ * raw and base names lets an unqualified code resolve a qualified catalog row.
+ * @param {string} name
+ */
+function baseLanguageName(name) {
+  return name.replace(/\s*\([^)]*\)\s*$/, '').trim();
+}
+
 function isoToEnglishName(languageTag) {
   // Strip region/script subtag — the catalog is keyed by primary language
   // only (no `en-US` / `pt-BR` rows). Caller already enforces
@@ -93,9 +106,25 @@ export async function resolveLanguageId(transport, languageTag, log) {
     const resp = await transport.listLanguages();
     const items = Array.isArray(resp?.items) ? resp.items : [];
     languageCache.byTag.clear();
-    for (const item of items) {
+    // Sort by name so a base-name alias resolves deterministically to the
+    // alphabetically-first qualified row (e.g. `zh` → `Chinese (Simplified)`
+    // before `Chinese (Traditional)`), independent of upstream ordering.
+    const sortedItems = [...items].sort(
+      (a, b) => String(a?.name ?? '').localeCompare(String(b?.name ?? '')),
+    );
+    for (const item of sortedItems) {
       if (hasText(item?.name) && hasText(item?.id)) {
-        languageCache.byTag.set(String(item.name).toLowerCase(), String(item.id));
+        const name = String(item.name).toLowerCase();
+        const id = String(item.id);
+        // Exact name wins; register a base-name alias only if no row already
+        // claims it (an exact `Chinese` row must not be shadowed by an alias).
+        if (!languageCache.byTag.has(name)) {
+          languageCache.byTag.set(name, id);
+        }
+        const base = baseLanguageName(name);
+        if (base && base !== name && !languageCache.byTag.has(base)) {
+          languageCache.byTag.set(base, id);
+        }
       }
     }
     if (languageCache.byTag.size === 0 && items.length > 0) {
