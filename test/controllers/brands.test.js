@@ -3418,6 +3418,7 @@ describe('Brands Controller', () => {
     });
 
     it('returns 500 when storage throws', async () => {
+      loggerStub.error.resetHistory();
       mockDataAccess.services.postgrestClient = {
         from: sandbox.stub().throws(new Error('DB connection lost')),
       };
@@ -3429,6 +3430,7 @@ describe('Brands Controller', () => {
         dataAccess: mockDataAccess,
       });
       expect(response.status).to.equal(500);
+      expect(loggerStub.error).to.have.been.called;
     });
   });
 

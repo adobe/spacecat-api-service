@@ -8222,7 +8222,10 @@ BrandMarket:
   properties:
     region:
       type: string
-      description: ISO 3166-1 alpha-2 country code.
+      description: >-
+        ISO 3166-1 alpha-2 country code. Whole-country only today; sub-national
+        geo (city/region/postal) is future work and, when it lands, will be a
+        new field rather than an overload of `region`.
       example: 'IN'
     languageCode:
       type: string

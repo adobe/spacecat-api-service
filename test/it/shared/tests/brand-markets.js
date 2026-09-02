@@ -46,6 +46,19 @@ export default function brandMarketsTests(getHttpClient, resetData, seedFixture)
       });
     });
 
+    it('user: returns 200 for a brand in the permitted organization', async () => {
+      // Non-admin org member admitted via `authInfo.hasOrganization(imsOrgId)`
+      // (the `tenants` path) — the admission route the real S2S consumer uses,
+      // distinct from the admin `x-api-key` bypass the case above takes.
+      const http = getHttpClient();
+      const res = await http.user.get(`/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/markets`);
+
+      expect(res.status).to.equal(200);
+      expect(res.body).to.deep.equal({
+        markets: [{ region: 'IN', languageCode: 'en', geoTargetId: 2356 }],
+      });
+    });
+
     it('returns an empty list for a brand with no mapping rows', async () => {
       const http = getHttpClient();
 
@@ -60,9 +73,18 @@ export default function brandMarketsTests(getHttpClient, resetData, seedFixture)
       expect(res.body).to.deep.equal({ markets: [] });
     });
 
-    it('returns 404 for a brand that does not belong to the organization', async () => {
+    it('returns 404 for an unknown brand', async () => {
       const http = getHttpClient();
       const res = await http.admin.get(`/v2/orgs/${ORG_1_ID}/brands/${NON_EXISTENT_BRAND_ID}/markets`);
+      expect(res.status).to.equal(404);
+    });
+
+    it('returns 404 for a brand owned by a different organization (org-scoped resolve)', async () => {
+      // BRAND_1 belongs to ORG_1; requested under ORG_2 it must not resolve.
+      // admin bypasses the org-access gate, so this exercises resolveBrandUuid's
+      // org scoping rather than the auth gate.
+      const http = getHttpClient();
+      const res = await http.admin.get(`/v2/orgs/${ORG_2_ID}/brands/${BRAND_1_ID}/markets`);
       expect(res.status).to.equal(404);
     });
 

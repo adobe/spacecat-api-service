@@ -18,9 +18,8 @@ import { marketForGeoTargetId } from './locations.js';
 
 /**
  * Builds the response body for the S2S "brand's Serenity markets" endpoint
- * (PR1 of a 2-PR feature; PR2 adds the controller that reads rows from the DB
- * and calls this) from `BrandSemrushProject` rows. Pure — no DB/IO — so the
- * controller owns the DB read and passes the rows in here.
+ * from `BrandSemrushProject` rows. Pure — no DB/IO — so the controller owns
+ * the DB read and passes the rows in here.
  *
  * Whole-countries-only: each row's `geoTargetId` (a Google Ads
  * Geo Target ID) is converted to an ISO 3166-1 alpha-2 region code via
@@ -44,26 +43,31 @@ import { marketForGeoTargetId } from './locations.js';
  * @param {Array<object>} [rows] - `BrandSemrushProject` rows (or row-likes)
  *   exposing `getGeoTargetId()` and `getLanguageCode()`.
  * @param {{ warn?: Function }} [log] - logger; `warn` is called once, after
- *   the loop, with a summary count of the rows skipped.
+ *   the loop, with the count and skipped `geoTargetId`s.
+ * @param {{ brandId?: string }} [options] - optional context; `brandId` is
+ *   included in the skip warning so an operator can correlate to a row.
  * @returns {{ markets: Array<{
  *   region: string,
  *   languageCode: string,
  *   geoTargetId: number,
  * }> }}
  */
-export function buildBrandMarketsResponse(rows, log) {
+export function buildBrandMarketsResponse(rows, log, { brandId } = {}) {
   if (!Array.isArray(rows) || rows.length === 0) {
     return { markets: [] };
   }
 
   const markets = [];
-  let skipped = 0;
+  const skippedGeoTargetIds = [];
   for (const row of rows) {
     const geoTargetId = row.getGeoTargetId();
     const region = marketForGeoTargetId(geoTargetId);
-    const languageCode = row.getLanguageCode();
-    if (region === null || !hasText(languageCode) || !languageCode.trim()) {
-      skipped += 1;
+    const rawLanguageCode = row.getLanguageCode();
+    // BCP-47 primary subtag: trim so a padded value like " en " is emitted
+    // as "en" rather than passed through untrimmed.
+    const languageCode = hasText(rawLanguageCode) ? rawLanguageCode.trim() : '';
+    if (region === null || !languageCode) {
+      skippedGeoTargetIds.push(geoTargetId);
       // eslint-disable-next-line no-continue
       continue;
     }
@@ -73,9 +77,11 @@ export function buildBrandMarketsResponse(rows, log) {
       geoTargetId,
     });
   }
-  if (skipped > 0) {
+  if (skippedGeoTargetIds.length > 0) {
     log?.warn?.(
-      `buildBrandMarketsResponse: skipped ${skipped} row(s) with a non-country geoTargetId or missing languageCode`,
+      `buildBrandMarketsResponse: skipped ${skippedGeoTargetIds.length} row(s)`
+      + `${brandId ? ` for brand ${brandId}` : ''} with a non-country geoTargetId`
+      + ` or missing languageCode (geoTargetIds: ${skippedGeoTargetIds.join(', ')})`,
     );
   }
   return { markets };

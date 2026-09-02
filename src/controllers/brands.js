@@ -1119,6 +1119,9 @@ function BrandsController(ctx, log, env) {
       if (organization.status) {
         return organization;
       }
+      // Admitted either by the admin bypass or by org membership
+      // (`authInfo.hasOrganization` / the token's `tenants` claim) — the latter
+      // is how the S2S consumer's customer-scoped token reaches this read.
       if (!await accessControlUtil.hasAccess(organization)) {
         return forbidden('User does not have access to this organization');
       }
@@ -1143,7 +1146,7 @@ function BrandsController(ctx, log, env) {
       // (buildBrandMarketsResponse's JSDoc return type, unlike the untyped/`any`
       // values other ok(...) call sites in this file pass) fails `tsc` strict
       // type-check. Byte-for-byte identical response.
-      return createResponse(buildBrandMarketsResponse(liveRows, log), 200);
+      return createResponse(buildBrandMarketsResponse(liveRows, log, { brandId }), 200);
     } catch (error) {
       log.error(`Error getting markets for brand ${brandId} in organization ${spaceCatId}:`, error);
       return createErrorResponse(error, reqCtxOf(context));

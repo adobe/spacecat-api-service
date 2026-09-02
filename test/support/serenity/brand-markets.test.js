@@ -105,6 +105,28 @@ describe('brand-markets.js — buildBrandMarketsResponse', () => {
     expect(log.warn.firstCall.args[0]).to.match(/skipped 3 row/);
   });
 
+  it('trims a padded languageCode before emitting it', () => {
+    const rows = [makeRow({ geoTargetId: 2356, languageCode: ' en ' })];
+
+    const result = buildBrandMarketsResponse(rows, log);
+
+    expect(result.markets).to.deep.equal([
+      { region: 'IN', languageCode: 'en', geoTargetId: 2356 },
+    ]);
+    expect(log.warn).not.to.have.been.called;
+  });
+
+  it('includes the brandId and skipped geoTargetIds in the skip warning', () => {
+    const rows = [makeRow({ geoTargetId: 1023191, languageCode: 'en' })];
+
+    buildBrandMarketsResponse(rows, log, { brandId: 'brand-xyz' });
+
+    expect(log.warn).to.have.been.calledOnce;
+    const msg = log.warn.firstCall.args[0];
+    expect(msg).to.include('brand-xyz');
+    expect(msg).to.include('1023191');
+  });
+
   it('returns an empty markets array for an empty rows array', () => {
     expect(buildBrandMarketsResponse([], log)).to.deep.equal({ markets: [] });
     expect(log.warn).not.to.have.been.called;
