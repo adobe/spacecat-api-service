@@ -18,39 +18,18 @@ import { marketForGeoTargetId } from './locations.js';
 
 /**
  * Builds the response body for the S2S "brand's Serenity markets" endpoint
- * from `BrandSemrushProject` rows. Pure — no DB/IO — so the controller owns
- * the DB read and passes the rows in here.
+ * from `BrandSemrushProject` rows. Pure (no DB/IO); the controller reads the
+ * rows and passes them in.
  *
- * Whole-countries-only: each row's `geoTargetId` (a Google Ads
- * Geo Target ID) is converted to an ISO 3166-1 alpha-2 region code via
- * {@link marketForGeoTargetId}, which only inverts the country formula
- * (`criterion_id = 2000 + ISO numeric`) — see locations.js. A geoTargetId
- * that is not a whole country (city/region/postal code, etc.) has no ISO
- * region to report; rather than mislabel it, the row is SKIPPED. A row with
- * a blank `languageCode` is skipped for the same reason — the schema
- * requires a non-empty string, so emitting `null` would violate the
- * contract. Skipped rows are counted and reported in a single summarized
- * warn after the loop, rather than one log line per row. Sub-national geo
- * support is a follow-up, not a silent fallback here.
+ * Each row's `geoTargetId` maps to an ISO 3166-1 alpha-2 region via
+ * {@link marketForGeoTargetId}. Whole countries only: a non-country
+ * `geoTargetId` or a blank `languageCode` is skipped rather than mislabeled,
+ * and the skipped rows are reported in a single warn.
  *
- * The `BrandSemrushProject` store has no `status` or `siteId` column (only
- * `brandId`, `semrushProjectId`, `geoTargetId`, `languageCode`, plus the
- * `deletedAt` soft-delete tombstone) — "live" status exists only in the
- * IMS-gated Semrush listing, which this S2S endpoint cannot reach — so
- * neither field is part of the response shape. Soft-delete filtering
- * (`deletedAt`) is the caller's DB-read concern, not this builder's.
- *
- * @param {Array<object>} [rows] - `BrandSemrushProject` rows (or row-likes)
- *   exposing `getGeoTargetId()` and `getLanguageCode()`.
- * @param {{ warn?: Function }} [log] - logger; `warn` is called once, after
- *   the loop, with the count and skipped `geoTargetId`s.
- * @param {{ brandId?: string }} [options] - optional context; `brandId` is
- *   included in the skip warning so an operator can correlate to a row.
- * @returns {{ markets: Array<{
- *   region: string,
- *   languageCode: string,
- *   geoTargetId: number,
- * }> }}
+ * @param {Array<object>} [rows] - rows exposing `getGeoTargetId()` and `getLanguageCode()`.
+ * @param {{ warn?: Function }} [log] - logger; `warn` is called once with the skipped count.
+ * @param {{ brandId?: string }} [options] - `brandId` is included in the skip warning.
+ * @returns {{ markets: Array<{ region: string, languageCode: string, geoTargetId: number }> }}
  */
 export function buildBrandMarketsResponse(rows, log, { brandId } = {}) {
   if (!Array.isArray(rows) || rows.length === 0) {
