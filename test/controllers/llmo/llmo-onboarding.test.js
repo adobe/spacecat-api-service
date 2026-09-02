@@ -4477,12 +4477,12 @@ describe('LLMO Onboarding Functions', () => {
       expect(brand.v1SiteId).to.equal('site-123');
       expect(brand.baseUrl).to.equal('https://www.example.com');
       expect(brand.urls).to.deep.equal([{ value: 'https://www.example.com', type: 'base' }]);
-      expect(brand.brandAliases).to.deep.equal([{ name: 'Test Brand', regions: ['gl'] }]);
+      expect(brand.brandAliases).to.deep.equal([{ name: 'Test Brand', regions: ['US'] }]);
       expect(brand.updatedBy).to.equal('tester@example.com');
       expect(brand.prompts).to.deep.equal([]);
     });
 
-    it('seeds the operator-selected market in place of the gl placeholder (LLMO-5645)', async () => {
+    it('seeds the operator-selected market in place of the default US placeholder (LLMO-5645)', async () => {
       const { buildInitialCustomerConfigV2 } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {});
 
       const result = buildInitialCustomerConfigV2({
@@ -4679,9 +4679,9 @@ describe('LLMO Onboarding Functions', () => {
       expect(newBrand.baseUrl).to.equal('https://www.example.com');
       expect(newBrand.status).to.equal('active');
       expect(newBrand.origin).to.equal('system');
-      expect(newBrand.regions).to.deep.equal(['gl']);
+      expect(newBrand.regions).to.deep.equal(['US']);
       expect(newBrand.urls).to.deep.equal([{ value: 'https://www.example.com', type: 'base' }]);
-      expect(newBrand.brandAliases).to.deep.equal([{ name: 'New Brand', regions: ['gl'] }]);
+      expect(newBrand.brandAliases).to.deep.equal([{ name: 'New Brand', regions: ['US'] }]);
 
       expect(mockCustomerConfigV2Storage.writeCustomerConfigV2ToPostgres).to.have.been.calledOnce;
       expect(mockCustomerConfigV2Storage.writeCustomerConfigV2ToPostgres.firstCall.args[0])

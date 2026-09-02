@@ -19,6 +19,7 @@ import {
   SERENITY_FEATURE_FLAG_NAME,
   SERENITY_FEATURE_FLAG_PRODUCT,
 } from './serenity/serenity-active.js';
+import { sanitizeRegions } from './customer-config-mapper.js';
 
 // Upper bound for the active-brand duplicate scan (LLMO-7284). Comfortably above
 // any realistic active-brands-per-org count. It makes a silent PostgREST
@@ -556,7 +557,7 @@ async function syncSocialAccounts(brandId, organizationId, socialAccounts, postg
       organization_id: organizationId,
       brand_id: brandId,
       url: s.url,
-      regions: s.regions || [],
+      regions: sanitizeRegions(s.regions),
       updated_by: updatedBy,
     }));
   await replaceChildRows('brand_social_accounts', brandId, rows, 'brand_id,url', postgrestClient);
@@ -580,7 +581,7 @@ async function syncEarnedSources(brandId, organizationId, earnedContent, postgre
       brand_id: brandId,
       name: e.name,
       url: e.url,
-      regions: e.regions || [],
+      regions: sanitizeRegions(e.regions),
       updated_by: updatedBy,
     }));
   await replaceChildRows('brand_earned_sources', brandId, rows, 'brand_id,url', postgrestClient);
@@ -598,7 +599,10 @@ async function syncAliases(brandId, organizationId, brandAliases, postgrestClien
   }
   const seen = new Set();
   const rows = (brandAliases || [])
-    .map((a) => ({ alias: typeof a === 'string' ? a : a?.name, regions: a?.regions || [] }))
+    .map((a) => ({
+      alias: typeof a === 'string' ? a : a?.name,
+      regions: sanitizeRegions(a?.regions),
+    }))
     .filter((a) => hasText(a.alias) && !seen.has(a.alias) && seen.add(a.alias))
     .map((a) => ({
       organization_id: organizationId,
@@ -626,7 +630,7 @@ async function syncCompetitors(brandId, organizationId, competitors, postgrestCl
       name: typeof c === 'string' ? c : c?.name,
       url: c?.url || null,
       aliases: Array.isArray(c?.aliases) ? c.aliases : [],
-      regions: c?.regions || [],
+      regions: sanitizeRegions(c?.regions),
     }))
     .filter((c) => hasText(c.name) && !seen.has(c.name) && seen.add(c.name))
     .map((c) => ({
@@ -1259,8 +1263,7 @@ export async function upsertBrand({
     throw new Error('Brand name is required');
   }
 
-  const regions = (brand.region || [])
-    .map((r) => (typeof r === 'string' ? r : String(r))).filter(hasText);
+  const regions = sanitizeRegions(brand.region);
 
   // Check if a non-deleted brand already exists with this name. Soft-deleted
   // brands are excluded (.neq('status', 'deleted')) so that creating a brand
@@ -1653,8 +1656,7 @@ export async function updateBrand({
   }
 
   if (updates.region !== undefined) {
-    patch.regions = (updates.region || [])
-      .map((r) => (typeof r === 'string' ? r : String(r))).filter(hasText);
+    patch.regions = sanitizeRegions(updates.region);
   }
 
   // Clear legacy columns on any brand update so old data doesn't linger.
