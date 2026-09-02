@@ -90,6 +90,7 @@ describe('LlmoAkamaiController', () => {
         { propertyId: PROPERTY_ID, propertyName: 'example', matchedOn: ['hostname'] },
       ]),
       getLatestVersion: sandbox.stub().resolves(7),
+      getLatestVersionActivatedOn: sandbox.stub(),
       getRuleTree: sandbox.stub().resolves({ ruleTree: RULE_TREE, ruleFormat: 'v2024-01-01', etag: 'etag-7' }),
       createVersion: sandbox.stub().resolves(8),
       updateRuleTree: sandbox.stub().resolves({ errors: [], warnings: [] }),
@@ -113,6 +114,13 @@ describe('LlmoAkamaiController', () => {
     // the freshly-fetched version's etag, not a stale one from the latest-version (v7) lookup.
     mockAkamaiClient.getRuleTree.withArgs(PROPERTY_ID, 8)
       .resolves({ ruleTree: RULE_TREE, ruleFormat: 'v2024-01-01', etag: 'etag-8' });
+
+    // Bounded active-version lookup: STAGING active on v7, PRODUCTION active on v5 (matches the
+    // default listActivations fixture above). undefined => never activated on that network.
+    mockAkamaiClient.getLatestVersionActivatedOn
+      .withArgs(PROPERTY_ID, CONTRACT_ID, GROUP_ID, 'STAGING').resolves({ propertyVersion: 7 });
+    mockAkamaiClient.getLatestVersionActivatedOn
+      .withArgs(PROPERTY_ID, CONTRACT_ID, GROUP_ID, 'PRODUCTION').resolves({ propertyVersion: 5 });
 
     mockTokowakaClient = {
       fetchMetaconfig: sandbox.stub().resolves({ apiKeys: [LLMO_API_KEY] }),
@@ -945,62 +953,52 @@ describe('LlmoAkamaiController', () => {
   });
 
   describe('getVersions', () => {
-    it('returns the latest version and the ACTIVE activation per network', async () => {
+    it('returns the latest version and the active version per network', async () => {
       const res = await controller.getVersions(withData(propertyRef));
       const body = await res.json();
       expect(res.status).to.equal(200);
       expect(body.propertyId).to.equal(PROPERTY_ID);
       expect(body.latestVersion).to.equal(7);
-      expect(body.active.STAGING.propertyVersion).to.equal(7);
-      expect(body.active.PRODUCTION.propertyVersion).to.equal(5);
-      expect(mockAkamaiClient.listActivations)
-        .to.have.been.calledWith(PROPERTY_ID, CONTRACT_ID, GROUP_ID);
+      expect(body.active.STAGING).to.deep.equal({
+        activationId: null, propertyVersion: 7, network: 'STAGING', status: 'ACTIVE',
+      });
+      expect(body.active.PRODUCTION).to.deep.equal({
+        activationId: null, propertyVersion: 5, network: 'PRODUCTION', status: 'ACTIVE',
+      });
     });
 
-    it('omits a network that has no ACTIVE activation', async () => {
-      mockAkamaiClient.listActivations.resolves([
-        {
-          activationId: 'atv_s', status: 'ACTIVE', network: 'STAGING', propertyVersion: 7,
-        },
-        {
-          activationId: 'atv_p', status: 'PENDING', network: 'PRODUCTION', propertyVersion: 6,
-        },
-      ]);
+    it('uses the bounded active-version lookup and never loads the full activation history', async () => {
+      await controller.getVersions(withData(propertyRef));
+      expect(mockAkamaiClient.getLatestVersionActivatedOn)
+        .to.have.been.calledWith(PROPERTY_ID, CONTRACT_ID, GROUP_ID, 'STAGING');
+      expect(mockAkamaiClient.getLatestVersionActivatedOn)
+        .to.have.been.calledWith(PROPERTY_ID, CONTRACT_ID, GROUP_ID, 'PRODUCTION');
+      expect(mockAkamaiClient.listActivations).to.not.have.been.called;
+    });
+
+    it('omits a network that was never activated', async () => {
+      mockAkamaiClient.getLatestVersionActivatedOn
+        .withArgs(PROPERTY_ID, CONTRACT_ID, GROUP_ID, 'PRODUCTION').resolves(undefined);
       const res = await controller.getVersions(withData(propertyRef));
       const body = await res.json();
       expect(body.active.STAGING.propertyVersion).to.equal(7);
       expect(body.active.PRODUCTION).to.be.undefined;
     });
 
-    it('returns an empty active map when nothing is active', async () => {
-      mockAkamaiClient.listActivations.resolves([
-        {
-          activationId: 'atv_p', status: 'DEACTIVATED', network: 'PRODUCTION', propertyVersion: 4,
-        },
-      ]);
+    it('returns an empty active map when neither network has an active version', async () => {
+      mockAkamaiClient.getLatestVersionActivatedOn
+        .withArgs(PROPERTY_ID, CONTRACT_ID, GROUP_ID, 'STAGING').resolves(undefined);
+      mockAkamaiClient.getLatestVersionActivatedOn
+        .withArgs(PROPERTY_ID, CONTRACT_ID, GROUP_ID, 'PRODUCTION').resolves(undefined);
       const res = await controller.getVersions(withData(propertyRef));
       const body = await res.json();
       expect(body.active).to.deep.equal({});
     });
 
-    it('keeps the first ACTIVE activation per network (does not overwrite with a later one)', async () => {
-      // Two ACTIVE STAGING entries (should not happen per Akamai's one-active-per-network rule):
-      // the first seen wins; a later one must not silently overwrite it.
-      mockAkamaiClient.listActivations.resolves([
-        {
-          activationId: 'atv_first', status: 'ACTIVE', network: 'STAGING', propertyVersion: 9,
-        },
-        {
-          activationId: 'atv_second', status: 'ACTIVE', network: 'STAGING', propertyVersion: 6,
-        },
-      ]);
-      const res = await controller.getVersions(withData(propertyRef));
-      const body = await res.json();
-      expect(body.active.STAGING.propertyVersion).to.equal(9);
-    });
-
     it('maps a PAPI failure to 502', async () => {
-      mockAkamaiClient.listActivations.rejects(new Error('PAPI GET /activations -> 500: oops'));
+      mockAkamaiClient.getLatestVersionActivatedOn
+        .withArgs(PROPERTY_ID, CONTRACT_ID, GROUP_ID, 'STAGING')
+        .rejects(new Error('PAPI GET /versions/latest -> 500: oops'));
       const res = await controller.getVersions(withData(propertyRef));
       expect(res.status).to.equal(502);
     });
