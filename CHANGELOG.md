@@ -1,3 +1,10 @@
+# [1.784.0](https://github.com/adobe/spacecat-api-service/compare/v1.783.0...v1.784.0) (2026-09-02)
+
+
+### Features
+
+* **ai-seo:** upgrade ai-seo-ts version ([#3173](https://github.com/adobe/spacecat-api-service/issues/3173)) ([427e2ed](https://github.com/adobe/spacecat-api-service/commit/427e2ed1d18ae2dc1cb96efa16e7b25d4f2245e1))
+
 # [1.783.0](https://github.com/adobe/spacecat-api-service/compare/v1.782.1...v1.783.0) (2026-09-02)
 
 
