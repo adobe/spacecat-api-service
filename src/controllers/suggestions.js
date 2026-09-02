@@ -1022,10 +1022,35 @@ function SuggestionsController(ctx, sqs, env) {
       return forbidden('User does not belong to the organization');
     }
 
+    // suggestionKey is a protected identity field (readOnly on the ORM schema,
+    // collision-checked only via the internal rekey_bbl_suggestion RPC used by
+    // Mystique's in-process projector). Setting it on create via this public API
+    // is restricted to callers with an explicit grant — either a scoped S2S
+    // suggestion:write capability or plain admin access Any caller without that grant has
+    // suggestionKey silently dropped rather than erroring, so ordinary suggestion
+    // creation (the overwhelmingly common case) is unaffected.
+    const suggKeyS2SResult = await accessControlUtil.hasS2SCapability(CAP_SUGGESTION_WRITE);
+    const canSetSuggestionKey = suggKeyS2SResult.allowed || accessControlUtil.hasAdminAccess();
+
     const suggestionPromises = context.data.map(async (suggData, index) => {
       try {
         // eslint-disable-next-line no-param-reassign
         suggData.opportunityId = opptyId;
+
+        if (hasText(suggData.suggestionKey)) {
+          if (!canSetSuggestionKey) {
+            // eslint-disable-next-line no-param-reassign
+            delete suggData.suggestionKey;
+          } else if (!suggData.suggestionKey.startsWith(`site:${siteId}:`)) {
+            // Check to make sure the suggestionKey is scoped to the correct site
+            return {
+              index,
+              message: `suggestionKey must be scoped to site ${siteId}`,
+              statusCode: 400,
+            };
+          }
+        }
+
         const suggestionEntity = await Suggestion.create(suggData);
         return {
           index,
