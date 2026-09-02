@@ -1985,6 +1985,96 @@ llmo-brand-claims:
     security:
       - api_key: [ ]
 
+llmo-brand-claims-request:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  post:
+    tags:
+      - llmo
+    summary: Request an on-demand Brand Claims run
+    description: |
+      Triggers a single, on-demand Brand Claims pipeline run for the site
+      (LLMO-7263), bypassing the persistent weekly cadence. Intended for trial
+      customers who have no Brand Claims data yet and want to generate it once.
+
+      The request enqueues a `brand-claims` audit (which republishes the DRS
+      brand-presence ready-signal with `onDemand: true`); results appear once the
+      downstream claims pipeline completes.
+
+      Rate limited to **once per 7 days per site**: the last `brand-claims` audit's
+      timestamp is the cooldown anchor. A request inside the window returns `429`
+      with the `availableAt` timestamp and a `Retry-After` header. The request body
+      is empty.
+    operationId: requestBrandClaims
+    requestBody:
+      required: false
+      content:
+        application/json:
+          schema:
+            type: object
+            description: No body is required; any payload is ignored.
+    responses:
+      '202':
+        description: Brand Claims run accepted and enqueued
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                siteId:
+                  type: string
+                  format: uuid
+                  description: The site the run was requested for
+                  example: '9ae8877a-bbf3-407d-9adb-d6a72ce3c5e3'
+                message:
+                  type: string
+                  example: 'Brand Claims run requested; results appear once the pipeline completes.'
+              required:
+                - siteId
+                - message
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        description: >
+          Cooldown active — a Brand Claims run was requested for this site within
+          the last 7 days.
+        headers:
+          Retry-After:
+            description: Seconds until a new run can be requested.
+            required: true
+            schema:
+              type: integer
+              example: 432000
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                siteId:
+                  type: string
+                  format: uuid
+                  example: '9ae8877a-bbf3-407d-9adb-d6a72ce3c5e3'
+                availableAt:
+                  type: string
+                  format: date-time
+                  description: ISO 8601 timestamp when a new run can be requested
+                  example: '2026-09-09T12:00:00.000Z'
+                message:
+                  type: string
+                  example: 'A Brand Claims run was requested recently; a new run can be requested once per 7 days.'
+              required:
+                - siteId
+                - availableAt
+                - message
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
 llmo-opportunity-workspace-demo-brand-presence:
   parameters:
     - $ref: './parameters.yaml#/siteId'

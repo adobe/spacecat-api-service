@@ -721,6 +721,7 @@ const routeRequiredCapabilities = {
   'GET /sites/:siteId/llmo/edge-optimize-status': 'site:read',
   'GET /sites/:siteId/llmo/probes/edge-optimize': 'site:read',
   'GET /sites/:siteId/llmo/brand-claims': 'site:read',
+  'POST /sites/:siteId/llmo/brand-claims/request': 'site:write',
   'GET /sites/:siteId/llmo/strategy/demo/brand-presence': 'site:read',
   'GET /sites/:siteId/llmo/strategy/demo/recommendations': 'site:read',
   'GET /llmo/agentic-traffic/global': 'report:read',

@@ -1,3 +1,46 @@
+## [1.784.1](https://github.com/adobe/spacecat-api-service/compare/v1.784.0...v1.784.1) (2026-09-02)
+
+
+### Bug Fixes
+
+* **serenity:** repair auto-created alias casing ([#3178](https://github.com/adobe/spacecat-api-service/issues/3178)) ([e89b7e1](https://github.com/adobe/spacecat-api-service/commit/e89b7e1f77caac4b8a2f0d150ff87ac942a3133f)), closes [Hi#level](https://github.com/Hi/issues/level)
+
+# [1.784.0](https://github.com/adobe/spacecat-api-service/compare/v1.783.0...v1.784.0) (2026-09-02)
+
+
+### Features
+
+* **ai-seo:** upgrade ai-seo-ts version ([#3173](https://github.com/adobe/spacecat-api-service/issues/3173)) ([427e2ed](https://github.com/adobe/spacecat-api-service/commit/427e2ed1d18ae2dc1cb96efa16e7b25d4f2245e1))
+
+# [1.783.0](https://github.com/adobe/spacecat-api-service/compare/v1.782.1...v1.783.0) (2026-09-02)
+
+
+### Features
+
+* **llmo:** on-demand Brand Claims request endpoint + 7-day cooldown (LLMO-7263) ([#3169](https://github.com/adobe/spacecat-api-service/issues/3169)) ([165fea9](https://github.com/adobe/spacecat-api-service/commit/165fea9197532518aadfd694300492460af9de7b))
+
+## [1.782.1](https://github.com/adobe/spacecat-api-service/compare/v1.782.0...v1.782.1) (2026-09-02)
+
+
+### Bug Fixes
+
+* **llmo:** prevent GL from being stored as a brand region ([#3172](https://github.com/adobe/spacecat-api-service/issues/3172)) ([da08d3b](https://github.com/adobe/spacecat-api-service/commit/da08d3b17c78abce62b2d895889629b5bf378eb4)), closes [Hi#level](https://github.com/Hi/issues/level)
+* **serenity:** make siteId authoritative over brandDomain in Add Market ([#3167](https://github.com/adobe/spacecat-api-service/issues/3167)) ([e79c4fe](https://github.com/adobe/spacecat-api-service/commit/e79c4feb840353ec116f2a0cbc3959d4b82867b1)), closes [Hi#level](https://github.com/Hi/issues/level)
+
+# [1.782.0](https://github.com/adobe/spacecat-api-service/compare/v1.781.1...v1.782.0) (2026-09-01)
+
+
+### Features
+
+* **suggestions:** gate suggestionKey write-on-create behind admin/S2S ([#3174](https://github.com/adobe/spacecat-api-service/issues/3174)) ([08e3e09](https://github.com/adobe/spacecat-api-service/commit/08e3e0972c55369da8047c6bf66f053e12d3286c))
+
+## [1.781.1](https://github.com/adobe/spacecat-api-service/compare/v1.781.0...v1.781.1) (2026-09-01)
+
+
+### Bug Fixes
+
+* **deps:** bump spacecat-shared-scrape-client to 2.7.2 for PRE_ONBOARD tier ([#3171](https://github.com/adobe/spacecat-api-service/issues/3171)) ([45ebc67](https://github.com/adobe/spacecat-api-service/commit/45ebc67e187c16ecef3c50a9937b9bc6c49e491c)), closes [#1904](https://github.com/adobe/spacecat-api-service/issues/1904) [Hi#level](https://github.com/Hi/issues/level) [#1904](https://github.com/adobe/spacecat-api-service/issues/1904) [#1904](https://github.com/adobe/spacecat-api-service/issues/1904)
+
 # [1.781.0](https://github.com/adobe/spacecat-api-service/compare/v1.780.2...v1.781.0) (2026-09-01)
 
 

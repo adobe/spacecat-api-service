@@ -317,6 +317,35 @@ export async function seedBrandMarketsFixture() {
 }
 
 /**
+ * Seeds a single recent `brand-claims` Audit row for `siteId` — the timestamp the
+ * on-demand Brand Claims request cooldown (LLMO-7263) reads via
+ * `Site.getLatestAuditByAuditType('brand-claims')`. Returns the ISO `auditedAt`
+ * used so a test can assert the derived `availableAt` (= auditedAt + 7 days).
+ *
+ * Kept out of the baseline seed so it doesn't perturb the audit-count assertions
+ * in the shared Audits suite (SITE_1 there is asserted to have exactly 3 audits).
+ * Seed it only after resetPostgres(); cleared by the next suite's clearData.
+ *
+ * @param {string} siteId - Site to attach the audit to.
+ * @param {{ agoMs?: number }} [opts] - How long ago the audit ran (default 1h).
+ * @returns {Promise<string>} The ISO `auditedAt` used.
+ */
+export async function seedRecentBrandClaimsAudit(siteId, { agoMs = 60 * 60 * 1000 } = {}) {
+  const auditedAt = new Date(Date.now() - agoMs).toISOString();
+  await insertRows('audits', [{
+    id: 'bc111111-bc11-4c11-bc11-bc1111111111',
+    site_id: siteId,
+    audit_type: 'brand-claims',
+    audit_result: { onDemand: true, week: 36, year: 2026 },
+    full_audit_ref: 'brand-claims/it-seed',
+    is_live: true,
+    is_error: false,
+    audited_at: auditedAt,
+  }]);
+  return auditedAt;
+}
+
+/**
  * Resets the PostgreSQL database: truncates all tables, then re-seeds baseline.
  * Called by each test suite in before() for full isolation.
  */

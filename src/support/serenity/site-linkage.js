@@ -389,6 +389,76 @@ export async function resolveSiteIdentity(dataAccess, siteId, log, organizationI
 }
 
 /**
+ * Decides which identity source becomes a market's Semrush project domain +
+ * primary URL. A supplied siteId is authoritative: when one was supplied, its
+ * resolved Site identity wins, even alongside a caller-supplied brandDomain
+ * that differs from it — a brandDomain that merely differs from the market's
+ * Site is the normal, intended Add Market shape and is never compared or
+ * rejected as a mismatch. brandDomain is consulted ONLY when no siteId was
+ * supplied at all. A siteId that was supplied but did not resolve is a hard
+ * failure — this returns nulls in that case rather than silently falling
+ * back to brandDomain; callers reject nulls with a 400.
+ *
+ * @param {{ domain: string|null, primaryUrl: string|null }|null} siteIdentity -
+ *   the already-resolved identity from `resolveSiteIdentity`, or null.
+ * @param {boolean} siteIdSupplied - whether the caller supplied a siteId at
+ *   all, independent of whether it resolved. Distinguishes "no siteId" (fall
+ *   back to brandDomain) from "siteId supplied but unresolved" (hard fail).
+ * @param {string|null|undefined} brandDomain - caller-supplied brandDomain.
+ * @param {string|null|undefined} primaryUrl - caller-supplied primaryUrl.
+ * @returns {{ domain: string|null, primaryUrl: string|null }}
+ */
+export function resolveMarketIdentity(siteIdentity, siteIdSupplied, brandDomain, primaryUrl) {
+  if (siteIdSupplied) {
+    return {
+      domain: siteIdentity?.domain ?? null,
+      primaryUrl: siteIdentity?.primaryUrl ?? null,
+    };
+  }
+  if (brandDomain && hasText(brandDomain)) {
+    const source = primaryUrl && hasText(primaryUrl) ? primaryUrl : brandDomain;
+    return {
+      domain: brandDomain,
+      primaryUrl: siteIdentityFromUrlString(source),
+    };
+  }
+  return { domain: null, primaryUrl: null };
+}
+
+/**
+ * Emits the Add Market success telemetry event, shared by the flat and
+ * sub-workspace create-market paths so the field list exists once — ops needs
+ * to know, after the fact, what identity source a given call resolved to and
+ * whether prompt generation was requested and how many prompts it produced.
+ *
+ * @param {{ info?: (...args: unknown[]) => void }|undefined} log
+ * @param {{
+ *   brandId: string, geoTargetId: number, languageCode: string|null,
+ *   siteId: string|null, brandDomain: string|null, primaryUrl: string|null,
+ *   semrushWorkspaceId: string, semrushProjectId: string,
+ *   generatePrompts: boolean, promptCount?: number,
+ * }} fields
+ */
+export function logMarketCreated(log, fields) {
+  const {
+    brandId, geoTargetId, languageCode, siteId, brandDomain, primaryUrl,
+    semrushWorkspaceId, semrushProjectId, generatePrompts, promptCount,
+  } = fields;
+  log?.info?.('serenity create-market: market created', {
+    brandId,
+    geoTargetId,
+    languageCode,
+    siteId,
+    brandDomain,
+    primaryUrl,
+    semrushWorkspaceId,
+    semrushProjectId,
+    generatePrompts,
+    ...(generatePrompts ? { promptCount } : {}),
+  });
+}
+
+/**
  * R12 (LLMO-6405): removes the brand_sites `type='serenity'` link for `siteId`
  * when the DELETED market was the LAST live market on that site — so a site that
  * no longer backs any market is not left orphaned in `brand_sites`. Reference-
