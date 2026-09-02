@@ -63,8 +63,7 @@ export function buildBrandMarketsResponse(rows, log, { brandId } = {}) {
     const geoTargetId = row.getGeoTargetId();
     const region = marketForGeoTargetId(geoTargetId);
     const rawLanguageCode = row.getLanguageCode();
-    // BCP-47 primary subtag: trim so a padded value like " en " is emitted
-    // as "en" rather than passed through untrimmed.
+    // trim so a padded " en " is emitted as "en" (BCP-47 primary subtag)
     const languageCode = hasText(rawLanguageCode) ? rawLanguageCode.trim() : '';
     if (region === null || !languageCode) {
       skippedGeoTargetIds.push(geoTargetId);

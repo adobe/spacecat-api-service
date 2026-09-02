@@ -1119,9 +1119,7 @@ function BrandsController(ctx, log, env) {
       if (organization.status) {
         return organization;
       }
-      // Admitted either by the admin bypass or by org membership
-      // (`authInfo.hasOrganization` / the token's `tenants` claim) — the latter
-      // is how the S2S consumer's customer-scoped token reaches this read.
+      // hasAccess = admin bypass OR org membership (the S2S token's `tenants` claim).
       if (!await accessControlUtil.hasAccess(organization)) {
         return forbidden('User does not have access to this organization');
       }

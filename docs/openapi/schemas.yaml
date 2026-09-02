@@ -8220,12 +8220,10 @@ BrandMarket:
     - languageCode
     - geoTargetId
   properties:
+    # Whole-country only today; sub-national geo would land as a new field, not an overload of region.
     region:
       type: string
-      description: >-
-        ISO 3166-1 alpha-2 country code. Whole-country only today; sub-national
-        geo (city/region/postal) is future work and, when it lands, will be a
-        new field rather than an overload of `region`.
+      description: ISO 3166-1 alpha-2 country code.
       example: 'IN'
     languageCode:
       type: string
