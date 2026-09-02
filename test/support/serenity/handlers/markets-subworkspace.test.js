@@ -638,7 +638,7 @@ describe('markets-subworkspace handlers', () => {
       expect(transport.publishProject).to.have.been.called;
     });
 
-    it('does not touch the brand-URL API when there are no sources', async () => {
+    it('resolves the own-brand benchmark without writing brand URLs when there are no sources', async () => {
       const transport = makeTransport();
       await handleCreateMarketSubworkspace(transport, makeBrand(), PARENT, createBody, log);
       expect(transport.listBenchmarks).to.have.been.calledOnceWith(WS, 'new-proj');
@@ -698,6 +698,7 @@ describe('markets-subworkspace handlers', () => {
       await expect(
         handleCreateMarketSubworkspace(transport, makeBrand(), PARENT, createBody, log),
       ).to.be.rejectedWith(/recase failed/);
+      expect(transport.updateBenchmark).to.have.been.calledThrice;
       expect(transport.publishProject).to.not.have.been.called;
     });
 

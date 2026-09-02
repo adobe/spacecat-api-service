@@ -182,7 +182,7 @@ function lowercaseAliasPlan(aliases) {
       recased.push(lowercase);
     }
   }
-  return { withoutAffected, recased };
+  return { original: stored, withoutAffected, recased };
 }
 
 function benchmarkUpdateBody(benchmark, brand, brandAliases) {
@@ -214,12 +214,29 @@ async function repairBenchmarkAliasCase(transport, workspaceId, projectId, bench
     benchmark.id,
     benchmarkUpdateBody(benchmark, brand, plan.withoutAffected),
   );
-  await transport.updateBenchmark(
-    workspaceId,
-    projectId,
-    benchmark.id,
-    benchmarkUpdateBody(benchmark, brand, plan.recased),
-  );
+  try {
+    await transport.updateBenchmark(
+      workspaceId,
+      projectId,
+      benchmark.id,
+      benchmarkUpdateBody(benchmark, brand, plan.recased),
+    );
+  } catch (repairError) {
+    try {
+      await transport.updateBenchmark(
+        workspaceId,
+        projectId,
+        benchmark.id,
+        benchmarkUpdateBody(benchmark, brand, plan.original),
+      );
+    } catch (rollbackError) {
+      throw new AggregateError(
+        [repairError, rollbackError],
+        'Benchmark alias repair and rollback both failed',
+      );
+    }
+    throw repairError;
+  }
 }
 
 /**
