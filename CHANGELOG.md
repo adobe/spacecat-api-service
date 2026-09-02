@@ -1,3 +1,10 @@
+## [1.784.3](https://github.com/adobe/spacecat-api-service/compare/v1.784.2...v1.784.3) (2026-09-02)
+
+
+### Bug Fixes
+
+* Aggregate Serenity brand-presence endpoints across all models when platform is omitted | LLMO-7093 ([#3094](https://github.com/adobe/spacecat-api-service/issues/3094)) ([1faa443](https://github.com/adobe/spacecat-api-service/commit/1faa443df3726444c72d085ee34b6211d3e0dbd8))
+
 ## [1.784.2](https://github.com/adobe/spacecat-api-service/compare/v1.784.1...v1.784.2) (2026-09-02)
 
 
