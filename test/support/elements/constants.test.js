@@ -15,6 +15,7 @@ import {
   ALL_PLATFORMS,
   isAllPlatforms,
   isAllModelsFilter,
+  buildAdvancedFilters,
 } from '../../../src/support/elements/constants.js';
 
 describe('elements constants', () => {
@@ -51,6 +52,28 @@ describe('elements constants', () => {
       expect(isAllModelsFilter('search-gpt')).to.equal(false);
       expect(isAllModelsFilter('openai')).to.equal(false);
       expect(isAllModelsFilter('not-a-real-model')).to.equal(false);
+    });
+  });
+
+  // Semrush rejects `advanced: { op: 'and', filters: [] }` with HTTP 422
+  // {"message":"request could not be processed"} — it does NOT treat an empty AND as
+  // "match all". Verified live 2026-09-02 against SENTIMENT (f4153af8), TRENDS_MV
+  // (b5281393) and MARKET_CITATIONS_TREND (2e5a6f4e): empty AND → 422 on all three,
+  // `advanced` key omitted → 200 on all three.
+  describe('buildAdvancedFilters', () => {
+    it('omits the advanced key entirely for an empty or absent filter list', () => {
+      expect(buildAdvancedFilters([])).to.deep.equal({});
+      expect(buildAdvancedFilters(undefined)).to.deep.equal({});
+      expect(buildAdvancedFilters(null)).to.deep.equal({});
+    });
+
+    it('wraps a non-empty filter list in an AND block', () => {
+      const f = { op: 'eq', val: 'x', col: 'CBF_tags' };
+      expect(buildAdvancedFilters([f])).to.deep.equal({ advanced: { op: 'and', filters: [f] } });
+    });
+
+    it('produces a fragment that spreads away cleanly when empty', () => {
+      expect({ simple: {}, ...buildAdvancedFilters([]) }).to.not.have.property('advanced');
     });
   });
 });

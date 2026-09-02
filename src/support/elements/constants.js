@@ -142,3 +142,31 @@ export function buildModelFilter(requestedModel, { wrap = true } = {}) {
   const eq = { op: 'eq', val: resolveElementModel(requestedModel), col: 'CBF_model' };
   return wrap ? { op: 'or', filters: [eq] } : eq;
 }
+
+/**
+ * Builds the `filters.advanced` fragment of an Elements payload, OMITTING the key entirely
+ * when there is nothing to filter on. Spread into the `filters` object by the caller.
+ *
+ * Semrush REJECTS an empty AND block: `advanced: { op: 'and', filters: [] }` returns
+ * HTTP 422 `{"message":"request could not be processed"}` — it does NOT treat it as the
+ * vacuously-true "match all". Dropping the key instead returns the unfiltered result.
+ *
+ * Verified live 2026-09-02 (brand "Asian Paints", sub-workspace c8feffff-6e58-41db-b804-
+ * 5652033dd292, 2026-08-04→2026-09-02) against all three elements that can reach the
+ * empty case — SENTIMENT (f4153af8), TRENDS_MV (b5281393) and MARKET_CITATIONS_TREND
+ * (2e5a6f4e): empty AND → 422 on every one, key omitted → 200 on every one. The 422 is
+ * caused by the empty AND itself, not by a missing required filter — an `advanced` block
+ * carrying only `CBF_model` (no `CBF_project`) returns 200.
+ *
+ * This case is reachable in production: the Overview-SR sentiment card requests
+ * "all platforms" with no region and no category, which leaves every optional filter
+ * unset (LLMO-7093).
+ *
+ * @param {object[]} [filters] - Advanced filter nodes; empty/absent → `{}`.
+ * @returns {{ advanced?: object }} Fragment to spread into `filters`.
+ */
+export function buildAdvancedFilters(filters) {
+  return Array.isArray(filters) && filters.length > 0
+    ? { advanced: { op: 'and', filters } }
+    : {};
+}

@@ -11,7 +11,7 @@
  */
 
 import { hasText } from '@adobe/spacecat-shared-utils';
-import { buildModelFilter } from '../constants.js';
+import { buildAdvancedFilters, buildModelFilter } from '../constants.js';
 import { dateToIsoWeek } from '../week-utils.js';
 
 /**
@@ -44,7 +44,9 @@ import { dateToIsoWeek } from '../week-utils.js';
  * Shape verified against the live MFE: top-level `auto_bucketing: "week"`, plain
  * `start_date`/`end_date` in `simple`, and `advanced` = model (in an `or` block) +
  * an `or` block of project ids under `projectCol`. No brand filter, no
- * `comparison_data_formatting` (the MFE omits it for these elements).
+ * `comparison_data_formatting` (the MFE omits it for these elements). When neither filter
+ * applies (all-platforms + no region), `advanced` is omitted entirely — Semrush 422s on an
+ * empty AND block (see {@link buildAdvancedFilters}).
  *
  * @param {object} params
  * @param {string} [params.model] - AI model (Semrush engine or UI platform code). Absent
@@ -79,7 +81,7 @@ function buildMarketTrendPayload({
     auto_bucketing: 'week',
     filters: {
       simple: { start_date: startDate, end_date: endDate },
-      advanced: { op: 'and', filters: advancedFilters },
+      ...buildAdvancedFilters(advancedFilters),
     },
   };
 }

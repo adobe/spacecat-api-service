@@ -10,7 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
-import { buildModelFilter } from '../constants.js';
+import { buildAdvancedFilters, buildModelFilter } from '../constants.js';
 import { dateToIsoWeek } from '../week-utils.js';
 
 // Legacy default window is a rolling 28 days (see defaultDateRange in
@@ -112,7 +112,7 @@ export function buildSentimentOverviewPayload({
     auto_bucketing: 'week',
     filters: {
       simple: { start_date: start, end_date: end },
-      advanced: { op: 'and', filters: advancedFilters },
+      ...buildAdvancedFilters(advancedFilters),
     },
   };
 }
