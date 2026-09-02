@@ -2942,6 +2942,89 @@ describe('Suggestions Controller', () => {
     expect(createResponse.suggestions[1]).to.have.property('message', 'Validation error');
   });
 
+  describe('createSuggestions suggestionKey gating', () => {
+    it('strips suggestionKey silently when caller is neither admin nor a granted S2S consumer', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(false);
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
+      sandbox.stub(AccessControlUtil.prototype, 'hasS2SCapability').resolves({ allowed: false, reason: 'not-s2s' });
+
+      suggs[0].suggestionKey = `site:${SITE_ID}:backlink:abc:referrer:def`;
+
+      const response = await suggestionsController.createSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: [suggs[0]],
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      const createResponse = await response.json();
+      expect(createResponse.suggestions[0]).to.have.property('statusCode', 201);
+      expect(mockSuggestion.create.calledOnce).to.be.true;
+      expect(mockSuggestion.create.firstCall.args[0].suggestionKey).to.be.undefined;
+    });
+
+    it('preserves a correctly site-scoped suggestionKey when caller is an admin', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(true);
+      sandbox.stub(AccessControlUtil.prototype, 'hasS2SCapability').resolves({ allowed: false, reason: 'not-s2s' });
+
+      const key = `site:${SITE_ID}:backlink:abc:referrer:def`;
+      suggs[0].suggestionKey = key;
+
+      const response = await suggestionsController.createSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: [suggs[0]],
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      const createResponse = await response.json();
+      expect(createResponse.suggestions[0]).to.have.property('statusCode', 201);
+      expect(mockSuggestion.create.calledOnce).to.be.true;
+      expect(mockSuggestion.create.firstCall.args[0].suggestionKey).to.equal(key);
+    });
+
+    it('preserves a correctly site-scoped suggestionKey when caller is a granted S2S consumer', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(false);
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
+      sandbox.stub(AccessControlUtil.prototype, 'hasS2SCapability')
+        .resolves({ allowed: true, reason: 'granted', clientId: 'svc-suggestions', consumerId: 'consumer-1' });
+
+      const key = `site:${SITE_ID}:backlink:abc:referrer:def`;
+      suggs[0].suggestionKey = key;
+
+      const response = await suggestionsController.createSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: [suggs[0]],
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      const createResponse = await response.json();
+      expect(createResponse.suggestions[0]).to.have.property('statusCode', 201);
+      expect(mockSuggestion.create.calledOnce).to.be.true;
+      expect(mockSuggestion.create.firstCall.args[0].suggestionKey).to.equal(key);
+    });
+
+    it('rejects a suggestionKey scoped to a different site even for an admin caller', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(true);
+      sandbox.stub(AccessControlUtil.prototype, 'hasS2SCapability').resolves({ allowed: false, reason: 'not-s2s' });
+
+      suggs[0].suggestionKey = 'site:some-other-site-id:backlink:abc:referrer:def';
+
+      const response = await suggestionsController.createSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: [suggs[0]],
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      const createResponse = await response.json();
+      expect(createResponse.suggestions[0]).to.have.property('statusCode', 400);
+      expect(createResponse.suggestions[0]).to.have.property('message', `suggestionKey must be scoped to site ${SITE_ID}`);
+      expect(mockSuggestion.create.calledOnce).to.be.false;
+    });
+  });
+
   it('creates a suggestion returns bad request if no site ID is passed', async () => {
     const response = await suggestionsController.createSuggestions({
       params: { opportunityId: OPPORTUNITY_ID },
