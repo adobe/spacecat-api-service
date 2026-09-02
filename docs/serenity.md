@@ -287,6 +287,12 @@ Two **org-level** catalogue routes are brand-independent (prefixed with `/v2/org
 | GET | `/serenity/models` | Global AI-model catalog (`GET /v1/ai_models`) | `listSerenityOrgModels` |
 | GET | `/serenity/languages` | Supported Semrush language catalog (`GET /v1/languages`) | `listSerenityOrgLanguages` |
 
+### S2S brand markets read (`GET /v2/orgs/:spaceCatId/brands/:brandId/markets`)
+
+A separate, S2S-authenticated route reads a brand's markets straight from the `brand_to_semrush_projects` table (`BrandSemrushProject.allByBrandId`), bypassing the IMS-gated `/serenity/*` surface above entirely. It exists for consumers that need a brand's configured markets without an IMS user token — DRS is the first caller. The response is `{ markets: [{ region, languageCode, geoTargetId }] }`; a row whose `geoTargetId` isn't a whole country, or whose `languageCode` is blank, is skipped rather than mislabeled.
+
+This differs from `GET /serenity/markets` in three ways: it carries no live/draft `status` (that only exists in the upstream Semrush listing, which this route never calls), no `siteId` (the market-mirror Site link is a `/serenity/*` concern), and it only ever reports whole countries (the flat table has no sub-national representation, whereas the IMS-gated route resolves markets live from Semrush and can surface sub-national slices). Soft-deleted (`deletedAt`) rows are excluded.
+
 ## The onboarding flow
 
 `POST /serenity/markets` writes a row to `brand_to_semrush_projects` **only after all three upstream calls succeed**. The order is strict and the `findBySlice` 409 gate runs before any upstream call so safe retries are free:

@@ -299,8 +299,9 @@ v2-brand-markets-for-org:
       `geoTargetId` (a Google Ads Geo Target ID) via the whole-country
       inverse of the `criterion_id = 2000 + ISO numeric` formula. A row whose
       `geoTargetId` is not a whole country (city/region/postal code, etc.)
-      has no ISO 3166-1 alpha-2 region to report and is omitted from `items`
-      rather than mislabeled.
+      has no ISO 3166-1 alpha-2 region to report and is omitted from
+      `markets` rather than mislabeled. A row with a blank `languageCode` is
+      omitted for the same reason.
     operationId: listBrandMarketsForOrg
     security:
       - session_token: []

@@ -12,6 +12,8 @@
 
 // @ts-check
 
+import { hasText } from '@adobe/spacecat-shared-utils';
+
 import { marketForGeoTargetId } from './locations.js';
 
 /**
@@ -25,9 +27,12 @@ import { marketForGeoTargetId } from './locations.js';
  * {@link marketForGeoTargetId}, which only inverts the country formula
  * (`criterion_id = 2000 + ISO numeric`) — see locations.js. A geoTargetId
  * that is not a whole country (city/region/postal code, etc.) has no ISO
- * region to report; rather than mislabel it, the row is SKIPPED and logged
- * at warn level once. Sub-national geo support is a follow-up, not a
- * silent fallback here.
+ * region to report; rather than mislabel it, the row is SKIPPED. A row with
+ * a blank `languageCode` is skipped for the same reason — the schema
+ * requires a non-empty string, so emitting `null` would violate the
+ * contract. Skipped rows are counted and reported in a single summarized
+ * warn after the loop, rather than one log line per row. Sub-national geo
+ * support is a follow-up, not a silent fallback here.
  *
  * The `BrandSemrushProject` store has no `status` or `siteId` column (only
  * `brandId`, `semrushProjectId`, `geoTargetId`, `languageCode`, plus the
@@ -38,9 +43,9 @@ import { marketForGeoTargetId } from './locations.js';
  *
  * @param {Array<object>} [rows] - `BrandSemrushProject` rows (or row-likes)
  *   exposing `getGeoTargetId()` and `getLanguageCode()`.
- * @param {{ warn?: Function }} [log] - logger; `warn` is called once per
- *   skipped (non-country) row.
- * @returns {{ items: Array<{
+ * @param {{ warn?: Function }} [log] - logger; `warn` is called once, after
+ *   the loop, with a summary count of the rows skipped.
+ * @returns {{ markets: Array<{
  *   region: string,
  *   languageCode: string,
  *   geoTargetId: number,
@@ -48,26 +53,30 @@ import { marketForGeoTargetId } from './locations.js';
  */
 export function buildBrandMarketsResponse(rows, log) {
   if (!Array.isArray(rows) || rows.length === 0) {
-    return { items: [] };
+    return { markets: [] };
   }
 
-  const items = [];
+  const markets = [];
+  let skipped = 0;
   for (const row of rows) {
     const geoTargetId = row.getGeoTargetId();
     const region = marketForGeoTargetId(geoTargetId);
-    if (region === null) {
-      log?.warn?.(
-        'buildBrandMarketsResponse: skipping row with non-country geoTargetId',
-        { brandId: row.getBrandId?.() ?? undefined, geoTargetId },
-      );
+    const languageCode = row.getLanguageCode();
+    if (region === null || !hasText(languageCode) || !languageCode.trim()) {
+      skipped += 1;
       // eslint-disable-next-line no-continue
       continue;
     }
-    items.push({
+    markets.push({
       region,
-      languageCode: row.getLanguageCode(),
+      languageCode,
       geoTargetId,
     });
   }
-  return { items };
+  if (skipped > 0) {
+    log?.warn?.(
+      `buildBrandMarketsResponse: skipped ${skipped} row(s) with a non-country geoTargetId or missing languageCode`,
+    );
+  }
+  return { markets };
 }

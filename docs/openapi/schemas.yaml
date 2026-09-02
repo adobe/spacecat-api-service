@@ -8241,9 +8241,9 @@ BrandMarketsResponse:
   type: object
   description: Response envelope for listing a brand's markets.
   required:
-    - items
+    - markets
   properties:
-    items:
+    markets:
       type: array
       items:
         $ref: '#/BrandMarket'

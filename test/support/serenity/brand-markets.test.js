@@ -50,7 +50,7 @@ describe('brand-markets.js — buildBrandMarketsResponse', () => {
     const result = buildBrandMarketsResponse(rows, log);
 
     expect(result).to.deep.equal({
-      items: [
+      markets: [
         { region: 'IN', languageCode: 'en', geoTargetId: 2356 },
         { region: 'US', languageCode: 'en', geoTargetId: 2840 },
         { region: 'GB', languageCode: 'en', geoTargetId: 2826 },
@@ -67,20 +67,51 @@ describe('brand-markets.js — buildBrandMarketsResponse', () => {
 
     const result = buildBrandMarketsResponse(rows, log);
 
-    expect(result.items).to.have.lengthOf(1);
-    expect(result.items[0]).to.deep.equal({
+    expect(result.markets).to.have.lengthOf(1);
+    expect(result.markets[0]).to.deep.equal({
       region: 'US', languageCode: 'en', geoTargetId: 2840,
     });
     expect(log.warn).to.have.been.calledOnce;
   });
 
-  it('returns an empty items array for an empty rows array', () => {
-    expect(buildBrandMarketsResponse([], log)).to.deep.equal({ items: [] });
+  it('skips multiple non-country rows and warns once with the total count', () => {
+    const rows = [
+      makeRow({ geoTargetId: 1023191, languageCode: 'en' }),
+      makeRow({ geoTargetId: 1023192, languageCode: 'en' }),
+      makeRow({ geoTargetId: 2840, languageCode: 'en' }),
+    ];
+
+    const result = buildBrandMarketsResponse(rows, log);
+
+    expect(result.markets).to.have.lengthOf(1);
+    expect(log.warn).to.have.been.calledOnce;
+    expect(log.warn.firstCall.args[0]).to.match(/skipped 2 row/);
+  });
+
+  it('skips a row with a null, empty, or whitespace-only languageCode', () => {
+    const rows = [
+      makeRow({ geoTargetId: 2356, languageCode: null }),
+      makeRow({ geoTargetId: 2840, languageCode: '' }),
+      makeRow({ geoTargetId: 2826, languageCode: '   ' }),
+      makeRow({ geoTargetId: 2276, languageCode: 'de' }),
+    ];
+
+    const result = buildBrandMarketsResponse(rows, log);
+
+    expect(result.markets).to.deep.equal([
+      { region: 'DE', languageCode: 'de', geoTargetId: 2276 },
+    ]);
+    expect(log.warn).to.have.been.calledOnce;
+    expect(log.warn.firstCall.args[0]).to.match(/skipped 3 row/);
+  });
+
+  it('returns an empty markets array for an empty rows array', () => {
+    expect(buildBrandMarketsResponse([], log)).to.deep.equal({ markets: [] });
     expect(log.warn).not.to.have.been.called;
   });
 
-  it('returns an empty items array for undefined rows', () => {
-    expect(buildBrandMarketsResponse(undefined, log)).to.deep.equal({ items: [] });
+  it('returns an empty markets array for undefined rows', () => {
+    expect(buildBrandMarketsResponse(undefined, log)).to.deep.equal({ markets: [] });
     expect(log.warn).not.to.have.been.called;
   });
 });

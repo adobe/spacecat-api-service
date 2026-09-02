@@ -1099,7 +1099,7 @@ function BrandsController(ctx, log, env) {
    * out here before calling {@link buildBrandMarketsResponse}, which is a
    * pure builder with no DB-read/soft-delete concern of its own.
    *
-   * @returns {Promise<Response>} `{ items: [{ region, languageCode, geoTargetId }] }`.
+   * @returns {Promise<Response>} `{ markets: [{ region, languageCode, geoTargetId }] }`.
    */
   const listBrandMarketsForOrg = async (context) => {
     const { spaceCatId, brandId } = context.params || {};
@@ -1136,7 +1136,7 @@ function BrandsController(ctx, log, env) {
       }
 
       const rows = await context.dataAccess.BrandSemrushProject.allByBrandId(brandUuid);
-      const liveRows = (rows ?? []).filter((row) => !row.getDeletedAt?.());
+      const liveRows = (rows ?? []).filter((row) => !row.getDeletedAt());
       // createResponse(body, 200) rather than ok(body) — ok()'s declared type is
       // `body?: string` (stale vs. its actual object-accepting runtime, which is a
       // plain createResponse(body, 200) call), so a concretely-typed object here

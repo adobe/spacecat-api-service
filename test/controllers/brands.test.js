@@ -3282,7 +3282,7 @@ describe('Brands Controller', () => {
       expect(response.status).to.equal(200);
       const body = await response.json();
       expect(body).to.deep.equal({
-        items: [{ region: 'IN', languageCode: 'en', geoTargetId: 2356 }],
+        markets: [{ region: 'IN', languageCode: 'en', geoTargetId: 2356 }],
       });
       expect(mockDataAccess.BrandSemrushProject.allByBrandId).to.have.been.calledWith(BRAND_UUID);
     });
@@ -3298,10 +3298,10 @@ describe('Brands Controller', () => {
 
       expect(response.status).to.equal(200);
       const body = await response.json();
-      expect(body).to.deep.equal({ items: [] });
+      expect(body).to.deep.equal({ markets: [] });
     });
 
-    it('excludes a soft-deleted market row from items', async () => {
+    it('excludes a soft-deleted market row from markets', async () => {
       mockDataAccess.BrandSemrushProject.allByBrandId.resolves([
         makeMarketRow({ geoTargetId: 2356, languageCode: 'en' }),
         makeMarketRow({
@@ -3318,7 +3318,7 @@ describe('Brands Controller', () => {
       expect(response.status).to.equal(200);
       const body = await response.json();
       expect(body).to.deep.equal({
-        items: [{ region: 'IN', languageCode: 'en', geoTargetId: 2356 }],
+        markets: [{ region: 'IN', languageCode: 'en', geoTargetId: 2356 }],
       });
     });
 
