@@ -63,6 +63,7 @@ import addOaeStageDomain from './commands/add-oae-stage-domain.js';
 import togglePathSuggestions from './commands/toggle-path-suggestions.js';
 import getPathSuggestionsStatus from './commands/get-path-suggestions-status.js';
 import brandClaims from './commands/toggle-brand-claims.js';
+import enrichBrandClaims from './commands/enrich-brand-claims.js';
 
 /**
  * Returns all commands.
@@ -124,4 +125,5 @@ export default (context) => [
   togglePathSuggestions(context),
   getPathSuggestionsStatus(context),
   brandClaims(context),
+  enrichBrandClaims(context),
 ];
