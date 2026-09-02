@@ -1,3 +1,10 @@
+## [1.784.1](https://github.com/adobe/spacecat-api-service/compare/v1.784.0...v1.784.1) (2026-09-02)
+
+
+### Bug Fixes
+
+* **serenity:** repair auto-created alias casing ([#3178](https://github.com/adobe/spacecat-api-service/issues/3178)) ([e89b7e1](https://github.com/adobe/spacecat-api-service/commit/e89b7e1f77caac4b8a2f0d150ff87ac942a3133f)), closes [Hi#level](https://github.com/Hi/issues/level)
+
 # [1.784.0](https://github.com/adobe/spacecat-api-service/compare/v1.783.0...v1.784.0) (2026-09-02)
 
 
