@@ -1,3 +1,18 @@
+# [1.783.0](https://github.com/adobe/spacecat-api-service/compare/v1.782.1...v1.783.0) (2026-09-02)
+
+
+### Features
+
+* **llmo:** on-demand Brand Claims request endpoint + 7-day cooldown (LLMO-7263) ([#3169](https://github.com/adobe/spacecat-api-service/issues/3169)) ([165fea9](https://github.com/adobe/spacecat-api-service/commit/165fea9197532518aadfd694300492460af9de7b))
+
+## [1.782.1](https://github.com/adobe/spacecat-api-service/compare/v1.782.0...v1.782.1) (2026-09-02)
+
+
+### Bug Fixes
+
+* **llmo:** prevent GL from being stored as a brand region ([#3172](https://github.com/adobe/spacecat-api-service/issues/3172)) ([da08d3b](https://github.com/adobe/spacecat-api-service/commit/da08d3b17c78abce62b2d895889629b5bf378eb4)), closes [Hi#level](https://github.com/Hi/issues/level)
+* **serenity:** make siteId authoritative over brandDomain in Add Market ([#3167](https://github.com/adobe/spacecat-api-service/issues/3167)) ([e79c4fe](https://github.com/adobe/spacecat-api-service/commit/e79c4feb840353ec116f2a0cbc3959d4b82867b1)), closes [Hi#level](https://github.com/Hi/issues/level)
+
 # [1.782.0](https://github.com/adobe/spacecat-api-service/compare/v1.781.1...v1.782.0) (2026-09-01)
 
 

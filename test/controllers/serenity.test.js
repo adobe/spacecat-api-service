@@ -1507,6 +1507,13 @@ describe('SerenityController', () => {
       // contract, which is why it must not fail silently if that ever changes.
       expect(linkSiteToRowStub).to.not.have.been.called;
       expect(log.warn).to.have.been.calledWithMatch(/201 without a projectId/);
+      // The create-market telemetry event must still fire on a malformed 201 —
+      // ops needs the event even when the body is missing fields, matching the
+      // flat handler's unconditional log; only the DB link above is skipped.
+      expect(log.info).to.have.been.calledWithMatch(
+        /serenity create-market: market created/,
+        sinon.match({ semrushProjectId: null, geoTargetId: 2840, languageCode: 'en' }),
+      );
     });
 
     it('createMarket mirrors the brand host when the market carries no url of its own', async () => {
@@ -1597,6 +1604,65 @@ describe('SerenityController', () => {
       // controller actually hands over.
       const opts = ensureMarketSiteStub.firstCall.args[1];
       expect(opts).to.include({ siteId: 'site-onboarded', domain: 'acme.com/markets' });
+    });
+
+    it('createMarket resolves the supplied siteId\'s domain over a conflicting brandDomain (siteId authoritative)', async () => {
+      handlers.handleCreateMarketSubworkspace.resolves({
+        status: 201,
+        body: {
+          brandId: BRAND, geoTargetId: 2840, languageCode: 'en', projectId: 'P-NEW', workspaceId: 'subworkspace-ws-1',
+        },
+      });
+      resolveSiteIdentityStub.resolves({ domain: 'acme.com', primaryUrl: 'acme.com/markets' });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({
+        data: {
+          market: 'us',
+          languageCode: 'en',
+          siteId: 'site-onboarded',
+          brandDomain: 'conflicting-literal.com',
+          brandNames: ['X'],
+        },
+      });
+      const response = await controller.createMarket(ctx);
+      expect(response.status).to.equal(201);
+      // The resolved Site identity wins over the literal brandDomain the caller
+      // also sent — a supplied siteId is authoritative whenever it resolves.
+      const handlerBody = handlers.handleCreateMarketSubworkspace.firstCall.args[3];
+      expect(handlerBody.brandDomain).to.equal('acme.com');
+      expect(handlerBody.primaryUrl).to.equal('acme.com/markets');
+    });
+
+    it('createMarket logs market-created telemetry on a live subworkspace 201', async () => {
+      handlers.handleCreateMarketSubworkspace.resolves({
+        status: 201,
+        body: {
+          brandId: BRAND, geoTargetId: 2840, languageCode: 'en', projectId: 'P-NEW', workspaceId: 'subworkspace-ws-1', promptCount: 5,
+        },
+      });
+      const log = fakeLog();
+      const controller = SerenityController({ env: {} }, log, {});
+      const response = await controller.createMarket(fakeContext({
+        data: {
+          market: 'us', languageCode: 'en', brandDomain: 'x.com', brandNames: ['X'], generatePrompts: true,
+        },
+      }));
+      expect(response.status).to.equal(201);
+      expect(log.info).to.have.been.calledWithMatch(/serenity create-market: market created/);
+      // The fields are the entire point of this event — a regression that logs the
+      // wrong resolved identity must fail here, not just a missing log call.
+      expect(log.info.firstCall.args[1]).to.include({
+        brandId: BRAND,
+        geoTargetId: 2840,
+        languageCode: 'en',
+        siteId: null,
+        brandDomain: 'x.com',
+        primaryUrl: 'x.com',
+        semrushWorkspaceId: 'subworkspace-ws-1',
+        semrushProjectId: 'P-NEW',
+        generatePrompts: true,
+        promptCount: 5,
+      });
     });
 
     it('createMarket 400s when a supplied siteId does not resolve to a domain', async () => {
@@ -3317,11 +3383,12 @@ describe('SerenityController', () => {
       ctx.data = undefined;
       const response = await controller.createMarket(ctx);
       expect(response.status).to.equal(200);
-      // `primaryUrl` is always set from the server-side derivation — null here,
-      // since there is no brandDomain to derive from. Always setting it is what
-      // stops a caller-supplied value from reaching Semrush unvalidated.
+      // `brandDomain`/`primaryUrl` are always set from the server-side derivation —
+      // both null here, since there is no siteId or brandDomain to derive from.
+      // Always setting them is what stops a caller-supplied primaryUrl from
+      // reaching Semrush unvalidated.
       expect(handlers.handleCreateMarketSubworkspace.firstCall.args[3])
-        .to.deep.equal({ primaryUrl: null });
+        .to.deep.equal({ brandDomain: null, primaryUrl: null });
     });
 
     it('createMarket ignores a caller-supplied primaryUrl and derives its own', async () => {
