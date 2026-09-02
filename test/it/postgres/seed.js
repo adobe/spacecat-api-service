@@ -311,7 +311,9 @@ export async function seedBrandPresenceIntentFixture() {
  * so this is seeded only by that suite after its own resetPostgres().
  */
 export async function seedBrandMarketsFixture() {
-  await insertRows('brand_to_semrush_projects', brandSemrushProjects);
+  // brand_to_semrush_projects does not grant INSERT to postgrest_anon, so seed
+  // with the writer JWT (same as feature_flags above).
+  await insertRows('brand_to_semrush_projects', brandSemrushProjects, { asWriter: true });
 }
 
 /**
