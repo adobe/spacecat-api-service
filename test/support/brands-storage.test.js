@@ -2319,6 +2319,118 @@ describe('brands-storage', () => {
       expect(result.region).to.deep.equal(['42']);
     });
 
+    it('normalizes GL to US on create, case-insensitively and whitespace-trimmed (#3168)', async () => {
+      const client = createCapturingClient({
+        brands: [
+          { data: null, error: null }, // no existing brand
+          { data: { id: BRAND_ID, name: 'Test' }, error: null }, // upsert result
+          { data: makeBrandRow({ regions: ['US', 'DE'] }), error: null },
+        ],
+      });
+
+      await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test', region: ['GL', ' gl ', 'DE'] },
+        postgrestClient: client,
+      });
+
+      const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
+      expect(brandsUpsert.row.regions).to.deep.equal(['US', 'DE']);
+    });
+
+    it('leaves non-GL region values untouched on create', async () => {
+      const client = createCapturingClient({
+        brands: [
+          { data: null, error: null },
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: makeBrandRow({ regions: ['FR'] }), error: null },
+        ],
+      });
+
+      await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test', region: ['FR'] },
+        postgrestClient: client,
+      });
+
+      const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
+      expect(brandsUpsert.row.regions).to.deep.equal(['FR']);
+    });
+
+    it('normalizes GL to US in aliases, competitors, social accounts, and earned '
+      + 'content on create (#3168)', async () => {
+      const client = createCapturingClient({
+        brands: [
+          { data: null, error: null },
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: makeBrandRow({ name: 'Test' }), error: null },
+        ],
+      });
+
+      await upsertBrand({
+        organizationId: ORG_ID,
+        brand: {
+          name: 'Test',
+          brandAliases: [{ name: 'Alias', regions: ['GL'] }],
+          competitors: [{ name: 'Rival', url: 'https://rival.com', regions: ['GL'] }],
+          socialAccounts: [{ url: 'https://x.com/test', regions: ['GL'] }],
+          earnedContent: [{ name: 'Blog', url: 'https://blog.com', regions: ['GL'] }],
+        },
+        postgrestClient: client,
+      });
+
+      const aliasesUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brand_aliases');
+      expect(aliasesUpsert.row[0].regions).to.deep.equal(['US']);
+
+      const competitorsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'competitors');
+      expect(competitorsUpsert.row[0].regions).to.deep.equal(['US']);
+
+      const socialUpsert = client.capturedCalls.upsert
+        .find((c) => c.table === 'brand_social_accounts');
+      expect(socialUpsert.row[0].regions).to.deep.equal(['US']);
+
+      const earnedUpsert = client.capturedCalls.upsert
+        .find((c) => c.table === 'brand_earned_sources');
+      expect(earnedUpsert.row[0].regions).to.deep.equal(['US']);
+    });
+
+    it('dedupes GL alongside an explicit US in aliases, competitors, social '
+      + 'accounts, and earned content on create', async () => {
+      const client = createCapturingClient({
+        brands: [
+          { data: null, error: null },
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: makeBrandRow({ name: 'Test' }), error: null },
+        ],
+      });
+
+      await upsertBrand({
+        organizationId: ORG_ID,
+        brand: {
+          name: 'Test',
+          brandAliases: [{ name: 'Alias', regions: ['GL', 'US'] }],
+          competitors: [{ name: 'Rival', url: 'https://rival.com', regions: ['GL', 'US'] }],
+          socialAccounts: [{ url: 'https://x.com/test', regions: ['GL', 'US'] }],
+          earnedContent: [{ name: 'Blog', url: 'https://blog.com', regions: ['GL', 'US'] }],
+        },
+        postgrestClient: client,
+      });
+
+      const aliasesUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brand_aliases');
+      expect(aliasesUpsert.row[0].regions).to.deep.equal(['US']);
+
+      const competitorsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'competitors');
+      expect(competitorsUpsert.row[0].regions).to.deep.equal(['US']);
+
+      const socialUpsert = client.capturedCalls.upsert
+        .find((c) => c.table === 'brand_social_accounts');
+      expect(socialUpsert.row[0].regions).to.deep.equal(['US']);
+
+      const earnedUpsert = client.capturedCalls.upsert
+        .find((c) => c.table === 'brand_earned_sources');
+      expect(earnedUpsert.row[0].regions).to.deep.equal(['US']);
+    });
+
     it('accepts string aliases (not objects) in brandAliases', async () => {
       const fullBrandRow = makeBrandRow({
         brand_aliases: [{ alias: 'StringAlias', regions: [] }],
@@ -3162,6 +3274,42 @@ describe('brands-storage', () => {
         postgrestClient,
       });
       expect(result.region).to.deep.equal(['42']);
+    });
+
+    it('normalizes GL to US on update, case-insensitively and whitespace-trimmed (#3168)', async () => {
+      const client = createCapturingClient({
+        brands: [
+          { data: makeBrandRow({ regions: ['US', 'DE'] }), error: null },
+        ],
+      });
+
+      await updateBrand({
+        organizationId: ORG_ID,
+        brandId: BRAND_ID,
+        updates: { region: ['GL', ' gl ', 'DE'] },
+        postgrestClient: client,
+      });
+
+      const brandsUpdate = client.capturedCalls.update.find((c) => c.table === 'brands');
+      expect(brandsUpdate.row.regions).to.deep.equal(['US', 'DE']);
+    });
+
+    it('leaves non-GL region values untouched on update', async () => {
+      const client = createCapturingClient({
+        brands: [
+          { data: makeBrandRow({ regions: ['FR'] }), error: null },
+        ],
+      });
+
+      await updateBrand({
+        organizationId: ORG_ID,
+        brandId: BRAND_ID,
+        updates: { region: ['FR'] },
+        postgrestClient: client,
+      });
+
+      const brandsUpdate = client.capturedCalls.update.find((c) => c.table === 'brands');
+      expect(brandsUpdate.row.regions).to.deep.equal(['FR']);
     });
 
     it('handles null values for array update fields', async () => {
