@@ -20,7 +20,7 @@ import { marketForGeoTargetId } from './locations.js';
  * and calls this) from `BrandSemrushProject` rows. Pure — no DB/IO — so the
  * controller owns the DB read and passes the rows in here.
  *
- * Whole-countries-only (PR1 scope): each row's `geoTargetId` (a Google Ads
+ * Whole-countries-only: each row's `geoTargetId` (a Google Ads
  * Geo Target ID) is converted to an ISO 3166-1 alpha-2 region code via
  * {@link marketForGeoTargetId}, which only inverts the country formula
  * (`criterion_id = 2000 + ISO numeric`) — see locations.js. A geoTargetId
@@ -34,8 +34,7 @@ import { marketForGeoTargetId } from './locations.js';
  * `deletedAt` soft-delete tombstone) — "live" status exists only in the
  * IMS-gated Semrush listing, which this S2S endpoint cannot reach — so
  * neither field is part of the response shape. Soft-delete filtering
- * (`deletedAt`) is the caller's (Task A2) DB-read concern, not this
- * builder's.
+ * (`deletedAt`) is the caller's DB-read concern, not this builder's.
  *
  * @param {Array<object>} [rows] - `BrandSemrushProject` rows (or row-likes)
  *   exposing `getGeoTargetId()` and `getLanguageCode()`.
