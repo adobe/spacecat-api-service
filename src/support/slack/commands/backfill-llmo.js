@@ -303,7 +303,7 @@ async function triggerBackfill(
               day: targetDate.getUTCDate(),
               hour: 23,
               processFullDay: true,
-              ...(force ? { forceReprocess: true, isSubAudit: true } : {}),
+              ...forceFields,
             },
           };
           // eslint-disable-next-line no-await-in-loop
@@ -389,7 +389,7 @@ function BackfillLlmoCommand(context) {
     name: 'Backfill LLMO',
     description: 'Backfills LLMO audits.',
     phrases: PHRASES,
-    usageText: `${PHRASES[0]} baseurl={baseURL} audit={auditType} [days={days}|weeks={weeks}|date={YYYY-MM-DD}] [force=true]`,
+    usageText: `${PHRASES[0]} baseurl={baseURL} audit={auditType} [days={days}|weeks={weeks}|date={YYYY-MM-DD}] [force=true] (force=true is cdn-logs-analysis only)`,
   });
 
   const { dataAccess, log } = context;
@@ -432,6 +432,13 @@ function BackfillLlmoCommand(context) {
       const auditType = isWeeklyDbRefreshMode(parsed)
         ? (parsed.audit || AUDIT_TYPES.CDN_LOGS_REPORT)
         : parsed.audit;
+
+      const force = parsed.force === 'true';
+      if (force && auditType !== AUDIT_TYPES.CDN_LOGS_ANALYSIS) {
+        await say(`:warning: force=true is only supported for audit=${AUDIT_TYPES.CDN_LOGS_ANALYSIS}.`);
+        return;
+      }
+
       const isAllSites = parsed.baseurl?.toLowerCase() === 'all';
       const baseURL = isAllSites ? 'all' : extractURLFromSlackInput(parsed.baseurl);
 
@@ -584,7 +591,6 @@ function BackfillLlmoCommand(context) {
       const target = isAllSites ? `${sites.length} sites` : baseURL;
       await say(`:rocket: Triggering ${auditType} for ${target} (${timeDesc})...`);
 
-      const force = parsed.force === 'true';
       const configuration = await Configuration.findLatest();
       for (const s of sites) {
         // eslint-disable-next-line no-await-in-loop

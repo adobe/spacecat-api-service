@@ -793,6 +793,22 @@ describe('BackfillLlmoCommand', () => {
       expect(slackContext.say.calledWith(`:warning: Supported audits: ${AUDIT_TYPES.CDN_LOGS_ANALYSIS}, ${AUDIT_TYPES.CDN_LOGS_REPORT}, ${AUDIT_TYPES.LLM_ERROR_PAGES}, ${AUDIT_TYPES.LLMO_REFERRAL_TRAFFIC}`)).to.be.true;
     });
 
+    it('rejects force=true for audit types other than cdn-logs-analysis', async () => {
+      const command = BackfillLlmoCommand(context);
+
+      await command.handleExecution([
+        'baseurl=https://example.com',
+        `audit=${AUDIT_TYPES.CDN_LOGS_REPORT}`,
+        'days=1',
+        'force=true',
+      ], slackContext);
+
+      expect(slackContext.say.calledWith(
+        `:warning: force=true is only supported for audit=${AUDIT_TYPES.CDN_LOGS_ANALYSIS}.`,
+      )).to.be.true;
+      expect(sqsStub.sendMessage).not.to.have.been.called;
+    });
+
     it('logs errors when they occur', async () => {
       const error = new Error('Test Error');
       dataAccessStub.Site.findByBaseURL.rejects(error);
@@ -853,6 +869,7 @@ describe('BackfillLlmoCommand', () => {
       for (const call of sqsStub.sendMessage.getCalls()) {
         const [, message] = call.args;
         expect(message.auditContext).to.have.all.keys('year', 'month', 'day', 'hour', 'processFullDay', 'forceReprocess', 'isSubAudit');
+        expect(message.auditContext.processFullDay).to.be.true;
         expect(message.auditContext.forceReprocess).to.be.true;
         expect(message.auditContext.isSubAudit).to.be.true;
       }
