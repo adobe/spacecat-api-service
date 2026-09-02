@@ -401,6 +401,7 @@ describe('handleRequestBrandClaims (on-demand, LLMO-7263)', () => {
     expect(msg.type).to.equal('brand-claims');
     expect(msg.siteId).to.equal('site-1');
     expect(msg.onDemand).to.equal(true);
+    expect(msg.auditContext).to.deep.equal({ trigger: 'on-demand-brand-claims' });
     expect(postSlackMessage).to.have.been.calledOnce;
   });
 
@@ -438,6 +439,7 @@ describe('handleRequestBrandClaims (on-demand, LLMO-7263)', () => {
     getLatestAudit.resolves({ getAuditedAt: () => ranAt });
     const result = await handleRequestBrandClaims(context, site);
     expect(result.status).to.equal(429);
+    expect(getLatestAudit).to.have.been.calledWith('brand-claims');
     expect(result.headers).to.have.property('Retry-After');
     const body = await result.json();
     expect(body.siteId).to.equal('site-1');
@@ -448,6 +450,16 @@ describe('handleRequestBrandClaims (on-demand, LLMO-7263)', () => {
 
   it('proceeds (202) when the last run is older than 7 days', async () => {
     const ranAt = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString(); // 8 days ago
+    getLatestAudit.resolves({ getAuditedAt: () => ranAt });
+    const result = await handleRequestBrandClaims(context, site);
+    expect(result.status).to.equal(202);
+    expect(sqsSend).to.have.been.calledOnce;
+  });
+
+  it('proceeds (202) at the 7-day boundary (cooldown uses strict <)', async () => {
+    // Exactly 7 days ago: elapsed is >= COOLDOWN_MS (never < it), so strict `<`
+    // lets the request through rather than blocking on the boundary.
+    const ranAt = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
     getLatestAudit.resolves({ getAuditedAt: () => ranAt });
     const result = await handleRequestBrandClaims(context, site);
     expect(result.status).to.equal(202);

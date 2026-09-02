@@ -202,7 +202,9 @@ export async function handleRequestBrandClaims(context, site) {
   // best-effort check here is deliberate rather than a hard once-only lock.
   try {
     const latestAudit = await site.getLatestAuditByAuditType(BRAND_CLAIMS_AUDIT_TYPE);
-    const ranAtMs = latestAudit?.getAuditedAt ? Date.parse(latestAudit.getAuditedAt()) : NaN;
+    const ranAtMs = typeof latestAudit?.getAuditedAt === 'function'
+      ? Date.parse(latestAudit.getAuditedAt())
+      : NaN;
     if (Number.isFinite(ranAtMs)) {
       const elapsed = Date.now() - ranAtMs;
       if (elapsed < BRAND_CLAIMS_REQUEST_COOLDOWN_MS) {

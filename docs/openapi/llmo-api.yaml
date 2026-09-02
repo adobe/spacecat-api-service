@@ -2045,6 +2045,7 @@ llmo-brand-claims-request:
         headers:
           Retry-After:
             description: Seconds until a new run can be requested.
+            required: true
             schema:
               type: integer
               example: 432000
