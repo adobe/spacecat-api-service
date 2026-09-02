@@ -21,6 +21,7 @@ import {
   PROTO_FROM_JSON,
   PROTO_TO_JSON,
   resolveCountry,
+  resolveSearchType,
   responseFromGrpcError,
 } from '../../../grpc-utils.js';
 
@@ -36,6 +37,7 @@ export async function handleTopBrands(sp, clients) {
   const country = resolveCountry(sp) || COUNTRY_ENUM.US;
   const llm = engineToLlm(sp.get('engine')) || LLM_ENUM.ALL;
   const limit = sp.get('limit') || '10';
+  const searchType = resolveSearchType(domain);
 
   let request;
   try {
@@ -46,6 +48,7 @@ export async function handleTopBrands(sp, clients) {
         brand_domain: domain,
         llm,
         limit,
+        search_type: searchType,
       },
       PROTO_FROM_JSON,
     );
