@@ -305,6 +305,7 @@ export default function getRouteHandlers(
     'POST /v2/orgs/:spaceCatId/semrush-onboarding': onboardingController.triggerOnboarding,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts': brandsController.listPromptsByBrand,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts/stats': brandsController.getPromptStatsByBrand,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts/topic-intent-stats': brandsController.getTopicIntentStatsByBrand,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts': brandsController.createPromptsByBrand,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': brandsController.getPromptByBrandAndId,
     'PATCH /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': brandsController.updatePromptByBrandAndId,

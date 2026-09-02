@@ -1471,3 +1471,54 @@ export async function getPromptStats({ organizationId, brandUuid, postgrestClien
     intents,
   };
 }
+
+// The 5-value Semrush intent taxonomy the topic-level RPC folds into, plus
+// `unknown` for prompts whose intent is missing/unmapped. Distinct from the
+// legacy 6-value `INTENT_VALUES` above (which the brand-aggregate RPC returns).
+export const SEMRUSH_INTENT_VALUES = [
+  'informational', 'commercial', 'transactional', 'task', 'navigational', 'unknown',
+];
+
+/**
+ * Per-topic branded + intent stats for a brand's active prompts, in the Semrush
+ * taxonomy. Wraps rpc_brand_topic_intent_stats, which returns one flat row per
+ * topic plus an untopiced bucket (topic_id NULL); this nests the flat intent_*
+ * fields into an `intents` object per topic, mirroring getPromptStats.
+ *
+ * @param {object} params
+ * @param {string} params.organizationId - SpaceCat org id
+ * @param {string} params.brandUuid - resolved brand UUID
+ * @param {object} params.postgrestClient - PostgREST client
+ * @returns {Promise<{topics: Array<object>}>} per-topic rows (untopiced row has topicId null)
+ */
+export async function getTopicIntentStats({ organizationId, brandUuid, postgrestClient }) {
+  if (!postgrestClient?.rpc) {
+    throw new Error('PostgREST client is required');
+  }
+
+  const { data, error } = await postgrestClient.rpc('rpc_brand_topic_intent_stats', {
+    p_organization_id: organizationId,
+    p_brand_id: brandUuid,
+  });
+
+  if (error) {
+    throw new Error(`getTopicIntentStats RPC failed: ${error.message}`);
+  }
+
+  const rows = Array.isArray(data) ? data : [];
+
+  return {
+    topics: rows.map((row) => ({
+      topicId: row.topic_id ?? null,
+      topicName: row.topic_name ?? null,
+      topicExternalId: row.topic_external_id ?? null,
+      popularityVolume: row.popularity_volume ?? null,
+      promptCount: Number(row.prompt_count) || 0,
+      branded: Number(row.branded) || 0,
+      unbranded: Number(row.unbranded) || 0,
+      intents: Object.fromEntries(
+        SEMRUSH_INTENT_VALUES.map((k) => [k, Number(row[`intent_${k}`]) || 0]),
+      ),
+    })),
+  };
+}

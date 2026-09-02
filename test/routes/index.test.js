@@ -997,6 +997,7 @@ describe('getRouteHandlers', () => {
       'POST /v2/orgs/:spaceCatId/brands/:brandId/activate',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts/stats',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts/topic-intent-stats',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId',
       'PATCH /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId',

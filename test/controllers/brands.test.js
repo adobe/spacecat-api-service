@@ -2855,6 +2855,133 @@ describe('Brands Controller', () => {
     });
   });
 
+  describe('getTopicIntentStatsByBrand', () => {
+    const BRAND_UUID = 'd1111111-1111-4111-b111-111111111111';
+    // RPC returns one flat row per topic + an untopiced bucket (topic_id null).
+    const TOPIC_ROWS = [
+      {
+        topic_id: 'a0000000-0000-0000-0000-000000000001',
+        topic_name: 'Sofas',
+        topic_external_id: 'sofas',
+        popularity_volume: -30,
+        prompt_count: 6,
+        branded: 2,
+        unbranded: 4,
+        intent_informational: 1,
+        intent_commercial: 1,
+        intent_transactional: 1,
+        intent_task: 3,
+        intent_navigational: 0,
+        intent_unknown: 0,
+      },
+      {
+        topic_id: null,
+        topic_name: null,
+        topic_external_id: null,
+        popularity_volume: null,
+        prompt_count: 2,
+        branded: 0,
+        unbranded: 2,
+        intent_informational: 1,
+        intent_commercial: 0,
+        intent_transactional: 0,
+        intent_task: 0,
+        intent_navigational: 0,
+        intent_unknown: 1,
+      },
+    ];
+
+    beforeEach(() => {
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake((table) => ({
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          maybeSingle: sandbox.stub().callsFake(() => {
+            if (table === 'brands') {
+              return Promise.resolve({ data: { id: BRAND_UUID }, error: null });
+            }
+            return Promise.resolve({ data: null, error: null });
+          }),
+        })),
+        rpc: sandbox.stub().resolves({ data: TOPIC_ROWS, error: null }),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+    });
+
+    it('returns 400 when spaceCatId is missing', async () => {
+      const response = await brandsController.getTopicIntentStatsByBrand({
+        ...context,
+        params: { brandId: BRAND_UUID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when spaceCatId is not a valid UUID', async () => {
+      const response = await brandsController.getTopicIntentStatsByBrand({
+        ...context,
+        params: { spaceCatId: 'not-a-uuid', brandId: BRAND_UUID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when brandId is missing', async () => {
+      const response = await brandsController.getTopicIntentStatsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 404 when the brand cannot be resolved', async () => {
+      mockDataAccess.services.postgrestClient.from = sandbox.stub().callsFake(() => ({
+        select: sandbox.stub().returnsThis(),
+        eq: sandbox.stub().returnsThis(),
+        maybeSingle: sandbox.stub().resolves({ data: null, error: null }),
+      }));
+      const response = await brandsController.getTopicIntentStatsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns 200 with per-topic rows and an untopiced bucket on success', async () => {
+      const response = await brandsController.getTopicIntentStatsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body.topics).to.have.length(2);
+      expect(body.topics[0]).to.include({ topicName: 'Sofas', promptCount: 6, branded: 2 });
+      expect(body.topics[0].intents).to.deep.equal({
+        informational: 1, commercial: 1, transactional: 1, task: 3, navigational: 0, unknown: 0,
+      });
+      expect(body.topics[1].topicId).to.equal(null);
+      expect(body.topics[1].intents.unknown).to.equal(1);
+    });
+
+    it('returns 500 when storage throws and logs the error', async () => {
+      const dbError = new Error('RPC failure');
+      mockDataAccess.services.postgrestClient.rpc = sandbox.stub().rejects(dbError);
+      const response = await brandsController.getTopicIntentStatsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(500);
+      expect(loggerStub.error).to.have.been.calledWith('Error fetching topic intent stats', {
+        brandId: BRAND_UUID,
+        error: dbError,
+      });
+    });
+  });
+
   describe('listBrandsForOrg', () => {
     beforeEach(() => {
       mockDataAccess.services.postgrestClient = {

@@ -26,6 +26,7 @@ import {
   bulkDeletePrompts,
   checkPromptsExist,
   getPromptStats,
+  getTopicIntentStats,
   normalizeIntent,
   isMissingIntentColumnError,
   findPromptsBlockingRegionRemoval,
@@ -3917,6 +3918,131 @@ describe('prompts-storage', () => {
       expect(result.branded).to.equal(42);
       expect(result.unbranded).to.equal(1208);
       expect(result.intents.informational).to.equal(410);
+    });
+  });
+
+  describe('getTopicIntentStats', () => {
+    const ALL_ZERO_INTENTS = {
+      informational: 0,
+      commercial: 0,
+      transactional: 0,
+      task: 0,
+      navigational: 0,
+      unknown: 0,
+    };
+
+    it('throws when postgrestClient has no rpc', async () => {
+      await expect(
+        getTopicIntentStats({
+          organizationId: ORG_ID,
+          brandUuid: BRAND_UUID,
+          postgrestClient: null,
+        }),
+      ).to.be.rejectedWith('PostgREST client is required');
+    });
+
+    it('throws when RPC returns an error', async () => {
+      const client = { rpc: sandbox.stub().resolves({ data: null, error: { message: 'boom' } }) };
+      await expect(
+        getTopicIntentStats({
+          organizationId: ORG_ID,
+          brandUuid: BRAND_UUID,
+          postgrestClient: client,
+        }),
+      ).to.be.rejectedWith('getTopicIntentStats RPC failed: boom');
+    });
+
+    it('returns an empty topics array when RPC returns null data', async () => {
+      const client = { rpc: sandbox.stub().resolves({ data: null, error: null }) };
+      const result = await getTopicIntentStats({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        postgrestClient: client,
+      });
+      expect(result).to.deep.equal({ topics: [] });
+    });
+
+    it('nests flat intent_* fields per topic and folds the untopiced bucket', async () => {
+      const client = {
+        rpc: sandbox.stub().resolves({
+          data: [
+            {
+              topic_id: 'a0000000-0000-0000-0000-000000000001',
+              topic_name: 'Sofas',
+              topic_external_id: 'sofas',
+              popularity_volume: -30,
+              prompt_count: 6,
+              branded: 2,
+              unbranded: 4,
+              intent_informational: 1,
+              intent_commercial: 1,
+              intent_transactional: 1,
+              intent_task: 3,
+              intent_navigational: 0,
+              intent_unknown: 0,
+            },
+            {
+              topic_id: null,
+              topic_name: null,
+              topic_external_id: null,
+              popularity_volume: null,
+              prompt_count: 2,
+              branded: 0,
+              unbranded: 2,
+              intent_informational: 1,
+              intent_commercial: 0,
+              intent_transactional: 0,
+              intent_task: 0,
+              intent_navigational: 0,
+              intent_unknown: 1,
+            },
+          ],
+          error: null,
+        }),
+      };
+      const result = await getTopicIntentStats({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        postgrestClient: client,
+      });
+      expect(result.topics).to.have.length(2);
+      expect(result.topics[0]).to.deep.equal({
+        topicId: 'a0000000-0000-0000-0000-000000000001',
+        topicName: 'Sofas',
+        topicExternalId: 'sofas',
+        popularityVolume: -30,
+        promptCount: 6,
+        branded: 2,
+        unbranded: 4,
+        intents: {
+          informational: 1, commercial: 1, transactional: 1, task: 3, navigational: 0, unknown: 0,
+        },
+      });
+      // untopiced bucket: topicId null, everything else preserved
+      expect(result.topics[1].topicId).to.equal(null);
+      expect(result.topics[1].topicName).to.equal(null);
+      expect(result.topics[1].promptCount).to.equal(2);
+      expect(result.topics[1].intents.unknown).to.equal(1);
+    });
+
+    it('coerces stringified bigint values returned by PostgREST', async () => {
+      const client = {
+        rpc: sandbox.stub().resolves({
+          data: [{
+            topic_id: 't1', prompt_count: '6', branded: '2', intent_task: '3',
+          }],
+          error: null,
+        }),
+      };
+      const result = await getTopicIntentStats({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        postgrestClient: client,
+      });
+      expect(result.topics[0].promptCount).to.equal(6);
+      expect(result.topics[0].branded).to.equal(2);
+      expect(result.topics[0].intents.task).to.equal(3);
+      expect(result.topics[0].intents).to.deep.equal({ ...ALL_ZERO_INTENTS, task: 3 });
     });
   });
 
