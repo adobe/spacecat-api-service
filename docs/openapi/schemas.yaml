@@ -10464,11 +10464,17 @@ AiVisibilityV1BrandStatsByLLMResponse:
 AiVisibilityV1BrandCompetitorsStatsByDate:
   type: object
   description: |
-    One row from `CompetitorsMetrics.StatsResponse.ByDate` as native protobuf JSON.
+    One row from `CompetitorService.StatsResponse.ByDate` (v2) as native protobuf JSON.
     UInt64 fields are serialized as JSON strings.
   properties:
     date:
       $ref: '#/AiVisibilitySemrushDate'
+    isoDate:
+      type: string
+      description: |
+        The row's date as an ISO-8601 string. Added by the v2 `CompetitorService`
+        message; the v1 `CompetitorsMetrics` message did not carry it. Always
+        present in the response.
     visibility:
       type: integer
       description: AI Visibility score for the brand on this date
@@ -10504,7 +10510,7 @@ AiVisibilityV1BrandCompetitorsStatsByBrand:
 AiVisibilityV1BrandCompetitorsStatsResponse:
   type: object
   description: |
-    Native Semrush `CompetitorsMetrics.StatsResponse` protobuf JSON from
+    Native Semrush `CompetitorService.StatsResponse` (v2) protobuf JSON from
     `GET /llmo/ai-visibility/v1/brand/competitors-stats`, plus `srFilters`
     from the API layer.
   properties:
