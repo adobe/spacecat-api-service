@@ -502,14 +502,7 @@ async function syncBrandSites(organizationId, brandId, urls, postgrestClient, up
     updated_by: updatedBy,
     sites: { base_url: s.base_url },
   }));
-  const rows = canonicalRows.map((row) => ({
-    organization_id: row.organization_id,
-    brand_id: row.brand_id,
-    site_id: row.site_id,
-    paths: row.paths,
-    type: row.type,
-    updated_by: row.updated_by,
-  }));
+  const rows = canonicalRows.map(({ sites: _, ...dbFields }) => dbFields);
 
   const { error } = await postgrestClient
     .from('brand_sites')
@@ -577,7 +570,7 @@ async function syncSocialAccounts(brandId, organizationId, socialAccounts, postg
     updated_by: updatedBy,
   }));
   await replaceChildRows('brand_social_accounts', brandId, rows, 'brand_id,url', postgrestClient);
-  return canonicalRows;
+  return mapSocialAccountsToV2(canonicalRows);
 }
 
 /**
@@ -605,7 +598,7 @@ async function syncEarnedSources(brandId, organizationId, earnedContent, postgre
     updated_by: updatedBy,
   }));
   await replaceChildRows('brand_earned_sources', brandId, rows, 'brand_id,url', postgrestClient);
-  return canonicalRows;
+  return mapEarnedContentToV2(canonicalRows);
 }
 
 /**
@@ -661,7 +654,7 @@ async function syncCompetitors(brandId, organizationId, competitors, postgrestCl
     updated_by: updatedBy,
   }));
   await replaceChildRows('competitors', brandId, rows, 'brand_id,name', postgrestClient);
-  return canonicalRows;
+  return mapCompetitorsToV2(canonicalRows);
 }
 
 /**
