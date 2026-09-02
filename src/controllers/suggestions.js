@@ -80,6 +80,11 @@ import { getImsTokenFromPromiseToken } from '../support/edge-routing-auth.js';
 import { isImsGroupMember } from '../support/ims-group.js';
 import { postSlackMessage } from '../utils/slack/base.js';
 import { createAtomicStrategy, deleteAtomicStrategy } from '../support/atomic-strategy-helper.js';
+import {
+  createSuggestionTranslator,
+  ensureAiRationaleTranslations,
+  resolveBatchTimeoutMs,
+} from '../support/suggestion-translator.js';
 
 const VALIDATION_ERROR_NAME = 'ValidationError';
 
@@ -575,6 +580,19 @@ function SuggestionsController(ctx, sqs, env) {
       );
     }
     const grantedEntities = await filterByGrantStatus(site, suggestionEntities, context);
+    if (locale) {
+      // Best-effort: translates + persists suggestion.data.i18n[locale].aiRationale on first
+      // read for this locale so SuggestionDto.toJSON below picks it up immediately. Falls back
+      // to English (no-op) on any translator/LLM failure. createSuggestionTranslator is only
+      // invoked (and only then constructs an Azure OpenAI client) once
+      // ensureAiRationaleTranslations has confirmed at least one suggestion needs translating.
+      await ensureAiRationaleTranslations(
+        () => createSuggestionTranslator(context),
+        grantedEntities,
+        locale,
+        { timeoutMs: resolveBatchTimeoutMs(context.env), log: context.log },
+      );
+    }
     const suggestions = grantedEntities.map(
       (sugg) => SuggestionDto.toJSON(sugg, view, opportunity, locale),
     );
