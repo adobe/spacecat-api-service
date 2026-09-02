@@ -313,6 +313,109 @@ describe('brand-urls helpers', () => {
       expect(transport.createBenchmarks).to.not.have.been.called;
     });
 
+    it('re-cases mixed-case aliases with two full-state updates', async () => {
+      const transport = {
+        listBenchmarks: sandbox.stub().resolves({
+          aio_benchmarks: [{
+            id: 'main-1',
+            main_brand: true,
+            brand_name: 'Acme',
+            brand_aliases: ['Acme', 'ACME Corp', 'vendor-added'],
+            domain: 'acme.com',
+            primary_url: 'acme.com/products/widget',
+            color: '#123456',
+            favorite: true,
+          }],
+        }),
+        updateBenchmark: sandbox.stub().resolves(null),
+        createBenchmarks: sandbox.stub(),
+      };
+
+      expect(await ensureOwnBrandBenchmark(
+        transport,
+        WS,
+        PID,
+        BRAND,
+        undefined,
+        { repairAliasCase: true },
+      )).to.equal('main-1');
+
+      expect(transport.updateBenchmark).to.have.been.calledTwice;
+      expect(transport.updateBenchmark.firstCall.args).to.deep.equal([
+        WS,
+        PID,
+        'main-1',
+        {
+          brand_name: 'Acme',
+          brand_aliases: ['vendor-added'],
+          domain: 'acme.com/products/widget',
+          primary_url: 'acme.com/products/widget',
+          color: '#123456',
+          favorite: true,
+        },
+      ]);
+      expect(transport.updateBenchmark.secondCall.args).to.deep.equal([
+        WS,
+        PID,
+        'main-1',
+        {
+          brand_name: 'Acme',
+          brand_aliases: ['acme', 'acme corp', 'vendor-added'],
+          domain: 'acme.com/products/widget',
+          primary_url: 'acme.com/products/widget',
+          color: '#123456',
+          favorite: true,
+        },
+      ]);
+      expect(transport.createBenchmarks).to.not.have.been.called;
+    });
+
+    it('does not stage alias repair on callers that only need the benchmark id', async () => {
+      const transport = {
+        listBenchmarks: sandbox.stub().resolves({
+          aio_benchmarks: [{
+            id: 'main-1',
+            main_brand: true,
+            brand_name: 'Acme',
+            brand_aliases: ['Acme'],
+            domain: 'acme.com',
+          }],
+        }),
+        updateBenchmark: sandbox.stub(),
+        createBenchmarks: sandbox.stub(),
+      };
+
+      expect(await ensureOwnBrandBenchmark(transport, WS, PID, BRAND)).to.equal('main-1');
+      expect(transport.updateBenchmark).to.not.have.been.called;
+    });
+
+    it('does not update an existing benchmark whose aliases are lowercase', async () => {
+      const transport = {
+        listBenchmarks: sandbox.stub().resolves({
+          aio_benchmarks: [{
+            id: 'main-1',
+            main_brand: true,
+            brand_name: 'Acme',
+            brand_aliases: ['acme', 'acme corp'],
+            domain: 'acme.com',
+          }],
+        }),
+        updateBenchmark: sandbox.stub(),
+        createBenchmarks: sandbox.stub(),
+      };
+
+      expect(await ensureOwnBrandBenchmark(
+        transport,
+        WS,
+        PID,
+        BRAND,
+        undefined,
+        { repairAliasCase: true },
+      )).to.equal('main-1');
+      expect(transport.updateBenchmark).to.not.have.been.called;
+      expect(transport.createBenchmarks).to.not.have.been.called;
+    });
+
     it('reuses an existing benchmark matched by the brand domain (idempotent)', async () => {
       const transport = {
         listBenchmarks: sandbox.stub().resolves({

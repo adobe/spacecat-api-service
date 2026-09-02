@@ -159,6 +159,69 @@ export function benchmarkTrackedUrl(benchmark) {
   return null;
 }
 
+function lowercaseAliasPlan(aliases) {
+  const stored = Array.isArray(aliases)
+    ? aliases.filter(hasText).map((alias) => alias.trim())
+    : [];
+  const affected = new Set(
+    stored
+      .filter((alias) => alias !== alias.toLowerCase())
+      .map((alias) => alias.toLowerCase()),
+  );
+  if (affected.size === 0) {
+    return null;
+  }
+
+  const withoutAffected = stored.filter((alias) => !affected.has(alias.toLowerCase()));
+  const recased = [];
+  const seen = new Set();
+  for (const alias of stored) {
+    const lowercase = alias.toLowerCase();
+    if (!seen.has(lowercase)) {
+      seen.add(lowercase);
+      recased.push(lowercase);
+    }
+  }
+  return { withoutAffected, recased };
+}
+
+function benchmarkUpdateBody(benchmark, brand, brandAliases) {
+  const trackedUrl = benchmarkTrackedUrl(benchmark)
+    || siteIdentityFromUrlString(brand?.primaryUrl)
+    || siteIdentityFromUrlString(brand?.domain);
+  if (trackedUrl === null) {
+    throw new Error('Cannot repair benchmark aliases without a tracked URL');
+  }
+  return {
+    brand_name: hasText(benchmark?.brand_name) ? benchmark.brand_name : brand.name,
+    brand_aliases: brandAliases,
+    domain: trackedUrl,
+    primary_url: trackedUrl,
+    ...(benchmark?.color !== undefined ? { color: benchmark.color } : {}),
+    ...(benchmark?.favorite !== undefined ? { favorite: benchmark.favorite } : {}),
+  };
+}
+
+async function repairBenchmarkAliasCase(transport, workspaceId, projectId, benchmark, brand) {
+  const plan = lowercaseAliasPlan(benchmark?.brand_aliases);
+  if (plan === null) {
+    return;
+  }
+
+  await transport.updateBenchmark(
+    workspaceId,
+    projectId,
+    benchmark.id,
+    benchmarkUpdateBody(benchmark, brand, plan.withoutAffected),
+  );
+  await transport.updateBenchmark(
+    workspaceId,
+    projectId,
+    benchmark.id,
+    benchmarkUpdateBody(benchmark, brand, plan.recased),
+  );
+}
+
 /**
  * The set of normalized hosts that are the primary domain of SOME market in the
  * brand's sub-workspace — every one of them is skipped as a `website` brand URL
@@ -311,10 +374,20 @@ export function collectBrandUrlEntries(sources, market, primaryDomains, primaryI
  *   own brand; `primaryUrl` is the url the market tracks and falls back to
  *   `domain`.
  * @param {object} [log] - optional logger ({ info?, warn? }).
+ * @param {object} [options] - ensure behavior.
+ * @param {boolean} [options.repairAliasCase=false] - perform the blocking
+ *   withhold/re-add repair used by project creation.
  * @returns {Promise<string|null>} the resolved benchmark id, or null when none
  *   exists and none can be created (no usable brand domain).
  */
-export async function ensureOwnBrandBenchmark(transport, workspaceId, projectId, brand, log) {
+export async function ensureOwnBrandBenchmark(
+  transport,
+  workspaceId,
+  projectId,
+  brand,
+  log,
+  { repairAliasCase = false } = {},
+) {
   const resp = await transport.listBenchmarks(workspaceId, projectId);
   const benchmarks = Array.isArray(resp?.aio_benchmarks) ? resp.aio_benchmarks : [];
   const ownDomain = normalizeBenchmarkDomain(brand?.domain);
@@ -324,6 +397,9 @@ export async function ensureOwnBrandBenchmark(transport, workspaceId, projectId,
   const existing = benchmarks.find((b) => b?.main_brand === true && hasText(b?.id))
     || benchmarks.find(matchesOwn);
   if (existing) {
+    if (repairAliasCase) {
+      await repairBenchmarkAliasCase(transport, workspaceId, projectId, existing, brand);
+    }
     return String(existing.id);
   }
 
@@ -387,6 +463,8 @@ export async function ensureOwnBrandBenchmark(transport, workspaceId, projectId,
  * @param {object} brand - { name, domain, primaryUrl?, aliases? } of the project's
  *   own brand, used to find-or-create the benchmark the URLs attach to.
  * @param {object} [log] - optional logger ({ info?, warn? }).
+ * @param {string|null} [existingBenchmarkId] - a benchmark already resolved by
+ *   the caller, avoiding a duplicate list/ensure operation.
  * @returns {Promise<{created: number, skipped?: boolean}>} count submitted
  *   (0 on no-op or when skipped for a missing benchmark).
  */
@@ -397,11 +475,13 @@ export async function attachBrandUrlsToProject(
   entries,
   brand,
   log,
+  existingBenchmarkId = null,
 ) {
   if (!Array.isArray(entries) || entries.length === 0) {
     return { created: 0 };
   }
-  const benchmarkId = await ensureOwnBrandBenchmark(transport, workspaceId, projectId, brand, log);
+  const benchmarkId = existingBenchmarkId
+    || await ensureOwnBrandBenchmark(transport, workspaceId, projectId, brand, log);
   if (benchmarkId === null) {
     log?.warn?.('brand-urls: no benchmark available — skipping URL attach', {
       workspaceId, projectId, count: entries.length,
