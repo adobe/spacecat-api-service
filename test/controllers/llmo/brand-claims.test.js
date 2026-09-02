@@ -411,6 +411,13 @@ describe('handleRequestBrandClaims (on-demand, LLMO-7263)', () => {
     expect(sqsSend).to.not.have.been.called;
   });
 
+  it('returns 500 (not 400) when the SQS enqueue fails', async () => {
+    sqsSend.rejects(new Error('sqs down'));
+    const result = await handleRequestBrandClaims(context, site);
+    expect(result.status).to.equal(500);
+    expect(postSlackMessage).to.not.have.been.called;
+  });
+
   it('still succeeds when the Slack notification fails (best-effort)', async () => {
     postSlackMessage.rejects(new Error('slack down'));
     const result = await handleRequestBrandClaims(context, site);

@@ -4560,8 +4560,8 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(404);
     });
 
-    it('returns 400 when the underlying trigger throws', async () => {
-      reqCtx.sqs.sendMessage.rejects(new Error('sqs boom'));
+    it('returns 400 when site resolution throws', async () => {
+      mockDataAccess.Site.findById.rejects(new Error('db boom'));
       const result = await controller.requestBrandClaims(reqCtx);
       expect(result.status).to.equal(400);
     });

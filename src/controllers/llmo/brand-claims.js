@@ -186,14 +186,20 @@ export async function handleRequestBrandClaims(context, site) {
 
   const queueUrl = env?.AUDIT_JOBS_QUEUE_URL;
   if (!queueUrl) {
+    // Keep the config diagnostic in the log; return a generic message so the
+    // environment's configuration state isn't leaked to external trial callers.
     log.error('Brand Claims on-demand: AUDIT_JOBS_QUEUE_URL is not configured');
-    return internalServerError('Brand Claims on-demand trigger is not configured for this environment');
+    return internalServerError('Brand Claims on-demand is temporarily unavailable');
   }
 
   // 7-day cooldown backstop: refuse a new run if the last brand-claims audit ran
   // within the window. Mirrors the UI's disabled "Request new run" button so the two
   // agree; because the UI button is bypassable this is the authoritative gate. Fails
   // OPEN — a lookup error must not block a legitimate first/eligible request.
+  // Accepted TOCTOU gap: two requests arriving before the audit-worker persists its
+  // audit row both pass this check and both enqueue. The per-brand redelivery dedup
+  // (blackboard fact freshness in mystique) makes the duplicate a cheap no-op, so a
+  // best-effort check here is deliberate rather than a hard once-only lock.
   try {
     const latestAudit = await site.getLatestAuditByAuditType(BRAND_CLAIMS_AUDIT_TYPE);
     const ranAtMs = latestAudit?.getAuditedAt ? Date.parse(latestAudit.getAuditedAt()) : NaN;
@@ -218,12 +224,19 @@ export async function handleRequestBrandClaims(context, site) {
     log.warn(`Brand Claims on-demand: cooldown lookup failed for site ${site.getId()}, allowing request: ${auditError.message}`);
   }
 
-  await sqs.sendMessage(queueUrl, {
-    type: 'brand-claims',
-    siteId: site.getId(),
-    onDemand: true,
-    auditContext: { trigger: 'on-demand-brand-claims' },
-  });
+  try {
+    await sqs.sendMessage(queueUrl, {
+      type: 'brand-claims',
+      siteId: site.getId(),
+      onDemand: true,
+      auditContext: { trigger: 'on-demand-brand-claims' },
+    });
+  } catch (sqsError) {
+    // Enqueue failure is a server-side/infra fault, not a client error — surface it
+    // as 5xx (the caller's controller catch would otherwise map any throw to 400).
+    log.error(`Brand Claims on-demand: failed to enqueue audit for site ${site.getId()}: ${sqsError.message}`);
+    return internalServerError('Brand Claims on-demand is temporarily unavailable');
+  }
   log.info(`Brand Claims on-demand: triggered brand-claims audit for site ${site.getId()}`);
 
   // Dedicated channel for on-demand Brand Claims request alerts (LLMO-7263),
