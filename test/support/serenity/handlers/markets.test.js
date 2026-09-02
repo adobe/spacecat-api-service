@@ -486,10 +486,11 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     expect(log.warn).to.have.been.called;
   });
 
-  it('prefers an explicit brandDomain over the siteId (does not read the Site)', async () => {
+  it('resolves the supplied siteId\'s domain over a conflicting brandDomain (siteId authoritative)', async () => {
     const dataAccess = makeDataAccess([]);
     dataAccess.BrandSemrushProject.findBySlice.resolves(null);
     dataAccess.BrandSemrushProject.create.resolves();
+    dataAccess.Site.findById.resolves({ getBaseURL: () => 'https://nba.com/kings' });
     const transport = {
       listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-new' }),
@@ -502,8 +503,45 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     }, fakeLog());
 
     expect(result.status).to.equal(201);
-    expect(dataAccess.Site.findById).to.not.have.been.called;
-    expect(transport.createProject.firstCall.args[1].domain).to.equal('adobe.com');
+    // The siteId resolves, so it wins: the Site IS read, and its domain — not
+    // the literal 'adobe.com' also supplied — is what the project is created
+    // against.
+    expect(dataAccess.Site.findById).to.have.been.calledOnce;
+    expect(transport.createProject.firstCall.args[1].domain).to.equal('nba.com');
+    expect(transport.updateProject.firstCall.args[2]).to.deep.equal({
+      type: 'ai', primary_url: 'nba.com/kings',
+    });
+  });
+
+  it('logs market-created telemetry with the resolved brandDomain/primaryUrl', async () => {
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(null);
+    dataAccess.BrandSemrushProject.create.resolves();
+    const transport = {
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      createProject: sinon.stub().resolves({ id: 'proj-new' }),
+      updateProject: sinon.stub().resolves(),
+      publishProject: sinon.stub().resolves(),
+    };
+    const log = fakeLog();
+
+    const result = await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
+      market: 'US', languageCode: 'en', brandDomain: 'adobe.com', brandNames: ['Adobe'],
+    }, log);
+
+    expect(result.status).to.equal(201);
+    expect(log.info).to.have.been.calledWithMatch(/serenity create-market: market created/);
+    // The fields are the entire point of this event — a regression that logs the
+    // wrong resolved identity must fail here, not just a missing log call.
+    expect(log.info.firstCall.args[1]).to.include({
+      brandId: BRAND,
+      brandDomain: 'adobe.com',
+      primaryUrl: 'adobe.com',
+      semrushWorkspaceId: WORKSPACE,
+      semrushProjectId: 'proj-new',
+      siteId: null,
+      generatePrompts: false,
+    });
   });
 
   it('400s when a supplied siteId does not resolve to a site domain', async () => {

@@ -345,6 +345,20 @@ export default function serenityTests(
       expect(res.body.languageCode).to.equal('en');
     });
 
+    it('POST /serenity/markets treats a supplied siteId as authoritative over a conflicting brandDomain', async () => {
+      // SITE_2 (site2.example.com) is a real, distinct ORG_1 Site from the literal
+      // brandDomain sent alongside it — the created market must track SITE_2's
+      // domain, not the literal string also supplied.
+      const created = await getHttpClient().admin.post(`${base}/markets`, {
+        market: 'US', languageCode: 'en', siteId: SITE_2_ID, brandDomain: 'example.com', brandNames: ['Test Brand'],
+      });
+      expect(created.status).to.equal(201);
+
+      const detail = await getHttpClient().admin.get(`${base}/markets/${US_GEO}/en`);
+      expect(detail.status).to.equal(200);
+      expect(detail.body.domain).to.equal('site2.example.com');
+    });
+
     it('DELETE /serenity/markets/:geo/:lang removes a siteId-linked market and cleans up (LLMO-6405 R12)', async () => {
       // Create via siteId (links SITE_1), then delete: the last market on that
       // non-primary site is removed, so its brand_sites 'serenity' link is unlinked.
