@@ -18,11 +18,13 @@ export const REVIEW_REASONS = {
   AEM_SITE_CHECK: 'AEM_SITE_CHECK',
   DOMAIN_ALREADY_ASSIGNED: 'DOMAIN_ALREADY_ASSIGNED',
   NON_PROD_DOMAIN: 'NON_PROD_DOMAIN',
+  AUTHENTICATED_SITE: 'AUTHENTICATED_SITE',
 };
 
 export const DOMAIN_ALREADY_ASSIGNED = 'already assigned to another organization';
 export const DOMAIN_ALREADY_ONBOARDED_IN_ORG = 'another domain is already onboarded for this IMS org';
 export const NON_PROD_DOMAIN = 'appears to be a non-production domain (contains qa, stage, dev, author, or publish subdomain, or is an hlx/AEM delivery URL).';
+export const AUTHENTICATED_SITE = 'requires authentication (login/SSO) to access, which ASO does not support';
 
 /**
  * Derives the review check key from the onboarding record's current state.
@@ -43,6 +45,9 @@ export function deriveCheckKey(onboarding) {
   }
   if (waitlistReason.includes(NON_PROD_DOMAIN)) {
     return REVIEW_REASONS.NON_PROD_DOMAIN;
+  }
+  if (waitlistReason.includes(AUTHENTICATED_SITE)) {
+    return REVIEW_REASONS.AUTHENTICATED_SITE;
   }
 
   return null;

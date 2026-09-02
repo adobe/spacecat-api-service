@@ -215,3 +215,23 @@ export async function bypassNonProdDomain({ onboarding }, context) {
   );
   return ok(PlgOnboardingDto.toAdminJSON(result));
 }
+
+/**
+ * BYPASS for AUTHENTICATED_SITE: admin has confirmed the login/SSO-gated site should be
+ * onboarded anyway (e.g. the customer allowlisted our crawler or exposed a public entry
+ * point). Sets authWallCheckBypassed in steps so the auth-wall guard is skipped when the
+ * flow re-runs.
+ */
+export async function bypassAuthenticatedSite({ onboarding }, context) {
+  const { ok } = context;
+  onboarding.setSteps({ ...(onboarding.getSteps() || {}), authWallCheckBypassed: true });
+  await onboarding.save();
+  const result = await performAsoPlgOnboarding(
+    {
+      domain: onboarding.getDomain(),
+      imsOrgId: onboarding.getImsOrgId(),
+    },
+    context,
+  );
+  return ok(PlgOnboardingDto.toAdminJSON(result));
+}

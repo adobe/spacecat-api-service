@@ -51,6 +51,7 @@ describe('PlgOnboardingController (onboarding-flow-core)', function describePlgO
   let rumRetrieveDomainkeyStub;
   let composeBaseURLStub;
   let detectBotBlockerStub;
+  let detectAuthWallStub;
   let detectLocaleStub;
   let resolveCanonicalUrlStub;
   let createOrFindOrganizationStub;
@@ -104,6 +105,7 @@ describe('PlgOnboardingController (onboarding-flow-core)', function describePlgO
       updateRumConfigStub,
       composeBaseURLStub,
       detectBotBlockerStub,
+      detectAuthWallStub,
       detectLocaleStub,
       resolveCanonicalUrlStub,
       createOrFindOrganizationStub,
@@ -140,6 +142,9 @@ describe('PlgOnboardingController (onboarding-flow-core)', function describePlgO
           hasText: (val) => typeof val === 'string' && val.trim().length > 0,
           isValidIMSOrgId: (val) => typeof val === 'string' && val.endsWith('@AdobeOrg'),
           resolveCanonicalUrl: resolveCanonicalUrlStub,
+        },
+        '../../../../src/support/detect-auth-wall.js': {
+          detectAuthWall: detectAuthWallStub,
         },
         '@adobe/spacecat-shared-http-utils': {
           badRequest: (msg) => ({ status: 400, value: msg }),
@@ -246,6 +251,7 @@ describe('PlgOnboardingController (onboarding-flow-core)', function describePlgO
     // Re-apply default behaviours that createSharedMocks set up
     composeBaseURLStub.returns(TEST_BASE_URL);
     detectBotBlockerStub.resolves({ crawlable: true });
+    detectAuthWallStub.resolves({ authenticated: false, signal: null });
     detectLocaleStub.resolves({ language: 'en', region: 'US' });
     resolveCanonicalUrlStub.resolves(TEST_BASE_URL);
     rumRetrieveDomainkeyStub.resolves('test-domainkey');
@@ -1136,6 +1142,74 @@ describe('PlgOnboardingController (onboarding-flow-core)', function describePlgO
 
       expect(mockOnboarding.setWaitlistReason)
         .to.have.been.calledBefore(mockOnboarding.setBotBlocker);
+    });
+  });
+
+  describe('onboard - authenticated site (login/SSO wall)', () => {
+    let controller;
+    beforeEach(() => {
+      controller = PlgOnboardingControllerFactory({ log: mockLog });
+    });
+
+    it('waitlists with an authentication reason when the front door requires login', async () => {
+      detectAuthWallStub.resolves({
+        authenticated: true,
+        signal: 'login-url',
+        finalUrl: 'https://example.com/sampoorna/login.html',
+      });
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(mockOnboarding.setWaitlistReason).to.have.been.calledWithMatch(/requires authentication/);
+      expect(mockOnboarding.save).to.have.been.called;
+      expect(mockDataAccess.Site.create).to.not.have.been.called;
+    });
+
+    it('probes the auth wall with the site base URL', async () => {
+      const context = buildContext({ domain: TEST_DOMAIN });
+      await controller.onboard(context);
+
+      expect(detectAuthWallStub).to.have.been.calledWithMatch({ baseUrl: TEST_BASE_URL });
+    });
+
+    it('includes the detected signal and resolved URL in the waitlist reason', async () => {
+      detectAuthWallStub.resolves({
+        authenticated: true,
+        signal: 'idp-host',
+        finalUrl: 'https://acme.okta.com/app/home',
+      });
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      await controller.onboard(context);
+
+      expect(mockOnboarding.setWaitlistReason).to.have.been.calledWithMatch(/idp-host/);
+      expect(mockOnboarding.setWaitlistReason).to.have.been.calledWithMatch(/acme\.okta\.com/);
+    });
+
+    it('omits the resolved URL from the reason when the probe returns no finalUrl', async () => {
+      detectAuthWallStub.resolves({ authenticated: true, signal: 'status-401', finalUrl: null });
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      await controller.onboard(context);
+
+      expect(mockOnboarding.setWaitlistReason).to.have.been.calledWithMatch(/detected: status-401\)/);
+      expect(mockOnboarding.setWaitlistReason).to.not.have.been.calledWithMatch(/resolved to/);
+    });
+
+    it('skips the auth-wall check when steps.authWallCheckBypassed is already true', async () => {
+      mockOnboarding.getSteps.returns({ authWallCheckBypassed: true });
+      detectAuthWallStub.resolves({ authenticated: true, signal: 'login-url' });
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const res = await controller.onboard(context);
+
+      expect(res.status).to.equal(200);
+      expect(detectAuthWallStub).to.not.have.been.called;
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+      expect(mockDataAccess.Site.create).to.have.been.called;
     });
   });
 
