@@ -43,6 +43,7 @@ import {
   sendGlobalImportRunMessage,
   triggerGlobalImportRun,
   triggerGeoExperimentImpactMeasurement,
+  triggerBrandClaimsEnrich,
 } from '../../src/support/utils.js';
 
 use(chaiAsPromised);
@@ -1294,6 +1295,40 @@ describe('utils', () => {
       expect(result.validForRedirects).to.be.false;
       expect(result.programId).to.be.undefined;
       expect(result.environmentId).to.be.undefined;
+    });
+  });
+
+  describe('triggerBrandClaimsEnrich', () => {
+    let sandbox;
+    let sqsStub;
+    let context;
+
+    beforeEach(() => {
+      sandbox = sinon.createSandbox();
+      sqsStub = { sendMessage: sandbox.stub().resolves() };
+      context = {
+        env: { AUDIT_JOBS_QUEUE_URL: 'https://sqs.example.com/queue' },
+        sqs: sqsStub,
+      };
+    });
+
+    afterEach(() => sandbox.restore());
+
+    it('publishes a brand-claims audit message with top-level mode=enrich', async () => {
+      const site = { getId: () => 'site-123' };
+      const slackContext = { channelId: 'C1', threadTs: 'T1' };
+
+      await triggerBrandClaimsEnrich(site, slackContext, context);
+
+      expect(sqsStub.sendMessage).to.have.been.calledOnce;
+      const [queueUrl, message] = sqsStub.sendMessage.firstCall.args;
+      expect(queueUrl).to.equal('https://sqs.example.com/queue');
+      expect(message).to.deep.equal({
+        type: 'brand-claims',
+        siteId: 'site-123',
+        mode: 'enrich',
+        auditContext: { slackContext: { channelId: 'C1', threadTs: 'T1' } },
+      });
     });
   });
 
