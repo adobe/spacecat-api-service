@@ -276,6 +276,15 @@ const routeRequiredCapabilities = {
   // Organizations
   'GET /organizations': CAP_ORG_READ_ALL,
   'GET /organizations/by-product-code/:productCode': CAP_ORG_READ_ALL,
+  // Mapped (not INTERNAL_ROUTES) so readOnlyAdminWrapper takes its read fast-path instead of
+  // the ownership check (this route has no siteId/organizationId path param to own). Reusing
+  // CAP_ORG_READ_ALL lets an S2S consumer pass this wrapper, but getByAccessMapSheet only
+  // calls hasAdminReadAccess() - no hasS2SCapability check - so S2S still gets 403 there;
+  // this route is intentionally admin-only end-to-end, unlike its by-product-code sibling.
+  // See the INVARIANT comment on getByAccessMapSheet in organizations.js: do not add a
+  // hasS2SCapability(CAP_ORG_READ_ALL) fallback there - this mapping's only purpose is the
+  // readOnlyAdminWrapper read fast-path, not S2S opt-in.
+  'GET /organizations/by-access-map-sheet/:productCode': CAP_ORG_READ_ALL,
   'POST /organizations': 'organization:write',
   'GET /organizations/:organizationId': 'organization:read',
   'GET /organizations/by-ims-org-id/:imsOrgId': 'organization:read',
