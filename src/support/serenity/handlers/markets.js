@@ -61,27 +61,77 @@ export function validateParentIdQuery(raw) {
 export { resolveLocation };
 
 /**
+ * @typedef {object} LanguageCache
+ * @property {number} expiresAt
+ * @property {Map<string,string>} byTag
+ * @property {Map<string,string>} byNorm
+ * @property {{norm: string, id: string}[]} sorted
+ */
+
+/**
  * Module-scoped Semrush language UUID cache. 1h TTL — the catalog is stable
  * but languages do get added occasionally, so we don't pin it for the
  * lifetime of the warm Lambda container.
+ *
+ * `byTag` keys the exact lowercased catalog name → id (kept for the
+ * empty-catalog guard). `byNorm` keys the normalized name (see
+ * {@link normalizeLanguageName}) → id for word-order-independent lookup, and
+ * `sorted` holds `{ norm, id }` in catalog-name order so a token-subset
+ * fallback (legacy bare `zh` → Simplified) is deterministic.
+ *
+ * @type {LanguageCache}
  */
 const languageCache = {
   expiresAt: 0,
   byTag: new Map(),
+  byNorm: new Map(),
+  sorted: [],
 };
 
 export function clearLanguageCache() {
   languageCache.expiresAt = 0;
   languageCache.byTag.clear();
+  languageCache.byNorm.clear();
+  languageCache.sorted = [];
 }
 
 const ENGLISH_LANGUAGE_NAMES = new Intl.DisplayNames(['en'], { type: 'language' });
 
+/**
+ * Normalize a language name to a word-order- and punctuation-independent key.
+ * Lowercases, splits on any non-alphanumeric run, sorts the tokens, and
+ * rejoins. The app's `Intl.DisplayNames` yields `"Simplified Chinese"` for
+ * `zh-Hans` while the live Semrush catalog returns `"Chinese Simplified"` —
+ * same tokens, reversed order (LLMO-7309); normalizing both to
+ * `"chinese simplified"` lets each script variant match its own catalog row
+ * (and tolerates a parenthetical form like `"Chinese (Simplified)"`).
+ * @param {string} name
+ */
+function normalizeLanguageName(name) {
+  return String(name)
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean)
+    .sort()
+    .join(' ');
+}
+
+/**
+ * Resolve a BCP-47 language tag to its English catalog name. The full tag is
+ * resolved first so a script variant keeps its qualifier (`zh-hans` →
+ * `"Simplified Chinese"`); `Intl.DisplayNames` echoes an unknown tag verbatim,
+ * so a result equal to the tag means "unresolved" and we fall back to the
+ * primary subtag (bare `zh` → `"Chinese"`).
+ * @param {string} languageTag
+ * @returns {string|null}
+ */
 function isoToEnglishName(languageTag) {
-  // Strip region/script subtag — the catalog is keyed by primary language
-  // only (no `en-US` / `pt-BR` rows). Caller already enforces
-  // LANGUAGE_TAG_REGEX, so `primary` is always a 2–3 letter string here.
-  const primary = String(languageTag).toLowerCase().split('-')[0];
+  const tag = String(languageTag).toLowerCase();
+  const primary = tag.split('-')[0];
+  const full = ENGLISH_LANGUAGE_NAMES.of(tag);
+  if (full && full.toLowerCase() !== tag) {
+    return full;
+  }
   const name = ENGLISH_LANGUAGE_NAMES.of(primary);
   return name && name.toLowerCase() !== primary ? name : null;
 }
@@ -93,9 +143,28 @@ export async function resolveLanguageId(transport, languageTag, log) {
     const resp = await transport.listLanguages();
     const items = Array.isArray(resp?.items) ? resp.items : [];
     languageCache.byTag.clear();
-    for (const item of items) {
+    languageCache.byNorm.clear();
+    languageCache.sorted = [];
+    // Sort by name so the token-subset fallback resolves deterministically to
+    // the alphabetically-first matching row (e.g. legacy bare `zh` →
+    // `Chinese Simplified` before `Chinese Traditional`).
+    const sortedItems = [...items].sort(
+      (a, b) => String(a?.name ?? '').localeCompare(String(b?.name ?? '')),
+    );
+    for (const item of sortedItems) {
       if (hasText(item?.name) && hasText(item?.id)) {
-        languageCache.byTag.set(String(item.name).toLowerCase(), String(item.id));
+        const name = String(item.name).toLowerCase();
+        const id = String(item.id);
+        const norm = normalizeLanguageName(name);
+        // First writer wins (catalog is name-sorted) so exact/normalized keys
+        // are stable across upstream reordering.
+        if (!languageCache.byTag.has(name)) {
+          languageCache.byTag.set(name, id);
+        }
+        if (norm && !languageCache.byNorm.has(norm)) {
+          languageCache.byNorm.set(norm, id);
+        }
+        languageCache.sorted.push({ norm, id });
       }
     }
     if (languageCache.byTag.size === 0 && items.length > 0) {
@@ -115,7 +184,25 @@ export async function resolveLanguageId(transport, languageTag, log) {
   if (!englishName) {
     return null;
   }
-  return languageCache.byTag.get(englishName.toLowerCase()) || null;
+  const query = normalizeLanguageName(englishName);
+  // Exact normalized match: `zh-hans` "Simplified Chinese" ↔ "Chinese Simplified".
+  const exact = languageCache.byNorm.get(query);
+  if (exact) {
+    return exact;
+  }
+  // Token-subset fallback: a bare/base name (legacy `zh` → "chinese") resolves
+  // to the alphabetically-first catalog row whose tokens are a superset —
+  // i.e. `Chinese Simplified`. Exact matches above always win first.
+  const queryTokens = query.split(' ').filter(Boolean);
+  if (queryTokens.length > 0) {
+    for (const entry of languageCache.sorted) {
+      const tokens = new Set(entry.norm.split(' '));
+      if (queryTokens.every((t) => tokens.has(t))) {
+        return entry.id;
+      }
+    }
+  }
+  return null;
 }
 
 /**
