@@ -1,3 +1,10 @@
+# [1.792.0](https://github.com/adobe/spacecat-api-service/compare/v1.791.1...v1.792.0) (2026-09-03)
+
+
+### Features
+
+* **referral-traffic:** thread urlPathPrefix through referral endpoints (LLMO-7315) ([#3190](https://github.com/adobe/spacecat-api-service/issues/3190)) ([c63bcee](https://github.com/adobe/spacecat-api-service/commit/c63bcee29b5f2891117c0d5abbd9062711de8b34)), closes [Hi#level](https://github.com/Hi/issues/level)
+
 ## [1.791.1](https://github.com/adobe/spacecat-api-service/compare/v1.791.0...v1.791.1) (2026-09-03)
 
 
