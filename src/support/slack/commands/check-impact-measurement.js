@@ -11,7 +11,7 @@
  */
 
 import { checkGeoExperimentImpactMeasurement } from '../../utils.js';
-import { isImpactMeasurementCheckEligible } from '../../geo-experiment-helper.js';
+import { getImpactMeasurementOutcome, IMPACT_MEASUREMENT_OUTCOME } from '../../geo-experiment-helper.js';
 import { resolveGeoExperiment } from './impact-measurement-helper.js';
 import BaseCommand from './base.js';
 import { extractURLFromSlackInput, postErrorMessage, postSiteNotFoundMessage } from '../../../utils/slack/base.js';
@@ -62,15 +62,33 @@ export default function CheckImpactMeasurementCommand(context) {
       }
 
       const geoExperimentId = geoExperiment.getId();
+      const outcome = getImpactMeasurementOutcome(geoExperiment);
 
-      if (!isImpactMeasurementCheckEligible(geoExperiment)) {
-        await say(`:warning: GeoExperiment ${geoExperimentId} for '${baseURL}' is at phase `
-          + `'${geoExperiment.getPhase()}' / status '${geoExperiment.getStatus()}' — a check `
-          + 'only makes sense at phase \'impact_measurement_started\' (an impact-measurement task '
-          + 'must be in flight). Use trigger-impact-measurement first if none is running.');
+      // Already terminal: report success/failure based on whether insights actually got filled,
+      // rather than refusing because no task is in flight.
+      if (outcome === IMPACT_MEASUREMENT_OUTCOME.SUCCEEDED) {
+        await say(`:white_check_mark: GeoExperiment ${geoExperimentId} for '${baseURL}' has `
+          + 'completed impact measurement — insights are available at '
+          + `\`${geoExperiment.getInsightsLocation()}\`.`);
         return;
       }
 
+      if (outcome === IMPACT_MEASUREMENT_OUTCOME.COMPLETED_WITHOUT_INSIGHTS) {
+        await say(`:x: GeoExperiment ${geoExperimentId} for '${baseURL}' completed without insights `
+          + `(phase '${geoExperiment.getPhase()}') — the impact measurement produced no data. `
+          + 'Use trigger-impact-measurement to re-run it.');
+        return;
+      }
+
+      if (outcome === IMPACT_MEASUREMENT_OUTCOME.NOT_APPLICABLE) {
+        await say(`:warning: GeoExperiment ${geoExperimentId} for '${baseURL}' is at phase `
+          + `'${geoExperiment.getPhase()}' / status '${geoExperiment.getStatus()}' — no `
+          + 'impact-measurement task is in flight to check. Use trigger-impact-measurement first '
+          + 'if none is running.');
+        return;
+      }
+
+      // IN_FLIGHT: a task is running — fire the async check and let the engine update the record.
       if (!sqs) {
         await say(':x: Cannot check impact measurement — missing SQS client.');
         return;
@@ -85,7 +103,7 @@ export default function CheckImpactMeasurementCommand(context) {
 
       await say(`:mag: Requested a check of GeoExperiment ${geoExperimentId}'s impact measurement `
         + `('${baseURL}'). If Mystique has finished, the experimentation engine will update it `
-        + 'shortly; otherwise it stays as-is until checked again.');
+        + 'shortly; re-run check-impact-measurement to see the result.');
     } catch (error) {
       log.error(error);
       await postErrorMessage(say, error);

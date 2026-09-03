@@ -65,6 +65,43 @@ export function isImpactMeasurementCheckEligible(geoExperiment) {
 }
 
 /**
+ * Observable outcomes of a geo-experiment's impact measurement, so the check command can report
+ * success/failure based on whether data actually got filled, instead of blindly refusing once no
+ * task is in flight.
+ */
+export const IMPACT_MEASUREMENT_OUTCOME = {
+  IN_FLIGHT: 'in_flight',
+  SUCCEEDED: 'succeeded',
+  COMPLETED_WITHOUT_INSIGHTS: 'completed_without_insights',
+  NOT_APPLICABLE: 'not_applicable',
+};
+
+/**
+ * Classifies a geo-experiment's impact-measurement outcome from its current persisted state:
+ * - IN_FLIGHT: a Mystique task is running (phase IMPACT_MEASUREMENT_STARTED) — a check is useful.
+ * - SUCCEEDED: phase IMPACT_MEASUREMENT_DONE with an insightsLocation — insights were written.
+ * - COMPLETED_WITHOUT_INSIGHTS: COMPLETED with no insightsLocation — measurement finished but
+ *   produced no data (llmo-experimentation-engine's `#completeWithoutInsights` path).
+ * - NOT_APPLICABLE: any earlier/other state — nothing has been measured, so nothing to report.
+ *
+ * @param {Object} geoExperiment
+ * @returns {string} one of IMPACT_MEASUREMENT_OUTCOME
+ */
+export function getImpactMeasurementOutcome(geoExperiment) {
+  if (isImpactMeasurementCheckEligible(geoExperiment)) {
+    return IMPACT_MEASUREMENT_OUTCOME.IN_FLIGHT;
+  }
+  if (geoExperiment.getPhase() === PHASES.IMPACT_MEASUREMENT_DONE
+    && geoExperiment.getInsightsLocation()) {
+    return IMPACT_MEASUREMENT_OUTCOME.SUCCEEDED;
+  }
+  if (geoExperiment.getStatus() === STATUSES.COMPLETED && !geoExperiment.getInsightsLocation()) {
+    return IMPACT_MEASUREMENT_OUTCOME.COMPLETED_WITHOUT_INSIGHTS;
+  }
+  return IMPACT_MEASUREMENT_OUTCOME.NOT_APPLICABLE;
+}
+
+/**
  * Validates a single phase config block.
  * All fields are optional — only present fields are validated.
  *
