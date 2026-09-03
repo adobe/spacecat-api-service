@@ -99,6 +99,46 @@ function defaultDateRange() {
   };
 }
 
+// Upper bound for a url-path-prefix filter value; longer input is treated as no
+// filter (defense-in-depth, mirrored by `maxLength` on the OpenAPI parameter).
+const MAX_URL_PATH_PREFIX_LENGTH = 512;
+
+/**
+ * Normalize the optional url-path-prefix filter (LLMO-7315).
+ *
+ * A prefix scopes a domain's referral data to a sub-path (e.g. '/knicks').
+ * Empty string, '/', or absent means NO filter (unchanged behavior).
+ * Otherwise the value is trimmed, forced to start with '/', and has all
+ * trailing '/' stripped so '/knicks', '/knicks/' and '/knicks///' resolve
+ * identically. A value that is only slashes (e.g. '/' or '//') collapses to
+ * empty and means "no filter".
+ *
+ * A repeated query param (parsed into an array) is ignored (treated as no
+ * filter) rather than coerced into a nonsense comma-joined value.
+ *
+ * @param {string|null|undefined} raw - Raw query value.
+ * @returns {string|null} Normalized prefix, or null when no filter applies.
+ */
+function normalizeUrlPathPrefix(raw) {
+  if (raw == null || Array.isArray(raw)) {
+    return null;
+  }
+  let prefix = String(raw).trim().replace(/\/+$/, '');
+  if (prefix === '') {
+    return null;
+  }
+  if (!prefix.startsWith('/')) {
+    prefix = `/${prefix}`;
+  }
+  // Defense-in-depth: ignore absurdly long values (not an injection risk — the value
+  // is only ever a bound RPC/PostgREST param — but caps memory abuse). A real path
+  // prefix is short; anything over the cap is treated as no filter.
+  if (prefix.length > MAX_URL_PATH_PREFIX_LENGTH) {
+    return null;
+  }
+  return prefix;
+}
+
 /**
  * Parse common referral-traffic query params from context.data.
  * Supports camelCase and snake_case aliases.
@@ -117,6 +157,7 @@ function parseParams(context) {
     pageIntent: q.pageIntent || q.page_intent || null,
     deviceType: q.deviceType || q.device_type || q.device || null,
     category: q.categoryName || q.category_name || null,
+    urlPathPrefix: normalizeUrlPathPrefix(q.urlPathPrefix || q.url_path_prefix || null),
   };
 }
 
@@ -134,6 +175,8 @@ function commonRpcParams(siteId, parsed) {
     p_device: parsed.deviceType,
     p_page_intent: parsed.pageIntent,
     p_category_name: parsed.category,
+    // LLMO-7315: optional url-path-prefix scope; null = no filter (unchanged).
+    p_url_path_prefix: parsed.urlPathPrefix,
   };
 }
 
@@ -208,6 +251,8 @@ export function createReferralTrafficFilterDimensionsHandler(getSiteAndValidateA
           p_source: parsed.source,
           p_start_date: parsed.startDate,
           p_end_date: parsed.endDate,
+          // LLMO-7315: optional url-path-prefix scope; null = no filter.
+          p_url_path_prefix: parsed.urlPathPrefix,
         });
 
         if (error) {
@@ -589,6 +634,11 @@ export function createReferralTrafficWeeksHandler(getSiteAndValidateAccess) {
         const source = VALID_SOURCES.has(rawSource) ? rawSource : DEFAULT_SOURCE;
         const tableName = SOURCE_TO_TABLE[source];
 
+        // LLMO-7315: /weeks is intentionally NOT url-path-prefix scoped. The week
+        // picker reflects the domain's data availability; the dashboard scopes it
+        // to a sub-path by querying the domain-root siteId (which owns the ingested
+        // rows), so a plain site_id read is correct here and avoids per-source
+        // PostgREST filter-string escaping.
         const rot = rotationCtx(siteId);
         if (rot.rotate) {
           // Rotation: the window is a pure function of now(); we only need to
@@ -705,8 +755,14 @@ export function createReferralTrafficUrlTrendHandler(getSiteAndValidateAccess) {
 
         const parsed = parseParams(ctx);
 
+        // LLMO-7315: rpc_referral_traffic_url_trend does an EXACT url_path match and is
+        // intentionally NOT given p_url_path_prefix. PostgREST resolves an RPC by its
+        // exact argument-name set, so passing an unknown p_url_path_prefix key would
+        // fail to match the function (PGRST202). Omit it via destructuring so the
+        // exclusion is visible at the call site.
+        const { p_url_path_prefix: _, ...urlTrendParams } = commonRpcParams(siteId, parsed);
         const { data, error } = await client.rpc('rpc_referral_traffic_url_trend', {
-          ...commonRpcParams(siteId, parsed),
+          ...urlTrendParams,
           p_url_path: urlPath,
         });
 
@@ -824,6 +880,10 @@ export function createReferralTrafficHasDataHandler(getSiteAndValidateAccess) {
           const lookback = new Date(Date.now() - HAS_DATA_LOOKBACK_DAYS * 86400000)
             .toISOString()
             .slice(0, 10);
+          // LLMO-7315: has-data is deliberately NOT scoped by urlPathPrefix. The
+          // UI calls has-data on the domain-ROOT siteId (no prefix) so a sub-path
+          // view inherits the domain's "configured" verdict; keying this probe on
+          // site_id only keeps that inheritance intact.
           results = await Promise.all(
             REFERRAL_HAS_DATA_TABLES.map((table) => client
               .from(table)

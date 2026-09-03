@@ -1,3 +1,24 @@
+## [1.791.1](https://github.com/adobe/spacecat-api-service/compare/v1.791.0...v1.791.1) (2026-09-03)
+
+
+### Bug Fixes
+
+* bump spacecat-shared-data-access to 4.28.0 for AsyncJob expiresAt (SITES-47947) ([#3196](https://github.com/adobe/spacecat-api-service/issues/3196)) ([bee354d](https://github.com/adobe/spacecat-api-service/commit/bee354d7e468bce5f1913518da032605b4789d1e))
+
+# [1.791.0](https://github.com/adobe/spacecat-api-service/compare/v1.790.0...v1.791.0) (2026-09-03)
+
+
+### Features
+
+* **ai-visibility:** scope remaining v1 brand endpoints to subdomains ([#3187](https://github.com/adobe/spacecat-api-service/issues/3187)) ([2e2d9b2](https://github.com/adobe/spacecat-api-service/commit/2e2d9b2a10ade426ad29a0bd4bee86eb1205320e)), closes [Hi#level](https://github.com/Hi/issues/level)
+
+# [1.790.0](https://github.com/adobe/spacecat-api-service/compare/v1.789.0...v1.790.0) (2026-09-03)
+
+
+### Features
+
+* **organizations:** add GET /organizations/by-access-map-sheet/:productCode ([#3176](https://github.com/adobe/spacecat-api-service/issues/3176)) ([b48b792](https://github.com/adobe/spacecat-api-service/commit/b48b792e20140b5b94720eeb862e52ba3c22756f))
+
 # [1.789.0](https://github.com/adobe/spacecat-api-service/compare/v1.788.0...v1.789.0) (2026-09-03)
 
 

@@ -128,6 +128,8 @@ paths:
     $ref: './organizations-api.yaml#/organizations'
   /organizations/by-product-code/{productCode}:
     $ref: './organizations-api.yaml#/organizations-by-product-code'
+  /organizations/by-access-map-sheet/{productCode}:
+    $ref: './organizations-api.yaml#/organizations-by-access-map-sheet'
   /organizations/{organizationId}:
     $ref: './organization-api.yaml#/organization'
   /organizations/{organizationId}/brands:
