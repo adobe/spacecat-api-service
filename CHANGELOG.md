@@ -1,3 +1,10 @@
+# [1.788.0](https://github.com/adobe/spacecat-api-service/compare/v1.787.0...v1.788.0) (2026-09-03)
+
+
+### Features
+
+* **brands:** S2S brand markets endpoint ([#3175](https://github.com/adobe/spacecat-api-service/issues/3175)) ([7c47a1c](https://github.com/adobe/spacecat-api-service/commit/7c47a1c7fdd55b620649681bd85f8f81b5f955c4)), closes [adobe-rnd/llmo-data-retrieval-service#3119](https://github.com/adobe-rnd/llmo-data-retrieval-service/issues/3119) [adobe-rnd/llmo-data-retrieval-service#3119](https://github.com/adobe-rnd/llmo-data-retrieval-service/issues/3119)
+
 # [1.787.0](https://github.com/adobe/spacecat-api-service/compare/v1.786.0...v1.787.0) (2026-09-03)
 
 
