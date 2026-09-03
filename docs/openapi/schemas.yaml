@@ -8205,6 +8205,50 @@ V2BrandActivateResponse:
     promptGenerationJobId: 'c3d4e5f6-7890-12ab-cdef-3456789012ab'
     scheduleId: 'd4e5f6a7-8901-23ab-cdef-4567890123ab'
 
+BrandMarket:
+  type: object
+  description: |
+    A whole-country market configured for a brand, derived from a
+    `BrandSemrushProject` row. `region` is derived server-side from the
+    row's `geoTargetId` (a Google Ads Geo Target ID) via the whole-country
+    inverse of the `criterion_id = 2000 + ISO numeric` formula — a row whose
+    `geoTargetId` is not a whole country (city/region/postal code, etc.) is
+    omitted rather than mislabeled. This shape has no `status` or `siteId`:
+    the underlying store carries neither column.
+  required:
+    - region
+    - languageCode
+    - geoTargetId
+  properties:
+    # Whole-country only today; sub-national geo would land as a new field, not an overload of region.
+    region:
+      type: string
+      description: ISO 3166-1 alpha-2 country code.
+      example: 'IN'
+    languageCode:
+      type: string
+      description: BCP-47 primary subtag.
+      example: 'en'
+    geoTargetId:
+      type: integer
+      description: Google Ads Geo Target ID for the market.
+      example: 2356
+  example:
+    region: 'IN'
+    languageCode: 'en'
+    geoTargetId: 2356
+
+BrandMarketsResponse:
+  type: object
+  description: Response envelope for listing a brand's markets.
+  required:
+    - markets
+  properties:
+    markets:
+      type: array
+      items:
+        $ref: '#/BrandMarket'
+
 V2Category:
   type: object
   description: A category in the normalized categories table

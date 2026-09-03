@@ -1,3 +1,24 @@
+# [1.788.0](https://github.com/adobe/spacecat-api-service/compare/v1.787.0...v1.788.0) (2026-09-03)
+
+
+### Features
+
+* **brands:** S2S brand markets endpoint ([#3175](https://github.com/adobe/spacecat-api-service/issues/3175)) ([7c47a1c](https://github.com/adobe/spacecat-api-service/commit/7c47a1c7fdd55b620649681bd85f8f81b5f955c4)), closes [adobe-rnd/llmo-data-retrieval-service#3119](https://github.com/adobe-rnd/llmo-data-retrieval-service/issues/3119) [adobe-rnd/llmo-data-retrieval-service#3119](https://github.com/adobe-rnd/llmo-data-retrieval-service/issues/3119)
+
+# [1.787.0](https://github.com/adobe/spacecat-api-service/compare/v1.786.0...v1.787.0) (2026-09-03)
+
+
+### Features
+
+* **slack:** report check-impact-measurement outcome and add get-experiment command ([#3189](https://github.com/adobe/spacecat-api-service/issues/3189)) ([049360f](https://github.com/adobe/spacecat-api-service/commit/049360f304e9ff894d5d0aaf6b43bc1d061663d5)), closes [#3170](https://github.com/adobe/spacecat-api-service/issues/3170)
+
+# [1.786.0](https://github.com/adobe/spacecat-api-service/compare/v1.785.0...v1.786.0) (2026-09-03)
+
+
+### Features
+
+* **slack:** add trigger-impact-measurement and check-impact-measurement Slack commands ([#3170](https://github.com/adobe/spacecat-api-service/issues/3170)) ([8de6193](https://github.com/adobe/spacecat-api-service/commit/8de61932816f37060ee58eacef81f23a043e8547))
+
 # [1.785.0](https://github.com/adobe/spacecat-api-service/compare/v1.784.4...v1.785.0) (2026-09-02)
 
 

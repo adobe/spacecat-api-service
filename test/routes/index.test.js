@@ -983,6 +983,7 @@ describe('getRouteHandlers', () => {
       'GET /organizations/:organizationId/brands',
       'GET /v2/orgs/:spaceCatId/brands',
       'GET /v2/orgs/:spaceCatId/brands/:brandId',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/markets',
       'GET /v2/orgs/:spaceCatId/categories',
       'POST /v2/orgs/:spaceCatId/categories',
       'PATCH /v2/orgs/:spaceCatId/categories/:categoryId',

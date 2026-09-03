@@ -138,6 +138,8 @@ paths:
     $ref: './brands-v2-api.yaml#/v2-brands-for-org'
   /v2/orgs/{spaceCatId}/brands/{brandId}:
     $ref: './brands-v2-api.yaml#/v2-brand-for-org'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/markets:
+    $ref: './brands-v2-api.yaml#/v2-brand-markets-for-org'
   /v2/orgs/{spaceCatId}/brands/{brandId}/activate:
     $ref: './brands-v2-api.yaml#/v2-brand-for-org-activate'
   /v2/orgs/{spaceCatId}/brands/{brandId}/status:

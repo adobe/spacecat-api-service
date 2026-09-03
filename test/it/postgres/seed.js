@@ -43,6 +43,7 @@ import { projectionAudits } from './seed-data/projection-audits.js';
 import { featureFlags } from './seed-data/feature-flags.js';
 import { prompts } from './seed-data/prompts.js';
 import { brandPresenceExecutions } from './seed-data/brand-presence-executions.js';
+import { brandSemrushProjects } from './seed-data/brand-semrush-projects.js';
 import { taskManagementConnections } from './seed-data/task-management-connections.js';
 import { tickets } from './seed-data/tickets.js';
 import { ticketSuggestions } from './seed-data/ticket-suggestions.js';
@@ -300,6 +301,19 @@ async function seed() {
 export async function seedBrandPresenceIntentFixture() {
   await insertRows('prompts', prompts); // FK: BPE.prompt_id → prompts.id
   await insertRows('brand_presence_executions', brandPresenceExecutions);
+}
+
+/**
+ * Optional per-test fixture: three `brand_to_semrush_projects` rows under
+ * BRAND_1 (live whole-country, soft-deleted, non-country) for the brand-markets
+ * IT (test/it/shared/tests/brand-markets.js). NOT part of the baseline seed —
+ * a `sites.js` IT relies on BRAND_1 carrying zero mapping rows in the baseline,
+ * so this is seeded only by that suite after its own resetPostgres().
+ */
+export async function seedBrandMarketsFixture() {
+  // brand_to_semrush_projects does not grant INSERT to postgrest_anon, so seed
+  // with the writer JWT (same as feature_flags above).
+  await insertRows('brand_to_semrush_projects', brandSemrushProjects, { asWriter: true });
 }
 
 /**

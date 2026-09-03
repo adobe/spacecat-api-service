@@ -876,6 +876,7 @@ const routeFacsCapabilities = {
       'GET /trial-users/email-preferences': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId': 'llmo/can_view',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/markets': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': 'llmo/can_view',
       // Serenity proxy (Semrush AIO replacement) — reads under brand

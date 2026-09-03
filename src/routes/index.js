@@ -226,6 +226,7 @@ export default function getRouteHandlers(
     'GET /v2/regions': llmoMysticatController.getRegions,
     'GET /v2/orgs/:spaceCatId/brands': brandsController.listBrandsForOrg,
     'GET /v2/orgs/:spaceCatId/brands/:brandId': brandsController.getBrandForOrg,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/markets': brandsController.listBrandMarketsForOrg,
     'GET /v2/orgs/:spaceCatId/categories': brandsController.listCategoriesForOrg,
     'POST /v2/orgs/:spaceCatId/categories': brandsController.createCategoryForOrg,
     'PATCH /v2/orgs/:spaceCatId/categories/:categoryId': brandsController.updateCategoryForOrg,
