@@ -78,16 +78,21 @@ export function clearLanguageCache() {
 const ENGLISH_LANGUAGE_NAMES = new Intl.DisplayNames(['en'], { type: 'language' });
 
 /**
- * Collapse a catalog language name to its base by dropping a trailing
- * parenthetical qualifier: `Chinese (Simplified)` → `chinese`. Semrush lists
- * some languages only under a script/region-qualified name (Chinese is the
- * known case — LLMO-7309), but the app models them by primary subtag alone
- * (`zh`), whose English name is the unqualified `Chinese`. Indexing both the
- * raw and base names lets an unqualified code resolve a qualified catalog row.
+ * Collapse a catalog language name to its base by dropping a trailing script
+ * qualifier: `Chinese Simplified` → `chinese`. Semrush lists Chinese only under
+ * script-qualified names — verified live (LLMO-7309), the `GET /v1/languages`
+ * catalog returns `Chinese Simplified` / `Chinese Traditional` (a trailing
+ * space-separated word, NOT a parenthetical) — but the app models Chinese by
+ * primary subtag alone (`zh`), whose English name is the unqualified `Chinese`.
+ * Indexing both the raw and base names lets an unqualified code resolve a
+ * qualified catalog row. Also tolerates a parenthetical form defensively.
  * @param {string} name
  */
 function baseLanguageName(name) {
-  return name.replace(/\s*\([^)]*\)\s*$/, '').trim();
+  return name
+    .replace(/\s*\([^)]*\)\s*$/, '')
+    .replace(/\s+(?:simplified|traditional)\s*$/i, '')
+    .trim();
 }
 
 function isoToEnglishName(languageTag) {
@@ -107,8 +112,8 @@ export async function resolveLanguageId(transport, languageTag, log) {
     const items = Array.isArray(resp?.items) ? resp.items : [];
     languageCache.byTag.clear();
     // Sort by name so a base-name alias resolves deterministically to the
-    // alphabetically-first qualified row (e.g. `zh` → `Chinese (Simplified)`
-    // before `Chinese (Traditional)`), independent of upstream ordering.
+    // alphabetically-first qualified row (e.g. `zh` → `Chinese Simplified`
+    // before `Chinese Traditional`), independent of upstream ordering.
     const sortedItems = [...items].sort(
       (a, b) => String(a?.name ?? '').localeCompare(String(b?.name ?? '')),
     );
