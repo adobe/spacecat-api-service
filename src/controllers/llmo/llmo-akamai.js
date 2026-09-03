@@ -816,10 +816,11 @@ function LlmoAkamaiController(ctx) {
    * identical key means the version is an unwritten clone (`freshWrite: false`).
    *
    * `fetcherKey` is returned in the response ONLY when `freshWrite !== false` (true, or undefined
-   * on an unambiguous first onboard) — i.e. only when the key found is confirmed to belong to THIS
-   * deploy, never an inherited key from a prior onboarding. This lets the Deploy step recover the
-   * key for Bot Manager allowlisting after its own deploy response was lost to the CDN timeout,
-   * without ever surfacing a stale/inherited key.
+   * on an unambiguous first onboard) AND a fetcher-key header was actually found — i.e. only when
+   * the key is confirmed to belong to THIS deploy, never an inherited key from a prior onboarding,
+   * and never a bare `null`. This lets the Deploy step recover the key for Bot Manager allowlisting
+   * after its own deploy response was lost to the CDN timeout, without ever surfacing a
+   * stale/inherited/missing key.
    *
    * `validate` (optional, 'true'): also run PAPI validation on the checked version and return
    * `activatable` (no blocking errors), `errorCount`, a bounded `errors` array, and `warningCount`.
@@ -888,17 +889,21 @@ function LlmoAkamaiController(ctx) {
       const errorCount = validate ? (errors?.length ?? 0) : undefined;
       const activatable = validate ? errorCount === 0 : undefined;
 
+      // The fetcher key found in the checked version, if any — null when the rule is absent, or
+      // present-but-missing/malformed the fetcher-key header (e.g. an old flat-layout rule).
+      // Computed once and reused below for both the freshWrite compare and the response.
+      const recoveredKey = deployed ? getManagedFetcherKey(ruleTree) : null;
+
       // Re-onboard disambiguation: compare the per-deploy fetcher key against the base version the
       // deploy cloned from. A fresh key proves THIS deploy's write persisted (not just an inherited
       // clone). Only meaningful when a distinct baseVersion is supplied and the rule is present.
       let freshWrite;
       if (deployed && baseVersion !== undefined && baseVersion !== version) {
-        const targetKey = getManagedFetcherKey(ruleTree);
         const { ruleTree: baseTree } = await client
           .getRuleTree(propertyId, baseVersion, contractId, groupId);
         const baseKey = getManagedFetcherKey(baseTree);
         // Distinct (or the base had no managed key at all) ⇒ this deploy wrote fresh content.
-        freshWrite = targetKey !== null && targetKey !== baseKey;
+        freshWrite = recoveredKey !== null && recoveredKey !== baseKey;
       }
 
       log.info(auditLine(context, 'deploy-status', 'ok', {
@@ -918,8 +923,9 @@ function LlmoAkamaiController(ctx) {
         ...(freshWrite !== undefined ? { freshWrite } : {}),
         // Recovered fetcher key, so a Deploy whose own response was lost to the CDN timeout can
         // still show it for Bot Manager allowlisting. NEVER when freshWrite === false — that
-        // version's key is an inherited clone from a prior onboarding, not this deploy's.
-        ...(deployed && freshWrite !== false ? { fetcherKey: getManagedFetcherKey(ruleTree) } : {}),
+        // version's key is an inherited clone from a prior onboarding, not this deploy's. Also
+        // omitted (not null) when the rule is present but has no usable fetcher-key header.
+        ...(recoveredKey && freshWrite !== false ? { fetcherKey: recoveredKey } : {}),
         // Present only when validate=true: whether the version can be activated + its error detail.
         // `errors` is bounded (PAPI can return hundreds) and redacted: PAPI can echo a behavior's
         // option values (e.g. headerValue) in structured detail on certain validation errors, so a

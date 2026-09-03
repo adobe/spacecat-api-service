@@ -565,6 +565,7 @@ describe('LlmoAkamaiController', () => {
       expect(body.latestVersion).to.equal(7);
       expect(body.deployed).to.equal(false);
       expect(body.managedRulesPresent).to.deep.equal([]);
+      expect(body).to.not.have.property('fetcherKey');
       expect(mockAkamaiClient.getRuleTree).to.have.been.calledWith(PROPERTY_ID, 7);
       // Read-only: never creates a version or writes.
       expect(mockAkamaiClient.createVersion).to.not.have.been.called;
@@ -579,6 +580,9 @@ describe('LlmoAkamaiController', () => {
       expect(res.status).to.equal(200);
       expect(body.deployed).to.equal(true);
       expect(body.managedRulesPresent).to.deep.equal(['ABV - Optimize at Edge']);
+      // The rule is present but carries no fetcher-key header (DEPLOYED_TREE has none) — omit the
+      // field rather than returning a bare null, even though deployed is true.
+      expect(body).to.not.have.property('fetcherKey');
     });
 
     it('checks a specific version when one is supplied', async () => {
