@@ -1817,27 +1817,31 @@ describe('Opportunities Controller', () => {
       expect(batchStub).to.have.been.calledOnce;
     });
 
-    it('narrows out opportunities of a type the caller is not permitted (D4 composite)', async () => {
+    it('returns an opportunity whose type is in the caller\'s permitted set (D4 composite)', async () => {
+      // mockOpptyEntity.getType() === 'SEO'; a grant scoped to that type must retain it.
       const res = await controllerWithPg.getByUrl({
         params: { siteId: SITE_ID },
         data: { urls: [inputUrl] },
-        attributes: { facsComposite: { values: [] } },
+        attributes: { facsComposite: { values: ['SEO'] } },
+      });
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.opportunities[OPPORTUNITY_ID]).to.include({ id: OPPORTUNITY_ID });
+      expect(body.results).to.deep.equal([{ url: inputUrl, opportunityIds: [OPPORTUNITY_ID] }]);
+    });
+
+    it('narrows out an opportunity whose type is NOT in the caller\'s permitted set (D4 composite)', async () => {
+      // caller is scoped to 'broken-backlinks'; the 'SEO' opportunity must be hidden,
+      // but the requested URL is still echoed (with no ids) since opportunities keep no-match URLs.
+      const res = await controllerWithPg.getByUrl({
+        params: { siteId: SITE_ID },
+        data: { urls: [inputUrl] },
+        attributes: { facsComposite: { values: ['broken-backlinks'] } },
       });
       expect(res.status).to.equal(200);
       const body = await res.json();
       expect(body.opportunities).to.deep.equal({});
       expect(body.results).to.deep.equal([{ url: inputUrl, opportunityIds: [] }]);
-    });
-
-    it('returns opportunities under a site-wide (all) composite grant (D4)', async () => {
-      const res = await controllerWithPg.getByUrl({
-        params: { siteId: SITE_ID },
-        data: { urls: [inputUrl] },
-        attributes: { facsComposite: { values: 'all' } },
-      });
-      expect(res.status).to.equal(200);
-      const body = await res.json();
-      expect(body.opportunities[OPPORTUNITY_ID]).to.include({ id: OPPORTUNITY_ID });
     });
   });
 });

@@ -15547,6 +15547,20 @@ describe('Suggestions Controller', () => {
       expect(res.status).to.equal(404);
     });
 
+    it('returns 403 when the caller does not belong to the site\'s organization', async () => {
+      // A caller outside the site's org must be refused before any lookup runs —
+      // by-url must not become a way to read another org's suggestions.
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(false);
+      const res = await controllerWithPg.getByUrl({
+        params: { siteId: SITE_ID }, data: { urls: [inputUrl] },
+      });
+      expect(res.status).to.equal(403);
+      const body = await res.json();
+      expect(body.message).to.equal('User does not belong to the organization');
+      // the access gate short-circuits ahead of the index lookup
+      expect(batchStub).to.not.have.been.called;
+    });
+
     it('returns 500 when the postgrest client is unavailable', async () => {
       const ctrl = SuggestionsController({
         dataAccess: { ...daWithPg, services: {} },
@@ -15585,11 +15599,29 @@ describe('Suggestions Controller', () => {
       expect(batchStub).to.have.been.calledOnce;
     });
 
-    it('narrows out suggestions whose opportunity the caller cannot see (D4 composite)', async () => {
+    it('returns a suggestion whose opportunity type is in the caller\'s permitted set (D4 composite)', async () => {
+      // the suggestion's opportunity (from allBySiteId) is type 'wikipedia-analysis';
+      // a grant scoped to that type must keep the suggestion.
       const res = await controllerWithPg.getByUrl({
         params: { siteId: SITE_ID },
         data: { urls: [inputUrl] },
-        attributes: { facsComposite: { values: [] } },
+        attributes: { facsComposite: { values: ['wikipedia-analysis'] } },
+      });
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.results).to.deep.equal([{ url: inputUrl, suggestionIds: [SUG_ID] }]);
+      expect(body.suggestions[SUG_ID]).to.include({ id: SUG_ID, opportunityId: OPPORTUNITY_ID });
+      expect(body.unmatchedUrls).to.deep.equal([]);
+    });
+
+    it('narrows out a suggestion whose opportunity type is NOT permitted (D4 composite)', async () => {
+      // caller is scoped to 'broken-backlinks'; the suggestion's opportunity
+      // ('wikipedia-analysis') is not permitted, so the suggestion is hidden and
+      // its URL is reported as unmatched.
+      const res = await controllerWithPg.getByUrl({
+        params: { siteId: SITE_ID },
+        data: { urls: [inputUrl] },
+        attributes: { facsComposite: { values: ['broken-backlinks'] } },
       });
       expect(res.status).to.equal(200);
       const body = await res.json();
