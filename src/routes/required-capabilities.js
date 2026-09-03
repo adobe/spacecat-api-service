@@ -285,6 +285,7 @@ const routeRequiredCapabilities = {
   'GET /organizations/:organizationId/brands': 'brand:read',
   'GET /v2/orgs/:spaceCatId/brands': 'organization:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId': 'organization:read',
+  'GET /v2/orgs/:spaceCatId/brands/:brandId/markets': 'organization:read',
   'GET /v2/orgs/:spaceCatId/categories': 'organization:read',
   'POST /v2/orgs/:spaceCatId/categories': 'organization:write',
   'PATCH /v2/orgs/:spaceCatId/categories/:categoryId': 'organization:write',
