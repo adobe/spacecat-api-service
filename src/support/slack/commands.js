@@ -65,6 +65,7 @@ import getPathSuggestionsStatus from './commands/get-path-suggestions-status.js'
 import brandClaims from './commands/toggle-brand-claims.js';
 import triggerImpactMeasurement from './commands/trigger-impact-measurement.js';
 import checkImpactMeasurement from './commands/check-impact-measurement.js';
+import enrichBrandClaims from './commands/enrich-brand-claims.js';
 
 /**
  * Returns all commands.
@@ -128,4 +129,5 @@ export default (context) => [
   brandClaims(context),
   triggerImpactMeasurement(context),
   checkImpactMeasurement(context),
+  enrichBrandClaims(context),
 ];

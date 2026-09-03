@@ -116,6 +116,35 @@ export const sendAuditMessage = async (
   data: auditData,
 });
 
+/**
+ * Triggers a Brand Claims off-site opportunity ENRICHMENT run for a site (LLMO-7312).
+ *
+ * Sends the `brand-claims` audit message with a top-level `mode: 'enrich'` field
+ * (mirrors `onDemand`), which the audit worker forwards onto its ready-signal so
+ * mystique's BP consumer runs the cache-safe link refresh (force only the matcher +
+ * delivery) instead of a full claims recompute.
+ *
+ * @param {Site} site - The site object.
+ * @param {Object} slackContext - The Slack context object.
+ * @param {Object} lambdaContext - The Lambda context object.
+ * @returns {Promise} A promise representing the trigger operation.
+ */
+export const triggerBrandClaimsEnrich = async (
+  site,
+  slackContext,
+  lambdaContext,
+) => lambdaContext.sqs.sendMessage(lambdaContext.env.AUDIT_JOBS_QUEUE_URL, {
+  type: 'brand-claims',
+  siteId: site.getId(),
+  mode: 'enrich',
+  auditContext: {
+    slackContext: {
+      channelId: slackContext.channelId,
+      threadTs: slackContext.threadTs,
+    },
+  },
+});
+
 // todo: prototype - untested
 /* c8 ignore start */
 export const sendExperimentationCandidatesMessage = async (

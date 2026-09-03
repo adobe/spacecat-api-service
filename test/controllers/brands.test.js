@@ -6547,6 +6547,10 @@ describe('Brands Controller', () => {
         { urls: [{ value: 'https://acme.com' }], socialAccounts: [], earnedContent: [] },
         'ws-9',
       );
+      const body = await response.json();
+      expect(body.urls).to.deep.equal(updated.urls);
+      expect(body.socialAccounts).to.deep.equal(updated.socialAccounts);
+      expect(body.earnedContent).to.deep.equal(updated.earnedContent);
     });
 
     it('resolves the IMS token via resolveSemrushImsToken and forwards it to createSerenityTransport (promise-token path)', async () => {
@@ -6709,6 +6713,8 @@ describe('Brands Controller', () => {
         'Updated Brand',
         'ws-9',
       );
+      const body = await response.json();
+      expect(body.brandAliases).to.deep.equal(updated.brandAliases);
     });
 
     it('surfaces semrushRejectedAliases on the response when Semrush refuses some aliases', async () => {
@@ -7105,7 +7111,12 @@ describe('Brands Controller', () => {
         id: BRAND_UUID,
         name: 'Updated Brand',
         semrushSubWorkspaceId: 'ws-9',
-        competitors: [{ name: 'Rival', url: 'https://rival.com', regions: ['us'] }],
+        competitors: [{
+          name: 'Rival',
+          url: 'https://rival.com',
+          aliases: ['Canonical Rival'],
+          regions: ['us'],
+        }],
       };
       const updateBrandStub = sinon.stub().resolves(updated);
       const ciSyncStub = sinon.stub().resolves({ markets: 1, changed: 1 });
@@ -7145,6 +7156,13 @@ describe('Brands Controller', () => {
         [{ name: 'gone.com', key: 'gone.com', domain: 'gone.com' }],
         'ws-9',
       );
+      const body = await response.json();
+      expect(body.competitors).to.deep.equal([{
+        name: 'Rival',
+        url: 'https://rival.com',
+        aliases: ['Canonical Rival'],
+        regions: ['us'],
+      }]);
     });
 
     it('does NOT re-sync competitors when the edit leaves them untouched', async () => {
