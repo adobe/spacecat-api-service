@@ -417,7 +417,7 @@ Phase 2 of the URL Inspector **"Cited Third Party URLs"** expandable tree: expan
 |---|---|---|---|
 | `spaceCatId` | path | ✅ | SpaceCat organisation UUID |
 | `brandId` | path | ✅ | SpaceCat brand UUID. Selects the brand's Semrush **sub-workspace** (flat-mode falls back to the org parent). LLMO ReBAC `brand` resource (FACS `llmo/can_view`); requires `brand:read`. `404` if not in the org |
-| `hostname` / `domain` | query | ❌ | Optional registered domain to drill into, as returned by Cited Domains. Matched host-or-subdomain (see below). When omitted, all source hosts are returned before pagination. |
+| `hostname` / `domain` | query | ❌ | Optional scope to drill into: a registered domain as returned by Cited Domains (`intuit.com`), a subdomain (`quickbooks.intuit.com`), or a `host/path` scope (`nba.com/kings`). Matched host-or-subdomain, narrowed by the path prefix when one is given (see below). `400` when non-empty but not parseable as a host. When omitted, all source hosts are returned before pagination. |
 | `model` / `platform` | query | ❌ | AI model filter (`model` wins). Default `search-gpt` |
 | `startDate` / `start_date` | query | ✅ | `YYYY-MM-DD`. `400` if missing, malformed, or after `endDate` |
 | `endDate` / `end_date` | query | ✅ | `YYYY-MM-DD`. `400` if missing or malformed |
@@ -437,7 +437,13 @@ Scoped by top-level `project_id` + date + `CBF_model`. The endpoint fans out **p
 
 ### What it returns
 
-The element has **no server-side domain filter** (verified live: `CBF_domain`/`cbf_domain`/`CBF_source`, `eq` + `contains`, all return the full project table), so `hostname` is applied **client-side** — the same pattern Owned URLs uses for `domain_type='Owned'`. Cited Domains reports the **registered domain** (e.g. `openai.com`), but `source` hosts are often subdomains (`help.openai.com`), so a row matches when its host **equals `hostname` or is a subdomain of it** (`host === hostname || host.endsWith('.'+hostname)`, `www.`-stripped, lowercased). Exact-host matching would miss most URLs — e.g. `cambridge.org` is only ever cited via `dictionary.cambridge.org`. When `hostname` is omitted, all source hosts are retained before applying `channel`, sorting, and pagination. An optional `channel` (content-type) filter is then applied client-side on `contentType`. URLs are sorted by `citations` **descending** and sliced client-side; `totalCount` is the full post-filter count. Field mapping:
+The element has **no server-side domain filter** (verified live: `CBF_domain`/`cbf_domain`/`CBF_source`, `eq` + `contains`, all return the full project table), so `hostname` is applied **client-side** — the same pattern Owned URLs uses for `domain_type='Owned'`. The value is parsed as a `{host, pathPrefix}` scope (`src/support/elements/url-scope.js`) and matched against each row's `source` URL:
+
+- **Host matching folds subdomains in**: Cited Domains reports the **registered domain** (e.g. `openai.com`), but `source` hosts are often subdomains (`help.openai.com`), so a row matches when its host equals the requested host or is a subdomain of it (`www.`-stripped, lowercased). Exact-host matching would miss most URLs — e.g. `cambridge.org` is only ever cited via `dictionary.cambridge.org`.
+- **A path-bearing scope narrows further**: `hostname=nba.com/kings` keeps only rows whose pathname sits at or under `/kings` (segment boundary — `/kingsx` does not match).
+- **The brand's own site anchor is respected**: the brand's primary-site `base_url` defines the site's own scope. Requesting exactly that scope (`quickbooks.intuit.com`, or `nba.com/kings` for a subpath site) returns only the site's subtree. Requesting a **proper ancestor** of it (`intuit.com` for a `quickbooks.intuit.com` brand; `nba.com` for `nba.com/kings`) returns the fold **minus** the site's own subtree — the site's URLs never appear under its parent's third-party row. Brands without a primary site keep the plain fold everywhere.
+
+When `hostname` is omitted, all source hosts are retained before applying `channel`, sorting, and pagination. An optional `channel` (content-type) filter is then applied client-side on `contentType`. URLs are sorted by `citations` **descending** and sliced client-side; `totalCount` is the full post-filter count. Field mapping:
 
 - **`url`** ← `source`; **`citations`** ← `citations`; **`promptsCited`** ← `prompts_with_citation`
 - **`contentType`** ← `domain_type`

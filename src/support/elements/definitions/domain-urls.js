@@ -11,6 +11,7 @@
  */
 
 import { isAllPlatforms, resolveElementModel } from '../constants.js';
+import { createScopeMatcher, parseCandidateUrl, splitScope } from '../url-scope.js';
 
 /**
  * Builds the payload for the Stats-per-URL element (9af5ed83, `table`) scoped to a
@@ -58,37 +59,6 @@ export function buildDomainUrlsPayload({
   };
 }
 
-/* c8 ignore start -- LLMO-6160 POC endpoint; unit tests intentionally deferred */
-
-/**
- * Extracts the registrable-domain-agnostic host of a URL: lowercased, `www.`-stripped.
- * Returns null for unparseable values (defensive — Semrush `source` is always a URL).
- */
-function hostOf(url) {
-  try {
-    return new URL(url).hostname.replace(/^www\./, '').toLowerCase();
-  } catch {
-    return null;
-  }
-}
-
-/**
- * True when `host` is `hostname` itself or a subdomain of it.
- *
- * The incoming `hostname` comes from the cited-domains element (98b91d00), which
- * reports the REGISTERED domain (eTLD+1, e.g. `openai.com`, `cambridge.org`). But the
- * Stats-per-URL element's `source` hosts are often subdomains (`help.openai.com`,
- * `dictionary.cambridge.org`). So an exact-host match would drop most (or, for
- * `cambridge.org`, ALL) of a domain's URLs. Matching `host === hostname ||
- * host.endsWith('.'+hostname)` captures the apex + every subdomain without a
- * public-suffix list, and the leading-dot guard prevents `notopenai.com` from
- * matching `openai.com`. Verified live (2026-07-10): `cambridge.org` → 46 URLs, all
- * under `dictionary.cambridge.org`; exact match would have returned 0.
- */
-function hostMatches(host, hostname) {
-  return host === hostname || host.endsWith(`.${hostname}`);
-}
-
 /**
  * Parses the pagination params (0-based `page`, `pageSize`) mirroring the legacy
  * parsePaginationParams (defaultPageSize 50, clamped to [1, 1000]).
@@ -117,22 +87,35 @@ function parsePagination({ page, pageSize } = {}) {
  * `regions`/`categories` are STRINGS here (the legacy contract + the UI `DomainUrlRow`
  * type), NOT arrays like owned-urls.
  *
- * When `hostname` is supplied, only rows whose `source` host matches it
- * (host-or-subdomain, see {@link hostMatches}) are kept. When omitted, all source
- * hosts are kept. An optional `channel` (content-type) filter is then applied
+ * When `hostname` is supplied it is parsed as a `{host, pathPrefix}` scope
+ * (`intuit.com`, `quickbooks.intuit.com`, `nba.com/kings` are all expressible)
+ * and only rows within that scope are kept — the eTLD+1 fold for host-only
+ * scopes, narrowed by the path prefix when one is given. When `siteBaseUrl`
+ * (the brand's own site anchor) is supplied and the requested scope is a
+ * proper ancestor of it, rows in the site's own subtree are excluded from the
+ * fold — the site's own URLs are addressable by requesting the site scope
+ * itself (see {@link createScopeMatcher}). When `hostname` is omitted, all
+ * source hosts are kept. An optional `channel` (content-type) filter is then applied
  * client-side on `contentType` (case-insensitive) — the element has no server-side
  * content-type filter, so this mirrors cited-domains + the legacy RPC's `p_channel`.
  * Semrush has no server-side pagination, so after filtering we sort by citations
  * desc and slice client-side; `totalCount` is the post-filter, pre-slice count.
  *
  * @param {Array<{region?: string, stats: object}>} projectResults
- * @param {object} params - { hostname, channel, page, pageSize }.
+ * @param {object} params - { hostname, siteBaseUrl, channel, page, pageSize }.
  * @returns {{ urls: Array<object>, totalCount: number }}
  */
 export function transformDomainUrlsResponse(projectResults = [], params = {}) {
   const { page, pageSize } = parsePagination(params);
-  const hostname = String(params.hostname ?? '').trim().replace(/^www\./, '').toLowerCase();
-  const filterByHostname = hostname !== '';
+  const rawHostname = String(params.hostname ?? '').trim();
+  const requestedScope = splitScope(rawHostname);
+  // A non-empty hostname that parses to no host (e.g. a bare path) can match
+  // nothing — return empty rather than silently dropping the filter.
+  if (rawHostname !== '' && !requestedScope) {
+    return { urls: [], totalCount: 0 };
+  }
+  const siteScope = splitScope(params.siteBaseUrl);
+  const matchesScope = requestedScope && createScopeMatcher(requestedScope, siteScope);
   const channel = typeof params.channel === 'string' ? params.channel.trim() : '';
   const byUrl = new Map();
 
@@ -142,8 +125,8 @@ export function transformDomainUrlsResponse(projectResults = [], params = {}) {
         // eslint-disable-next-line no-continue
         continue;
       }
-      const host = hostOf(row.source);
-      if (!host || (filterByHostname && !hostMatches(host, hostname))) {
+      const candidate = parseCandidateUrl(row.source);
+      if (!candidate || (matchesScope && !matchesScope(candidate))) {
         // eslint-disable-next-line no-continue
         continue;
       }
@@ -192,4 +175,3 @@ export function transformDomainUrlsResponse(projectResults = [], params = {}) {
   const offset = page * pageSize;
   return { urls: urls.slice(offset, offset + pageSize), totalCount };
 }
-/* c8 ignore stop */

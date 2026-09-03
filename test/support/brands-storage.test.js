@@ -482,13 +482,33 @@ describe('brands-storage', () => {
       expect(await getBrandIdentity(ORG_ID, '', { from: () => {} })).to.be.null;
     });
 
-    it('returns the { id, name } identity unchanged, without mapping through the full brand DTO', async () => {
-      const query = createChainableQuery({ data: { id: BRAND_ID, name: 'TestBrand' }, error: null });
+    it('returns { id, name, baseUrl } with baseUrl from the base_site join', async () => {
+      const query = createChainableQuery({
+        data: {
+          id: BRAND_ID,
+          name: 'TestBrand',
+          base_site: { base_url: 'https://quickbooks.intuit.com' },
+        },
+        error: null,
+      });
       const postgrestClient = { from: sinon.stub().returns(query) };
 
       const result = await getBrandIdentity(ORG_ID, BRAND_ID, postgrestClient);
 
-      expect(result).to.deep.equal({ id: BRAND_ID, name: 'TestBrand' });
+      expect(result).to.deep.equal({
+        id: BRAND_ID,
+        name: 'TestBrand',
+        baseUrl: 'https://quickbooks.intuit.com',
+      });
+    });
+
+    it('returns baseUrl null for a brand without a primary site (no base_site join row)', async () => {
+      const query = createChainableQuery({ data: { id: BRAND_ID, name: 'TestBrand', base_site: null }, error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+
+      const result = await getBrandIdentity(ORG_ID, BRAND_ID, postgrestClient);
+
+      expect(result).to.deep.equal({ id: BRAND_ID, name: 'TestBrand', baseUrl: null });
     });
 
     it('returns null when the brand does not exist in the org', async () => {
