@@ -349,6 +349,15 @@ describe('geo-experiment-helper', () => {
       );
     });
 
+    it('reports the outcome by phase even if status is transiently non-COMPLETED at DONE', () => {
+      // Keyed on phase, not status: a mid-update IN_PROGRESS status at IMPACT_MEASUREMENT_DONE
+      // still reports completed-without-insights rather than falling through to NOT_APPLICABLE.
+      const geo = makeGeo({ phase: PHASES.IMPACT_MEASUREMENT_DONE, status: STATUSES.IN_PROGRESS });
+      expect(getImpactMeasurementOutcome(geo)).to.equal(
+        IMPACT_MEASUREMENT_OUTCOME.COMPLETED_WITHOUT_INSIGHTS,
+      );
+    });
+
     it('is NOT_APPLICABLE for an earlier, non-terminal phase', () => {
       const geo = makeGeo({ phase: PHASES.PRE_ANALYSIS_STARTED, status: STATUSES.IN_PROGRESS });
       expect(getImpactMeasurementOutcome(geo)).to.equal(IMPACT_MEASUREMENT_OUTCOME.NOT_APPLICABLE);

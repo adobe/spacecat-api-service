@@ -206,6 +206,33 @@ describe('GetExperimentCommand', () => {
     expect(slackContext.say.firstCall.args[0]).to.include('E_MYSTIQUE');
   });
 
+  it('renders a plain-string error without extra quoting', async () => {
+    extractURLFromSlackInputStub.returns('https://example.com');
+    dataAccessStub.Site.findByBaseURL.resolves({ getId: () => 'site-1' });
+    const geo = mockGeoExperiment({ error: 'measurement failed' });
+    dataAccessStub.GeoExperiment.allBySiteId.resolves({ data: [geo] });
+    const command = GetExperimentCommand(context);
+
+    await command.handleExecution(['example.com'], slackContext);
+
+    expect(slackContext.say.firstCall.args[0]).to.include(':rotating_light: *Error:* measurement failed');
+  });
+
+  it('renders an em-dash for a missing prompts count instead of "null"/"undefined"', async () => {
+    extractURLFromSlackInputStub.returns('https://example.com');
+    dataAccessStub.Site.findByBaseURL.resolves({ getId: () => 'site-1' });
+    const geo = mockGeoExperiment({ promptsCount: undefined });
+    dataAccessStub.GeoExperiment.allBySiteId.resolves({ data: [geo] });
+    const command = GetExperimentCommand(context);
+
+    await command.handleExecution(['example.com'], slackContext);
+
+    const msg = slackContext.say.firstCall.args[0];
+    expect(msg).to.include(':bar_chart: *Prompts:* —');
+    expect(msg).to.not.include('*Prompts:* undefined');
+    expect(msg).to.not.include('*Prompts:* null');
+  });
+
   it('resolves an explicitly supplied geoExperimentId', async () => {
     extractURLFromSlackInputStub.returns('https://example.com');
     dataAccessStub.Site.findByBaseURL.resolves({ getId: () => 'site-1' });

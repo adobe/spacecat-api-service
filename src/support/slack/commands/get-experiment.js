@@ -34,7 +34,7 @@ function formatExperimentSummary(geoExperiment, baseURL) {
     `:label: *Type:* ${orDash(geoExperiment.getType())}`,
     `:round_pushpin: *Phase:* \`${geoExperiment.getPhase()}\`   :vertical_traffic_light: *Status:* \`${geoExperiment.getStatus()}\``,
     `:dart: *Opportunity:* ${orDash(geoExperiment.getOpportunityId())}`,
-    `:bar_chart: *Prompts:* ${geoExperiment.getPromptsCount()} · :jigsaw: *Suggestions:* ${suggestionIds.length}`,
+    `:bar_chart: *Prompts:* ${orDash(geoExperiment.getPromptsCount())} · :jigsaw: *Suggestions:* ${suggestionIds.length}`,
     `:bulb: *Insights:* ${orDash(geoExperiment.getInsightsLocation())}`,
     `:hourglass: *Window:* ${orDash(geoExperiment.getStartTime())} → ${orDash(geoExperiment.getEndTime())}`,
     `:calendar: *Created:* ${orDash(geoExperiment.getCreatedAt())} · *Updated:* ${orDash(geoExperiment.getUpdatedAt())} (by ${orDash(geoExperiment.getUpdatedBy())})`,
@@ -42,7 +42,10 @@ function formatExperimentSummary(geoExperiment, baseURL) {
   ];
 
   if (error) {
-    lines.push(`:rotating_light: *Error:* ${error.message || JSON.stringify(error)}`);
+    const errorText = typeof error === 'string'
+      ? error
+      : (error.message || JSON.stringify(error));
+    lines.push(`:rotating_light: *Error:* ${errorText}`);
   }
 
   return lines.join('\n');

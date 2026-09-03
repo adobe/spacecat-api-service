@@ -91,10 +91,15 @@ export function getImpactMeasurementOutcome(geoExperiment) {
   if (isImpactMeasurementCheckEligible(geoExperiment)) {
     return IMPACT_MEASUREMENT_OUTCOME.IN_FLIGHT;
   }
-  if (geoExperiment.getPhase() === PHASES.IMPACT_MEASUREMENT_DONE
-    && geoExperiment.getInsightsLocation()) {
-    return IMPACT_MEASUREMENT_OUTCOME.SUCCEEDED;
+  // Measurement has reached its terminal phase: success iff insights were written. Keyed on phase
+  // (not status) so a transient non-COMPLETED status mid engine-update still reports the outcome
+  // rather than misleadingly claiming nothing is in flight.
+  if (geoExperiment.getPhase() === PHASES.IMPACT_MEASUREMENT_DONE) {
+    return geoExperiment.getInsightsLocation()
+      ? IMPACT_MEASUREMENT_OUTCOME.SUCCEEDED
+      : IMPACT_MEASUREMENT_OUTCOME.COMPLETED_WITHOUT_INSIGHTS;
   }
+  // Completed at an earlier phase with no insights — the engine's `#completeWithoutInsights` path.
   if (geoExperiment.getStatus() === STATUSES.COMPLETED && !geoExperiment.getInsightsLocation()) {
     return IMPACT_MEASUREMENT_OUTCOME.COMPLETED_WITHOUT_INSIGHTS;
   }
