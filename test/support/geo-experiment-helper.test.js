@@ -18,6 +18,7 @@ import {
   getScheduleParams,
   buildExperimentMetadata,
   isImpactMeasurementEligible,
+  isImpactMeasurementCheckEligible,
 } from '../../src/support/geo-experiment-helper.js';
 
 const {
@@ -282,6 +283,29 @@ describe('geo-experiment-helper', () => {
         getStatus: () => STATUSES.GENERATING_BASELINE,
       };
       expect(isImpactMeasurementEligible(geoExperiment)).to.be.false;
+    });
+  });
+
+  describe('isImpactMeasurementCheckEligible', () => {
+    it('returns true at impact_measurement_started regardless of status', () => {
+      [STATUSES.IN_PROGRESS, STATUSES.COMPLETED, STATUSES.FAILED].forEach((status) => {
+        const geoExperiment = {
+          getPhase: () => PHASES.IMPACT_MEASUREMENT_STARTED,
+          getStatus: () => status,
+        };
+        expect(isImpactMeasurementCheckEligible(geoExperiment)).to.be.true;
+      });
+    });
+
+    it('returns false for any other phase', () => {
+      [
+        PHASES.POST_ANALYSIS_DONE,
+        PHASES.IMPACT_MEASUREMENT_DONE,
+        PHASES.PRE_ANALYSIS_STARTED,
+      ].forEach((phase) => {
+        const geoExperiment = { getPhase: () => phase, getStatus: () => STATUSES.COMPLETED };
+        expect(isImpactMeasurementCheckEligible(geoExperiment)).to.be.false;
+      });
     });
   });
 });

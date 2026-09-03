@@ -46,6 +46,25 @@ export function isImpactMeasurementEligible(geoExperiment) {
 }
 
 /**
+ * Whether a GeoExperiment can have its in-flight impact measurement manually checked: it must be
+ * sitting at IMPACT_MEASUREMENT_STARTED — the phase llmo-experimentation-engine's
+ * handleImpactMeasurementStarted dispatches on. Status is deliberately not checked: a re-armed
+ * COMPLETED experiment (see isImpactMeasurementEligible above) and a genuinely in-flight
+ * IN_PROGRESS one are both valid to check.
+ *
+ * This mirrors llmo-experimentation-engine's own eligibility check (authoritative — the engine
+ * re-validates on receipt) — checked here only so the response is immediate and accurate instead
+ * of "sent, wait and see". Keep the two in sync.
+ * See llmo-experimentation-engine/docs/decisions/007-manual-impact-measurement-check-completed-
+ * status.md.
+ * @param {Object} geoExperiment
+ * @returns {boolean}
+ */
+export function isImpactMeasurementCheckEligible(geoExperiment) {
+  return geoExperiment.getPhase() === PHASES.IMPACT_MEASUREMENT_STARTED;
+}
+
+/**
  * Validates a single phase config block.
  * All fields are optional — only present fields are validated.
  *

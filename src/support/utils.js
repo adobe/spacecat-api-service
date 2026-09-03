@@ -455,6 +455,33 @@ export const triggerGeoExperimentImpactMeasurement = async (
   triggeredBy: triggeredBy || 'unknown',
 });
 
+/**
+ * Sends a message to the llmo-experimentation-engine-queue to manually check an in-flight
+ * Mystique impact-measurement task for a GeoExperiment (see
+ * llmo-experimentation-engine's docs/decisions/007-manual-impact-measurement-check-completed-
+ * status.md for the handler contract).
+ *
+ * NOTE: this does NOT return the check result — it only requests that the engine poll Mystique
+ * and update the GeoExperiment if the task has finished. Needed because
+ * triggerGeoExperimentImpactMeasurement can re-arm a COMPLETED experiment while leaving it
+ * COMPLETED (invisible to the engine's cron sweep), so a manual check is the only way to advance
+ * it short of the engine's own bounded stuck-check safety net.
+ *
+ * @param {string} geoExperimentId - The GeoExperiment ID to check.
+ * @param {string} triggeredBy - Identity of the caller, for the engine's log line.
+ * @param {Object} lambdaContext - The Lambda context object (sqs, env).
+ * @return {Promise} - A promise representing the SQS send operation.
+ */
+export const checkGeoExperimentImpactMeasurement = async (
+  geoExperimentId,
+  triggeredBy,
+  lambdaContext,
+) => lambdaContext.sqs.sendMessage(lambdaContext.env.LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL, {
+  type: 'CHECK_IMPACT_MEASUREMENT',
+  geoExperimentId,
+  triggeredBy: triggeredBy || 'unknown',
+});
+
 // todo: prototype - untested
 /* c8 ignore start */
 export const triggerExperimentationCandidates = async (
