@@ -1,3 +1,10 @@
+# [1.787.0](https://github.com/adobe/spacecat-api-service/compare/v1.786.0...v1.787.0) (2026-09-03)
+
+
+### Features
+
+* **slack:** report check-impact-measurement outcome and add get-experiment command ([#3189](https://github.com/adobe/spacecat-api-service/issues/3189)) ([049360f](https://github.com/adobe/spacecat-api-service/commit/049360f304e9ff894d5d0aaf6b43bc1d061663d5)), closes [#3170](https://github.com/adobe/spacecat-api-service/issues/3170)
+
 # [1.786.0](https://github.com/adobe/spacecat-api-service/compare/v1.785.0...v1.786.0) (2026-09-03)
 
 
