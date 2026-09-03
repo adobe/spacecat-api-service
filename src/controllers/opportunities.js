@@ -220,6 +220,12 @@ function OpportunitiesController(ctx) {
         const { data } = await Opportunity.batchGetByKeys(ids.map((id) => ({ opportunityId: id })));
         return data ?? [];
       },
+      // Narrow to what the caller may see, exactly like getAllForSite/getByStatus:
+      // Summit-PLG type gating + D4 FACS composite (per-opportunity-type ReBAC).
+      filterEntities: async (opptys) => filterOpportunitiesByFacsComposite(
+        context,
+        await filterForSummitPlg(site, opptys, context),
+      ),
       getId: (oppty) => oppty.getId(),
       getStatus: (oppty) => oppty.getStatus(),
       getSortKey: (oppty) => oppty.getId(),

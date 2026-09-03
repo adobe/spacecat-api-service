@@ -78,6 +78,7 @@ describe('lookup-by-url support', () => {
     validStatuses: ['NEW', 'IN_PROGRESS', 'IGNORED', 'RESOLVED'],
     defaultExcludedStatuses: ['IGNORED'],
     fetchEntities: over.fetchEntities ?? fetchFrom([]),
+    filterEntities: over.filterEntities,
     getId: (e) => e.id,
     getStatus: (e) => e.status,
     getSortKey: (e) => e.id,
@@ -98,6 +99,7 @@ describe('lookup-by-url support', () => {
     validStatuses: ['NEW', 'APPROVED', 'IN_PROGRESS', 'SKIPPED', 'FIXED', 'ERROR', 'OUTDATED', 'PENDING_VALIDATION', 'REJECTED'],
     defaultExcludedStatuses: ['SKIPPED', 'REJECTED', 'OUTDATED'],
     fetchEntities: over.fetchEntities ?? fetchFrom([]),
+    filterEntities: over.filterEntities,
     getId: (e) => e.id,
     getStatus: (e) => e.status,
     getSortKey: (e) => `${e.opportunityId}|${e.id}`,
@@ -342,6 +344,33 @@ describe('lookup-by-url support', () => {
         pagination: { limit: 100, cursor: null, hasMore: false },
         unmatchedUrls: [],
       });
+    });
+  });
+
+  // ---- lookupByUrl: filterEntities hook ------------------------------------
+
+  describe('lookupByUrl filterEntities hook', () => {
+    it('narrows the hydrated set before status-filter and pagination (opportunities)', async () => {
+      lookupStub.resolves(rowsFor({ 'https://e.com/a': ['o1', 'o2'] }));
+      const { response } = await mod.lookupByUrl({}, oppCfg({
+        rawUrls: ['https://e.com/a'],
+        fetchEntities: fetchFrom([opp('o1'), opp('o2')]),
+        filterEntities: (list) => list.filter((e) => e.id !== 'o2'),
+      }));
+      expect(Object.keys(response.opportunities)).to.deep.equal(['o1']);
+      expect(response.results[0].opportunityIds).to.deep.equal(['o1']);
+    });
+
+    it('awaits an async hook and counts a filtered-out suggestion as unmatched', async () => {
+      lookupStub.resolves(rowsFor({ 'https://e.com/a': ['s1'] }));
+      const { response } = await mod.lookupByUrl({}, suggCfg({
+        rawUrls: ['https://e.com/a'],
+        fetchEntities: fetchFrom([sugg('s1', 'op1')]),
+        filterEntities: async (list) => list.filter((e) => e.opportunityId !== 'op1'),
+      }));
+      expect(response.suggestions).to.deep.equal({});
+      expect(response.results).to.deep.equal([]);
+      expect(response.unmatchedUrls).to.deep.equal(['https://e.com/a']);
     });
   });
 });

@@ -3768,6 +3768,16 @@ function SuggestionsController(ctx, sqs, env) {
         const { data } = await Suggestion.batchGetByKeys(ids.map((id) => ({ suggestionId: id })));
         return data ?? [];
       },
+      // Narrow to suggestions whose opportunity the caller may see — mirrors the
+      // edge-deployed-urls D4 composite gate. No-op for site-wide / non-FACS / admin.
+      filterEntities: async (suggestions) => {
+        const permitted = filterOpportunitiesByFacsComposite(
+          context,
+          await Opportunity.allBySiteId(siteId),
+        );
+        const permittedOpptyIds = new Set(permitted.map((o) => o.getId()));
+        return suggestions.filter((s) => permittedOpptyIds.has(s.getOpportunityId()));
+      },
       getId: (sugg) => sugg.getId(),
       getStatus: (sugg) => sugg.getStatus(),
       getSortKey: (sugg) => `${sugg.getOpportunityId()}|${sugg.getId()}`,

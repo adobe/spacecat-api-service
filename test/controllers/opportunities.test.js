@@ -1732,18 +1732,16 @@ describe('Opportunities Controller', () => {
 
     beforeEach(() => {
       batchStub = sandbox.stub().resolves({ data: [mockOpptyEntity] });
-      const pgClient = {
-        from: () => ({
-          select: () => ({
-            eq: () => ({
-              in: () => Promise.resolve({
-                data: [{ entity_id: OPPORTUNITY_ID, entity_type: 'cited-analysis', url: canonicalizeUrl(inputUrl) }],
-                error: null,
-              }),
-            }),
-          }),
-        }),
+      const pgResult = {
+        data: [{ entity_id: OPPORTUNITY_ID, entity_type: 'cited-analysis', url: canonicalizeUrl(inputUrl) }],
+        error: null,
       };
+      // Chainable + thenable stub tolerant of the real query-builder chain
+      // (.select().eq().in().order()...), so the test isn't coupled to its exact shape.
+      const pgBuilder = new Proxy({}, {
+        get: (_t, p) => (p === 'then' ? (res) => res(pgResult) : () => pgBuilder),
+      });
+      const pgClient = { from: () => pgBuilder };
       daWithPg = {
         Opportunity: { ...mockOpportunity, batchGetByKeys: batchStub },
         Site: mockSite,
@@ -1817,6 +1815,29 @@ describe('Opportunities Controller', () => {
       expect(body.opportunities[OPPORTUNITY_ID]).to.include({ id: OPPORTUNITY_ID });
       expect(body.opportunities[OPPORTUNITY_ID]).to.not.have.property('data');
       expect(batchStub).to.have.been.calledOnce;
+    });
+
+    it('narrows out opportunities of a type the caller is not permitted (D4 composite)', async () => {
+      const res = await controllerWithPg.getByUrl({
+        params: { siteId: SITE_ID },
+        data: { urls: [inputUrl] },
+        attributes: { facsComposite: { values: [] } },
+      });
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.opportunities).to.deep.equal({});
+      expect(body.results).to.deep.equal([{ url: inputUrl, opportunityIds: [] }]);
+    });
+
+    it('returns opportunities under a site-wide (all) composite grant (D4)', async () => {
+      const res = await controllerWithPg.getByUrl({
+        params: { siteId: SITE_ID },
+        data: { urls: [inputUrl] },
+        attributes: { facsComposite: { values: 'all' } },
+      });
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.opportunities[OPPORTUNITY_ID]).to.include({ id: OPPORTUNITY_ID });
     });
   });
 });

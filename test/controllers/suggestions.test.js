@@ -15509,21 +15509,23 @@ describe('Suggestions Controller', () => {
         updatedAt: '2026-01-01',
       }, sandbox.stub());
       batchStub = sandbox.stub().resolves({ data: [suggEntity] });
-      const pgClient = {
-        from: () => ({
-          select: () => ({
-            eq: () => ({
-              in: () => Promise.resolve({
-                data: [{ entity_id: SUG_ID, entity_type: 'wikipedia-analysis', url: canonicalizeUrl(inputUrl) }],
-                error: null,
-              }),
-            }),
-          }),
-        }),
+      const pgResult = {
+        data: [{ entity_id: SUG_ID, entity_type: 'wikipedia-analysis', url: canonicalizeUrl(inputUrl) }],
+        error: null,
       };
+      // Chainable + thenable stub tolerant of the real query-builder chain
+      // (.select().eq().in().order()...), so the test isn't coupled to its exact shape.
+      const pgBuilder = new Proxy({}, {
+        get: (_t, p) => (p === 'then' ? (res) => res(pgResult) : () => pgBuilder),
+      });
+      const pgClient = { from: () => pgBuilder };
       daWithPg = {
         ...mockSuggestionDataAccess,
         Suggestion: { ...mockSuggestion, batchGetByKeys: batchStub },
+        Opportunity: {
+          ...mockOpportunity,
+          allBySiteId: sandbox.stub().resolves([{ getId: () => OPPORTUNITY_ID, getType: () => 'wikipedia-analysis' }]),
+        },
         Site: { findById: sandbox.stub().resolves(site) },
         services: { postgrestClient: pgClient },
       };
@@ -15581,6 +15583,19 @@ describe('Suggestions Controller', () => {
       expect(body.suggestions[SUG_ID]).to.not.have.property('data');
       expect(body.unmatchedUrls).to.deep.equal(['https://example.com/miss']);
       expect(batchStub).to.have.been.calledOnce;
+    });
+
+    it('narrows out suggestions whose opportunity the caller cannot see (D4 composite)', async () => {
+      const res = await controllerWithPg.getByUrl({
+        params: { siteId: SITE_ID },
+        data: { urls: [inputUrl] },
+        attributes: { facsComposite: { values: [] } },
+      });
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.suggestions).to.deep.equal({});
+      expect(body.results).to.deep.equal([]);
+      expect(body.unmatchedUrls).to.deep.equal([inputUrl]);
     });
   });
 });

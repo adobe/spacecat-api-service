@@ -159,6 +159,8 @@ function projectLookup(fullDtos, fieldsParam, lightweightFields, forceFields) {
  * @param {string[]} cfg.validStatuses - the entity status enum
  * @param {string[]} cfg.defaultExcludedStatuses - statuses hidden when `status` is omitted
  * @param {(ids: string[]) => Promise<object[]>} cfg.fetchEntities - batch hydrate by id
+ * @param {(entities: object[]) => object[]|Promise<object[]>} [cfg.filterEntities] - optional
+ *   authorization / product-gating narrowing of the hydrated set, before status-filter
  * @param {(e: object) => string} cfg.getId
  * @param {(e: object) => string} cfg.getStatus
  * @param {(e: object) => string} cfg.getSortKey - immutable keyset sort key
@@ -175,7 +177,7 @@ export async function lookupByUrl(postgrestClient, cfg) {
   const {
     table, siteId, rawUrls, params = {},
     validStatuses, defaultExcludedStatuses,
-    fetchEntities, getId, getStatus, getSortKey, toFullDto,
+    fetchEntities, filterEntities, getId, getStatus, getSortKey, toFullDto,
     lightweightFields, forceFields,
     idListKey, mapKey, includeNoMatchInResults, includeUnmatchedUrls,
   } = cfg;
@@ -235,7 +237,13 @@ export async function lookupByUrl(postgrestClient, cfg) {
     }
   }
 
-  const entities = allIds.length > 0 ? await fetchEntities(allIds) : [];
+  const hydrated = allIds.length > 0 ? await fetchEntities(allIds) : [];
+  // Authorization / product-gating narrowing (e.g. D4 FACS composite type-scoping,
+  // Summit-PLG). Applied to the full hydrated set BEFORE status filtering and
+  // pagination, so an entity the caller may not see is absent from the entity map,
+  // the per-URL id lists, and the page — and (for suggestions) counted as unmatched,
+  // i.e. indistinguishable from "no match".
+  const entities = filterEntities ? await filterEntities(hydrated) : hydrated;
 
   // status filter (default excludes the dismissed statuses)
   const survivingById = new Map();
