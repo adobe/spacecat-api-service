@@ -1,3 +1,10 @@
+# [1.786.0](https://github.com/adobe/spacecat-api-service/compare/v1.785.0...v1.786.0) (2026-09-03)
+
+
+### Features
+
+* **slack:** add trigger-impact-measurement and check-impact-measurement Slack commands ([#3170](https://github.com/adobe/spacecat-api-service/issues/3170)) ([8de6193](https://github.com/adobe/spacecat-api-service/commit/8de61932816f37060ee58eacef81f23a043e8547))
+
 # [1.785.0](https://github.com/adobe/spacecat-api-service/compare/v1.784.4...v1.785.0) (2026-09-02)
 
 
