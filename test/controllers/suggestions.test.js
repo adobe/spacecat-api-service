@@ -24,6 +24,7 @@ import {
   GeoExperiment as GeoExperimentModel,
 } from '@adobe/spacecat-shared-data-access';
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
+import { canonicalizeUrl } from '@adobe/spacecat-shared-utils';
 import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
 import SuggestionsController from '../../src/controllers/suggestions.js';
 import AccessControlUtil from '../../src/support/access-control-util.js';
@@ -164,6 +165,7 @@ describe('Suggestions Controller', () => {
     'autofixSuggestions',
     'createSuggestions',
     'createBackofficeReview',
+    'getByUrl',
     'getAllForOpportunity',
     'getAllForOpportunityPaged',
     'deploySuggestionToEdge',
@@ -15482,6 +15484,150 @@ describe('Suggestions Controller', () => {
           '1 additional suggestion(s) automatically marked as deployed (covered by path-level configuration)',
         );
       });
+    });
+  });
+
+  describe('getByUrl', () => {
+    const inputUrl = 'https://example.com/a';
+    const SUG_ID = '11111111-1111-4111-8111-111111111111';
+    let batchStub;
+    let daWithPg;
+    let controllerWithPg;
+
+    const adminAuth = () => new AuthInfo()
+      .withType('jwt').withScopes([{ name: 'admin' }]).withProfile({ is_admin: true, email: 't@t.com' })
+      .withAuthenticated(true);
+
+    beforeEach(() => {
+      const suggEntity = mockSuggestionEntity({
+        id: SUG_ID,
+        opportunityId: OPPORTUNITY_ID,
+        type: 'CONTENT_UPDATE',
+        status: 'NEW',
+        rank: 1,
+        data: { url: inputUrl },
+        updatedAt: '2026-01-01',
+      }, sandbox.stub());
+      batchStub = sandbox.stub().resolves({ data: [suggEntity] });
+      const pgResult = {
+        data: [{ entity_id: SUG_ID, entity_type: 'wikipedia-analysis', url: canonicalizeUrl(inputUrl) }],
+        error: null,
+      };
+      // Chainable + thenable stub tolerant of the real query-builder chain
+      // (.select().eq().in().order()...), so the test isn't coupled to its exact shape.
+      const pgBuilder = new Proxy({}, {
+        get: (_t, p) => (p === 'then' ? (res) => res(pgResult) : () => pgBuilder),
+      });
+      const pgClient = { from: () => pgBuilder };
+      daWithPg = {
+        ...mockSuggestionDataAccess,
+        Suggestion: { ...mockSuggestion, batchGetByKeys: batchStub },
+        Opportunity: {
+          ...mockOpportunity,
+          allBySiteId: sandbox.stub().resolves([{ getId: () => OPPORTUNITY_ID, getType: () => 'wikipedia-analysis' }]),
+        },
+        Site: { findById: sandbox.stub().resolves(site) },
+        services: { postgrestClient: pgClient },
+      };
+      controllerWithPg = SuggestionsController({
+        dataAccess: daWithPg,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        attributes: { authInfo: adminAuth() },
+      }, mockSqs, {});
+    });
+
+    it('returns 400 for an invalid site id', async () => {
+      const res = await controllerWithPg.getByUrl({ params: { siteId: 'nope' }, data: { urls: [inputUrl] } });
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 404 when the site does not exist', async () => {
+      daWithPg.Site.findById.resolves(null);
+      const res = await controllerWithPg.getByUrl({ params: { siteId: SITE_ID }, data: { urls: [inputUrl] } });
+      expect(res.status).to.equal(404);
+    });
+
+    it('returns 403 when the caller does not belong to the site\'s organization', async () => {
+      // A caller outside the site's org must be refused before any lookup runs —
+      // by-url must not become a way to read another org's suggestions.
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(false);
+      const res = await controllerWithPg.getByUrl({
+        params: { siteId: SITE_ID }, data: { urls: [inputUrl] },
+      });
+      expect(res.status).to.equal(403);
+      const body = await res.json();
+      expect(body.message).to.equal('User does not belong to the organization');
+      // the access gate short-circuits ahead of the index lookup
+      expect(batchStub).to.not.have.been.called;
+    });
+
+    it('returns 500 when the postgrest client is unavailable', async () => {
+      const ctrl = SuggestionsController({
+        dataAccess: { ...daWithPg, services: {} },
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        attributes: { authInfo: adminAuth() },
+      }, mockSqs, {});
+      const res = await ctrl.getByUrl({ params: { siteId: SITE_ID }, data: { urls: [inputUrl] } });
+      expect(res.status).to.equal(500);
+    });
+
+    it('returns 400 for an invalid urls body', async () => {
+      const res = await controllerWithPg.getByUrl({ params: { siteId: SITE_ID }, data: { urls: 'nope' } });
+      expect(res.status).to.equal(400);
+      const body = await res.json();
+      expect(body.message).to.match(/must be an array/);
+    });
+
+    it('returns matched suggestions with unmatchedUrls and a force-included opportunityId', async () => {
+      const res = await controllerWithPg.getByUrl({
+        params: { siteId: SITE_ID },
+        data: { urls: [inputUrl, 'https://example.com/miss'] },
+      });
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.results).to.deep.equal([{ url: inputUrl, suggestionIds: [SUG_ID] }]);
+      expect(body.suggestions[SUG_ID]).to.deep.equal({
+        id: SUG_ID,
+        opportunityId: OPPORTUNITY_ID,
+        type: 'CONTENT_UPDATE',
+        status: 'NEW',
+        rank: 1,
+        updatedAt: '2026-01-01',
+      });
+      expect(body.suggestions[SUG_ID]).to.not.have.property('data');
+      expect(body.unmatchedUrls).to.deep.equal(['https://example.com/miss']);
+      expect(batchStub).to.have.been.calledOnce;
+    });
+
+    it('returns a suggestion whose opportunity type is in the caller\'s permitted set (D4 composite)', async () => {
+      // the suggestion's opportunity (from allBySiteId) is type 'wikipedia-analysis';
+      // a grant scoped to that type must keep the suggestion.
+      const res = await controllerWithPg.getByUrl({
+        params: { siteId: SITE_ID },
+        data: { urls: [inputUrl] },
+        attributes: { facsComposite: { values: ['wikipedia-analysis'] } },
+      });
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.results).to.deep.equal([{ url: inputUrl, suggestionIds: [SUG_ID] }]);
+      expect(body.suggestions[SUG_ID]).to.include({ id: SUG_ID, opportunityId: OPPORTUNITY_ID });
+      expect(body.unmatchedUrls).to.deep.equal([]);
+    });
+
+    it('narrows out a suggestion whose opportunity type is NOT permitted (D4 composite)', async () => {
+      // caller is scoped to 'broken-backlinks'; the suggestion's opportunity
+      // ('wikipedia-analysis') is not permitted, so the suggestion is hidden and
+      // its URL is reported as unmatched.
+      const res = await controllerWithPg.getByUrl({
+        params: { siteId: SITE_ID },
+        data: { urls: [inputUrl] },
+        attributes: { facsComposite: { values: ['broken-backlinks'] } },
+      });
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.suggestions).to.deep.equal({});
+      expect(body.results).to.deep.equal([]);
+      expect(body.unmatchedUrls).to.deep.equal([inputUrl]);
     });
   });
 });

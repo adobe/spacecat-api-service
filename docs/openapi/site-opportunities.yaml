@@ -2061,3 +2061,89 @@ site-opportunity-status:
               $ref: './schemas.yaml#/FixStatusUpdateListResponse'
     security:
       - session_token: [ ]
+
+site-opportunities-by-url:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  post:
+    operationId: getSiteOpportunitiesByUrl
+    summary: |
+      Look up opportunities backed by any of the supplied source URLs
+    description: |
+      Returns opportunities across all of the site's opportunity types whose stored source
+      URL matches (after canonicalization) any URL in the request body. This is a POST used
+      for reading: all parameters (`urls`, `fields`, `status`, `limit`, `cursor`) travel in
+      the JSON body. Input URLs are never dereferenced — they are opaque match keys. The
+      response is normalized (results reference ids; entities appear once in `opportunities`).
+    tags:
+      - opportunities
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/LookupByUrlRequest'
+    responses:
+      '200':
+        description: Normalized results, an opportunities map keyed by id, and a pagination block.
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/OpportunitiesByUrlResponse'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - session_token: [ ]
+
+site-suggestions-by-url:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  post:
+    operationId: getSiteSuggestionsByUrl
+    summary: |
+      Look up suggestions backed by any of the supplied source URLs
+    description: |
+      Returns suggestions across ALL of the site's opportunities whose stored source URL
+      matches (after canonicalization) any URL in the request body, keyset-paginated over the
+      immutable `(opportunityId, id)`. This is a POST used for reading: all parameters travel
+      in the JSON body. Each returned suggestion carries its `opportunityId`. `unmatchedUrls`
+      (first page only) is the definitive list of URLs backing no suggestion.
+    tags:
+      - opportunity-suggestions
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/LookupByUrlRequest'
+    responses:
+      '200':
+        description: Normalized results, a suggestions map keyed by id, unmatchedUrls, and a pagination block.
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/SuggestionsByUrlResponse'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - session_token: [ ]

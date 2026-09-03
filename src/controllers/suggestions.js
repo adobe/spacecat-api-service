@@ -51,6 +51,7 @@ import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
 import { SuggestionDto, SUGGESTION_VIEWS, SUGGESTION_SKIP_REASONS } from '../dto/suggestion.js';
 import { isValidLocale } from '../utils/validations.js';
 import { applyFieldProjection } from '../utils/field-projection.js';
+import { lookupByUrl } from '../support/lookup-by-url.js';
 import {
   getScheduleParams,
   buildExperimentMetadata,
@@ -3720,8 +3721,83 @@ function SuggestionsController(ctx, sqs, env) {
     return createResponse(toReviewView(data), 201);
   };
 
+  // Lightweight default projection for the by-url lookup (omits the heavy `data` blob;
+  // callers opt in via `fields=...,data`). `opportunityId` is force-included alongside `id`
+  // since results span opportunities. See lookup-service-api-design.md, Milestone 1.
+  const SUGGESTION_BY_URL_LIGHTWEIGHT_FIELDS = ['id', 'opportunityId', 'type', 'status', 'rank', 'updatedAt'];
+
+  /**
+   * Looks up suggestions backed by any of the supplied source URLs, across ALL of the site's
+   * opportunities in one call. POST body: `{ urls: [...], fields?, status?, limit?, cursor? }`
+   * (query params are dropped for a JSON body, so all params travel in the body). Keyset-paginated
+   * over the immutable `(opportunityId, id)`. See lookup-service-api-design.md, Milestone 1.
+   * @param {Object} context of the request
+   * @returns {Promise<Response>} Normalized results + suggestions map + unmatchedUrls + pagination.
+   */
+  const getByUrl = async (context) => {
+    const siteId = context.params?.siteId;
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('User does not belong to the organization');
+    }
+
+    const postgrestClient = dataAccess.services?.postgrestClient;
+    if (!postgrestClient) {
+      return createResponse({ message: 'URL lookup is not available' }, 500);
+    }
+
+    const { response, error } = await lookupByUrl(postgrestClient, {
+      table: 'suggestion_urls',
+      siteId,
+      rawUrls: context.data?.urls,
+      params: context.data ?? {},
+      validStatuses: Object.values(SuggestionModel.STATUSES),
+      defaultExcludedStatuses: [
+        SuggestionModel.STATUSES.SKIPPED,
+        SuggestionModel.STATUSES.REJECTED,
+        SuggestionModel.STATUSES.OUTDATED,
+      ],
+      fetchEntities: async (ids) => {
+        const { data } = await Suggestion.batchGetByKeys(ids.map((id) => ({ suggestionId: id })));
+        return data ?? [];
+      },
+      // Narrow to suggestions whose opportunity the caller may see — mirrors the
+      // edge-deployed-urls D4 composite gate. No-op for site-wide / non-FACS / admin.
+      filterEntities: async (suggestions) => {
+        const permitted = filterOpportunitiesByFacsComposite(
+          context,
+          await Opportunity.allBySiteId(siteId),
+        );
+        const permittedOpptyIds = new Set(permitted.map((o) => o.getId()));
+        return suggestions.filter((s) => permittedOpptyIds.has(s.getOpportunityId()));
+      },
+      getId: (sugg) => sugg.getId(),
+      getStatus: (sugg) => sugg.getStatus(),
+      getSortKey: (sugg) => `${sugg.getOpportunityId()}|${sugg.getId()}`,
+      toFullDto: (sugg) => SuggestionDto.toJSON(sugg),
+      lightweightFields: SUGGESTION_BY_URL_LIGHTWEIGHT_FIELDS,
+      forceFields: ['id', 'opportunityId'],
+      idListKey: 'suggestionIds',
+      mapKey: 'suggestions',
+      includeNoMatchInResults: false,
+      includeUnmatchedUrls: true,
+    });
+    if (error) {
+      return badRequest(error);
+    }
+    return ok(response);
+  };
+
   return {
     createBackofficeReview,
+    getByUrl,
     autofixSuggestions,
     createSuggestions,
     deploySuggestionToEdge,

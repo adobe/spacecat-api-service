@@ -14408,3 +14408,104 @@ OnboardingProvisioningResponse:
         workspace (or its parent) before this call — Semrush's 409 response,
         which is treated as success rather than an error.
       example: true
+
+LookupByUrlRequest:
+  type: object
+  required:
+    - urls
+  properties:
+    urls:
+      type: array
+      description: >
+        Source URLs to match, 1–100 entries. Matching is done after canonicalization
+        (scheme / www / trailing-slash normalization). Non-string or empty entries are
+        dropped; an empty or all-dropped list returns an empty result set, not a 400.
+      items:
+        type: string
+      maxItems: 100
+    fields:
+      type: string
+      description: >
+        Optional comma-separated sparse-fieldset projection (e.g. `id,type,status,data`).
+        Omitted → a lightweight default projection that omits the heavy `data` blob. `id`
+        (and `opportunityId` for suggestions) is always included.
+    status:
+      type: string
+      description: >
+        Optional status filter. Omitted → dismissed statuses are hidden by default
+        (opportunities hide `IGNORED`; suggestions hide `SKIPPED`, `REJECTED`, `OUTDATED`).
+    limit:
+      type: integer
+      minimum: 1
+      maximum: 100
+      default: 100
+    cursor:
+      type: string
+      description: Opaque keyset cursor from a previous response's `pagination.cursor`.
+
+LookupPagination:
+  type: object
+  properties:
+    limit:
+      type: integer
+    cursor:
+      type: [string, 'null']
+    hasMore:
+      type: boolean
+
+OpportunitiesByUrlResponse:
+  type: object
+  properties:
+    results:
+      type: array
+      description: One entry per requested URL (input order; includes duplicates and no-match URLs).
+      items:
+        type: object
+        properties:
+          url:
+            type: string
+          opportunityIds:
+            type: array
+            items:
+              type: string
+    opportunities:
+      type: object
+      description: >
+        Map keyed by opportunity id; each distinct matched opportunity appears once, projected
+        to `fields` or the lightweight default.
+      additionalProperties:
+        $ref: '#/Opportunity'
+    pagination:
+      $ref: '#/LookupPagination'
+
+SuggestionsByUrlResponse:
+  type: object
+  properties:
+    results:
+      type: array
+      description: One entry per requested URL that has at least one matching suggestion on this page.
+      items:
+        type: object
+        properties:
+          url:
+            type: string
+          suggestionIds:
+            type: array
+            items:
+              type: string
+    suggestions:
+      type: object
+      description: >
+        Map keyed by suggestion id; each distinct suggestion on this page appears once. Each
+        value force-includes `opportunityId` (the result spans opportunities).
+      additionalProperties:
+        $ref: '#/Suggestion'
+    unmatchedUrls:
+      type: array
+      description: >
+        Requested URLs matching zero suggestions across the whole result set (not just this
+        page). First page only (absent when a cursor is supplied).
+      items:
+        type: string
+    pagination:
+      $ref: '#/LookupPagination'

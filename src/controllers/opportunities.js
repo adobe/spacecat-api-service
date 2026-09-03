@@ -29,6 +29,7 @@ import { Opportunity as OpportunityModel } from '@adobe/spacecat-shared-data-acc
 import { OpportunityDto } from '../dto/opportunity.js';
 import { isValidLocale } from '../utils/validations.js';
 import { applyFieldProjection } from '../utils/field-projection.js';
+import { lookupByUrl } from '../support/lookup-by-url.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { filterOpportunitiesByFacsComposite } from '../support/facs-composite-resolvers.js';
 import {
@@ -40,6 +41,10 @@ import { getIsSummitPlgEnabled } from '../support/utils.js';
 
 const VALIDATION_ERROR_NAME = 'ValidationError';
 const SUMMIT_PLG_ALLOWED_TYPES = ['broken-backlinks', 'cwv', 'alt-text'];
+
+// Lightweight default projection for the by-url lookup (omits the heavy `data` blob;
+// callers opt in via `fields=...,data`).
+const OPPORTUNITY_BY_URL_LIGHTWEIGHT_FIELDS = ['id', 'type', 'status', 'title', 'updatedAt'];
 
 /**
  * Opportunities controller.
@@ -175,6 +180,67 @@ function OpportunitiesController(ctx) {
       return badRequest(error);
     }
     return ok(list);
+  };
+
+  /**
+   * Looks up opportunities backed by any of the supplied source URLs, across all of the site's
+   * opportunity types. POST body: `{ urls: [...], fields?, status?, limit?, cursor? }`
+   * (query params are dropped for a JSON body, so all params travel in the body — mirrors the
+   * agentic-traffic hits-by-urls endpoint). See lookup-service-api-design.md, Milestone 1.
+   * @param {Object} context of the request
+   * @returns {Promise<Response>} Normalized results + opportunities map + pagination.
+   */
+  const getByUrl = async (context) => {
+    const siteId = context.params?.siteId;
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('Only users belonging to the organization of the site can view its opportunities');
+    }
+
+    const postgrestClient = dataAccess.services?.postgrestClient;
+    if (!postgrestClient) {
+      return createResponse({ message: 'URL lookup is not available' }, 500);
+    }
+
+    const { response, error } = await lookupByUrl(postgrestClient, {
+      table: 'opportunity_urls',
+      siteId,
+      rawUrls: context.data?.urls,
+      params: context.data ?? {},
+      validStatuses: Object.values(OpportunityModel.STATUSES),
+      defaultExcludedStatuses: [OpportunityModel.STATUSES.IGNORED],
+      fetchEntities: async (ids) => {
+        const { data } = await Opportunity.batchGetByKeys(ids.map((id) => ({ opportunityId: id })));
+        return data ?? [];
+      },
+      // Narrow to what the caller may see, exactly like getAllForSite/getByStatus:
+      // Summit-PLG type gating + D4 FACS composite (per-opportunity-type ReBAC).
+      filterEntities: async (opptys) => filterOpportunitiesByFacsComposite(
+        context,
+        await filterForSummitPlg(site, opptys, context),
+      ),
+      getId: (oppty) => oppty.getId(),
+      getStatus: (oppty) => oppty.getStatus(),
+      getSortKey: (oppty) => oppty.getId(),
+      toFullDto: (oppty) => OpportunityDto.toJSON(oppty),
+      lightweightFields: OPPORTUNITY_BY_URL_LIGHTWEIGHT_FIELDS,
+      forceFields: ['id'],
+      idListKey: 'opportunityIds',
+      mapKey: 'opportunities',
+      includeNoMatchInResults: true,
+      includeUnmatchedUrls: false,
+    });
+    if (error) {
+      return badRequest(error);
+    }
+    return ok(response);
   };
 
   /**
@@ -402,6 +468,7 @@ function OpportunitiesController(ctx) {
     getAllForSite,
     getByID,
     getByStatus,
+    getByUrl,
     patchOpportunity,
     removeOpportunity,
   };
