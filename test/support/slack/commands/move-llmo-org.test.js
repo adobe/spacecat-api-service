@@ -31,14 +31,19 @@ describe('MoveLlmoOrgCommand', () => {
     ok: true,
     source: { id: 'src-1', name: 'Source Org', ims_org_id: '111111111111111111111111@AdobeOrg' },
     destination: { id: 'dst-1', name: 'Dest Org', ims_org_id: 'ABCDEF1234567890ABCDEF12@AdobeOrg' },
+    seed_site_id: 'site-1',
     blocking_conflicts: [],
-    auto_resolved: {
-      categories_merged: 0, topics_disambiguated: 0, feature_flags_dropped: 0,
+    taxonomy: {
+      categories_reused: 0,
+      categories_copied: 0,
+      topics_reused: 0,
+      topics_copied: 0,
+      org_feature_flags_copied: 0,
     },
     brands: [{
-      id: 'b1', name: 'Acme', status: 'active', site_id: 's1',
+      id: 'b1', name: 'Acme', status: 'active', site_id: 'site-1',
     }],
-    sites: [{ id: 's1', base_url: 'https://acme.com' }],
+    sites: [{ id: 'site-1', base_url: 'https://acme.com', is_seed: true }],
     counts: { brands: 1, prompts: 4 },
     ...overrides,
   });
@@ -148,12 +153,27 @@ describe('MoveLlmoOrgCommand', () => {
     expect(slackContext.client.chat.postMessage).to.not.have.been.called;
   });
 
+  it('explains a cross-org closure as pre-existing corruption, not a rename fix', async () => {
+    rpcStub.resolves({
+      data: preview({
+        ok: false,
+        blocking_conflicts: [{ type: 'foreign_site_in_scope', detail: 'site-uuid-9' }],
+      }),
+      error: null,
+    });
+
+    await run(['https://acme.com', 'ABCDEF1234567890ABCDEF12@AdobeOrg']);
+
+    expect(slackContext.say).to.have.been.calledWithMatch(/straddles two organizations/);
+    expect(slackContext.client.chat.postMessage).to.not.have.been.called;
+  });
+
   it('posts a preview with a confirm button carrying the move payload', async () => {
     await run(['https://acme.com', 'ABCDEF1234567890ABCDEF12@AdobeOrg']);
 
     expect(rpcStub).to.have.been.calledOnceWith('rpc_org_move_preview', {
-      p_src: 'src-1',
-      p_dst: 'dst-1',
+      p_site_id: 'site-1',
+      p_dst_org: 'dst-1',
     });
     expect(slackContext.client.chat.postMessage).to.have.been.calledOnce;
 

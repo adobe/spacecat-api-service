@@ -37,24 +37,31 @@ describe('move-llmo-org action', () => {
     ok: true,
     source: { id: 'src-1', name: 'Source Org', ims_org_id: '111111111111111111111111@AdobeOrg' },
     destination: { id: 'dst-1', name: 'Dest Org', ims_org_id: IMS_ORG },
+    seed_site_id: 'site-1',
     blocking_conflicts: [],
-    auto_resolved: {
-      categories_merged: 0, topics_disambiguated: 0, feature_flags_dropped: 0,
+    taxonomy: {
+      categories_reused: 0,
+      categories_copied: 0,
+      topics_reused: 0,
+      topics_copied: 0,
+      org_feature_flags_copied: 0,
     },
     brands: [{
-      id: 'b1', name: 'Acme', status: 'active', site_id: 's1',
+      id: 'b1', name: 'Acme', status: 'active', site_id: 'site-1',
     }],
-    sites: [{ id: 's1', base_url: 'https://acme.com' }],
+    sites: [{ id: 'site-1', base_url: 'https://acme.com', is_seed: true }],
     counts: { brands: 1 },
     ...overrides,
   });
 
   const moveResult = {
     ok: true,
-    source: { id: 'src-1', name: 'Source Org', ims_org_id: '111111111111111111111111@AdobeOrg' },
-    destination: { id: 'dst-1', name: 'Dest Org', ims_org_id: IMS_ORG },
+    source: 'src-1',
+    destination: 'dst-1',
     brands_moved: 1,
-    feature_flags_moved: 2,
+    sites_moved: 1,
+    prompts_moved: 9,
+    brand_feature_flags_moved: 2,
   };
 
   beforeEach(async () => {
@@ -139,8 +146,8 @@ describe('move-llmo-org action', () => {
     await run();
 
     expect(rpcStub).to.have.been.calledWith('wrpc_move_brandalf_org', {
-      p_src: 'src-1',
-      p_dst: 'dst-1',
+      p_site_id: 'site-1',
+      p_dst_org: 'dst-1',
       p_updated_by: 'slack:move-llmo-org:U123',
     });
     expect(reparentSiteProjectStub).to.have.been.calledOnce;
@@ -224,13 +231,113 @@ describe('move-llmo-org action', () => {
     expect(createEntitlementAndEnrollmentStub).to.not.have.been.called;
   });
 
-  it('reports a failure from entitlement provisioning after a successful move', async () => {
+  it('reports a per-site follow-up failure without losing the successful move', async () => {
     createEntitlementAndEnrollmentStub.rejects(new Error('tier unavailable'));
 
     await run();
 
+    expect(lastUpdateText()).to.contain('Moved LLMO organization');
+    expect(lastUpdateText()).to.contain('post-move setup failed');
     expect(lastUpdateText()).to.contain('tier unavailable');
     expect(lambdaContext.log.error).to.have.been.called;
+  });
+
+  it('runs the follow-up for every site the closure moved, not just the seed', async () => {
+    const siteB = {
+      getId: sandbox.stub().returns('site-2'),
+      getBaseURL: sandbox.stub().returns('https://acme.co.uk'),
+      save: sandbox.stub().resolves(),
+    };
+    rpcStub.callsFake((fn) => {
+      if (fn === 'rpc_org_move_preview') {
+        return Promise.resolve({
+          data: preview({
+            sites: [
+              { id: 'site-1', base_url: 'https://acme.com', is_seed: true },
+              { id: 'site-2', base_url: 'https://acme.co.uk', is_seed: false },
+            ],
+          }),
+          error: null,
+        });
+      }
+      return Promise.resolve({ data: { ...moveResult, sites_moved: 2 }, error: null });
+    });
+    siteStub.findById.withArgs('site-2').resolves(siteB);
+
+    await run();
+
+    expect(reparentSiteProjectStub).to.have.been.calledTwice;
+    expect(createEntitlementAndEnrollmentStub).to.have.been.calledTwice;
+    expect(siteB.save).to.have.been.calledOnce;
+    expect(lastUpdateText()).to.not.contain('post-move setup failed');
+  });
+
+  it('continues with the remaining sites when one site fails its follow-up', async () => {
+    const siteB = {
+      getId: sandbox.stub().returns('site-2'),
+      getBaseURL: sandbox.stub().returns('https://acme.co.uk'),
+      save: sandbox.stub().resolves(),
+    };
+    rpcStub.callsFake((fn) => {
+      if (fn === 'rpc_org_move_preview') {
+        return Promise.resolve({
+          data: preview({
+            sites: [
+              { id: 'site-1', base_url: 'https://acme.com', is_seed: true },
+              { id: 'site-2', base_url: 'https://acme.co.uk', is_seed: false },
+            ],
+          }),
+          error: null,
+        });
+      }
+      return Promise.resolve({ data: { ...moveResult, sites_moved: 2 }, error: null });
+    });
+    siteStub.findById.withArgs('site-2').resolves(siteB);
+    reparentSiteProjectStub.onFirstCall().rejects(new Error('project gone'));
+
+    await run();
+
+    expect(createEntitlementAndEnrollmentStub).to.have.been.calledOnce;
+    expect(siteB.save).to.have.been.calledOnce;
+    expect(lastUpdateText()).to.contain('post-move setup failed');
+    expect(lastUpdateText()).to.contain('https://acme.com');
+    expect(lastUpdateText()).to.contain('project gone');
+  });
+
+  it('reports a moved site that has since disappeared', async () => {
+    siteStub.findById.onSecondCall().resolves(null);
+
+    await run();
+
+    expect(lastUpdateText()).to.contain('post-move setup failed');
+    expect(lastUpdateText()).to.contain('site no longer exists');
+    expect(createEntitlementAndEnrollmentStub).to.not.have.been.called;
+  });
+
+  it('shows the org names from the preview rather than the result RPC uuids', async () => {
+    await run();
+
+    expect(lastUpdateText()).to.contain('Source Org');
+    expect(lastUpdateText()).to.contain('Dest Org');
+    expect(lastUpdateText()).to.not.contain('_unnamed_');
+  });
+
+  it('tolerates a preview with no site or brand lists', async () => {
+    rpcStub.callsFake((fn) => {
+      if (fn === 'rpc_org_move_preview') {
+        const p = preview();
+        delete p.sites;
+        delete p.brands;
+        return Promise.resolve({ data: p, error: null });
+      }
+      return Promise.resolve({ data: moveResult, error: null });
+    });
+
+    await run();
+
+    expect(client.chat.update).to.have.been.calledWithMatch({ text: sinon.match(/0 sites, 0 brands/) });
+    expect(createEntitlementAndEnrollmentStub).to.not.have.been.called;
+    expect(lastUpdateText()).to.contain('Moved LLMO organization');
   });
 
   it('falls back to an unknown user id when the body carries no user', async () => {

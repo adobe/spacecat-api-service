@@ -42,16 +42,19 @@ describe('llmo-org-move', () => {
     ok: true,
     source: { id: 'src-1', name: 'Source Org', ims_org_id: 'SRC@AdobeOrg' },
     destination: { id: 'dst-1', name: 'Dest Org', ims_org_id: 'DST@AdobeOrg' },
+    seed_site_id: 's1',
     blocking_conflicts: [],
-    auto_resolved: {
-      categories_merged: 0,
-      topics_disambiguated: 0,
-      feature_flags_dropped: 0,
+    taxonomy: {
+      categories_reused: 0,
+      categories_copied: 0,
+      topics_reused: 0,
+      topics_copied: 0,
+      org_feature_flags_copied: 0,
     },
     brands: [{
       id: 'b1', name: 'Acme', status: 'active', site_id: 's1',
     }],
-    sites: [{ id: 's1', base_url: 'https://acme.com' }],
+    sites: [{ id: 's1', base_url: 'https://acme.com', is_seed: true }],
     counts: { brands: 1, prompts: 12, sites: 1 },
     ...overrides,
   });
@@ -69,14 +72,14 @@ describe('llmo-org-move', () => {
   });
 
   describe('previewOrgMove', () => {
-    it('calls rpc_org_move_preview with the source and destination org ids', async () => {
+    it('calls rpc_org_move_preview with the seed site and destination org id', async () => {
       rpcStub.resolves({ data: basePreview(), error: null });
 
-      const preview = await previewOrgMove(context, 'src-1', 'dst-1');
+      const preview = await previewOrgMove(context, 's1', 'dst-1');
 
       expect(rpcStub).to.have.been.calledOnceWith('rpc_org_move_preview', {
-        p_src: 'src-1',
-        p_dst: 'dst-1',
+        p_site_id: 's1',
+        p_dst_org: 'dst-1',
       });
       expect(preview.ok).to.be.true;
     });
@@ -84,7 +87,7 @@ describe('llmo-org-move', () => {
     it('unwraps a single-element array payload', async () => {
       rpcStub.resolves({ data: [basePreview()], error: null });
 
-      const preview = await previewOrgMove(context, 'src-1', 'dst-1');
+      const preview = await previewOrgMove(context, 's1', 'dst-1');
 
       expect(preview.source.id).to.equal('src-1');
     });
@@ -110,14 +113,14 @@ describe('llmo-org-move', () => {
   });
 
   describe('executeOrgMove', () => {
-    it('calls wrpc_move_brandalf_org with the audit stamp', async () => {
+    it('calls wrpc_move_brandalf_org with the seed site and the audit stamp', async () => {
       rpcStub.resolves({ data: { ok: true, brands_moved: 3 }, error: null });
 
-      const result = await executeOrgMove(context, 'src-1', 'dst-1', 'slack:tester');
+      const result = await executeOrgMove(context, 's1', 'dst-1', 'slack:tester');
 
       expect(rpcStub).to.have.been.calledOnceWith('wrpc_move_brandalf_org', {
-        p_src: 'src-1',
-        p_dst: 'dst-1',
+        p_site_id: 's1',
+        p_dst_org: 'dst-1',
         p_updated_by: 'slack:tester',
       });
       expect(result.brands_moved).to.equal(3);
@@ -148,9 +151,14 @@ describe('llmo-org-move', () => {
       expect(describePreviewError(basePreview())).to.be.null;
     });
 
-    it('explains a missing source org', () => {
-      expect(describePreviewError({ error: 'source_org_not_found' }))
-        .to.contain('current organization no longer exists');
+    it('explains a missing site', () => {
+      expect(describePreviewError({ error: 'site_not_found' }))
+        .to.contain('site no longer exists');
+    });
+
+    it('explains missing arguments', () => {
+      expect(describePreviewError({ error: 'site_and_destination_required' }))
+        .to.contain('both required');
     });
 
     it('explains a missing destination org', () => {
@@ -212,6 +220,17 @@ describe('llmo-org-move', () => {
         .to.contain('future_kind');
     });
 
+    it('labels a cross-org brand or site pulled in by the closure', () => {
+      const rendered = formatBlockingConflicts([
+        { type: 'foreign_brand_in_scope', detail: 'brand-uuid-1' },
+        { type: 'foreign_site_in_scope', detail: 'site-uuid-2' },
+      ]);
+
+      expect(rendered).to.contain('belongs to a different org');
+      expect(rendered).to.contain('brand-uuid-1');
+      expect(rendered).to.contain('site-uuid-2');
+    });
+
     it('renders an empty string for no conflicts', () => {
       expect(formatBlockingConflicts()).to.equal('');
     });
@@ -227,6 +246,25 @@ describe('llmo-org-move', () => {
       expect(text).to.contain('Prompts: *12*');
       expect(text).to.contain('Acme');
       expect(text).to.contain('https://acme.com');
+    });
+
+    it('explains that the closure moves as one unit', () => {
+      const text = buildPreviewMessage(basePreview(), 'https://acme.com');
+
+      expect(text).to.contain('Everything below moves together');
+      expect(text).to.contain('Seeded from site');
+    });
+
+    it('marks the site the operator named', () => {
+      const text = buildPreviewMessage(basePreview({
+        sites: [
+          { id: 's1', base_url: 'https://acme.com', is_seed: true },
+          { id: 's2', base_url: 'https://acme.co.uk', is_seed: false },
+        ],
+      }), 'https://acme.com');
+
+      expect(text).to.contain('`https://acme.com` ← _the site you named_');
+      expect(text).to.contain('`https://acme.co.uk`\n');
     });
 
     it('always carries the entitlement gotcha', () => {
@@ -261,33 +299,59 @@ describe('llmo-org-move', () => {
       expect(text).to.contain('no site');
     });
 
-    it('lists auto-resolved conflicts, pluralised', () => {
+    it('describes the taxonomy copy/reuse plan, pluralised', () => {
       const text = buildPreviewMessage(basePreview({
-        auto_resolved: {
-          categories_merged: 1,
-          topics_disambiguated: 2,
-          feature_flags_dropped: 3,
+        taxonomy: {
+          categories_reused: 2,
+          categories_copied: 1,
+          topics_reused: 4,
+          topics_copied: 3,
+          org_feature_flags_copied: 2,
         },
       }), 'https://acme.com');
 
-      expect(text).to.contain('Automatically resolved conflicts');
+      expect(text).to.contain('Shared taxonomy');
       expect(text).to.contain('*1* category');
-      expect(text).to.contain('*2* topic ids');
-      expect(text).to.contain('*3* duplicate feature flags');
+      expect(text).to.contain('*3* topics');
+      expect(text).to.contain('*copied* into the destination org');
+      expect(text).to.contain('*2* categories');
+      expect(text).to.contain('*4* topics');
+      expect(text).to.contain('*reused*');
+      expect(text).to.contain('The originals stay in the source org');
+      expect(text).to.contain('*2* org-level feature flags');
     });
 
-    it('pluralises a single topic and flag correctly', () => {
+    it('pluralises a single reused topic and a single org flag correctly', () => {
       const text = buildPreviewMessage(basePreview({
-        auto_resolved: {
-          categories_merged: 2,
-          topics_disambiguated: 1,
-          feature_flags_dropped: 1,
+        taxonomy: {
+          categories_reused: 1,
+          categories_copied: 0,
+          topics_reused: 1,
+          topics_copied: 0,
+          org_feature_flags_copied: 1,
         },
       }), 'https://acme.com');
 
-      expect(text).to.contain('*2* categories');
-      expect(text).to.contain('*1* topic id ');
-      expect(text).to.contain('*1* duplicate feature flag ');
+      expect(text).to.contain('*1* category');
+      expect(text).to.contain('*1* topic ');
+      expect(text).to.contain('*1* org-level feature flag ');
+      expect(text).to.not.contain('*copied* into the destination org');
+    });
+
+    it('says nothing about taxonomy when there is none to resolve', () => {
+      expect(buildPreviewMessage(basePreview(), 'https://acme.com'))
+        .to.not.contain('Shared taxonomy');
+    });
+
+    it('tolerates a taxonomy block missing individual keys', () => {
+      const text = buildPreviewMessage(basePreview({
+        taxonomy: { topics_copied: 2, categories_reused: 3 },
+      }), 'https://acme.com');
+
+      expect(text).to.contain('*0* categories');
+      expect(text).to.contain('*2* topics');
+      expect(text).to.contain('*3* categories');
+      expect(text).to.contain('*0* topics');
     });
 
     it('shouts about an unusually large move', () => {
@@ -310,13 +374,13 @@ describe('llmo-org-move', () => {
       expect(text).to.contain('6 active brands');
     });
 
-    it('handles a preview with no auto_resolved block', () => {
+    it('handles a preview with no taxonomy block', () => {
       const preview = basePreview();
-      delete preview.auto_resolved;
+      delete preview.taxonomy;
 
       const text = buildPreviewMessage(preview, 'https://acme.com');
 
-      expect(text).to.not.contain('Automatically resolved conflicts');
+      expect(text).to.not.contain('Shared taxonomy');
     });
 
     it('reports a large site-driven move even when the brand list is absent', () => {
@@ -344,40 +408,63 @@ describe('llmo-org-move', () => {
   describe('buildResultMessage', () => {
     it('summarises a clean move', () => {
       const text = buildResultMessage({
-        source: { id: 'src-1', name: 'Source Org', ims_org_id: 'SRC@AdobeOrg' },
-        destination: { id: 'dst-1', name: 'Dest Org', ims_org_id: 'DST@AdobeOrg' },
+        source: 'src-1',
+        destination: 'dst-1',
         brands_moved: 2,
-        feature_flags_moved: 5,
-      }, 'https://acme.com');
+        sites_moved: 3,
+        prompts_moved: 40,
+        brand_feature_flags_moved: 5,
+      }, 'https://acme.com', basePreview());
 
       expect(text).to.contain('Moved LLMO organization');
       expect(text).to.contain('Brands moved: *2*');
-      expect(text).to.contain('Feature flags moved: *5*');
+      expect(text).to.contain('Sites moved: *3*');
+      expect(text).to.contain('Prompts moved: *40*');
+      expect(text).to.contain('Brand feature flags moved: *5*');
       expect(text).to.contain(ENTITLEMENT_GOTCHA);
     });
 
-    it('omits conflict lines when nothing was auto-resolved', () => {
-      const text = buildResultMessage({}, 'https://acme.com');
+    it('takes the org display names from the preview, not the result', () => {
+      const text = buildResultMessage(
+        { source: 'src-1', destination: 'dst-1' },
+        'https://acme.com',
+        basePreview(),
+      );
 
-      expect(text).to.not.contain('merged');
-      expect(text).to.not.contain('renamed');
-      expect(text).to.not.contain('dropped');
-      expect(text).to.contain('Brands moved: *0*');
-      expect(text).to.contain('Feature flags moved: *0*');
+      expect(text).to.contain('Source Org');
+      expect(text).to.contain('SRC@AdobeOrg');
+      expect(text).to.contain('Dest Org');
+      expect(text).to.not.contain('_unnamed_');
     });
 
-    it('reports auto-resolved conflicts when present', () => {
+    it('renders unknown orgs when no preview is supplied', () => {
+      expect(buildResultMessage({}, 'https://acme.com')).to.contain('_unknown_');
+    });
+
+    it('omits the optional lines when nothing else happened', () => {
+      const text = buildResultMessage({}, 'https://acme.com', basePreview());
+
+      expect(text).to.not.contain('feature flags');
+      expect(text).to.not.contain('Categories resolved');
+      expect(text).to.not.contain('Topics');
+      expect(text).to.contain('Brands moved: *0*');
+      expect(text).to.contain('Sites moved: *0*');
+      expect(text).to.contain('Prompts moved: *0*');
+    });
+
+    it('reports copied org flags and the resolved taxonomy when present', () => {
       const text = buildResultMessage({
         brands_moved: 1,
-        feature_flags_moved: 1,
-        categories_merged: 4,
-        topics_disambiguated: 3,
-        feature_flags_dropped: 2,
-      }, 'https://acme.com');
+        org_feature_flags_copied: 2,
+        categories_mapped: 4,
+        topics_mapped: 3,
+        source_topics_unowned: 7,
+      }, 'https://acme.com', basePreview());
 
-      expect(text).to.contain('Categories merged into existing destination rows: *4*');
-      expect(text).to.contain('Topics renamed to avoid a clash: *3*');
-      expect(text).to.contain('Duplicate feature flags dropped: *2*');
+      expect(text).to.contain('Org feature flags copied: *2*');
+      expect(text).to.contain('Categories resolved in the destination: *4*');
+      expect(text).to.contain('Topics resolved in the destination: *3*');
+      expect(text).to.contain('released from their moved brand: *7*');
     });
   });
 });

@@ -59,9 +59,14 @@ function buildConfirmBlocks(text, payload) {
 /**
  * Factory function to create the MoveLlmoOrgCommand object.
  *
- * Relocates a customer's whole LLMO entity graph - brands, prompts, topics, categories,
- * competitors, feature flags and the site itself - from the organization its site
- * currently sits in to another IMS org.
+ * Relocates a customer's whole LLMO entity graph - brands, prompts, competitors, feature
+ * flags and the sites themselves - from the organization the named site currently sits
+ * in to another IMS org.
+ *
+ * The move is scoped to the transitive closure of brands and sites reachable from the
+ * named site, not to the whole source organization: customers are routinely provisioned
+ * into a shared or DEMO org, and moving everything in that org would relocate unrelated
+ * tenants too.
  *
  * This command only ever previews. It reports what would move and what conflicts, then
  * posts a confirmation button; the write happens in the `open_move_llmo_org_modal`
@@ -75,9 +80,9 @@ function MoveLlmoOrgCommand(context) {
   const baseCommand = BaseCommand({
     id: 'move-llmo-org',
     name: 'Move LLMO Org',
-    description: 'Moves a site and its full LLMO entity graph (brands, prompts, topics, '
-      + 'categories, competitors, feature flags) to another IMS org. Shows a preview and '
-      + 'requires confirmation before writing.',
+    description: 'Moves a site and every brand transitively linked to it - along with their '
+      + 'prompts, competitors and feature flags - to another IMS org. Shows a preview of the '
+      + 'full blast radius and requires confirmation before writing.',
     phrases: PHRASES,
     usageText: `${PHRASES[0]} {site} {imsOrgId}`,
   });
@@ -122,7 +127,7 @@ function MoveLlmoOrgCommand(context) {
       const sourceOrgId = site.getOrganizationId();
       const destOrgId = destOrg.getId();
 
-      const preview = await previewOrgMove(context, sourceOrgId, destOrgId);
+      const preview = await previewOrgMove(context, site.getId(), destOrgId);
 
       const previewError = describePreviewError(preview);
       if (previewError) {
@@ -132,9 +137,12 @@ function MoveLlmoOrgCommand(context) {
 
       if (preview.ok !== true) {
         await say(
-          `:x: *This move is blocked.* The destination org already holds conflicting data:\n\n${
+          `:x: *This move is blocked.*\n\n${
             formatBlockingConflicts(preview.blocking_conflicts)
-          }\n\nResolve these in the destination org (rename or remove the conflicting brand) and re-run.`,
+          }\n\nA name or base-site clash is resolved by renaming or removing the conflicting `
+          + 'brand in the destination org. A *different org* appearing in the list means the '
+          + 'brand/site graph already straddles two organizations — that is pre-existing data '
+          + 'corruption and needs untangling by hand before this move can run.',
         );
         return;
       }

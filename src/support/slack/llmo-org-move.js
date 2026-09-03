@@ -11,7 +11,7 @@
  */
 
 /**
- * Shared logic for relocating a full LLMO ("brandalf") entity graph from one
+ * Shared logic for relocating a customer's LLMO ("brandalf") entity graph from one
  * organization to another.
  *
  * Historically the Slack "Update IMS Org" flow only reassigned `sites.organization_id`,
@@ -19,6 +19,14 @@
  * competitors, feature flags) in the source org. Now that the product navigates by
  * brand rather than by site, that left customers with an empty destination org and an
  * orphaned source org (LLMO-7294).
+ *
+ * The move is scoped to a SITE, not to an organization. Customers are routinely
+ * provisioned into a shared or DEMO org, so relocating everything matching
+ * `organization_id = <source>` would drag every other tenant in that org along too. The
+ * database resolves the transitive closure of brands and sites reachable from the given
+ * site instead - a site can carry many brands and a brand can span many sites, so the
+ * closure is frequently wider than the one site the operator names, and the preview
+ * spells out exactly what it pulled in.
  *
  * The relocation itself is delegated to two PostgREST functions in
  * mysticat-data-service, NOT to the data-access models:
@@ -41,8 +49,8 @@ const MOVE_RPC = 'wrpc_move_brandalf_org';
 /**
  * Above these counts the move is flagged as unusually large in the preview. The move is
  * still allowed - it runs in a single transaction, so a large move is not a corruption
- * risk - but a source org holding this many sites or active brands is a strong hint the
- * operator resolved the wrong org and is about to relocate an unrelated customer.
+ * risk - but a closure this wide is a strong hint the operator named a site that shares
+ * brands with an unrelated customer, and is about to relocate both.
  */
 export const LARGE_MOVE_SITE_THRESHOLD = 5;
 export const LARGE_MOVE_BRAND_THRESHOLD = 5;
@@ -56,37 +64,52 @@ export const LARGE_MOVE_BRAND_THRESHOLD = 5;
  *
  * The caller re-runs the normal LLMO entitlement/enrollment provisioning against the
  * destination org after the move, which grants correct access there but leaves the
- * source org's now-unused enrollment in place. See the LLMO Troubleshooting wiki.
+ * source org's now-unused entitlement in place.
+ *
+ * The ordering below is not advisory. `revoke entitlement site` deletes the enrollment
+ * for a site regardless of which org it currently belongs to, so running it *after* a
+ * move deletes the correct enrollment this command just created, silently leaving the
+ * customer without access in the destination org.
  */
-export const ENTITLEMENT_GOTCHA = ':warning: *Entitlements are not moved.* A fresh LLMO '
-  + 'entitlement/enrollment is provisioned on the destination org, but the source org\'s '
-  + 'existing entitlement and its site enrollment are left untouched and must be revoked '
-  + 'manually if the customer should no longer be billed there.';
+export const ENTITLEMENT_GOTCHA = ':warning: *Entitlements are not moved* — and the order '
+  + 'you clean them up in matters.\n'
+  + '• *Moving a whole tenant between IMS orgs:* run `revoke entitlement imsorg` against '
+  + 'the *source* IMS org *after* this move completes.\n'
+  + '• *Extracting a customer from a shared/DEMO org:* run `revoke entitlement site` '
+  + '*before* this move. Running it afterwards deletes the enrollment this command just '
+  + 'created on the destination org and leaves the customer with no access.\n'
+  + '• Neither command removes a `site_enrollments` row backed by a *paid* entitlement — '
+  + 'that still needs doing by hand.';
 
 /**
  * Tables reported by the preview, in the order they are rendered. Keys match the
  * `counts` object returned by `rpc_org_move_preview`.
+ *
+ * Categories and topics are absent by design: they are copied into the destination
+ * rather than moved, and are reported separately under the taxonomy plan. The two
+ * prompt junction tables are absent too - they follow their prompts automatically via
+ * the `sync_prompt_junction_tables` trigger.
  */
 const COUNT_LABELS = [
   ['brands', 'Brands'],
+  ['sites', 'Sites'],
+  ['prompts', 'Prompts'],
   ['brand_aliases', 'Brand aliases'],
-  ['brand_sites', 'Brand sites'],
+  ['brand_sites', 'Brand ↔ site links'],
   ['brand_urls', 'Brand URLs'],
   ['brand_social_accounts', 'Social accounts'],
   ['brand_earned_sources', 'Earned sources'],
-  ['categories', 'Categories'],
-  ['topics', 'Topics'],
-  ['prompts', 'Prompts'],
-  ['topic_prompts', 'Topic prompts'],
-  ['category_prompts', 'Category prompts'],
   ['competitors', 'Competitors'],
-  ['feature_flags', 'Feature flags'],
-  ['sites', 'Sites'],
+  ['brand_feature_flags', 'Brand feature flags'],
 ];
 
 const BLOCKING_CONFLICT_LABELS = {
   brand_name: 'A brand with this name already exists in the destination org',
   brand_base_site: 'A brand in the destination org already uses this site',
+  foreign_brand_in_scope: 'This brand is reachable from the site but belongs to a different org '
+    + '(pre-existing cross-org data; moving would drag an unrelated tenant along)',
+  foreign_site_in_scope: 'This site is reachable from the site but belongs to a different org '
+    + '(pre-existing cross-org data; moving would drag an unrelated tenant along)',
 };
 
 /**
@@ -117,24 +140,25 @@ function resolvePostgrestClient(context) {
 }
 
 /**
- * Reports what a move from `sourceOrgId` to `destOrgId` would do. Read-only.
+ * Reports what moving the closure rooted at `siteId` into `destOrgId` would do.
+ * Read-only.
  *
- * Never throws on a business-level problem: an unevaluable request (unknown org, same
- * org) comes back as `{ ok: false, error: <code> }`, and a genuine blocking conflict
- * comes back as `{ ok: false, blocking_conflicts: [...] }` with no `error` key. Only
- * transport/database failures throw.
+ * Never throws on a business-level problem: an unevaluable request (unknown site or org,
+ * site already in the destination) comes back as `{ ok: false, error: <code> }`, and a
+ * genuine blocking conflict comes back as `{ ok: false, blocking_conflicts: [...] }`
+ * with no `error` key. Only transport/database failures throw.
  *
  * @param {object} context - Lambda context.
- * @param {string} sourceOrgId - Source SpaceCat organization id.
+ * @param {string} siteId - The site the move is seeded from.
  * @param {string} destOrgId - Destination SpaceCat organization id.
  * @returns {Promise<object>} The preview payload.
  */
-export async function previewOrgMove(context, sourceOrgId, destOrgId) {
+export async function previewOrgMove(context, siteId, destOrgId) {
   const postgrestClient = resolvePostgrestClient(context);
 
   const { data, error } = await postgrestClient.rpc(PREVIEW_RPC, {
-    p_src: sourceOrgId,
-    p_dst: destOrgId,
+    p_site_id: siteId,
+    p_dst_org: destOrgId,
   });
 
   if (error) {
@@ -149,7 +173,7 @@ export async function previewOrgMove(context, sourceOrgId, destOrgId) {
 }
 
 /**
- * Performs the move. All fourteen tables are rewritten inside one transaction, so this
+ * Performs the move. Every affected table is rewritten inside one transaction, so this
  * either fully succeeds or fully rolls back.
  *
  * Raises (surfacing as a thrown error) when a blocking conflict is present, so callers
@@ -157,17 +181,17 @@ export async function previewOrgMove(context, sourceOrgId, destOrgId) {
  * database error.
  *
  * @param {object} context - Lambda context.
- * @param {string} sourceOrgId - Source SpaceCat organization id.
+ * @param {string} siteId - The site the move is seeded from.
  * @param {string} destOrgId - Destination SpaceCat organization id.
  * @param {string} updatedBy - Audit stamp written to `updated_by`.
  * @returns {Promise<object>} The move result payload.
  */
-export async function executeOrgMove(context, sourceOrgId, destOrgId, updatedBy) {
+export async function executeOrgMove(context, siteId, destOrgId, updatedBy) {
   const postgrestClient = resolvePostgrestClient(context);
 
   const { data, error } = await postgrestClient.rpc(MOVE_RPC, {
-    p_src: sourceOrgId,
-    p_dst: destOrgId,
+    p_site_id: siteId,
+    p_dst_org: destOrgId,
     p_updated_by: updatedBy,
   });
 
@@ -201,8 +225,10 @@ export function isLargeMove(preview) {
  */
 export function describePreviewError(preview) {
   switch (preview?.error) {
-    case 'source_org_not_found':
-      return ':x: The site\'s current organization no longer exists.';
+    case 'site_not_found':
+      return ':x: That site no longer exists.';
+    case 'site_and_destination_required':
+      return ':x: A site and a destination organization are both required.';
     case 'destination_org_not_found':
       return ':x: The destination organization could not be found.';
     case 'same_org':
@@ -240,19 +266,53 @@ function formatSites(sites = []) {
   if (sites.length === 0) {
     return '_No sites._';
   }
-  return sites.map((s) => `• \`${s.base_url}\``).join('\n');
+  return sites
+    .map((s) => `• \`${s.base_url}\`${s.is_seed ? ' ← _the site you named_' : ''}`)
+    .join('\n');
 }
 
-function formatAutoResolved(autoResolved = {}) {
+/**
+ * Describes what happens to the shared taxonomy.
+ *
+ * Categories and topics are copied into the destination rather than moved, because both
+ * are shared across brands: `categories` has no `brand_id` at all, and brand-owned
+ * topics are routinely referenced by other brands' prompts. Moving those rows would
+ * strip the taxonomy from whichever brands stay behind.
+ *
+ * @param {object} taxonomy - The preview's `taxonomy` object.
+ * @returns {Array<string>} Markdown lines.
+ */
+function formatTaxonomyPlan(taxonomy = {}) {
   const notes = [];
-  if (autoResolved.categories_merged > 0) {
-    notes.push(`• *${autoResolved.categories_merged}* categor${autoResolved.categories_merged === 1 ? 'y' : 'ies'} already exist in the destination and will be *merged* (their prompts are re-pointed at the destination's copy).`);
+  const reused = (taxonomy.categories_reused || 0) + (taxonomy.topics_reused || 0);
+  const copied = (taxonomy.categories_copied || 0) + (taxonomy.topics_copied || 0);
+
+  if (copied > 0) {
+    notes.push(
+      `• *${taxonomy.categories_copied || 0}* categor${taxonomy.categories_copied === 1 ? 'y' : 'ies'} `
+      + `and *${taxonomy.topics_copied || 0}* topic${taxonomy.topics_copied === 1 ? '' : 's'} `
+      + 'will be *copied* into the destination org.',
+    );
   }
-  if (autoResolved.topics_disambiguated > 0) {
-    notes.push(`• *${autoResolved.topics_disambiguated}* topic id${autoResolved.topics_disambiguated === 1 ? '' : 's'} clash with the destination and will be *renamed* with a \` (moved)\` suffix.`);
+  if (reused > 0) {
+    notes.push(
+      `• *${taxonomy.categories_reused || 0}* categor${taxonomy.categories_reused === 1 ? 'y' : 'ies'} `
+      + `and *${taxonomy.topics_reused || 0}* topic${taxonomy.topics_reused === 1 ? '' : 's'} `
+      + 'already exist in the destination and will be *reused*.',
+    );
   }
-  if (autoResolved.feature_flags_dropped > 0) {
-    notes.push(`• *${autoResolved.feature_flags_dropped}* duplicate feature flag${autoResolved.feature_flags_dropped === 1 ? '' : 's'} will be *dropped* — the destination org's existing value wins.`);
+  if (copied > 0 || reused > 0) {
+    notes.push(
+      '• The originals stay in the source org — they are shared with brands that are '
+      + '_not_ moving, so they are copied rather than relocated.',
+    );
+  }
+  if (taxonomy.org_feature_flags_copied > 0) {
+    notes.push(
+      `• *${taxonomy.org_feature_flags_copied}* org-level feature flag`
+      + `${taxonomy.org_feature_flags_copied === 1 ? '' : 's'} will be *copied* to the `
+      + 'destination (existing destination values are never overwritten).',
+    );
   }
   return notes;
 }
@@ -277,39 +337,52 @@ export function formatBlockingConflicts(conflicts = []) {
 /**
  * Builds the human-readable preview summary posted before the operator confirms.
  *
+ * The brand and site lists are the point of this message, not decoration: the move is
+ * seeded from one site but covers everything transitively connected to it, so the
+ * operator has to be able to see whether the closure pulled in more than they meant.
+ *
  * @param {object} preview - Payload from {@link previewOrgMove}.
  * @param {string} baseURL - The site the operator asked about.
  * @returns {string} Slack mrkdwn.
  */
 export function buildPreviewMessage(preview, baseURL) {
+  const brands = preview.brands || [];
+  const sites = preview.sites || [];
+
   const sections = [
     '*Move LLMO organization*',
     '',
-    `Triggered by site: \`${baseURL}\``,
+    `Seeded from site: \`${baseURL}\``,
     `From: ${formatOrg(preview.source)}`,
     `To: ${formatOrg(preview.destination)}`,
+    '',
+    `*Everything below moves together* — ${brands.length} brand${brands.length === 1 ? '' : 's'} `
+    + `across ${sites.length} site${sites.length === 1 ? '' : 's'}. Brands and sites are linked `
+    + 'many-to-many, so relocating one without the others would leave the link rows pointing '
+    + 'across an org boundary.',
     '',
     '*What will move*',
     formatCounts(preview.counts),
     '',
     '*Brands*',
-    formatBrands(preview.brands),
+    formatBrands(brands),
     '',
     '*Sites*',
-    formatSites(preview.sites),
+    formatSites(sites),
   ];
 
-  const autoResolved = formatAutoResolved(preview.auto_resolved);
-  if (autoResolved.length > 0) {
-    sections.push('', '*Automatically resolved conflicts*', ...autoResolved);
+  const taxonomy = formatTaxonomyPlan(preview.taxonomy);
+  if (taxonomy.length > 0) {
+    sections.push('', '*Shared taxonomy*', ...taxonomy);
   }
 
   if (isLargeMove(preview)) {
     sections.push(
       '',
-      `:rotating_light: *This is an unusually large move* (${preview.sites?.length || 0} sites, `
-      + `${(preview.brands || []).filter((b) => b.status === 'active').length} active brands). `
-      + 'Confirm this is really the customer you meant to relocate before continuing.',
+      `:rotating_light: *This is an unusually large move* (${sites.length} sites, `
+      + `${brands.filter((b) => b.status === 'active').length} active brands). `
+      + 'Check the lists above and confirm this is really the customer you meant to '
+      + 'relocate before continuing.',
     );
   }
 
@@ -321,29 +394,43 @@ export function buildPreviewMessage(preview, baseURL) {
 /**
  * Builds the summary posted after a successful move.
  *
+ * The org display names come from the preview, not the result: the write RPC returns
+ * bare organization ids.
+ *
  * @param {object} result - Payload from {@link executeOrgMove}.
  * @param {string} baseURL - The site the operator asked about.
+ * @param {object} [preview] - The preview the move was confirmed from, for org names.
  * @returns {string} Slack mrkdwn.
  */
-export function buildResultMessage(result, baseURL) {
+export function buildResultMessage(result, baseURL, preview = {}) {
   const lines = [
     `:white_check_mark: *Moved LLMO organization for* \`${baseURL}\``,
     '',
-    `From: ${formatOrg(result.source)}`,
-    `To: ${formatOrg(result.destination)}`,
+    `From: ${formatOrg(preview.source)}`,
+    `To: ${formatOrg(preview.destination)}`,
     '',
     `• Brands moved: *${result.brands_moved || 0}*`,
-    `• Feature flags moved: *${result.feature_flags_moved || 0}*`,
+    `• Sites moved: *${result.sites_moved || 0}*`,
+    `• Prompts moved: *${result.prompts_moved || 0}*`,
   ];
 
-  if (result.categories_merged > 0) {
-    lines.push(`• Categories merged into existing destination rows: *${result.categories_merged}*`);
+  if (result.brand_feature_flags_moved > 0) {
+    lines.push(`• Brand feature flags moved: *${result.brand_feature_flags_moved}*`);
   }
-  if (result.topics_disambiguated > 0) {
-    lines.push(`• Topics renamed to avoid a clash: *${result.topics_disambiguated}*`);
+  if (result.org_feature_flags_copied > 0) {
+    lines.push(`• Org feature flags copied: *${result.org_feature_flags_copied}*`);
   }
-  if (result.feature_flags_dropped > 0) {
-    lines.push(`• Duplicate feature flags dropped: *${result.feature_flags_dropped}*`);
+  if (result.categories_mapped > 0) {
+    lines.push(`• Categories resolved in the destination: *${result.categories_mapped}*`);
+  }
+  if (result.topics_mapped > 0) {
+    lines.push(`• Topics resolved in the destination: *${result.topics_mapped}*`);
+  }
+  if (result.source_topics_unowned > 0) {
+    lines.push(
+      '• Topics left in the source org and released from their moved brand: '
+      + `*${result.source_topics_unowned}*`,
+    );
   }
 
   lines.push('', ENTITLEMENT_GOTCHA);
