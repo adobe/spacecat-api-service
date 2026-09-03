@@ -612,7 +612,7 @@ describe('LlmoAkamaiController', () => {
       },
     });
 
-    it('reports freshWrite:true when the fetcher key differs from the base (write landed)', async () => {
+    it('reports freshWrite:true and recovers the fetcher key when it differs from the base (write landed)', async () => {
       mockAkamaiClient.getRuleTree.withArgs(PROPERTY_ID, 7)
         .resolves({ ruleTree: treeWithFetcherKey('NEW_KEY'), ruleFormat: 'v', etag: 'e7' });
       mockAkamaiClient.getRuleTree.withArgs(PROPERTY_ID, 6)
@@ -622,12 +622,12 @@ describe('LlmoAkamaiController', () => {
       expect(res.status).to.equal(200);
       expect(body.deployed).to.equal(true);
       expect(body.freshWrite).to.equal(true);
-      // The secret fetcher-key value is compared server-side but never returned.
-      expect(JSON.stringify(body)).to.not.contain('NEW_KEY');
+      // This deploy's OWN key is recovered (confirmed fresh); the base's inherited key never is.
+      expect(body.fetcherKey).to.equal('NEW_KEY');
       expect(JSON.stringify(body)).to.not.contain('OLD_KEY');
     });
 
-    it('reports freshWrite:false when the version is an unwritten clone (same key as base)', async () => {
+    it('reports freshWrite:false and omits fetcherKey when the version is an unwritten clone (same key as base)', async () => {
       mockAkamaiClient.getRuleTree.withArgs(PROPERTY_ID, 7)
         .resolves({ ruleTree: treeWithFetcherKey('SAME_KEY'), ruleFormat: 'v', etag: 'e7' });
       mockAkamaiClient.getRuleTree.withArgs(PROPERTY_ID, 6)
@@ -636,15 +636,19 @@ describe('LlmoAkamaiController', () => {
       const body = await res.json();
       expect(body.deployed).to.equal(true);
       expect(body.freshWrite).to.equal(false);
+      // The key present is inherited from a prior onboarding, not this deploy's — never surfaced.
+      expect(body).to.not.have.property('fetcherKey');
+      expect(JSON.stringify(body)).to.not.contain('SAME_KEY');
     });
 
-    it('omits freshWrite when no baseVersion is supplied', async () => {
+    it('omits freshWrite but recovers fetcherKey when no baseVersion is supplied (unambiguous first onboard)', async () => {
       mockAkamaiClient.getRuleTree.withArgs(PROPERTY_ID, 7)
         .resolves({ ruleTree: treeWithFetcherKey('K'), ruleFormat: 'v', etag: 'e7' });
       const res = await controller.deployStatus(withData(propertyRef));
       const body = await res.json();
       expect(body.deployed).to.equal(true);
       expect(body).to.not.have.property('freshWrite');
+      expect(body.fetcherKey).to.equal('K');
       // No base comparison ⇒ only the target version was read.
       expect(mockAkamaiClient.getRuleTree).to.have.been.calledOnceWith(PROPERTY_ID, 7);
     });
