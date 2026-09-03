@@ -337,6 +337,10 @@ paths:
     $ref: './site-api.yaml#/site-page-relationships-search'
   /sites/{siteId}/opportunities:
     $ref: './site-opportunities.yaml#/site-opportunities'
+  /sites/{siteId}/opportunities/by-url:
+    $ref: './site-opportunities.yaml#/site-opportunities-by-url'
+  /sites/{siteId}/suggestions/by-url:
+    $ref: './site-opportunities.yaml#/site-suggestions-by-url'
   /sites/{siteId}/opportunities/by-status/{status}:
     $ref: './site-opportunities.yaml#/site-opportunities-by-status'
   /sites/{siteId}/opportunities/{opportunityId}:

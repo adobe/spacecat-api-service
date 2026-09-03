@@ -758,6 +758,9 @@ const routeFacsCapabilities = {
       'GET /sites/:siteId/metrics/:metric/:source': 'llmo/can_view',
       'GET /sites/:siteId/metrics/:metric/:source/by-url/:base64PageUrl': 'llmo/can_view',
       'GET /sites/:siteId/opportunities': 'llmo/can_view',
+      // POST-for-read lookups (body carries the query); reads, not writes.
+      'POST /sites/:siteId/opportunities/by-url': 'llmo/can_view',
+      'POST /sites/:siteId/suggestions/by-url': 'llmo/can_view',
       'GET /sites/:siteId/opportunities/:opportunityId': 'llmo/can_view',
       'GET /sites/:siteId/opportunities/:opportunityId/fixes': 'llmo/can_view',
       'GET /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': 'llmo/can_view',

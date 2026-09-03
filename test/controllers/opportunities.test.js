@@ -17,6 +17,7 @@ import sinon from 'sinon';
 
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 import { ValidationError } from '@adobe/spacecat-shared-data-access';
+import { canonicalizeUrl } from '@adobe/spacecat-shared-utils';
 import esmock from 'esmock';
 import OpportunitiesController from '../../src/controllers/opportunities.js';
 
@@ -177,6 +178,7 @@ describe('Opportunities Controller', () => {
   const opportunitiesFunctions = [
     'getAllForSite',
     'getByStatus',
+    'getByUrl',
     'getByID',
     'createOpportunity',
     'patchOpportunity',
@@ -1719,6 +1721,102 @@ describe('Opportunities Controller', () => {
 
       expect(plgStub.calledOnce).to.be.true;
       expect(plgStub.firstCall.args[2]).to.equal(requestContext);
+    });
+  });
+
+  describe('getByUrl', () => {
+    const inputUrl = 'https://example.com/a';
+    let batchStub;
+    let daWithPg;
+    let controllerWithPg;
+
+    beforeEach(() => {
+      batchStub = sandbox.stub().resolves({ data: [mockOpptyEntity] });
+      const pgClient = {
+        from: () => ({
+          select: () => ({
+            eq: () => ({
+              in: () => Promise.resolve({
+                data: [{ entity_id: OPPORTUNITY_ID, entity_type: 'cited-analysis', url: canonicalizeUrl(inputUrl) }],
+                error: null,
+              }),
+            }),
+          }),
+        }),
+      };
+      daWithPg = {
+        Opportunity: { ...mockOpportunity, batchGetByKeys: batchStub },
+        Site: mockSite,
+        services: { postgrestClient: pgClient },
+      };
+      controllerWithPg = OpportunitiesController({
+        dataAccess: daWithPg, pathInfo: { headers: {} }, ...defaultAuthAttributes,
+      });
+    });
+
+    it('returns 400 for an invalid site id', async () => {
+      const res = await controllerWithPg.getByUrl({ params: { siteId: 'nope' }, data: { urls: [inputUrl] } });
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 404 when the site does not exist', async () => {
+      mockSite.findById.resolves(null);
+      const res = await controllerWithPg.getByUrl({
+        params: { siteId: SITE_ID }, data: { urls: [inputUrl] },
+      });
+      expect(res.status).to.equal(404);
+    });
+
+    it('returns 403 when the user lacks access to the site', async () => {
+      const mockSiteWithOrg = {
+        id: SITE_ID, getOrganization: async () => ({ getImsOrgId: () => 'test-org-id' }),
+      };
+      mockSiteWithOrg.constructor = { ENTITY_NAME: 'Site' };
+      mockSite.findById.resolves(mockSiteWithOrg);
+      const restrictedAuthInfo = new AuthInfo()
+        .withType('jwt')
+        .withScopes([{ name: 'user' }])
+        .withProfile({ is_admin: false })
+        .withAuthenticated(true);
+      restrictedAuthInfo.claims = { organizations: [] };
+      const ctrl = OpportunitiesController({
+        dataAccess: daWithPg,
+        pathInfo: { headers: {} },
+        attributes: { authInfo: restrictedAuthInfo },
+      });
+      const res = await ctrl.getByUrl({ params: { siteId: SITE_ID }, data: { urls: [inputUrl] } });
+      expect(res.status).to.equal(403);
+    });
+
+    it('returns 500 when the postgrest client is unavailable', async () => {
+      const ctrl = OpportunitiesController({
+        dataAccess: mockOpportunityDataAccess, pathInfo: { headers: {} }, ...defaultAuthAttributes,
+      });
+      const res = await ctrl.getByUrl({ params: { siteId: SITE_ID }, data: { urls: [inputUrl] } });
+      expect(res.status).to.equal(500);
+    });
+
+    it('returns 400 for an invalid urls body', async () => {
+      const res = await controllerWithPg.getByUrl({ params: { siteId: SITE_ID }, data: { urls: 'nope' } });
+      expect(res.status).to.equal(400);
+      const body = await res.json();
+      expect(body.message).to.match(/must be an array/);
+    });
+
+    it('returns matched opportunities for the supplied urls', async () => {
+      const res = await controllerWithPg.getByUrl({
+        params: { siteId: SITE_ID },
+        data: { urls: [inputUrl, 'https://example.com/miss'] },
+      });
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.results).to.deep.equal([
+        { url: inputUrl, opportunityIds: [OPPORTUNITY_ID] },
+        { url: 'https://example.com/miss', opportunityIds: [] },
+      ]);
+      expect(body.opportunities[OPPORTUNITY_ID]).to.include({ id: OPPORTUNITY_ID });
+      expect(body.opportunities[OPPORTUNITY_ID]).to.not.have.property('data');
+      expect(batchStub).to.have.been.calledOnce;
     });
   });
 });
