@@ -5935,6 +5935,47 @@ site-llmo-cloudflare-config:
     security:
       - session_token: [ ]
 
+site-llmo-cloudflare-target-host:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    operationId: getLlmoCloudflareTargetHost
+    summary: Preview the target host that deploy would derive server-side
+    description: |
+      Read-only preview of the host `POST .../cloudflare/deploy` would derive server-side when
+      the caller omits `targetHost` (a bare apex such as `example.com` is normalized to its `www`
+      host, confirmed by following same-domain redirects). Lets the onboarding UI suggest a value
+      before the user reaches the deploy step, without a Cloudflare token and without any deploy
+      side effect.
+
+      **Note:** This endpoint requires LLMO administrator access for the site.
+    tags:
+      - llmo
+    responses:
+      '200':
+        description: The server-derived target host suggestion
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - targetHost
+              properties:
+                targetHost:
+                  type: string
+                  description: >-
+                    The origin host `deployWorker` would use if `targetHost` is omitted from the
+                    request — a suggestion, not a guarantee of the live canonical host.
+                  example: 'www.example.com'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - session_token: [ ]
+
 site-llmo-cloudflare-accounts:
   parameters:
     - $ref: './parameters.yaml#/siteId'
@@ -6067,9 +6108,11 @@ site-llmo-cloudflare-deploy:
       account. The worker name is derived server-side from the site's base URL
       (`edge-optimize-router-<canonical-host>`, e.g. `edge-optimize-router-example-com`) and is
       not client-supplied. The worker is tagged with `adobe-llmo` plus the caller's identity, and
-      the `EDGE_OPTIMIZE_TARGET_HOST` plain-text binding is set to the host derived server-side
-      from the site's base URL (a bare apex such as `example.com` is normalized to its `www` host),
-      and the site's LLMO API key is set as the `EDGE_OPTIMIZE_API_KEY` secret.
+      the `EDGE_OPTIMIZE_TARGET_HOST` plain-text binding is set to `targetHost` if supplied (it
+      must equal the site's canonical host or be a subdomain of it, otherwise the request is
+      rejected with `400`), or otherwise derived server-side from the site's base URL (a bare apex
+      such as `example.com` is normalized to its `www` host). The site's LLMO API key is set as
+      the `EDGE_OPTIMIZE_API_KEY` secret.
 
       The deploy is idempotent: if a worker we previously deployed (carrying the `adobe-llmo` tag)
       already exists, the response is `200` with `alreadyDeployed: true` and the secret is not
@@ -6097,6 +6140,14 @@ site-llmo-cloudflare-deploy:
                 description: Cloudflare account ID (32-character lowercase hex)
                 pattern: '^[0-9a-f]{32}$'
                 example: '0123456789abcdef0123456789abcdef'
+              targetHost:
+                type: string
+                description: >-
+                  Optional override for the worker's forwarding host. Must equal the site's
+                  canonical base-URL host or be a subdomain of it, otherwise the request is
+                  rejected with `400`. When omitted, the host is derived server-side from the
+                  site's base URL.
+                example: 'www.example.com'
     responses:
       '200':
         description: >-
@@ -6114,8 +6165,9 @@ site-llmo-cloudflare-deploy:
                 targetHost:
                   type: string
                   description: >-
-                    The origin host the worker forwards to, derived server-side from the site's
-                    base URL and set as the `EDGE_OPTIMIZE_TARGET_HOST` binding.
+                    The origin host the worker forwards to, set as the `EDGE_OPTIMIZE_TARGET_HOST`
+                    binding — the validated request `targetHost` if supplied, otherwise derived
+                    server-side from the site's base URL.
                 alreadyDeployed:
                   type: boolean
                   description: >-

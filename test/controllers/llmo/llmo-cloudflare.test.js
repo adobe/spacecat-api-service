@@ -192,6 +192,50 @@ describe('LlmoCloudflareController', () => {
     });
   });
 
+  // ── getTargetHost ────────────────────────────────────────────────────────
+
+  describe('getTargetHost', () => {
+    it('returns the server-derived target host without deploying anything', async () => {
+      const res = await controller.getTargetHost(mockContext);
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body).to.deep.equal({ targetHost: TARGET_HOST });
+      expect(mockCfClient.deployWorkerScript).to.not.have.been.called;
+    });
+
+    it('returns 404 when site is not found', async () => {
+      mockContext.dataAccess.Site.findById.resolves(null);
+      const res = await controller.getTargetHost(mockContext);
+      expect(res.status).to.equal(404);
+    });
+
+    it('returns 403 when user does not have site access', async () => {
+      mockAccessControlUtil.hasAccess.resolves(false);
+      const res = await controller.getTargetHost(mockContext);
+      expect(res.status).to.equal(403);
+    });
+
+    it('returns 403 when user is not an LLMO administrator', async () => {
+      mockAccessControlUtil.hasLlmoCapabilityForSite.resolves(false);
+      const res = await controller.getTargetHost(mockContext);
+      expect(res.status).to.equal(403);
+    });
+
+    it('returns 501 for a subpath site (CDN auto-routing not supported)', async () => {
+      mockSite.getBaseURL = () => 'https://www.example.com/blog';
+      const res = await controller.getTargetHost(mockContext);
+      expect(res.status).to.equal(501);
+    });
+
+    it('returns 500 when the target host cannot be derived from the site base URL', async () => {
+      mockResolveCanonicalHost = () => {
+        throw new Error('cannot derive host');
+      };
+      const res = await controller.getTargetHost(mockContext);
+      expect(res.status).to.equal(500);
+    });
+  });
+
   // ── listAccounts ─────────────────────────────────────────────────────────
 
   describe('listAccounts', () => {
@@ -346,7 +390,7 @@ describe('LlmoCloudflareController', () => {
   describe('deployWorker', () => {
     beforeEach(() => {
       mockContext.params = { siteId: SITE_ID };
-      // targetHost is no longer client-supplied; it is derived from the site base URL
+      // Default: no client-supplied targetHost, so it is derived from the site base URL
       // (https://www.example.com → www.example.com === TARGET_HOST).
       mockContext.data = { accountId: ACCOUNT_ID };
     });
@@ -505,11 +549,9 @@ describe('LlmoCloudflareController', () => {
       expect(res.status).to.equal(400);
     });
 
-    it('derives targetHost from the site base URL (apex → www) and ignores any client value', async () => {
+    it('derives targetHost from the site base URL (apex → www) when no client value is supplied', async () => {
       mockSite.getBaseURL = () => 'https://example.com';
-      // A client-supplied targetHost must be ignored — the worker only ever forwards to the
-      // canonical host derived from the site's own base URL.
-      mockContext.data = { accountId: ACCOUNT_ID, targetHost: 'evil.com' };
+      mockContext.data = { accountId: ACCOUNT_ID };
       mockCfClient.deployWorkerScript.resolves();
       mockCfClient.setWorkerSecret.resolves();
 
@@ -519,6 +561,50 @@ describe('LlmoCloudflareController', () => {
       const binding = mockCfClient.deployWorkerScript.getCall(0).args[3];
       expect(binding).to.deep.equal([
         { name: 'EDGE_OPTIMIZE_TARGET_HOST', type: 'plain_text', text: 'www.example.com' },
+      ]);
+    });
+
+    it('rejects a client-supplied targetHost outside the site\'s domain', async () => {
+      mockSite.getBaseURL = () => 'https://example.com';
+      mockContext.data = { accountId: ACCOUNT_ID, targetHost: 'evil.com' };
+
+      const res = await controller.deployWorker(mockContext);
+      expect(res.status).to.equal(400);
+      expect(mockCfClient.deployWorkerScript).to.not.have.been.called;
+    });
+
+    it('honors a valid client-supplied targetHost equal to the site\'s canonical host', async () => {
+      const resolveSpy = sandbox.stub().resolves('should-not-be-used.example.com');
+      mockResolveCanonicalHost = resolveSpy;
+      mockContext.data = { accountId: ACCOUNT_ID, targetHost: 'WWW.EXAMPLE.COM' };
+      mockCfClient.deployWorkerScript.resolves();
+      mockCfClient.setWorkerSecret.resolves();
+
+      const res = await controller.deployWorker(mockContext);
+      expect(res.status).to.equal(200);
+      expect(resolveSpy).to.not.have.been.called;
+
+      const binding = mockCfClient.deployWorkerScript.getCall(0).args[3];
+      expect(binding).to.deep.equal([
+        { name: 'EDGE_OPTIMIZE_TARGET_HOST', type: 'plain_text', text: 'www.example.com' },
+      ]);
+
+      const body = await res.json();
+      expect(body.targetHost).to.equal('www.example.com');
+    });
+
+    it('honors a valid client-supplied targetHost that is a subdomain of the site\'s base URL', async () => {
+      mockSite.getBaseURL = () => 'https://example.com';
+      mockContext.data = { accountId: ACCOUNT_ID, targetHost: 'cdn.example.com' };
+      mockCfClient.deployWorkerScript.resolves();
+      mockCfClient.setWorkerSecret.resolves();
+
+      const res = await controller.deployWorker(mockContext);
+      expect(res.status).to.equal(200);
+
+      const binding = mockCfClient.deployWorkerScript.getCall(0).args[3];
+      expect(binding).to.deep.equal([
+        { name: 'EDGE_OPTIMIZE_TARGET_HOST', type: 'plain_text', text: 'cdn.example.com' },
       ]);
     });
 

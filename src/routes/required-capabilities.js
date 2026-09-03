@@ -105,6 +105,7 @@ export const INTERNAL_ROUTES = [
   // not an S2S JWT). Customer gate is now FACS llmo/can_configure via
   // hasLlmoCapabilityForSite (isLLMOAdministrator fallback for non-FACS orgs).
   'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/config',
+  'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/target-host',
   'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/accounts',
   'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/zones',
   'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/deploy',

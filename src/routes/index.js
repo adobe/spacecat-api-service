@@ -633,6 +633,7 @@ export default function getRouteHandlers(
 
     // LLMO Cloudflare Onboarding Routes
     'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/config': llmoCloudflareController.getCloudflareConfig,
+    'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/target-host': llmoCloudflareController.getTargetHost,
     'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/accounts': llmoCloudflareController.listAccounts,
     'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/zones': llmoCloudflareController.listZones,
     'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/deploy': llmoCloudflareController.deployWorker,

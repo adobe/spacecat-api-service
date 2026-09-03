@@ -1334,6 +1334,7 @@ describe('getRouteHandlers', () => {
       'PUT /sites/:siteId/llmo/strategy',
       'PUT /sites/:siteId/llmo/opportunities-reviewed',
       'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/config',
+      'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/target-host',
       'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/accounts',
       'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/zones',
       'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/deploy',
