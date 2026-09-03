@@ -608,14 +608,69 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     expect(result.body.error).to.equal('unknownLanguage');
   });
 
-  // LLMO-7309: Semrush lists Chinese only under script-qualified names. The
-  // real `GET /v1/languages` catalog was captured live against the Add-market
-  // flow and returns `Chinese Simplified` / `Chinese Traditional` — a trailing
-  // space-separated word, NOT a parenthetical. The app models it by the bare
-  // primary subtag `zh` whose English name is `Chinese`, so the base-name
-  // aliasing must resolve `zh` to a qualified catalog row — deterministically
-  // the alphabetically-first one (Simplified).
-  it('resolves a bare `zh` to the alphabetically-first qualified Chinese catalog row', async () => {
+  // LLMO-7309: Semrush tracks Chinese as two script catalogs, returned live as
+  // `Chinese Simplified` / `Chinese Traditional` (space-separated). The app
+  // offers them as `zh-Hans` / `zh-Hant`, whose Intl English names are
+  // `Simplified Chinese` / `Traditional Chinese` (reversed word order) — so
+  // resolution matches on a word-order-independent normalized key.
+  it('resolves `zh-Hans` to the Chinese Simplified catalog row', async () => {
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(null);
+    dataAccess.BrandSemrushProject.create.resolves();
+    dataAccess.Site.findById.resolves({ getBaseURL: () => 'https://cuhk.edu.hk' });
+    const transport = {
+      listLanguages: sinon.stub().resolves({
+        items: [
+          { id: 'lang-zh-hant', name: 'Chinese Traditional' },
+          { id: 'lang-zh-hans', name: 'Chinese Simplified' },
+        ],
+      }),
+      createProject: sinon.stub().resolves({ id: 'proj-hk-zh' }),
+      updateProject: sinon.stub().resolves(),
+      publishProject: sinon.stub().resolves(),
+    };
+    clearLanguageCache();
+
+    const result = await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
+      market: 'HK', languageCode: 'zh-Hans', siteId: '00000000-0000-4000-8000-0000000000cc', brandNames: ['CUHK'],
+    }, fakeLog());
+
+    expect(result.status).to.equal(201);
+    expect(transport.createProject.firstCall.args[1].language_id).to.equal('lang-zh-hans');
+    expect(result.body.languageCode).to.equal('zh-hans');
+  });
+
+  it('resolves `zh-Hant` to the Chinese Traditional catalog row', async () => {
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(null);
+    dataAccess.BrandSemrushProject.create.resolves();
+    dataAccess.Site.findById.resolves({ getBaseURL: () => 'https://cuhk.edu.hk' });
+    const transport = {
+      listLanguages: sinon.stub().resolves({
+        items: [
+          { id: 'lang-zh-hant', name: 'Chinese Traditional' },
+          { id: 'lang-zh-hans', name: 'Chinese Simplified' },
+        ],
+      }),
+      createProject: sinon.stub().resolves({ id: 'proj-hk-zh' }),
+      updateProject: sinon.stub().resolves(),
+      publishProject: sinon.stub().resolves(),
+    };
+    clearLanguageCache();
+
+    const result = await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
+      market: 'HK', languageCode: 'zh-Hant', siteId: '00000000-0000-4000-8000-0000000000cc', brandNames: ['CUHK'],
+    }, fakeLog());
+
+    expect(result.status).to.equal(201);
+    expect(transport.createProject.firstCall.args[1].language_id).to.equal('lang-zh-hant');
+    expect(result.body.languageCode).to.equal('zh-hant');
+  });
+
+  // Back-compat: a market persisted as bare `zh` (before the split) still
+  // resolves — the token-subset fallback maps "chinese" to the alphabetically
+  // -first superset row, i.e. Simplified.
+  it('resolves a legacy bare `zh` to Chinese Simplified (token-subset fallback)', async () => {
     const dataAccess = makeDataAccess([]);
     dataAccess.BrandSemrushProject.findBySlice.resolves(null);
     dataAccess.BrandSemrushProject.create.resolves();
@@ -638,16 +693,12 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     }, fakeLog());
 
     expect(result.status).to.equal(201);
-    // Alphabetical: 'Chinese Simplified' < 'Chinese Traditional'.
     expect(transport.createProject.firstCall.args[1].language_id).to.equal('lang-zh-hans');
-    expect(result.body.languageCode).to.equal('zh');
   });
 
-  // A parenthetical qualifier form (`Chinese (Simplified)`) must also resolve —
-  // the base-name helper strips both a trailing parenthetical and a trailing
-  // space-separated script word, so the fix is robust if Semrush ever changes
-  // the catalog formatting.
-  it('resolves a bare `zh` when the catalog uses a parenthetical qualifier', async () => {
+  // A parenthetical catalog form must also resolve — the normalizer strips
+  // punctuation, so `zh-Hant` "Traditional Chinese" matches "Chinese (Traditional)".
+  it('resolves `zh-Hant` when the catalog uses a parenthetical qualifier', async () => {
     const dataAccess = makeDataAccess([]);
     dataAccess.BrandSemrushProject.findBySlice.resolves(null);
     dataAccess.BrandSemrushProject.create.resolves();
@@ -666,16 +717,16 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     clearLanguageCache();
 
     const result = await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
-      market: 'HK', languageCode: 'zh', siteId: '00000000-0000-4000-8000-0000000000cc', brandNames: ['CUHK'],
+      market: 'HK', languageCode: 'zh-Hant', siteId: '00000000-0000-4000-8000-0000000000cc', brandNames: ['CUHK'],
     }, fakeLog());
 
     expect(result.status).to.equal(201);
-    expect(transport.createProject.firstCall.args[1].language_id).to.equal('lang-zh-hans');
+    expect(transport.createProject.firstCall.args[1].language_id).to.equal('lang-zh-hant');
   });
 
-  // An EXACT catalog name must never be shadowed by another row's base-name
-  // alias: a real `Chinese` row wins over the qualified aliases.
-  it('prefers an exact `Chinese` catalog row over qualified aliases for `zh`', async () => {
+  // An EXACT catalog name must win over the token-subset fallback: a real bare
+  // `Chinese` row resolves legacy `zh` directly rather than via the superset scan.
+  it('prefers an exact `Chinese` catalog row for legacy `zh`', async () => {
     const dataAccess = makeDataAccess([]);
     dataAccess.BrandSemrushProject.findBySlice.resolves(null);
     dataAccess.BrandSemrushProject.create.resolves();
