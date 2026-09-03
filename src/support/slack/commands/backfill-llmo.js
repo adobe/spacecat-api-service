@@ -257,11 +257,21 @@ async function triggerBackfill(
   auditType,
   timeValue,
   specificDate,
+  force,
 ) {
   const { sqs } = context;
 
   switch (auditType) {
     case AUDIT_TYPES.CDN_LOGS_ANALYSIS: {
+      // force=true reproduces the exact auditContext shape the worker's own
+      // triggerSubAudits sends (processFullDay + forceReprocess + isSubAudit),
+      // skipping the S3-scan indirection and the "already aggregated" skip.
+      // forceReprocess makes the worker delete and rebuild existing S3
+      // aggregate partitions for that hour before reprocessing.
+      const forceFields = force
+        ? { processFullDay: true, forceReprocess: true, isSubAudit: true }
+        : {};
+
       // If specific date/hour provided, run for that hour only
       if (specificDate) {
         const message = {
@@ -272,6 +282,7 @@ async function triggerBackfill(
             month: specificDate.month,
             day: specificDate.day,
             hour: specificDate.hour,
+            ...forceFields,
           },
         };
         await sqs.sendMessage(configuration.getQueues().audits, message);
@@ -292,6 +303,7 @@ async function triggerBackfill(
               day: targetDate.getUTCDate(),
               hour: 23,
               processFullDay: true,
+              ...forceFields,
             },
           };
           // eslint-disable-next-line no-await-in-loop
@@ -377,7 +389,7 @@ function BackfillLlmoCommand(context) {
     name: 'Backfill LLMO',
     description: 'Backfills LLMO audits.',
     phrases: PHRASES,
-    usageText: `${PHRASES[0]} baseurl={baseURL} audit={auditType} [days={days}|weeks={weeks}|date={YYYY-MM-DD}]`,
+    usageText: `${PHRASES[0]} baseurl={baseURL} audit={auditType} [days={days}|weeks={weeks}|date={YYYY-MM-DD}] [force=true] (force=true is cdn-logs-analysis only)`,
   });
 
   const { dataAccess, log } = context;
@@ -407,6 +419,7 @@ function BackfillLlmoCommand(context) {
         await say(`• \`backfill-llmo baseurl=https://example.com audit=${AUDIT_TYPES.CDN_LOGS_ANALYSIS} days=3\` (last 3 days)`);
         await say(`• \`backfill-llmo baseurl=https://example.com audit=${AUDIT_TYPES.CDN_LOGS_ANALYSIS} year=2024 month=11 day=15 hour=14\` (specific hour)`);
         await say(`• \`backfill-llmo baseurl=all audit=${AUDIT_TYPES.CDN_LOGS_ANALYSIS} year=2024 month=11 day=15 hour=14\` (all enabled sites)`);
+        await say(`• \`backfill-llmo baseurl=https://example.com audit=${AUDIT_TYPES.CDN_LOGS_ANALYSIS} year=2024 month=11 day=15 hour=23 force=true\` (force immediate processing, skip wait + reprocess if already run)`);
         await say(`• \`backfill-llmo baseurl=https://example.com audit=${AUDIT_TYPES.CDN_LOGS_REPORT} weeks=2\` (last 2 completed ISO weeks → DB)`);
         await say(`• \`backfill-llmo baseurl=https://example.com audit=${AUDIT_TYPES.CDN_LOGS_REPORT} days=10\` (last 10 days → DB)`);
         await say(`• \`backfill-llmo baseurl=https://example.com audit=${AUDIT_TYPES.CDN_LOGS_REPORT} date=2026-04-27\` (single traffic day → DB)`);
@@ -419,6 +432,13 @@ function BackfillLlmoCommand(context) {
       const auditType = isWeeklyDbRefreshMode(parsed)
         ? (parsed.audit || AUDIT_TYPES.CDN_LOGS_REPORT)
         : parsed.audit;
+
+      const force = parsed.force === 'true';
+      if (force && auditType !== AUDIT_TYPES.CDN_LOGS_ANALYSIS) {
+        await say(`:warning: force=true is only supported for audit=${AUDIT_TYPES.CDN_LOGS_ANALYSIS}.`);
+        return;
+      }
+
       const isAllSites = parsed.baseurl?.toLowerCase() === 'all';
       const baseURL = isAllSites ? 'all' : extractURLFromSlackInput(parsed.baseurl);
 
@@ -581,6 +601,7 @@ function BackfillLlmoCommand(context) {
           auditType,
           timeValue,
           specificDate,
+          force,
         );
       }
 
