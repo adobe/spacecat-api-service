@@ -1360,6 +1360,31 @@ describe('Organizations Controller', () => {
       expect(body[0].id).to.equal(organizations[3].getId());
     });
 
+    it('matches a bare Customer IMS Org Id cell lacking the @AdobeOrg suffix', async () => {
+      context.attributes.authInfo.withProfile({ is_admin: true, email: 'grantee@adobe.com' });
+      const bareImsOrgId = organizations[3].getImsOrgId().split('@')[0];
+      fetchLlmoSourceStub.resolves({
+        status: 200,
+        data: {
+          data: [
+            {
+              'Customer IMS Org Id': bareImsOrgId,
+              'Customer Name': 'Org 4',
+              'User email': 'grantee@adobe.com',
+              'Access Expires At': String(FAR_FUTURE_SERIAL),
+            },
+          ],
+        },
+      });
+
+      const response = await accessMapController.getByAccessMapSheet(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body).to.be.an('array').with.lengthOf(1);
+      expect(body[0].id).to.equal(organizations[3].getId());
+    });
+
     it('denies access when the caller has no resolvable email', async () => {
       context.attributes.authInfo.withProfile({ is_admin: true });
 

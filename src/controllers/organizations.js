@@ -82,15 +82,29 @@ const isBlankExpiry = (value) => value === null
   || (typeof value === 'string' && value.trim() === '');
 
 /**
- * Trims and lowercases an IMS org ID (or any other identifier) so that a whitespace-padded or
- * differently-cased sheet cell still matches organization.getImsOrgId(). Mirrors the
- * case-insensitive comparison already used by llmo-utils.js#applyFilters for sheet-row matching.
+ * Normalizes an IMS org ID for equality comparison only - NOT the same helper as
+ * `normalizeImsOrgId` in state-access-mappings.js (which appends `@AdobeOrg` but does not
+ * lowercase; it exists to canonicalize an ID for storage/lookup, not for matching two
+ * differently-sourced IDs against each other). This one: trims whitespace, lowercases, and
+ * appends `@AdobeOrg` when the suffix is absent, so a bare or differently-cased sheet cell
+ * still matches organization.getImsOrgId(). Mirrors the case-insensitive comparison already
+ * used by llmo-utils.js#applyFilters for sheet-row matching.
+ *
+ * Deliberately named differently from state-access-mappings.js's helper so the two are never
+ * confused - if that one is ever swapped for the shared `@adobe/spacecat-shared-http-utils`
+ * import (see the TODO there), this one must NOT be swapped along with it, since the shared
+ * helper does not lowercase.
  * @param {string|undefined|null} imsOrgId - Raw IMS org ID.
  * @returns {string|null} Normalized IMS org ID, or null if not a usable string.
  */
-const normalizeImsOrgId = (imsOrgId) => (
-  hasText(imsOrgId) ? imsOrgId.trim().toLowerCase() : null
-);
+const normalizeImsOrgIdForMatch = (imsOrgId) => {
+  if (!hasText(imsOrgId)) {
+    return null;
+  }
+  const trimmed = imsOrgId.trim();
+  const suffixed = trimmed.includes('@') ? trimmed : `${trimmed}@AdobeOrg`;
+  return suffixed.toLowerCase();
+};
 
 /**
  * The authenticated caller's human-readable email. Prefers trial_email (present for trial
@@ -391,12 +405,12 @@ function OrganizationsController(ctx, env) {
 
           return endOfDayMs >= now;
         })
-        .map((row) => normalizeImsOrgId(row['Customer IMS Org Id']))
+        .map((row) => normalizeImsOrgIdForMatch(row['Customer IMS Org Id']))
         .filter((imsOrgId) => imsOrgId !== null),
     );
 
     const filtered = organizations.filter((organization) => allowedImsOrgIds
-      .has(normalizeImsOrgId(organization.getImsOrgId())));
+      .has(normalizeImsOrgIdForMatch(organization.getImsOrgId())));
     const result = filtered.map((organization) => OrganizationDto.toJSON(organization));
 
     log.info(`[access-map] GET /organizations/by-access-map-sheet/${productCode} filtered count=${result.length} requestId=${requestId}`);
