@@ -18,6 +18,9 @@ import {
   getScheduleParams,
   buildExperimentMetadata,
   isImpactMeasurementEligible,
+  isImpactMeasurementCheckEligible,
+  getImpactMeasurementOutcome,
+  IMPACT_MEASUREMENT_OUTCOME,
 } from '../../src/support/geo-experiment-helper.js';
 
 const {
@@ -282,6 +285,82 @@ describe('geo-experiment-helper', () => {
         getStatus: () => STATUSES.GENERATING_BASELINE,
       };
       expect(isImpactMeasurementEligible(geoExperiment)).to.be.false;
+    });
+  });
+
+  describe('isImpactMeasurementCheckEligible', () => {
+    it('returns true at impact_measurement_started regardless of status', () => {
+      [STATUSES.IN_PROGRESS, STATUSES.COMPLETED, STATUSES.FAILED].forEach((status) => {
+        const geoExperiment = {
+          getPhase: () => PHASES.IMPACT_MEASUREMENT_STARTED,
+          getStatus: () => status,
+        };
+        expect(isImpactMeasurementCheckEligible(geoExperiment)).to.be.true;
+      });
+    });
+
+    it('returns false for any other phase', () => {
+      [
+        PHASES.POST_ANALYSIS_DONE,
+        PHASES.IMPACT_MEASUREMENT_DONE,
+        PHASES.PRE_ANALYSIS_STARTED,
+      ].forEach((phase) => {
+        const geoExperiment = { getPhase: () => phase, getStatus: () => STATUSES.COMPLETED };
+        expect(isImpactMeasurementCheckEligible(geoExperiment)).to.be.false;
+      });
+    });
+  });
+
+  describe('getImpactMeasurementOutcome', () => {
+    const makeGeo = ({ phase, status, insightsLocation }) => ({
+      getPhase: () => phase,
+      getStatus: () => status,
+      getInsightsLocation: () => insightsLocation,
+    });
+
+    it('is IN_FLIGHT at impact_measurement_started', () => {
+      const geo = makeGeo({
+        phase: PHASES.IMPACT_MEASUREMENT_STARTED,
+        status: STATUSES.IN_PROGRESS,
+      });
+      expect(getImpactMeasurementOutcome(geo)).to.equal(IMPACT_MEASUREMENT_OUTCOME.IN_FLIGHT);
+    });
+
+    it('is SUCCEEDED at impact_measurement_done with an insightsLocation', () => {
+      const geo = makeGeo({
+        phase: PHASES.IMPACT_MEASUREMENT_DONE,
+        status: STATUSES.COMPLETED,
+        insightsLocation: 's3://bucket/insights.json',
+      });
+      expect(getImpactMeasurementOutcome(geo)).to.equal(IMPACT_MEASUREMENT_OUTCOME.SUCCEEDED);
+    });
+
+    it('is COMPLETED_WITHOUT_INSIGHTS when COMPLETED with no insightsLocation', () => {
+      const geo = makeGeo({ phase: PHASES.POST_ANALYSIS_DONE, status: STATUSES.COMPLETED });
+      expect(getImpactMeasurementOutcome(geo)).to.equal(
+        IMPACT_MEASUREMENT_OUTCOME.COMPLETED_WITHOUT_INSIGHTS,
+      );
+    });
+
+    it('treats impact_measurement_done without an insightsLocation as completed-without-insights', () => {
+      const geo = makeGeo({ phase: PHASES.IMPACT_MEASUREMENT_DONE, status: STATUSES.COMPLETED });
+      expect(getImpactMeasurementOutcome(geo)).to.equal(
+        IMPACT_MEASUREMENT_OUTCOME.COMPLETED_WITHOUT_INSIGHTS,
+      );
+    });
+
+    it('reports the outcome by phase even if status is transiently non-COMPLETED at DONE', () => {
+      // Keyed on phase, not status: a mid-update IN_PROGRESS status at IMPACT_MEASUREMENT_DONE
+      // still reports completed-without-insights rather than falling through to NOT_APPLICABLE.
+      const geo = makeGeo({ phase: PHASES.IMPACT_MEASUREMENT_DONE, status: STATUSES.IN_PROGRESS });
+      expect(getImpactMeasurementOutcome(geo)).to.equal(
+        IMPACT_MEASUREMENT_OUTCOME.COMPLETED_WITHOUT_INSIGHTS,
+      );
+    });
+
+    it('is NOT_APPLICABLE for an earlier, non-terminal phase', () => {
+      const geo = makeGeo({ phase: PHASES.PRE_ANALYSIS_STARTED, status: STATUSES.IN_PROGRESS });
+      expect(getImpactMeasurementOutcome(geo)).to.equal(IMPACT_MEASUREMENT_OUTCOME.NOT_APPLICABLE);
     });
   });
 });

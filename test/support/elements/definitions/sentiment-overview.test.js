@@ -16,12 +16,12 @@ import {
   transformSentimentOverviewResponse,
   SENTIMENT_COLORS,
 } from '../../../../src/support/elements/definitions/sentiment-overview.js';
-import { DEFAULT_ELEMENT_MODEL } from '../../../../src/support/elements/constants.js';
 
 // Locates the CBF_project value inside the advanced filter tree (it sits in its own
-// `or` block, like the CBF_model block), or returns undefined if absent.
+// `or` block, like the CBF_model block), or returns undefined if absent (including when
+// the whole `advanced` block is omitted).
 function findProjectFilterVal(payload) {
-  const blocks = payload.filters.advanced.filters;
+  const blocks = payload.filters.advanced?.filters ?? [];
   for (const block of blocks) {
     const inner = Array.isArray(block.filters) ? block.filters : [];
     const hit = inner.find((f) => f.col === 'CBF_project');
@@ -57,18 +57,52 @@ describe('sentiment-overview definitions', () => {
     });
 
     it('uses an AND operator over the advanced filters', () => {
-      expect(buildSentimentOverviewPayload().filters.advanced.op).to.equal('and');
+      expect(buildSentimentOverviewPayload({ projectId: 'proj-1' }).filters.advanced.op).to.equal('and');
     });
 
-    it('defaults the model to DEFAULT_ELEMENT_MODEL in a CBF_model or-block', () => {
-      const modelBlock = buildSentimentOverviewPayload().filters.advanced.filters[0];
+    // Semrush 422s on `advanced: { op: 'and', filters: [] }` — it is NOT treated as
+    // "match all". Verified live 2026-09-02 against SENTIMENT (f4153af8): empty AND → 422,
+    // key omitted → 200. This is the Overview-SR default view (all platforms, no region,
+    // no category), so the empty case is reachable in production.
+    it('omits the advanced block entirely when there is nothing to filter on', () => {
+      const payload = buildSentimentOverviewPayload();
+      expect(payload.filters).to.not.have.property('advanced');
+      expect(payload.auto_bucketing).to.equal('week');
+    });
+
+    it('omits the CBF_model filter when the model is absent (All Platforms aggregate)', () => {
+      const payload = buildSentimentOverviewPayload({ projectId: 'proj-1' });
+      const hasModel = payload.filters.advanced.filters.some(
+        (f) => f.filters?.some((sub) => sub.col === 'CBF_model'),
+      );
+      expect(hasModel).to.equal(false);
+      // no model and no category → project scoping is the only advanced filter left
+      expect(payload.filters.advanced.filters).to.deep.equal([
+        { op: 'or', filters: [{ op: 'eq', val: 'proj-1', col: 'CBF_project' }] },
+      ]);
+    });
+
+    it('still emits the advanced block when only a category applies (all-platforms, no region)', () => {
+      const payload = buildSentimentOverviewPayload({ platform: 'all', category: 'category__Paint' });
+      expect(payload.filters.advanced).to.deep.equal({
+        op: 'and',
+        filters: [{ op: 'eq', val: 'category__Paint', col: 'CBF_tags' }],
+      });
+    });
+
+    it("omits the CBF_model filter for the explicit 'all' sentinel, keeping project scoping", () => {
+      const payload = buildSentimentOverviewPayload({ platform: 'all', projectId: 'proj-1' });
+      const hasModel = payload.filters.advanced.filters.some(
+        (f) => f.filters?.some((sub) => sub.col === 'CBF_model'),
+      );
+      expect(hasModel).to.equal(false);
+      expect(findProjectFilterVal(payload)).to.equal('proj-1');
+    });
+
+    it('translates a UI platform code to the Semrush model in a CBF_model or-block', () => {
+      const modelBlock = buildSentimentOverviewPayload({ model: 'openai' }).filters.advanced.filters[0];
       expect(modelBlock.op).to.equal('or');
       expect(modelBlock.filters[0].col).to.equal('CBF_model');
-      expect(modelBlock.filters[0].val).to.equal(DEFAULT_ELEMENT_MODEL);
-    });
-
-    it('translates a UI platform code to the Semrush model', () => {
-      const modelBlock = buildSentimentOverviewPayload({ model: 'openai' }).filters.advanced.filters[0];
       expect(modelBlock.filters[0].val).to.equal('chatgpt-paid');
     });
 
