@@ -345,6 +345,88 @@ describe('StateAccessMappingsController', () => {
     });
   });
 
+  describe('GET /state/access-mappings — admin org-scope override (preview)', () => {
+    const PREVIEW_ORG_BARE = 'PREVIEW-ORG-999';
+    const PREVIEW_ORG_CANONICAL = 'PREVIEW-ORG-999@AdobeOrg';
+    const previewOrg = { getImsOrgId: () => PREVIEW_ORG_BARE };
+    const listQuery = {
+      resourceType: 'brand', resourceId: VALID_UUID_RES, organizationId: VALID_UUID_RES,
+    };
+
+    it('admin: scopes the read to the previewed org from ?organizationId', async () => {
+      const listStub = sinon.stub().resolves([makeRow({ ims_org_id: PREVIEW_ORG_CANONICAL })]);
+      const { Controller } = await loadController({ listFacsAccessMappings: listStub });
+      const ctx = makeContext({ isAdmin: true, organization: previewOrg, queryParams: listQuery });
+      const res = await Controller(ctx).listMappings(ctx);
+      expect(res.status).to.equal(200);
+      expect(listStub.firstCall.args[1].imsOrgId).to.equal(PREVIEW_ORG_CANONICAL);
+    });
+
+    it('non-admin: ignores ?organizationId and stays caller-scoped', async () => {
+      const listStub = sinon.stub().resolves([]);
+      const { Controller } = await loadController({ listFacsAccessMappings: listStub });
+      const ctx = makeContext({ isAdmin: false, organization: previewOrg, queryParams: listQuery });
+      const res = await Controller(ctx).listMappings(ctx);
+      expect(res.status).to.equal(200);
+      expect(listStub.firstCall.args[1].imsOrgId).to.equal(CALLER_ORG_CANONICAL);
+    });
+
+    it('admin: without ?organizationId stays caller-scoped', async () => {
+      const listStub = sinon.stub().resolves([]);
+      const { Controller } = await loadController({ listFacsAccessMappings: listStub });
+      const ctx = makeContext({
+        isAdmin: true,
+        queryParams: { resourceType: 'brand', resourceId: VALID_UUID_RES },
+      });
+      const res = await Controller(ctx).listMappings(ctx);
+      expect(res.status).to.equal(200);
+      expect(listStub.firstCall.args[1].imsOrgId).to.equal(CALLER_ORG_CANONICAL);
+    });
+
+    it('admin: returns 400 for an invalid organizationId', async () => {
+      const { Controller } = await loadController();
+      const ctx = makeContext({
+        isAdmin: true,
+        queryParams: { resourceType: 'brand', resourceId: VALID_UUID_RES, organizationId: 'not-a-uuid' },
+      });
+      const res = await Controller(ctx).listMappings(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it('admin: returns 404 when the previewed org is not found', async () => {
+      const { Controller } = await loadController();
+      const ctx = makeContext({ isAdmin: true, organization: null, queryParams: listQuery });
+      const res = await Controller(ctx).listMappings(ctx);
+      expect(res.status).to.equal(404);
+    });
+
+    it('admin: returns 404 when the previewed org has no IMS org', async () => {
+      const { Controller } = await loadController();
+      const ctx = makeContext({
+        isAdmin: true, organization: { getImsOrgId: () => null }, queryParams: listQuery,
+      });
+      const res = await Controller(ctx).listMappings(ctx);
+      expect(res.status).to.equal(404);
+    });
+
+    it('admin: returns 500 when the org lookup throws', async () => {
+      const { Controller } = await loadController();
+      const ctx = makeContext({ isAdmin: true, queryParams: listQuery });
+      ctx.dataAccess.Organization.findById = sinon.stub().rejects(new Error('db down'));
+      const res = await Controller(ctx).listMappings(ctx);
+      expect(res.status).to.equal(500);
+    });
+
+    it('listHistory honours the admin org-scope override too', async () => {
+      const histStub = sinon.stub().resolves([]);
+      const { Controller } = await loadController({ listFacsAccessMappingHistory: histStub });
+      const ctx = makeContext({ isAdmin: true, organization: previewOrg, queryParams: listQuery });
+      const res = await Controller(ctx).listHistory(ctx);
+      expect(res.status).to.equal(200);
+      expect(histStub.firstCall.args[1].imsOrgId).to.equal(PREVIEW_ORG_CANONICAL);
+    });
+  });
+
   describe('GET /state/access-mappings/history (listHistory)', () => {
     it('returns 400 when neither subject nor resource filter is supplied', async () => {
       const { Controller } = await loadController();
