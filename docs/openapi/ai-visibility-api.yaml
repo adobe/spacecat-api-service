@@ -1495,12 +1495,17 @@ ai-visibility-v1-brand-competitors:
 ai-visibility-v1-brand-competitors-stats:
   get:
     tags: [ai-visibility]
-    summary: Get competitor statistics (CompetitorsMetrics v1 JSON)
+    summary: Get competitor statistics (CompetitorService v2 JSON)
     description: |
       Returns time-series statistics for the target brand and its competitors using Semrush
-      `CompetitorsMetrics.Stats`. The response is native protobuf JSON (camelCase) without
+      `CompetitorService.Stats` (v2). The response is native protobuf JSON (camelCase) without
       additional field mapping.
       Optional `engine` selects one LLM.
+      Results are scoped by `search_type`, resolved from `domain`: a non-`www` subdomain is
+      scoped to that subdomain, while an apex domain or a bare `www` host is scoped to the
+      registrable domain.
+      Each `byDate` row carries an additive `isoDate` field that the previous v1
+      `CompetitorsMetrics.Stats` response did not return.
     operationId: getAiVisibilityV1BrandCompetitorsStats
     parameters:
       - *domainParam
