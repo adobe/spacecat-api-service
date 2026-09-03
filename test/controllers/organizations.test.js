@@ -1233,7 +1233,7 @@ describe('Organizations Controller', () => {
       expect(body[0].id).to.equal(organizations[3].getId());
     });
 
-    it('ignores rows with a non-numeric Access Expires At value', async () => {
+    it('ignores rows with a non-numeric Access Expires At value and logs a warning', async () => {
       context.attributes.authInfo.withProfile({ is_admin: true, email: 'grantee@adobe.com' });
       fetchLlmoSourceStub.resolves({
         status: 200,
@@ -1243,7 +1243,7 @@ describe('Organizations Controller', () => {
               'Customer IMS Org Id': organizations[3].getImsOrgId(),
               'Customer Name': 'Org 4',
               'User email': 'grantee@adobe.com',
-              'Access Expires At': 'not-a-number',
+              'Access Expires At': '2026-12-31',
             },
           ],
         },
@@ -1254,6 +1254,33 @@ describe('Organizations Controller', () => {
 
       expect(response.status).to.equal(200);
       expect(body).to.be.an('array').that.is.empty;
+      expect(context.log.warn).to.have.been.calledWithMatch(/Unparsable Access Expires At "2026-12-31"/);
+    });
+
+    ['', null, undefined].forEach((blankValue) => {
+      it(`treats a blank Access Expires At (${JSON.stringify(blankValue)}) as expired/denied and logs a warning`, async () => {
+        context.attributes.authInfo.withProfile({ is_admin: true, email: 'grantee@adobe.com' });
+        fetchLlmoSourceStub.resolves({
+          status: 200,
+          data: {
+            data: [
+              {
+                'Customer IMS Org Id': organizations[3].getImsOrgId(),
+                'Customer Name': 'Org 4',
+                'User email': 'grantee@adobe.com',
+                'Access Expires At': blankValue,
+              },
+            ],
+          },
+        });
+
+        const response = await accessMapController.getByAccessMapSheet(context);
+        const body = await response.json();
+
+        expect(response.status).to.equal(200);
+        expect(body).to.be.an('array').that.is.empty;
+        expect(context.log.warn).to.have.been.calledWithMatch(/Blank Access Expires At/);
+      });
     });
 
     it('prefers trial_email over preferred_username and email when resolving the caller', async () => {

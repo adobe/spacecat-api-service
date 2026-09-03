@@ -70,6 +70,18 @@ const excelSerialDateToEndOfDayMs = (serial) => {
 };
 
 /**
+ * True for a genuinely empty "Access Expires At" cell (null/undefined/whitespace-only string).
+ * Deliberately distinct from "unparsable" (e.g. an ISO date string): both are treated as
+ * expired/denied, but a blank cell most likely means the sheet maintainer intended "no expiry"
+ * rather than a typo, so it's worth a different log message.
+ * @param {*} value - Raw "Access Expires At" cell value.
+ * @returns {boolean}
+ */
+const isBlankExpiry = (value) => value === null
+  || value === undefined
+  || (typeof value === 'string' && value.trim() === '');
+
+/**
  * Trims and lowercases an IMS org ID (or any other identifier) so that a whitespace-padded or
  * differently-cased sheet cell still matches organization.getImsOrgId(). Mirrors the
  * case-insensitive comparison already used by llmo-utils.js#applyFilters for sheet-row matching.
@@ -359,8 +371,25 @@ function OrganizationsController(ctx, env) {
     const allowedImsOrgIds = new Set(
       callerRows
         .filter((row) => {
-          const endOfDayMs = excelSerialDateToEndOfDayMs(row['Access Expires At']);
-          return endOfDayMs !== null && endOfDayMs >= now;
+          const rawExpiry = row['Access Expires At'];
+          const orgId = row['Customer IMS Org Id'];
+
+          // Fail closed either way, but log the two cases distinctly: a blank cell reads as
+          // "no expiry" to whoever maintains the sheet, while an unparsable value (e.g. an ISO
+          // date string) is most likely a data-entry mistake that would otherwise drop the row
+          // with no trace.
+          if (isBlankExpiry(rawExpiry)) {
+            log.warn(`[access-map] Blank Access Expires At for org "${orgId}" (productCode=${productCode}, requestId=${requestId}) - treating the grant as expired/denied, not indefinite`);
+            return false;
+          }
+
+          const endOfDayMs = excelSerialDateToEndOfDayMs(rawExpiry);
+          if (endOfDayMs === null) {
+            log.warn(`[access-map] Unparsable Access Expires At "${rawExpiry}" for org "${orgId}" (productCode=${productCode}, requestId=${requestId}) - treating the grant as expired/denied`);
+            return false;
+          }
+
+          return endOfDayMs >= now;
         })
         .map((row) => normalizeImsOrgId(row['Customer IMS Org Id']))
         .filter((imsOrgId) => imsOrgId !== null),
