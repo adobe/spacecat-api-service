@@ -770,6 +770,8 @@ paths:
     $ref: './llmo-api.yaml#/site-llmo-cloudfront-plan'
   /sites/{siteId}/llmo/cdn-onboard/cloudfront/permissions:
     $ref: './llmo-api.yaml#/site-llmo-cloudfront-permissions'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/template:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-template'
   /sites/{siteId}/llmo/cdn-onboard/cloudfront/log-delivery:
     $ref: './llmo-api.yaml#/site-llmo-cloudfront-log-delivery'
   /sites/{siteId}/llmo/cdn-onboard/cloudfront/log-rescan:
