@@ -70,6 +70,17 @@ const excelSerialDateToEndOfDayMs = (serial) => {
 };
 
 /**
+ * Trims and lowercases an IMS org ID (or any other identifier) so that a whitespace-padded or
+ * differently-cased sheet cell still matches organization.getImsOrgId(). Mirrors the
+ * case-insensitive comparison already used by llmo-utils.js#applyFilters for sheet-row matching.
+ * @param {string|undefined|null} imsOrgId - Raw IMS org ID.
+ * @returns {string|null} Normalized IMS org ID, or null if not a usable string.
+ */
+const normalizeImsOrgId = (imsOrgId) => (
+  hasText(imsOrgId) ? imsOrgId.trim().toLowerCase() : null
+);
+
+/**
  * The authenticated caller's human-readable email. Prefers trial_email (present for trial
  * users), then preferred_username (the RFC-5322 address on enterprise/IMS tokens); profile.email
  * is an IMS user GUID, not a real address, so it is only a last resort. See
@@ -351,12 +362,12 @@ function OrganizationsController(ctx, env) {
           const endOfDayMs = excelSerialDateToEndOfDayMs(row['Access Expires At']);
           return endOfDayMs !== null && endOfDayMs >= now;
         })
-        .map((row) => row['Customer IMS Org Id'])
-        .filter((imsOrgId) => hasText(imsOrgId)),
+        .map((row) => normalizeImsOrgId(row['Customer IMS Org Id']))
+        .filter((imsOrgId) => imsOrgId !== null),
     );
 
     const filtered = organizations.filter((organization) => allowedImsOrgIds
-      .has(organization.getImsOrgId()));
+      .has(normalizeImsOrgId(organization.getImsOrgId())));
     const result = filtered.map((organization) => OrganizationDto.toJSON(organization));
 
     log.info(`[access-map] GET /organizations/by-access-map-sheet/${productCode} filtered count=${result.length} requestId=${requestId}`);

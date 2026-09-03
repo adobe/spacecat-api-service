@@ -1079,6 +1079,30 @@ describe('Organizations Controller', () => {
       expect(response.status).to.equal(200);
     });
 
+    it('denies an S2S consumer holding organization:readAll (admin-only, no S2S bypass)', async () => {
+      // Unlike getByProductCode, this route must stay admin-only end-to-end even though it is
+      // mapped to CAP_ORG_READ_ALL in required-capabilities.js (that mapping exists solely for
+      // the readOnlyAdminWrapper read fast-path - see the INVARIANT comment on this method).
+      // An S2S caller holding the capability that mapping names must still get 403 here.
+      context.attributes.authInfo.withProfile({ is_admin: false, email: 'svc@adobe.com' });
+      context.s2sConsumer = { getClientId: () => 'svc-1', getImsOrgId: () => 'AAA111111111111111111111@AdobeOrg' };
+      mockDataAccess.Consumer = {
+        findByClientIdAndImsOrgId: sinon.stub().resolves({
+          getId: () => 'consumer-id-1',
+          getCapabilities: () => ['organization:readAll'],
+          getStatus: () => 'ACTIVE',
+          isRevoked: () => false,
+        }),
+      };
+
+      const response = await accessMapController.getByAccessMapSheet(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(403);
+      expect(body).to.have.property('message', 'Forbidden: admin access required');
+      expect(fetchLlmoSourceStub).to.not.have.been.called;
+    });
+
     it('returns 400 for an unknown product code', async () => {
       context.params = { productCode: 'BOGUS' };
 
@@ -1271,6 +1295,30 @@ describe('Organizations Controller', () => {
               'Customer IMS Org Id': organizations[3].getImsOrgId(),
               'Customer Name': 'Org 4',
               'User email': 'admin@adobe.com',
+              'Access Expires At': String(FAR_FUTURE_SERIAL),
+            },
+          ],
+        },
+      });
+
+      const response = await accessMapController.getByAccessMapSheet(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body).to.be.an('array').with.lengthOf(1);
+      expect(body[0].id).to.equal(organizations[3].getId());
+    });
+
+    it('matches a whitespace-padded, differently-cased Customer IMS Org Id cell', async () => {
+      context.attributes.authInfo.withProfile({ is_admin: true, email: 'grantee@adobe.com' });
+      fetchLlmoSourceStub.resolves({
+        status: 200,
+        data: {
+          data: [
+            {
+              'Customer IMS Org Id': `  ${organizations[3].getImsOrgId().toLowerCase()}  `,
+              'Customer Name': 'Org 4',
+              'User email': 'grantee@adobe.com',
               'Access Expires At': String(FAR_FUTURE_SERIAL),
             },
           ],
