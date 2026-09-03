@@ -1,3 +1,10 @@
+# [1.791.0](https://github.com/adobe/spacecat-api-service/compare/v1.790.0...v1.791.0) (2026-09-03)
+
+
+### Features
+
+* **ai-visibility:** scope remaining v1 brand endpoints to subdomains ([#3187](https://github.com/adobe/spacecat-api-service/issues/3187)) ([2e2d9b2](https://github.com/adobe/spacecat-api-service/commit/2e2d9b2a10ade426ad29a0bd4bee86eb1205320e)), closes [Hi#level](https://github.com/Hi/issues/level)
+
 # [1.790.0](https://github.com/adobe/spacecat-api-service/compare/v1.789.0...v1.790.0) (2026-09-03)
 
 
