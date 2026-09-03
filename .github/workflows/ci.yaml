@@ -55,37 +55,76 @@ jobs:
       - name: Type-check
         run: npm run type-check
 
-  # Manually-triggered deploy for the serenity job runner worker (adobe/serenity-docs#186),
-  # a second Lambda built from a distinct hedy --entryFile
+  # ===========================================================================
+  # serenity-job-runner WORKER Lambda deploy (adobe/serenity-docs#186).
+  #
+  # A SECOND Lambda per service, built from a distinct `hedy --entryFile`
   # (src/serenity-prompt-classification/index.js, deployed as
-  # spacecat-services--serenity-job-runner) rather than the reusable service-ci
-  # workflow's single deploy-dev/deploy-stage target, which has no seam for a
-  # second Lambda per service.
+  # spacecat-services--serenity-job-runner) — NOT the reusable service-ci
+  # workflow's single deploy target, which has no seam for a second Lambda.
   #
-  # workflow_dispatch-only, not push-triggered: this still needs to happen
-  # under CI's spacecat-role-github-actions (personal dev credentials lack the
-  # iam:PassRole permission the reusable workflow's deploy jobs are granted),
-  # but the worker isn't part of steady-state traffic yet
-  # (create_serenity_job_runner_esms defaults false in every environment) -
-  # tying it to every push would add permanent CI surface for a feature not
-  # yet in continuous use. Trigger manually via the Actions tab or
-  # `gh workflow run ci.yaml -f environment=<dev|stage|prod>`.
+  # Runs on TWO triggers:
+  #   1. push to `main`   -> AUTO-deploy to the SAME environment(s) api-service
+  #      itself auto-deploys to from that same commit: STAGE + PROD. (In the
+  #      reusable service-ci.yaml@v3, a `main` push runs `deploy-stage` (stage)
+  #      and `semantic-release` (prod).) A matrix fans out over [stage, prod].
+  #      This stops the worker Lambda from silently drifting behind the
+  #      api-service Lambda: previously the worker deployed by manual dispatch
+  #      ONLY, so a change merged to the worker handler (e.g. PR #3138, which
+  #      edited src/support/serenity/handlers/classify-prompts-job.js) shipped
+  #      to the api-service Lambda on merge but left the worker Lambda stale
+  #      until someone remembered to run the dispatch — a latent prod gap with
+  #      no signal until a job failed.
+  #   2. workflow_dispatch -> MANUAL single-env deploy (dev, stage, or prod).
+  #      dev is manual-only (never auto-deployed); stage/prod manual dispatch is
+  #      gated to `main` by the `if` below. Preserved exactly as before — this
+  #      is the path for ad-hoc / out-of-band deploys (incl. dev, which the
+  #      push path never touches).
   #
-  # Prod is a manual-dispatch target too (gated to `main` by the `if` below,
-  # like stage). It is deliberately NOT wired into `npm run semantic-release`
-  # yet — automatic per-release worker deploys are a separate follow-up; until
-  # then a prod worker rollout is an explicit `-f environment=prod` dispatch.
+  # Gating choice (per-release vs every-main-push): service-ci.yaml@v3 exposes
+  # NO `workflow_call` output — there is no `released` / new-version signal for
+  # the caller to gate on. So we (re)deploy the worker on EVERY successful
+  # `main`-push `ci` run rather than only when api-service actually cut a
+  # release. That slightly over-deploys prod (an extra `hedy` build when only
+  # unrelated code changed; api-service's own prod deploy goes through
+  # semantic-release and only ships on a version bump), but it is the simple,
+  # robust option that GUARANTEES no drift. The worker bundles most of
+  # src/support/serenity/*, so "worker changed" ~= "api changed" for most
+  # commits anyway, and `deploy:worker` ships current `main` as
+  # pkgVersion=latest independent of semantic-release's version, so an
+  # every-push redeploy is self-contained.
+  #
+  # !!! DEPLOY != ROLLOUT !!!  Auto-deploying this worker only keeps the
+  # deployed *code* current. It does NOT enable the serenity job runner for
+  # anyone: the feature stays gated by the `create_serenity_job_runner_esms`
+  # ESM (Terraform, in spacecat-infrastructure) AND the UI's per-org DB flag.
+  # This job GAs nothing — it just stops the worker Lambda from going stale.
+  #
+  # Still runs under CI's spacecat-role-github-actions (personal dev
+  # credentials lack the iam:PassRole the reusable deploy jobs are granted).
+  # ===========================================================================
   deploy-worker:
     if: >-
-      github.event_name == 'workflow_dispatch' &&
-      (inputs.environment == 'dev' || github.ref == 'refs/heads/main')
+      (github.event_name == 'workflow_dispatch' &&
+        (inputs.environment == 'dev' || github.ref == 'refs/heads/main')) ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    concurrency:
-      group: deploy-worker-${{ inputs.environment }}
-      cancel-in-progress: false
     needs: [ci]
-    environment: ${{ inputs.environment == 'dev' && 'dev-branches' || inputs.environment }}
+    strategy:
+      # push -> both auto-deploy envs, mirroring api-service (stage + prod);
+      # workflow_dispatch -> the single chosen env. fail-fast: false so a stage
+      # failure does not cancel the in-flight prod deploy (and vice versa).
+      fail-fast: false
+      matrix:
+        environment: ${{ fromJSON(github.event_name == 'push' && '["stage","prod"]' || format('["{0}"]', inputs.environment)) }}
+    concurrency:
+      # Per-environment: the two `main`-push matrix legs (and any concurrent
+      # manual dispatch) serialize within an env but never block a different
+      # env, so a stage deploy can't collide with a prod deploy.
+      group: deploy-worker-${{ matrix.environment }}
+      cancel-in-progress: false
+    environment: ${{ matrix.environment == 'dev' && 'dev-branches' || matrix.environment }}
     permissions:
       contents: read
       id-token: write
@@ -103,14 +142,15 @@ jobs:
       - name: Configure AWS
         uses: adobe/mysticat-ci/.github/actions/configure-aws@v1
         with:
-          aws_role_to_assume: ${{ inputs.environment == 'dev'
-            && format('arn:aws:iam::{0}:role/spacecat-role-github-actions', secrets.AWS_ACCOUNT_ID_DEV)
-            || (inputs.environment == 'stage'
-            && format('arn:aws:iam::{0}:role/spacecat-role-github-actions', secrets.AWS_ACCOUNT_ID_STAGE)
-            || format('arn:aws:iam::{0}:role/spacecat-role-github-actions', secrets.AWS_ACCOUNT_ID_PROD)) }}
+          aws_role_to_assume: ${{ format('arn:aws:iam::{0}:role/spacecat-role-github-actions',
+            matrix.environment == 'dev' && secrets.AWS_ACCOUNT_ID_DEV
+            || matrix.environment == 'stage' && secrets.AWS_ACCOUNT_ID_STAGE
+            || secrets.AWS_ACCOUNT_ID_PROD) }}
 
       - name: Deploy worker
-        run: npm run ${{ inputs.environment == 'dev' && 'deploy-dev:worker' || (inputs.environment == 'stage' && 'deploy-stage:worker' || 'deploy:worker') }}
+        # dev -> deploy-dev:worker, stage -> deploy-stage:worker,
+        # prod -> deploy:worker (see package.json scripts).
+        run: npm run ${{ matrix.environment == 'dev' && 'deploy-dev:worker' || matrix.environment == 'stage' && 'deploy-stage:worker' || 'deploy:worker' }}
         env:
           AWS_REGION: us-east-1
           # hedy resolves --aws-region from this HLX_-prefixed env var, not
@@ -118,7 +158,7 @@ jobs:
           # client) - the reusable service-ci workflow sets this at its own
           # workflow level, which this repo-local job doesn't inherit.
           HLX_AWS_REGION: us-east-1
-          AWS_ACCOUNT_ID: ${{ inputs.environment == 'dev' && secrets.AWS_ACCOUNT_ID_DEV || (inputs.environment == 'stage' && secrets.AWS_ACCOUNT_ID_STAGE || secrets.AWS_ACCOUNT_ID_PROD) }}
+          AWS_ACCOUNT_ID: ${{ matrix.environment == 'dev' && secrets.AWS_ACCOUNT_ID_DEV || matrix.environment == 'stage' && secrets.AWS_ACCOUNT_ID_STAGE || secrets.AWS_ACCOUNT_ID_PROD }}
           VPC_SUBNET_1: ${{ secrets.VPC_SUBNET_1 }}
           VPC_SUBNET_2: ${{ secrets.VPC_SUBNET_2 }}
           VPC_SG_ID: ${{ secrets.VPC_SG_ID }}
