@@ -280,6 +280,14 @@ function OrganizationsController(ctx, env) {
    * caller's email is not present in the sheet at all, the full unfiltered list from step 1 is
    * returned. If the email IS present but every row for it is expired, the result is an empty
    * list - an expired grant must never be more permissive than no grant.
+   *
+   * INVARIANT - do NOT add a `hasS2SCapability(CAP_ORG_READ_ALL)` fallback here. The route is
+   * mapped to CAP_ORG_READ_ALL in required-capabilities.js only so readOnlyAdminWrapper takes
+   * its read fast-path (this route has no siteId/organizationId for the wrapper's ownership
+   * check to resolve) - that mapping also lets an S2S consumer holding organization:readAll
+   * pass s2sAuthWrapper, but this controller intentionally checks hasAdminReadAccess() ONLY.
+   * That is the single, deliberate gate that keeps this route admin-only end-to-end; adding an
+   * S2S fallback here (mirroring getByProductCode) would silently open it to S2S consumers.
    * @param {object} context - Context of the request.
    * @returns {Promise<Response>} Array of organizations response.
    */
@@ -287,6 +295,8 @@ function OrganizationsController(ctx, env) {
     const { log } = ctx;
     const requestId = context?.invocation?.id || 'unknown';
 
+    // Do NOT add an `isAdmin ? ... : hasS2SCapability(...)` dual-layer check here - see the
+    // INVARIANT note above. hasAdminReadAccess() is the only intended gate for this route.
     if (!accessControlUtil.hasAdminReadAccess()) {
       log.info(`[acl] Denied GET /organizations/by-access-map-sheet - reason=not-admin requestId=${requestId}`);
       return forbidden('Forbidden: admin access required');
@@ -303,6 +313,15 @@ function OrganizationsController(ctx, env) {
       return ok([]);
     }
 
+    // The access map restricts by caller identity - if we can't identify the caller, we cannot
+    // know what to restrict them to, so we must deny rather than fail open into "email not in
+    // map -> unfiltered access".
+    const callerEmail = getCallerEmail(context);
+    if (!hasText(callerEmail)) {
+      log.info(`[access-map] Denied GET /organizations/by-access-map-sheet/${productCode} - reason=no-caller-email requestId=${requestId}`);
+      return forbidden('Forbidden: caller email could not be resolved');
+    }
+
     let sheet;
     try {
       ({ data: sheet } = await fetchLlmoSource(context, ACCESS_MAP_SHEET_URL));
@@ -311,11 +330,12 @@ function OrganizationsController(ctx, env) {
       return llmoSourceErrorResponse(error) || internalServerError('Failed to fetch customer access map');
     }
 
-    const callerEmail = getCallerEmail(context);
     const rows = Array.isArray(sheet?.data) ? sheet.data : [];
-    const callerRows = hasText(callerEmail)
-      ? rows.filter((row) => row['User email'] === callerEmail)
-      : [];
+    // Case-insensitive match: the IMS token casing and the human-maintained sheet casing are
+    // not guaranteed to agree, and a casing mismatch must never fail open into the unfiltered
+    // branch below.
+    const normalizedCallerEmail = callerEmail.toLowerCase();
+    const callerRows = rows.filter((row) => row['User email']?.toLowerCase?.() === normalizedCallerEmail);
 
     if (callerRows.length === 0) {
       // Caller's email is not present in the access map at all - unfiltered access.

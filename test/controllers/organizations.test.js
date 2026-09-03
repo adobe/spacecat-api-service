@@ -1110,6 +1110,7 @@ describe('Organizations Controller', () => {
     });
 
     it('returns 500 when the sheet fetch fails with an unrecognized error', async () => {
+      context.attributes.authInfo.withProfile({ is_admin: true, email: 'admin@adobe.com' });
       fetchLlmoSourceStub.rejects(new Error('boom'));
 
       const response = await accessMapController.getByAccessMapSheet(context);
@@ -1121,6 +1122,7 @@ describe('Organizations Controller', () => {
     });
 
     it('maps a recognized source error (isConfigError) via llmoSourceErrorResponse', async () => {
+      context.attributes.authInfo.withProfile({ is_admin: true, email: 'admin@adobe.com' });
       const configError = new Error('LLMO_HLX_API_KEY environment variable is not configured');
       configError.isConfigError = true;
       fetchLlmoSourceStub.rejects(configError);
@@ -1257,6 +1259,52 @@ describe('Organizations Controller', () => {
       expect(response.status).to.equal(200);
       expect(body).to.be.an('array').with.lengthOf(1);
       expect(body[0].id).to.equal(organizations[3].getId());
+    });
+
+    it('matches the caller email against the sheet case-insensitively', async () => {
+      context.attributes.authInfo.withProfile({ is_admin: true, email: 'Admin@Adobe.com' });
+      fetchLlmoSourceStub.resolves({
+        status: 200,
+        data: {
+          data: [
+            {
+              'Customer IMS Org Id': organizations[3].getImsOrgId(),
+              'Customer Name': 'Org 4',
+              'User email': 'admin@adobe.com',
+              'Access Expires At': String(FAR_FUTURE_SERIAL),
+            },
+          ],
+        },
+      });
+
+      const response = await accessMapController.getByAccessMapSheet(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body).to.be.an('array').with.lengthOf(1);
+      expect(body[0].id).to.equal(organizations[3].getId());
+    });
+
+    it('denies access when the caller has no resolvable email', async () => {
+      context.attributes.authInfo.withProfile({ is_admin: true });
+
+      const response = await accessMapController.getByAccessMapSheet(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(403);
+      expect(body).to.have.property('message', 'Forbidden: caller email could not be resolved');
+      expect(fetchLlmoSourceStub).to.not.have.been.called;
+    });
+
+    it('returns the unfiltered list when the sheet payload has no data array', async () => {
+      context.attributes.authInfo.withProfile({ is_admin: true, email: 'grantee@adobe.com' });
+      fetchLlmoSourceStub.resolves({ status: 200, data: {} });
+
+      const response = await accessMapController.getByAccessMapSheet(context);
+      const body = await response.json();
+
+      expect(response.status).to.equal(200);
+      expect(body).to.be.an('array').with.lengthOf(2);
     });
   });
 

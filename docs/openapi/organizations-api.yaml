@@ -110,7 +110,9 @@ organizations-by-access-map-sheet:
       `GET /organizations/by-product-code/{productCode}`. If present, only organizations whose
       IMS org ID has a non-expired grant for that email are returned — an email present but with
       only expired grants yields an empty list. Admin-only; unlike the sibling endpoint, S2S
-      consumers are not permitted here.
+      consumers are not permitted here. If the caller's token carries no resolvable email claim,
+      the request is denied (`403`) rather than falling back to an unfiltered list — the endpoint
+      never serves data when it cannot identify who is asking.
     operationId: getOrganizationsByAccessMapSheet
     parameters:
       - name: productCode
