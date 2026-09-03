@@ -1221,6 +1221,57 @@ function LlmoCloudFrontController(ctx) {
     }
   };
 
+  /**
+   * GET /sites/{siteId}/llmo/cdn-onboard/cloudfront/template
+   * Returns the raw CloudFormation connector-role template YAML as a file download, so a customer
+   * who can't use the quick-create link (expired presign, not an AWS console admin) can create the
+   * stack by hand. Serves the SAME S3 object the quick-create URL presigns and the permissions
+   * endpoint reads (env.EDGE_OPTIMIZE_TEMPLATE_KEY), so the download can't drift from the wizard.
+   * Read-only — gated on site access + LLMO admin (like getPermissions). No cross-account calls.
+   * @param {object} context - Request context
+   * @returns {Promise<Response>} 200 text/yaml attachment, or a 400/500 on a config/read failure.
+   */
+  const getTemplate = async (context) => {
+    const {
+      log, dataAccess, env, s3,
+    } = context;
+    const { siteId } = context.params;
+    const { Site } = dataAccess;
+
+    try {
+      const { error } = await gateEdgeOptimizeWizard(siteId, Site, 'download the CloudFront connector template');
+      if (error) {
+        return error;
+      }
+
+      const bucket = env.SPACECAT_CDN_CLOUDFRONT_TEMPLATE_BUCKET;
+      if (!hasText(bucket) || !s3?.s3Client || !s3?.GetObjectCommand) {
+        return badRequest('CloudFront template hosting is not configured for this environment');
+      }
+      // Same object the quick-create URL presigns and getPermissions reads — one source of truth.
+      const key = env.EDGE_OPTIMIZE_TEMPLATE_KEY || 'customer-bootstrap-role.yaml';
+
+      const response = await s3.s3Client.send(new s3.GetObjectCommand({
+        Bucket: bucket,
+        Key: key,
+      }));
+      const body = await response.Body.transformToString();
+
+      log.info(auditLine(context, 'template', 'downloaded', { siteId }));
+      // Raw YAML file download (not JSON). cleanupHeaderValue guards the filename header.
+      return new Response(body, {
+        status: 200,
+        headers: {
+          'content-type': 'text/yaml; charset=utf-8',
+          'content-disposition': `attachment; filename="${cleanupHeaderValue(key)}"`,
+        },
+      });
+    } catch (error) {
+      log.error(`Failed to read the CloudFront connector template for site ${siteId}:`, error);
+      return internalServerError('Failed to read the CloudFront connector template, please try again');
+    }
+  };
+
   // Enable CDN access-log forwarding for a SINGLE CloudFront distribution to Adobe's cross-account
   // cdn-logs destination (mutation, idempotent). The assume-role externalId is the per-session UUID
   // from bootstrap (client-supplied, must match the connector role's trust policy); the delivery
@@ -1424,6 +1475,7 @@ function LlmoCloudFrontController(ctx) {
     deploy,
     plan,
     getPermissions,
+    getTemplate,
     enableCdnLogDelivery,
     rescanCdnLogDelivery,
   };

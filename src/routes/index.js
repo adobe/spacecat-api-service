@@ -624,6 +624,7 @@ export default function getRouteHandlers(
     'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/deploy': llmoCloudFrontController.deploy,
     'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/plan': llmoCloudFrontController.plan,
     'GET /sites/:siteId/llmo/cdn-onboard/cloudfront/permissions': llmoCloudFrontController.getPermissions,
+    'GET /sites/:siteId/llmo/cdn-onboard/cloudfront/template': llmoCloudFrontController.getTemplate,
     'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/log-delivery': llmoCloudFrontController.enableCdnLogDelivery,
     'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/log-rescan': llmoCloudFrontController.rescanCdnLogDelivery,
     'GET /sites/:siteId/llmo/strategy': llmoController.getStrategy,
