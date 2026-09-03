@@ -1,3 +1,10 @@
+# [1.789.0](https://github.com/adobe/spacecat-api-service/compare/v1.788.0...v1.789.0) (2026-09-03)
+
+
+### Features
+
+* add CloudFront connector template download endpoint | LLMO-7074 ([#3154](https://github.com/adobe/spacecat-api-service/issues/3154)) ([5a0ba25](https://github.com/adobe/spacecat-api-service/commit/5a0ba256eedc1996c58270cabe9ee2b05823701c))
+
 # [1.788.0](https://github.com/adobe/spacecat-api-service/compare/v1.787.0...v1.788.0) (2026-09-03)
 
 
