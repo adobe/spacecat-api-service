@@ -180,6 +180,24 @@ describe('facs-composite-resolvers (asoOpportunityComposite)', () => {
     expect(context.attributes.facsComposite.values).to.deep.equal(['security']);
   });
 
+  it('opportunities by-url LIST route defers and stashes permitted types (D4)', async () => {
+    listStub.resolves([{ composite_key_value_1: 'security', granted_capabilities: [CAP] }]);
+    const res = await mod.asoOpportunityComposite(context, {
+      ...baseArgs, routePattern: 'POST /sites/:siteId/opportunities/by-url', routeParams: { siteId: 'site-1' },
+    });
+    expect(res).to.equal('defer');
+    expect(context.attributes.facsComposite.values).to.deep.equal(['security']);
+  });
+
+  it('suggestions by-url LIST route defers and stashes permitted types (D4)', async () => {
+    listStub.resolves([{ composite_key_value_1: 'security', granted_capabilities: [CAP] }]);
+    const res = await mod.asoOpportunityComposite(context, {
+      ...baseArgs, routePattern: 'POST /sites/:siteId/suggestions/by-url', routeParams: { siteId: 'site-1' },
+    });
+    expect(res).to.equal('defer');
+    expect(context.attributes.facsComposite.values).to.deep.equal(['security']);
+  });
+
   it('opportunity CREATE: grants when a binding matches the body opportunity type', async () => {
     listStub.resolves([{ composite_key_value_1: 'security', granted_capabilities: [CAP] }]);
     context.data = { type: 'security' };
