@@ -1,3 +1,31 @@
+# [1.785.0](https://github.com/adobe/spacecat-api-service/compare/v1.784.4...v1.785.0) (2026-09-02)
+
+
+### Features
+
+* **slack:** enrich-brand-claims command for off-site opportunity refresh (LLMO-7312) ([#3188](https://github.com/adobe/spacecat-api-service/issues/3188)) ([cd5ed45](https://github.com/adobe/spacecat-api-service/commit/cd5ed456271449b13ff36b1cf1c7cc65ce939e3e)), closes [experience-platform/mystique#4804](https://github.com/experience-platform/mystique/issues/4804) [adobe/spacecat-audit-worker#2937](https://github.com/adobe/spacecat-audit-worker/issues/2937)
+
+## [1.784.4](https://github.com/adobe/spacecat-api-service/compare/v1.784.3...v1.784.4) (2026-09-02)
+
+
+### Bug Fixes
+
+* **plg-onboarding:** re-parent site project into customer org on reassignment ([#3184](https://github.com/adobe/spacecat-api-service/issues/3184)) ([8c57e0e](https://github.com/adobe/spacecat-api-service/commit/8c57e0e24a7aa572bae622a5f36e345395e13883))
+
+## [1.784.3](https://github.com/adobe/spacecat-api-service/compare/v1.784.2...v1.784.3) (2026-09-02)
+
+
+### Bug Fixes
+
+* Aggregate Serenity brand-presence endpoints across all models when platform is omitted | LLMO-7093 ([#3094](https://github.com/adobe/spacecat-api-service/issues/3094)) ([1faa443](https://github.com/adobe/spacecat-api-service/commit/1faa443df3726444c72d085ee34b6211d3e0dbd8))
+
+## [1.784.2](https://github.com/adobe/spacecat-api-service/compare/v1.784.1...v1.784.2) (2026-09-02)
+
+
+### Bug Fixes
+
+* return authoritative brand collections after updates ([#3182](https://github.com/adobe/spacecat-api-service/issues/3182)) ([cd2b460](https://github.com/adobe/spacecat-api-service/commit/cd2b4607540de1d1d473b0804c50fd181b0abb6d)), closes [Hi#level](https://github.com/Hi/issues/level) [#3179](https://github.com/adobe/spacecat-api-service/issues/3179)
+
 ## [1.784.1](https://github.com/adobe/spacecat-api-service/compare/v1.784.0...v1.784.1) (2026-09-02)
 
 

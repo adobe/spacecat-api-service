@@ -10,7 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
-import { resolveElementModel } from '../constants.js';
+import { buildModelFilter } from '../constants.js';
 
 /**
  * Payload builders + response transformers backing `GET .../brand-presence/stats`
@@ -56,18 +56,22 @@ export function transformStatsSimpleNumericResponse(raw) {
  *
  * @param {object} params
  * @param {string} params.brandName - Brand display name (Semrush `CBF_ws_brand` value).
- * @param {string} [params.model] / [params.platform] - AI model filter.
+ * @param {string} [params.model] / [params.platform] - AI model filter. When absent or
+ *   the `'all'` sentinel ({@link isAllModelsFilter}), the `CBF_model` filter is OMITTED so
+ *   Semrush aggregates across all of the brand's models ("All Platforms", LLMO-7093).
  * @param {string} params.startDate / params.endDate - YYYY-MM-DD.
  * @param {string[]} [params.projectIds] - Semrush project UUIDs to OR together.
  */
 export function buildStatsTotalExecutionsPayload({
   model, platform, startDate, endDate, projectIds, brandName,
 }) {
-  const resolvedModel = resolveElementModel(model || platform);
+  const modelFilter = buildModelFilter(model || platform);
   const filters = [
     { op: 'or', filters: [{ op: 'eq', val: brandName, col: 'CBF_ws_brand' }] },
-    { op: 'or', filters: [{ op: 'eq', val: resolvedModel, col: 'CBF_model' }] },
   ];
+  if (modelFilter) {
+    filters.push(modelFilter);
+  }
   const projectFilter = orProjectFilter('CBF_project', projectIds);
   if (projectFilter) {
     filters.push(projectFilter);
@@ -83,18 +87,21 @@ export const transformStatsTotalExecutionsResponse = transformStatsSimpleNumeric
  *
  * @param {object} params
  * @param {string} params.brandName - Brand display name (Semrush `CBF_ws_brand` value).
- * @param {string} [params.model] / [params.platform] - AI model filter.
+ * @param {string} [params.model] / [params.platform] - AI model filter. Absent or `'all'`
+ *   ({@link isAllModelsFilter}) → the `CBF_model` filter is OMITTED (all-model aggregate).
  * @param {string} params.startDate / params.endDate - YYYY-MM-DD.
  * @param {string[]} [params.projectIds] - Semrush project UUIDs to OR together.
  */
 export function buildStatsMentionsPayload({
   model, platform, startDate, endDate, projectIds, brandName,
 }) {
-  const resolvedModel = resolveElementModel(model || platform);
+  const modelFilter = buildModelFilter(model || platform, { wrap: false });
   const filters = [
     { op: 'eq', val: brandName, col: 'CBF_ws_brand' },
-    { op: 'eq', val: resolvedModel, col: 'CBF_model' },
   ];
+  if (modelFilter) {
+    filters.push(modelFilter);
+  }
   const projectFilter = orProjectFilter('CBF_project', projectIds);
   if (projectFilter) {
     filters.push(projectFilter);
@@ -114,11 +121,13 @@ export const transformStatsMentionsResponse = transformStatsSimpleNumericRespons
 export function buildStatsVisibilityPayload({
   model, platform, startDate, endDate, projectIds, brandName,
 }) {
-  const resolvedModel = resolveElementModel(model || platform);
+  const modelFilter = buildModelFilter(model || platform);
   const filters = [
     { op: 'eq', val: brandName, col: 'CBF_ws_brand' },
-    { op: 'or', filters: [{ op: 'eq', val: resolvedModel, col: 'CBF_model' }] },
   ];
+  if (modelFilter) {
+    filters.push(modelFilter);
+  }
   const projectFilter = orProjectFilter('CBF_project', projectIds);
   if (projectFilter) {
     filters.push(projectFilter);
@@ -144,11 +153,13 @@ export function transformStatsVisibilityResponse(raw) {
 export function buildStatsCitationsPayload({
   model, platform, startDate, endDate, projectIds, brandName,
 }) {
-  const resolvedModel = resolveElementModel(model || platform);
+  const modelFilter = buildModelFilter(model || platform, { wrap: false });
   const filters = [
     { op: 'eq', val: brandName, col: 'CBF_brand' },
-    { op: 'eq', val: resolvedModel, col: 'CBF_model' },
   ];
+  if (modelFilter) {
+    filters.push(modelFilter);
+  }
   const projectFilter = orProjectFilter('CBF_projects', projectIds);
   if (projectFilter) {
     filters.push(projectFilter);

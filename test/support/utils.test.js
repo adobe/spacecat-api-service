@@ -43,6 +43,8 @@ import {
   sendGlobalImportRunMessage,
   triggerGlobalImportRun,
   triggerGeoExperimentImpactMeasurement,
+  checkGeoExperimentImpactMeasurement,
+  triggerBrandClaimsEnrich,
 } from '../../src/support/utils.js';
 
 use(chaiAsPromised);
@@ -1297,6 +1299,40 @@ describe('utils', () => {
     });
   });
 
+  describe('triggerBrandClaimsEnrich', () => {
+    let sandbox;
+    let sqsStub;
+    let context;
+
+    beforeEach(() => {
+      sandbox = sinon.createSandbox();
+      sqsStub = { sendMessage: sandbox.stub().resolves() };
+      context = {
+        env: { AUDIT_JOBS_QUEUE_URL: 'https://sqs.example.com/queue' },
+        sqs: sqsStub,
+      };
+    });
+
+    afterEach(() => sandbox.restore());
+
+    it('publishes a brand-claims audit message with top-level mode=enrich', async () => {
+      const site = { getId: () => 'site-123' };
+      const slackContext = { channelId: 'C1', threadTs: 'T1' };
+
+      await triggerBrandClaimsEnrich(site, slackContext, context);
+
+      expect(sqsStub.sendMessage).to.have.been.calledOnce;
+      const [queueUrl, message] = sqsStub.sendMessage.firstCall.args;
+      expect(queueUrl).to.equal('https://sqs.example.com/queue');
+      expect(message).to.deep.equal({
+        type: 'brand-claims',
+        siteId: 'site-123',
+        mode: 'enrich',
+        auditContext: { slackContext: { channelId: 'C1', threadTs: 'T1' } },
+      });
+    });
+  });
+
   describe('queueDetectCdnAudit', () => {
     let sandbox;
     let context;
@@ -2311,6 +2347,34 @@ describe('utils', () => {
 
       expect(sqs.sendMessage).to.have.been.calledOnceWithExactly('queue-url', {
         type: 'TRIGGER_IMPACT_MEASUREMENT',
+        geoExperimentId: 'geo-exp-1',
+        triggeredBy: 'unknown',
+      });
+    });
+  });
+
+  describe('checkGeoExperimentImpactMeasurement', () => {
+    it('sends a CHECK_IMPACT_MEASUREMENT message with the given triggeredBy', async () => {
+      const sqs = { sendMessage: sinon.stub().resolves() };
+      const lambdaContext = { sqs, env: { LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL: 'queue-url' } };
+
+      await checkGeoExperimentImpactMeasurement('geo-exp-1', 'user@example.com', lambdaContext);
+
+      expect(sqs.sendMessage).to.have.been.calledOnceWithExactly('queue-url', {
+        type: 'CHECK_IMPACT_MEASUREMENT',
+        geoExperimentId: 'geo-exp-1',
+        triggeredBy: 'user@example.com',
+      });
+    });
+
+    it('falls back triggeredBy to "unknown" when not provided', async () => {
+      const sqs = { sendMessage: sinon.stub().resolves() };
+      const lambdaContext = { sqs, env: { LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL: 'queue-url' } };
+
+      await checkGeoExperimentImpactMeasurement('geo-exp-1', undefined, lambdaContext);
+
+      expect(sqs.sendMessage).to.have.been.calledOnceWithExactly('queue-url', {
+        type: 'CHECK_IMPACT_MEASUREMENT',
         geoExperimentId: 'geo-exp-1',
         triggeredBy: 'unknown',
       });
