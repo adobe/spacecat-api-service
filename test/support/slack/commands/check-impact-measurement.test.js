@@ -14,6 +14,7 @@ import { expect, use } from 'chai';
 import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
 import esmock from 'esmock';
+import { IMPACT_MEASUREMENT_OUTCOME } from '../../../../src/support/geo-experiment-helper.js';
 
 use(sinonChai);
 
@@ -24,12 +25,14 @@ function mockGeoExperiment({
   phase = 'impact_measurement_started',
   status = 'COMPLETED',
   siteId = 'site-1',
+  insightsLocation,
 } = {}) {
   return {
     getId: () => id,
     getPhase: () => phase,
     getStatus: () => status,
     getSiteId: () => siteId,
+    getInsightsLocation: () => insightsLocation,
   };
 }
 
@@ -43,14 +46,14 @@ describe('CheckImpactMeasurementCommand', () => {
   let postErrorMessageStub;
   let postSiteNotFoundMessageStub;
   let checkGeoExperimentImpactMeasurementStub;
-  let isImpactMeasurementCheckEligibleStub;
+  let getImpactMeasurementOutcomeStub;
 
   beforeEach(async () => {
     extractURLFromSlackInputStub = sinon.stub();
     postErrorMessageStub = sinon.stub().resolves();
     postSiteNotFoundMessageStub = sinon.stub().resolves();
     checkGeoExperimentImpactMeasurementStub = sinon.stub().resolves();
-    isImpactMeasurementCheckEligibleStub = sinon.stub().returns(true);
+    getImpactMeasurementOutcomeStub = sinon.stub().returns(IMPACT_MEASUREMENT_OUTCOME.IN_FLIGHT);
 
     CheckImpactMeasurementCommand = (await esmock(
       '../../../../src/support/slack/commands/check-impact-measurement.js',
@@ -64,7 +67,8 @@ describe('CheckImpactMeasurementCommand', () => {
           checkGeoExperimentImpactMeasurement: checkGeoExperimentImpactMeasurementStub,
         },
         '../../../../src/support/geo-experiment-helper.js': {
-          isImpactMeasurementCheckEligible: isImpactMeasurementCheckEligibleStub,
+          getImpactMeasurementOutcome: getImpactMeasurementOutcomeStub,
+          IMPACT_MEASUREMENT_OUTCOME,
         },
       },
     )).default;
@@ -133,18 +137,52 @@ describe('CheckImpactMeasurementCommand', () => {
     );
   });
 
-  it('warns and does not check when the experiment is not eligible', async () => {
+  it('reports success with the insights location when measurement has completed', async () => {
+    extractURLFromSlackInputStub.returns('https://example.com');
+    dataAccessStub.Site.findByBaseURL.resolves({ getId: () => 'site-1' });
+    const geo = mockGeoExperiment({
+      phase: 'impact_measurement_done',
+      status: 'COMPLETED',
+      insightsLocation: 's3://bucket/geo-experiments/geo-exp-1/insights.json',
+    });
+    dataAccessStub.GeoExperiment.allBySiteId.resolves({ data: [geo] });
+    getImpactMeasurementOutcomeStub.returns(IMPACT_MEASUREMENT_OUTCOME.SUCCEEDED);
+    const command = CheckImpactMeasurementCommand(context);
+
+    await command.handleExecution(['example.com'], slackContext);
+
+    expect(slackContext.say.firstCall.args[0]).to.include(':white_check_mark:');
+    expect(slackContext.say.firstCall.args[0]).to.include('s3://bucket/geo-experiments/geo-exp-1/insights.json');
+    expect(checkGeoExperimentImpactMeasurementStub).to.not.have.been.called;
+  });
+
+  it('reports a completed-without-insights failure and suggests re-triggering', async () => {
     extractURLFromSlackInputStub.returns('https://example.com');
     dataAccessStub.Site.findByBaseURL.resolves({ getId: () => 'site-1' });
     const geo = mockGeoExperiment({ phase: 'post_analysis_done', status: 'COMPLETED' });
     dataAccessStub.GeoExperiment.allBySiteId.resolves({ data: [geo] });
-    isImpactMeasurementCheckEligibleStub.returns(false);
+    getImpactMeasurementOutcomeStub.returns(IMPACT_MEASUREMENT_OUTCOME.COMPLETED_WITHOUT_INSIGHTS);
+    const command = CheckImpactMeasurementCommand(context);
+
+    await command.handleExecution(['example.com'], slackContext);
+
+    expect(slackContext.say.firstCall.args[0]).to.include('without insights');
+    expect(slackContext.say.firstCall.args[0]).to.include('trigger-impact-measurement');
+    expect(checkGeoExperimentImpactMeasurementStub).to.not.have.been.called;
+  });
+
+  it('warns and does not check when no task is in flight and nothing has been measured', async () => {
+    extractURLFromSlackInputStub.returns('https://example.com');
+    dataAccessStub.Site.findByBaseURL.resolves({ getId: () => 'site-1' });
+    const geo = mockGeoExperiment({ phase: 'pre_analysis_done', status: 'IN_PROGRESS' });
+    dataAccessStub.GeoExperiment.allBySiteId.resolves({ data: [geo] });
+    getImpactMeasurementOutcomeStub.returns(IMPACT_MEASUREMENT_OUTCOME.NOT_APPLICABLE);
     const command = CheckImpactMeasurementCommand(context);
 
     await command.handleExecution(['example.com'], slackContext);
 
     expect(slackContext.say.firstCall.args[0]).to.include('geo-exp-1');
-    expect(slackContext.say.firstCall.args[0]).to.include('post_analysis_done');
+    expect(slackContext.say.firstCall.args[0]).to.include('pre_analysis_done');
     expect(checkGeoExperimentImpactMeasurementStub).to.not.have.been.called;
   });
 

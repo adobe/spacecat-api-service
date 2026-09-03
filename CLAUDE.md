@@ -541,7 +541,7 @@ Commands for operations (see `src/support/slack/commands.js` for the full, curre
 - Organization setup: `/add-slack-channel`, `/configure-slack`
 - Debugging: `/site-info`, `/audit-info`
 - LLMO: `/brand-profile`, `/llmo-onboard`, `enable-brand-claims`, `disable-brand-claims`
-- Geo-experiments: `/trigger-impact-measurement`, `/check-impact-measurement`
+- Geo-experiments: `/trigger-impact-measurement`, `/check-impact-measurement`, `/get-experiment`
 
 ## Common Utilities
 
