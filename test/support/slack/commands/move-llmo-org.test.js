@@ -175,12 +175,14 @@ describe('MoveLlmoOrgCommand', () => {
       p_site_id: 'site-1',
       p_dst_org: 'dst-1',
     });
-    expect(slackContext.client.chat.postMessage).to.have.been.calledOnce;
 
-    // The button payload is only complete after the update pass, which injects the
-    // posted message's own timestamp so the action can edit it in place.
-    const updateArgs = slackContext.client.chat.update.firstCall.args[0];
-    const button = updateArgs.blocks[1].elements[0];
+    // One call, not a post-then-patch pair: the confirm handler reads the message
+    // timestamp from Bolt's action body, so it never has to be injected into the payload.
+    expect(slackContext.client.chat.postMessage).to.have.been.calledOnce;
+    expect(slackContext.client.chat.update).to.not.have.been.called;
+
+    const postArgs = slackContext.client.chat.postMessage.firstCall.args[0];
+    const button = postArgs.blocks[1].elements[0];
     expect(button.action_id).to.equal('open_move_llmo_org_modal');
     expect(JSON.parse(button.value)).to.deep.include({
       baseURL: 'https://acme.com',
@@ -188,8 +190,8 @@ describe('MoveLlmoOrgCommand', () => {
       sourceOrgId: 'src-1',
       destOrgId: 'dst-1',
       imsOrgId: 'ABCDEF1234567890ABCDEF12@AdobeOrg',
-      messageTs: '111.333',
     });
+    expect(JSON.parse(button.value)).to.not.have.property('messageTs');
   });
 
   it('never writes: the command only ever calls the read-only preview RPC', async () => {
@@ -200,8 +202,8 @@ describe('MoveLlmoOrgCommand', () => {
 
   it('reports the entitlement gotcha in the preview', async () => {
     await run(['https://acme.com', 'ABCDEF1234567890ABCDEF12@AdobeOrg']);
-    const updateArgs = slackContext.client.chat.update.firstCall.args[0];
-    expect(updateArgs.blocks[0].text.text).to.contain('Entitlements are not moved');
+    const postArgs = slackContext.client.chat.postMessage.firstCall.args[0];
+    expect(postArgs.blocks[0].text.text).to.contain('Entitlements are not moved');
   });
 
   it('handles an unexpected failure gracefully', async () => {

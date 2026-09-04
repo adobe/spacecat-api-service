@@ -46,17 +46,43 @@ export function openMoveLlmoOrgModal(lambdaContext) {
     await ack();
 
     const {
-      baseURL, siteId, sourceOrgId, destOrgId, imsOrgId, channelId, threadTs, messageTs,
+      baseURL, siteId, sourceOrgId, destOrgId, imsOrgId, channelId, threadTs,
     } = JSON.parse(body.actions[0].value);
-    const say = createSayFunction(client, channelId, threadTs);
     const userId = body?.user?.id || 'unknown';
 
-    const updateMessage = async (text) => client.chat.update({
-      channel: channelId,
-      ts: messageTs,
-      text,
-      blocks: [{ type: 'section', text: { type: 'mrkdwn', text } }],
-    });
+    // Bolt's action body is authoritative for where this button actually lives, so prefer
+    // it over the channel carried in the payload. Everything that talks to Slack from here
+    // on - including the say passed down to reparentSiteProject and
+    // createEntitlementAndEnrollment - is bound to it, so a stale payload cannot misroute
+    // part of the output to another channel.
+    const targetChannel = body?.channel?.id || channelId;
+    const targetTs = body?.message?.ts;
+    const say = createSayFunction(client, targetChannel, threadTs);
+
+    // Reporting progress must never decide whether the move runs. This previously threw
+    // straight out of the handler - the first call sits immediately before executeOrgMove,
+    // so a cosmetic Slack failure aborted the move, and the identical call in the catch
+    // below rethrew into Bolt, leaving the operator with no feedback at all.
+    const updateMessage = async (text) => {
+      try {
+        await client.chat.update({
+          channel: targetChannel,
+          ts: targetTs,
+          text,
+          blocks: [{ type: 'section', text: { type: 'mrkdwn', text } }],
+        });
+      } catch (updateError) {
+        log.warn(
+          `move llmo org: could not update message ${targetTs} in ${targetChannel}: `
+          + `${updateError.message}. Falling back to a new message.`,
+        );
+        try {
+          await say(text);
+        } catch (sayError) {
+          log.error(`move llmo org: could not report to Slack at all: ${sayError.message}`);
+        }
+      }
+    };
 
     try {
       const site = await Site.findById(siteId);
