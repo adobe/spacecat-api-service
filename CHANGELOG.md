@@ -1,3 +1,10 @@
+## [1.793.1](https://github.com/adobe/spacecat-api-service/compare/v1.793.0...v1.793.1) (2026-09-04)
+
+
+### Bug Fixes
+
+* **ci:** give type-check a push fallback so it can't lose its required verdict ([#3201](https://github.com/adobe/spacecat-api-service/issues/3201)) ([2a8d34c](https://github.com/adobe/spacecat-api-service/commit/2a8d34ced505f1bd82fdc03090aa2d898f57e2e5)), closes [Hi#level](https://github.com/Hi/issues/level) [#3199](https://github.com/adobe/spacecat-api-service/issues/3199)
+
 # [1.793.0](https://github.com/adobe/spacecat-api-service/compare/v1.792.1...v1.793.0) (2026-09-04)
 
 
