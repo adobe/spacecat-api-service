@@ -64,17 +64,20 @@ jobs:
         run: |
           set -euo pipefail
           PR_COUNT=$(gh pr list --head "$REF_NAME" --state open --repo "$REPO" \
-            --json number --jq 'length' 2>/dev/null) || true
+            --json number --jq 'length') || true
           if [ "$PR_COUNT" = "0" ]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "::notice::No open PR found for branch ${REF_NAME} — skipping type-check on this push"
+            echo "::notice::No open PR found for the current branch — skipping type-check on this push"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
             if [ -z "$PR_COUNT" ]; then
-              echo "::warning::Could not determine whether an open PR exists for ${REF_NAME} (gh pr list failed) — running type-check anyway rather than risk skipping the only completed run for this commit"
+              echo "::warning::Could not determine whether an open PR exists for the current branch (gh pr list failed, see log above) — running type-check anyway rather than risk skipping the only completed run for this commit"
             fi
           fi
 
+      # steps.pr-check.outputs.skip is an empty string (not 'false') on pull_request
+      # events, since the step above doesn't run there -- the '!= true' checks below
+      # rely on that negative match; do not refactor them to '== false'.
       - name: Check out
         if: steps.pr-check.outputs.skip != 'true'
         uses: actions/checkout@v6
