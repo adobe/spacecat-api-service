@@ -563,3 +563,19 @@ fields:
   schema:
     type: string
     example: 'id,baseURL,name'
+referralUrlPathPrefix:
+  name: urlPathPrefix
+  in: query
+  required: false
+  description: >-
+    Optional URL-path prefix that scopes a domain's referral data to a single
+    sub-path (e.g. `/knicks` returns the `/knicks` page and everything beneath
+    it). Used to show referral insights for a sub-path site that inherits its
+    domain-root site's configuration. A leading slash is added if missing and
+    trailing slashes are stripped; an empty value or `/` means no filter (whole
+    site). Snake-case alias: `url_path_prefix`. Not accepted by `has-data`,
+    `by-url-trend`, or `weeks`.
+  schema:
+    type: string
+    maxLength: 512
+    example: '/knicks'

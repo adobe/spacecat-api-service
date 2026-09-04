@@ -1215,17 +1215,27 @@ function SitesController(ctx, log, env) {
 
     // A site's URL backing a Semrush-managed brand can be changed, but only for the
     // brand's OWN primary site — see serenity-docs#349. A registrable-domain change is
-    // allowed too: live-verified against adobe-hackathon.semrush.com (2026-08-18) that
-    // Semrush's project PATCH accepts and persists a changed `domain` (not just
-    // `primary_url`), and that a subsequent publish settles cleanly with no project
-    // recreation — the "would this lose history?" concern that originally motivated
-    // refusing cross-domain edits does not hold. propagateSiteUrlToSemrush keeps the
-    // project's `domain` in step with the new registrable domain in this case (see that
-    // module). A market-mirror site (linked via brand_sites, type='serenity') stays
-    // immutable: whether/how a mirror should follow a rename is a separate, open decision
-    // (issue #349 workstream 4) this change does not make. The brand lookup runs only when
-    // a URL change is actually requested, so the common patch path (no baseURL) pays no
-    // extra query.
+    // ALSO allowed here today, on the strength of an earlier version of this comment that
+    // claimed Semrush's project PATCH persists a changed `domain` (not just `primary_url`)
+    // and that "would this lose history?" therefore does not apply to a cross-domain edit.
+    // That claim was WRONG and has been corrected — live-verified 2026-09-01 against
+    // www.semrush.com (the earlier comment's `adobe-hackathon.semrush.com` test host is now
+    // decommissioned; see semrush-project-domain-immutable-once-published in project
+    // memory): a Semrush project's `domain` is settable only at create time. A PATCH that
+    // changes `domain` on an already-published project is accepted and echoed back once,
+    // then silently dropped from every later read, including after a republish — only
+    // `primary_url` and the own-brand benchmark's `domain`/`primary_url` genuinely move in
+    // place. So `propagateSiteUrlToSemrush` does NOT keep a market project's `domain` in
+    // step with a cross-domain rename made here: it moves `primary_url` and the benchmark,
+    // but the project's `domain` stays on whatever it was at first publish, producing the
+    // same domain/primary_url split the Add Market siteId/brandDomain precedence bug
+    // produced. Fixing that (or gating this cross-domain path until it's fixed) is tracked
+    // separately — this comment update corrects the factual claim only, it does not change
+    // the code path below. A market-mirror site (linked via brand_sites, type='serenity')
+    // stays immutable: whether/how a mirror should follow a rename is a separate, open
+    // decision (issue #349 workstream 4) this change does not make. The brand lookup runs
+    // only when a URL change is actually requested, so the common patch path (no baseURL)
+    // pays no extra query.
     if (hasText(nextBaseURL) && nextBaseURL !== site.getBaseURL()) {
       if (!isValidUrl(nextBaseURL)) {
         return badRequest('baseURL must be a valid URL');

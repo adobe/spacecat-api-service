@@ -11,14 +11,22 @@
  */
 
 import {
-  badRequest, notFound,
+  badRequest, notFound, accepted, internalServerError, createResponse,
 } from '@adobe/spacecat-shared-http-utils';
 import { HeadObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
 import { cachedOk } from '../../support/cached-response.js';
 import { dateToIsoWeek } from '../../support/elements/week-utils.js';
+import { postSlackMessage } from '../../utils/slack/base.js';
 
 const CLAIMS_PREFIX = 'brand_claims/llmo';
 const WEEK_RE = /^\d{4}-W\d{2}$/;
+
+// Audit type + 7-day cooldown for on-demand Brand Claims runs (LLMO-7263). Trial
+// customers may request a fresh run at most once per week; the UI shows the same
+// window, and this is the authoritative server-side backstop (the UI gate is
+// bypassable). Kept in step with project-elmo-ui's BRAND_CLAIMS_REQUEST_COOLDOWN_MS.
+const BRAND_CLAIMS_AUDIT_TYPE = 'brand-claims';
+const BRAND_CLAIMS_REQUEST_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
 // `model` is interpolated into the S3 key, so constrain it to alphanumerics,
 // dots, hyphens, underscores — no `/` — to prevent using HeadObject as an
 // object-existence probe across arbitrary key paths.
@@ -157,4 +165,101 @@ export async function handleBrandClaims(context) {
     log.error(`S3 error retrieving brand claims for site ${siteId}: ${s3Error.message}`);
     return badRequest(`Error retrieving brand claims: ${s3Error.message}`);
   }
+}
+
+/**
+ * On-demand Brand Claims trigger for trial customers (LLMO-7263). Triggers the
+ * audit-worker `brand-claims` audit for the site with `onDemand: true`, which
+ * finds the latest Brand Presence sheet and publishes a one-shot
+ * `BRAND_PRESENCE_SHEET_WRITTEN` event (on_demand=true). The audit-worker owns
+ * the sheet lookup + event shape, so this endpoint just fires the trigger; the
+ * run happens once WITHOUT setting the persistent `brand_claims_enabled` flag
+ * (which the weekly emit would otherwise re-run every week). Site + LLMO access
+ * is validated by the caller.
+ *
+ * @param {object} context - Request context (log, sqs, env).
+ * @param {object} site - The resolved, access-checked Site model.
+ * @returns {Promise<Response>} 202 accepted, or a 5xx on a misconfiguration.
+ */
+export async function handleRequestBrandClaims(context, site) {
+  const { log, sqs, env } = context;
+
+  const queueUrl = env?.AUDIT_JOBS_QUEUE_URL;
+  if (!queueUrl) {
+    // Keep the config diagnostic in the log; return a generic message so the
+    // environment's configuration state isn't leaked to external trial callers.
+    log.error('Brand Claims on-demand: AUDIT_JOBS_QUEUE_URL is not configured');
+    return internalServerError('Brand Claims on-demand is temporarily unavailable');
+  }
+
+  // 7-day cooldown backstop: refuse a new run if the last brand-claims audit ran
+  // within the window. Mirrors the UI's disabled "Request new run" button so the two
+  // agree; because the UI button is bypassable this is the authoritative gate. Fails
+  // OPEN — a lookup error must not block a legitimate first/eligible request.
+  // Accepted TOCTOU gap: two requests arriving before the audit-worker persists its
+  // audit row both pass this check and both enqueue. The per-brand redelivery dedup
+  // (blackboard fact freshness in mystique) makes the duplicate a cheap no-op, so a
+  // best-effort check here is deliberate rather than a hard once-only lock.
+  try {
+    const latestAudit = await site.getLatestAuditByAuditType(BRAND_CLAIMS_AUDIT_TYPE);
+    const ranAtMs = typeof latestAudit?.getAuditedAt === 'function'
+      ? Date.parse(latestAudit.getAuditedAt())
+      : NaN;
+    if (Number.isFinite(ranAtMs)) {
+      const elapsed = Date.now() - ranAtMs;
+      if (elapsed < BRAND_CLAIMS_REQUEST_COOLDOWN_MS) {
+        const availableAt = new Date(ranAtMs + BRAND_CLAIMS_REQUEST_COOLDOWN_MS).toISOString();
+        const retryAfterSeconds = Math.ceil((BRAND_CLAIMS_REQUEST_COOLDOWN_MS - elapsed) / 1000);
+        log.info(`Brand Claims on-demand: cooldown active for site ${site.getId()}, available at ${availableAt}`);
+        return createResponse(
+          {
+            siteId: site.getId(),
+            availableAt,
+            message: 'A Brand Claims run was requested recently; a new run can be requested once per 7 days.',
+          },
+          429,
+          { 'Retry-After': String(retryAfterSeconds) },
+        );
+      }
+    }
+  } catch (auditError) {
+    log.warn(`Brand Claims on-demand: cooldown lookup failed for site ${site.getId()}, allowing request: ${auditError.message}`);
+  }
+
+  try {
+    await sqs.sendMessage(queueUrl, {
+      type: 'brand-claims',
+      siteId: site.getId(),
+      onDemand: true,
+      auditContext: { trigger: 'on-demand-brand-claims' },
+    });
+  } catch (sqsError) {
+    // Enqueue failure is a server-side/infra fault, not a client error — surface it
+    // as 5xx (the caller's controller catch would otherwise map any throw to 400).
+    log.error(`Brand Claims on-demand: failed to enqueue audit for site ${site.getId()}: ${sqsError.message}`);
+    return internalServerError('Brand Claims on-demand is temporarily unavailable');
+  }
+  log.info(`Brand Claims on-demand: triggered brand-claims audit for site ${site.getId()}`);
+
+  // Dedicated channel for on-demand Brand Claims request alerts (LLMO-7263),
+  // set in Vault, so these can be routed/muted independently of other LLMO alerts.
+  const slackChannel = env?.SLACK_BRAND_CLAIMS_REQUEST_CHANNEL_ID;
+  const slackToken = env?.SLACK_BOT_TOKEN;
+  if (slackChannel && slackToken) {
+    try {
+      await postSlackMessage(
+        slackChannel,
+        `:rocket: On-demand Brand Claims requested for *${site.getBaseURL()}* (${site.getId()}).`,
+        slackToken,
+      );
+    } catch (slackError) {
+      // Slack notification is best-effort — the trigger is already queued.
+      log.warn(`Brand Claims on-demand: Slack notification failed: ${slackError.message}`);
+    }
+  }
+
+  return accepted({
+    siteId: site.getId(),
+    message: 'Brand Claims run requested; results appear once the pipeline completes.',
+  });
 }

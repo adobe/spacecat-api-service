@@ -2286,6 +2286,94 @@ describe('LlmoCloudFrontController', () => {
     });
   });
 
+  describe('getTemplate', () => {
+    let templateContext;
+    let s3SendStub;
+    const sampleTemplate = "AWSTemplateFormatVersion: '2010-09-09'\nResources:\n  ConnectorRole:\n    Type: AWS::IAM::Role\n";
+
+    beforeEach(() => {
+      s3SendStub = sinon.stub().resolves({
+        Body: { transformToString: async () => sampleTemplate },
+      });
+      templateContext = {
+        ...mockContext,
+        params: { siteId: TEST_SITE_ID },
+        env: { SPACECAT_CDN_CLOUDFRONT_TEMPLATE_BUCKET: 'llmo-edgeoptimize-cf-template' },
+        s3: {
+          s3Client: { send: s3SendStub },
+          GetObjectCommand: function MockGetObjectCommand(params) {
+            Object.assign(this, params);
+          },
+        },
+      };
+    });
+
+    it('returns the raw template YAML as a file download', async () => {
+      const result = await controller.getTemplate(templateContext);
+
+      expect(result.status).to.equal(200);
+      expect(result.headers.get('content-type')).to.include('text/yaml');
+      expect(result.headers.get('content-disposition')).to.include('attachment');
+      expect(result.headers.get('content-disposition')).to.include('customer-bootstrap-role.yaml');
+      const body = await result.text();
+      expect(body).to.equal(sampleTemplate);
+      expect(s3SendStub.calledOnce).to.equal(true);
+      const [cmd] = s3SendStub.firstCall.args;
+      expect(cmd.Key).to.equal('customer-bootstrap-role.yaml');
+      expect(cmd.Bucket).to.equal('llmo-edgeoptimize-cf-template');
+    });
+
+    it('reads the env-configured template key', async () => {
+      const result = await controller.getTemplate({
+        ...templateContext,
+        env: {
+          SPACECAT_CDN_CLOUDFRONT_TEMPLATE_BUCKET: 'custom-bucket',
+          EDGE_OPTIMIZE_TEMPLATE_KEY: 'customer-bootstrap-role-log-only.yaml',
+        },
+      });
+      expect(result.status).to.equal(200);
+      const [cmd] = s3SendStub.firstCall.args;
+      expect(cmd.Bucket).to.equal('custom-bucket');
+      expect(cmd.Key).to.equal('customer-bootstrap-role-log-only.yaml');
+      expect(result.headers.get('content-disposition')).to.include('customer-bootstrap-role-log-only.yaml');
+    });
+
+    it('returns 400 when template hosting is not configured (no S3 client)', async () => {
+      const result = await controller.getTemplate({ ...templateContext, s3: {} });
+      expect(result.status).to.equal(400);
+      const body = await result.json();
+      expect(body.message).to.include('not configured');
+    });
+
+    it('returns 500 with a generic message when the S3 read fails', async () => {
+      s3SendStub.rejects(new Error('NoSuchKey'));
+      const result = await controller.getTemplate(templateContext);
+      expect(result.status).to.equal(500);
+      const body = await result.json();
+      expect(body.message).to.not.include('NoSuchKey');
+      expect(body.message).to.include('Failed to read the CloudFront connector template');
+    });
+
+    it('returns 404 when the site is not found', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+      const result = await controller.getTemplate(templateContext);
+      expect(result.status).to.equal(404);
+    });
+
+    it('returns 403 when the user lacks access to the site', async () => {
+      const deniedController = controllerWithAccessDenied(mockContext);
+      const result = await deniedController.getTemplate(templateContext);
+      expect(result.status).to.equal(403);
+    });
+
+    it('returns 403 when the user is not an LLMO administrator', async () => {
+      const LlmoControllerNoAdmin = await esmock('../../../src/controllers/llmo/llmo-cloudfront.js', cfClientMocks(createMockAccessControlUtil(true, true, false)));
+      const result = await LlmoControllerNoAdmin(mockContext)
+        .getTemplate(templateContext);
+      expect(result.status).to.equal(403);
+    });
+  });
+
   describe('enableCdnLogDelivery', () => {
     let logDeliveryContext;
 

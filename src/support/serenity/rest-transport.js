@@ -888,6 +888,34 @@ export function createSerenityTransport({ env, imsToken }) {
     },
 
     /**
+     * DELETE /v2/workspaces/{ws}/projects/{pid}/aio/tags — batch-deletes tags by
+     * id (model.BatchDeleteRequest body). Detaches every id from every carrying
+     * prompt before removing the tag record; never deletes a prompt (category-
+     * delete.md §3). 204 on success.
+     *
+     * No `prompt_id` query is sent — the vendored contract's declared-required
+     * `prompt_id` is corrected optional (spacecat-shared CR25): a live batch
+     * delete with no `prompt_id` at all 204s and deletes exactly the requested
+     * ids, and every delete this proxy composes is project-wide (a whole tag
+     * subtree), never scoped to one prompt.
+     *
+     * @param {string} semrushWorkspaceId
+     * @param {string} projectId
+     * @param {string[]} tagIds - upstream tag ids to delete (a subtree,
+     *   composed by the caller — see tag-tree.js collectSubtreeIds).
+     */
+    async deleteProjectTags(semrushWorkspaceId, projectId, tagIds) {
+      return projects.deleteProjectTags(
+        {
+          params: {
+            path: { id: semrushWorkspaceId, project_id: projectId },
+          },
+          body: { ids: tagIds },
+        },
+      );
+    },
+
+    /**
      * POST /v1/workspaces/{ws}/projects — creates a new Semrush AIO project.
      *
      * @param {string} semrushWorkspaceId

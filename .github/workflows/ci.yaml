@@ -35,57 +35,119 @@ jobs:
   # `// @ts-check`-annotated files (currently src/support/serenity/**). Blocking.
   # The reusable service-ci workflow has no type-check seam yet, so this runs as
   # a self-contained job here. See docs/decisions/005-opt-in-type-checking.md.
+  #
+  # Also runs on `push` (adobe/spacecat-api-service#3199): the reusable
+  # service-ci workflow's own concurrency group (mysticat-ci service-ci.yaml,
+  # keyed on ${{ github.workflow }}-${{ github.ref }} with cancel-in-progress
+  # on non-main refs) can cancel a PR's `pull_request`-triggered run of this
+  # job, leaving its head commit with no completed run. The `push` run is a
+  # fallback, skipped when no open PR exists yet for the branch (nothing to
+  # protect on `main` or a pre-PR branch). If the PR-existence lookup itself
+  # fails, it runs anyway rather than skip -- this is a required blocking
+  # check, and defaulting an inconclusive lookup to "skip" risks reproducing
+  # the exact bug being fixed.
+  #
+  # No concurrency group on this job: the push and pull_request runs are meant
+  # to complete independently (that's the whole fix), so nothing here should
+  # cancel either one.
   type-check:
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref != 'refs/heads/main')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       contents: read
+      pull-requests: read
     steps:
+      - name: Check for open PR (push only)
+        id: pr-check
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF_NAME: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          PR_COUNT=$(gh pr list --head "$REF_NAME" --state open --repo "$REPO" \
+            --json number --jq 'length') || true
+          # Match strictly-numeric output, not just non-empty: unexpected stdout
+          # ahead of a `gh` failure (e.g. a CLI notice) would otherwise slip past
+          # a bare `-z` check and skip the warning below.
+          if [[ "$PR_COUNT" =~ ^[0-9]+$ ]]; then
+            if [ "$PR_COUNT" = "0" ]; then
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              echo "::notice::No open PR found for the current branch — skipping type-check on this push"
+            else
+              echo "skip=false" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Could not determine whether an open PR exists for the current branch (gh pr list failed, see log above) — running type-check anyway rather than risk skipping the only completed run for this commit"
+          fi
+
+      # steps.pr-check.outputs.skip is an empty string (not 'false') on pull_request
+      # events, since the step above doesn't run there -- the '!= true' checks below
+      # rely on that negative match; do not refactor them to '== false'.
       - name: Check out
+        if: steps.pr-check.outputs.skip != 'true'
         uses: actions/checkout@v6
         with:
           persist-credentials: false
 
       - name: Setup Node & NPM
+        if: steps.pr-check.outputs.skip != 'true'
         uses: adobe/mysticat-ci/.github/actions/setup-node-npm@v1
         env:
           MYSTICAT_DATA_SERVICE_REPO_READ_TOKEN: ${{ secrets.MYSTICAT_DATA_SERVICE_REPO_READ_TOKEN }}
 
       - name: Type-check
+        if: steps.pr-check.outputs.skip != 'true'
         run: npm run type-check
 
-  # Manually-triggered deploy for the serenity job runner worker (adobe/serenity-docs#186),
-  # a second Lambda built from a distinct hedy --entryFile
-  # (src/serenity-prompt-classification/index.js, deployed as
-  # spacecat-services--serenity-job-runner) rather than the reusable service-ci
-  # workflow's single deploy-dev/deploy-stage target, which has no seam for a
-  # second Lambda per service.
+  # serenity-job-runner WORKER Lambda deploy (adobe/serenity-docs#186). Rationale
+  # and design: PR #3191.
   #
-  # workflow_dispatch-only, not push-triggered: this still needs to happen
-  # under CI's spacecat-role-github-actions (personal dev credentials lack the
-  # iam:PassRole permission the reusable workflow's deploy jobs are granted),
-  # but the worker isn't part of steady-state traffic yet
-  # (create_serenity_job_runner_esms defaults false in every environment) -
-  # tying it to every push would add permanent CI surface for a feature not
-  # yet in continuous use. Trigger manually via the Actions tab or
-  # `gh workflow run ci.yaml -f environment=<dev|stage|prod>`.
+  # A SECOND Lambda per service (distinct `hedy --entryFile`, deployed as
+  # spacecat-services--serenity-job-runner) that the reusable service-ci workflow
+  # can't deploy. Two triggers:
+  #   1. push to `main` -> auto-deploy to the same envs api-service auto-deploys to
+  #      (STAGE then PROD; see the strategy block). Stops the worker drifting behind
+  #      the api-service Lambda — previously it was manual-dispatch ONLY, so a change
+  #      merged to the worker handler (e.g. PR #3138) shipped to api-service but left
+  #      the worker stale with no signal until a job failed.
+  #   2. workflow_dispatch -> manual single-env deploy (dev is manual-only).
   #
-  # Prod is a manual-dispatch target too (gated to `main` by the `if` below,
-  # like stage). It is deliberately NOT wired into `npm run semantic-release`
-  # yet — automatic per-release worker deploys are a separate follow-up; until
-  # then a prod worker rollout is an explicit `-f environment=prod` dispatch.
+  # Deploys on every successful `main`-push `ci` run (service-ci.yaml@v3 exposes no
+  # `released` output to gate on): a slight over-deploy that guarantees no drift.
+  #
+  # !!! DEPLOY != ROLLOUT !!!  This keeps the worker *code* current; it enables the
+  # feature for NO ONE. Rollout stays gated by the `create_serenity_job_runner_esms`
+  # ESM (Terraform) AND the UI's per-org DB flag. Runs under CI's
+  # spacecat-role-github-actions (personal creds lack the needed iam:PassRole).
   deploy-worker:
     if: >-
-      github.event_name == 'workflow_dispatch' &&
-      (inputs.environment == 'dev' || github.ref == 'refs/heads/main')
+      (github.event_name == 'workflow_dispatch' &&
+        (inputs.environment == 'dev' || github.ref == 'refs/heads/main')) ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    concurrency:
-      group: deploy-worker-${{ inputs.environment }}
-      cancel-in-progress: false
     needs: [ci]
-    environment: ${{ inputs.environment == 'dev' && 'dev-branches' || inputs.environment }}
+    strategy:
+      # push -> stage THEN prod. `max-parallel: 1` runs the matrix legs one at a
+      # time in the order listed (stage, then prod), and `fail-fast: true` cancels
+      # the queued prod leg if the stage deploy fails -- so prod ONLY ships once
+      # stage has deployed cleanly (stage-first promotion gate). On
+      # workflow_dispatch the matrix is a single env, so both settings are no-ops.
+      fail-fast: true
+      max-parallel: 1
+      matrix:
+        environment: ${{ fromJSON(github.event_name == 'push' && '["stage","prod"]' || format('["{0}"]', inputs.environment)) }}
+    concurrency:
+      # Per-environment: the two `main`-push matrix legs (and any concurrent
+      # manual dispatch) serialize within an env but never block a different
+      # env, so a stage deploy can't collide with a prod deploy.
+      group: deploy-worker-${{ matrix.environment }}
+      cancel-in-progress: false
+    environment: ${{ matrix.environment == 'dev' && 'dev-branches' || matrix.environment }}
     permissions:
       contents: read
       id-token: write
@@ -103,14 +165,18 @@ jobs:
       - name: Configure AWS
         uses: adobe/mysticat-ci/.github/actions/configure-aws@v1
         with:
-          aws_role_to_assume: ${{ inputs.environment == 'dev'
-            && format('arn:aws:iam::{0}:role/spacecat-role-github-actions', secrets.AWS_ACCOUNT_ID_DEV)
-            || (inputs.environment == 'stage'
-            && format('arn:aws:iam::{0}:role/spacecat-role-github-actions', secrets.AWS_ACCOUNT_ID_STAGE)
-            || format('arn:aws:iam::{0}:role/spacecat-role-github-actions', secrets.AWS_ACCOUNT_ID_PROD)) }}
+          # Explicit per-env branches (no fall-through-to-prod default): an
+          # unrecognised env yields an empty account id -> an invalid role ARN
+          # that fails `configure-aws`, rather than silently assuming prod.
+          aws_role_to_assume: ${{ format('arn:aws:iam::{0}:role/spacecat-role-github-actions',
+            (matrix.environment == 'dev' && secrets.AWS_ACCOUNT_ID_DEV)
+            || (matrix.environment == 'stage' && secrets.AWS_ACCOUNT_ID_STAGE)
+            || (matrix.environment == 'prod' && secrets.AWS_ACCOUNT_ID_PROD)) }}
 
       - name: Deploy worker
-        run: npm run ${{ inputs.environment == 'dev' && 'deploy-dev:worker' || (inputs.environment == 'stage' && 'deploy-stage:worker' || 'deploy:worker') }}
+        # dev -> deploy-dev:worker, stage -> deploy-stage:worker,
+        # prod -> deploy:worker (see package.json scripts).
+        run: npm run ${{ (matrix.environment == 'dev' && 'deploy-dev:worker') || (matrix.environment == 'stage' && 'deploy-stage:worker') || (matrix.environment == 'prod' && 'deploy:worker') }}
         env:
           AWS_REGION: us-east-1
           # hedy resolves --aws-region from this HLX_-prefixed env var, not
@@ -118,7 +184,7 @@ jobs:
           # client) - the reusable service-ci workflow sets this at its own
           # workflow level, which this repo-local job doesn't inherit.
           HLX_AWS_REGION: us-east-1
-          AWS_ACCOUNT_ID: ${{ inputs.environment == 'dev' && secrets.AWS_ACCOUNT_ID_DEV || (inputs.environment == 'stage' && secrets.AWS_ACCOUNT_ID_STAGE || secrets.AWS_ACCOUNT_ID_PROD) }}
+          AWS_ACCOUNT_ID: ${{ (matrix.environment == 'dev' && secrets.AWS_ACCOUNT_ID_DEV) || (matrix.environment == 'stage' && secrets.AWS_ACCOUNT_ID_STAGE) || (matrix.environment == 'prod' && secrets.AWS_ACCOUNT_ID_PROD) }}
           VPC_SUBNET_1: ${{ secrets.VPC_SUBNET_1 }}
           VPC_SUBNET_2: ${{ secrets.VPC_SUBNET_2 }}
           VPC_SG_ID: ${{ secrets.VPC_SG_ID }}

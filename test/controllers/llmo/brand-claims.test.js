@@ -342,3 +342,135 @@ describe('handleBrandClaims', () => {
     expect(expiresAt).to.be.at.most(after + oneHourMs);
   });
 });
+
+describe('handleRequestBrandClaims (on-demand, LLMO-7263)', () => {
+  let handleRequestBrandClaims;
+  let sandbox;
+  let sqsSend;
+  let postSlackMessage;
+  let site;
+  let context;
+
+  let getLatestAudit;
+
+  const httpUtils = {
+    accepted: (body) => ({ status: 202, json: async () => body }),
+    badRequest: (message) => ({ status: 400, json: async () => ({ message }) }),
+    notFound: (message) => ({ status: 404, json: async () => ({ message }) }),
+    internalServerError: (message) => ({ status: 500, json: async () => ({ message }) }),
+    createResponse: (body, status, headers) => ({ status, headers, json: async () => body }),
+  };
+
+  beforeEach(async () => {
+    sandbox = sinon.createSandbox();
+    sqsSend = sandbox.stub().resolves();
+    postSlackMessage = sandbox.stub().resolves();
+    // Default: no prior brand-claims audit → not in cooldown.
+    getLatestAudit = sandbox.stub().resolves(null);
+
+    const mod = await esmock('../../../src/controllers/llmo/brand-claims.js', {
+      '@adobe/spacecat-shared-http-utils': httpUtils,
+      '../../../src/utils/slack/base.js': { postSlackMessage },
+    });
+    handleRequestBrandClaims = mod.handleRequestBrandClaims;
+
+    site = {
+      getId: () => 'site-1',
+      getBaseURL: () => 'https://acme.example',
+      getLatestAuditByAuditType: (...args) => getLatestAudit(...args),
+    };
+    context = {
+      log: { info: sinon.stub(), warn: sinon.stub(), error: sinon.stub() },
+      sqs: { sendMessage: sqsSend },
+      env: {
+        AUDIT_JOBS_QUEUE_URL: 'audit-q',
+        SLACK_BRAND_CLAIMS_REQUEST_CHANNEL_ID: 'C123',
+        SLACK_BOT_TOKEN: 'xoxb-1',
+      },
+    };
+  });
+
+  afterEach(() => sandbox.restore());
+
+  it('triggers the brand-claims audit with onDemand and notifies Slack (202)', async () => {
+    const result = await handleRequestBrandClaims(context, site);
+    expect(result.status).to.equal(202);
+    expect(sqsSend).to.have.been.calledOnce;
+    const [queueUrl, msg] = sqsSend.getCall(0).args;
+    expect(queueUrl).to.equal('audit-q');
+    expect(msg.type).to.equal('brand-claims');
+    expect(msg.siteId).to.equal('site-1');
+    expect(msg.onDemand).to.equal(true);
+    expect(msg.auditContext).to.deep.equal({ trigger: 'on-demand-brand-claims' });
+    expect(postSlackMessage).to.have.been.calledOnce;
+  });
+
+  it('returns 500 when AUDIT_JOBS_QUEUE_URL is not configured', async () => {
+    context.env.AUDIT_JOBS_QUEUE_URL = undefined;
+    const result = await handleRequestBrandClaims(context, site);
+    expect(result.status).to.equal(500);
+    expect(sqsSend).to.not.have.been.called;
+  });
+
+  it('returns 500 (not 400) when the SQS enqueue fails', async () => {
+    sqsSend.rejects(new Error('sqs down'));
+    const result = await handleRequestBrandClaims(context, site);
+    expect(result.status).to.equal(500);
+    expect(postSlackMessage).to.not.have.been.called;
+  });
+
+  it('still succeeds when the Slack notification fails (best-effort)', async () => {
+    postSlackMessage.rejects(new Error('slack down'));
+    const result = await handleRequestBrandClaims(context, site);
+    expect(result.status).to.equal(202);
+    expect(sqsSend).to.have.been.calledOnce;
+  });
+
+  it('skips Slack when not configured but still triggers the audit', async () => {
+    context.env.SLACK_BOT_TOKEN = undefined;
+    const result = await handleRequestBrandClaims(context, site);
+    expect(result.status).to.equal(202);
+    expect(sqsSend).to.have.been.calledOnce;
+    expect(postSlackMessage).to.not.have.been.called;
+  });
+
+  it('returns 429 and does not enqueue when the last run is within 7 days', async () => {
+    const ranAt = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(); // 2 days ago
+    getLatestAudit.resolves({ getAuditedAt: () => ranAt });
+    const result = await handleRequestBrandClaims(context, site);
+    expect(result.status).to.equal(429);
+    expect(getLatestAudit).to.have.been.calledWith('brand-claims');
+    expect(result.headers).to.have.property('Retry-After');
+    const body = await result.json();
+    expect(body.siteId).to.equal('site-1');
+    expect(body).to.have.property('availableAt');
+    expect(sqsSend).to.not.have.been.called;
+    expect(postSlackMessage).to.not.have.been.called;
+  });
+
+  it('proceeds (202) when the last run is older than 7 days', async () => {
+    const ranAt = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString(); // 8 days ago
+    getLatestAudit.resolves({ getAuditedAt: () => ranAt });
+    const result = await handleRequestBrandClaims(context, site);
+    expect(result.status).to.equal(202);
+    expect(sqsSend).to.have.been.calledOnce;
+  });
+
+  it('proceeds (202) at the 7-day boundary (cooldown uses strict <)', async () => {
+    // Exactly 7 days ago: elapsed is >= COOLDOWN_MS (never < it), so strict `<`
+    // lets the request through rather than blocking on the boundary.
+    const ranAt = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    getLatestAudit.resolves({ getAuditedAt: () => ranAt });
+    const result = await handleRequestBrandClaims(context, site);
+    expect(result.status).to.equal(202);
+    expect(sqsSend).to.have.been.calledOnce;
+  });
+
+  it('fails open (202) when the cooldown lookup throws', async () => {
+    getLatestAudit.rejects(new Error('db down'));
+    const result = await handleRequestBrandClaims(context, site);
+    expect(result.status).to.equal(202);
+    expect(sqsSend).to.have.been.calledOnce;
+    expect(context.log.warn).to.have.been.called;
+  });
+});

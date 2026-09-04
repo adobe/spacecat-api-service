@@ -106,6 +106,11 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
 
       expect(response.status).to.equal(200);
       expect(mockDataAccess.SiteEnrollment.create).to.have.been.called;
+      // Fast path enables the aso_plg profile imports (incl. top-pages) and persists them.
+      expect(stubs.enableImportsStub).to.have.been.called;
+      const importTypes = stubs.enableImportsStub.firstCall.args[1].map((d) => d.type);
+      expect(importTypes).to.include('top-pages');
+      expect(mockSite.setConfig).to.have.been.called;
       expect(stubs.triggerAuditsStub).to.not.have.been.called;
       expect(preonboardedOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
       expect(preonboardedOnboarding.setCompletedAt).to.have.been.called;
@@ -134,6 +139,25 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       expect(preonboardedOnboarding.setOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
       // Should NOT run other full onboarding steps
       expect(stubs.detectBotBlockerStub).to.not.have.been.called;
+    });
+
+    it('fast-track still completes onboarding when enableImports fails', async () => {
+      const preonboardedOnboarding = createMockOnboarding({
+        status: 'PRE_ONBOARDING',
+        siteId: TEST_SITE_ID,
+        organizationId: TEST_ORG_ID,
+      });
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(preonboardedOnboarding);
+      const mockSiteInOrg = createMockSite({ id: TEST_SITE_ID, orgId: TEST_ORG_ID });
+      mockDataAccess.Site.findById.resolves(mockSiteInOrg);
+      // Supplementary import-enable step throws — must not abort onboarding.
+      stubs.enableImportsStub.rejects(new Error('dynamo throttle'));
+
+      const response = await controller.onboard(buildContext({ domain: TEST_DOMAIN }));
+
+      expect(response.status).to.equal(200);
+      expect(preonboardedOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+      expect(mockLog.warn).to.have.been.calledWithMatch(/Failed to enable imports for site/);
     });
 
     it('fast-tracks preonboarded site with null steps', async () => {
@@ -477,6 +501,125 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       expect(mockDataAccess.SiteEnrollment.create).to.have.been.calledWith(
         sinon.match({ entitlementId: 'ent-1' }),
       );
+    });
+
+    it('re-parents the stranded project into the customer org during full onboarding reassignment', async () => {
+      const INTERNAL_ORG_ID = 'internal-org-999';
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(null);
+
+      const existingSite = createMockSite({
+        id: TEST_SITE_ID, orgId: INTERNAL_ORG_ID, projectId: 'stranded-project-id',
+      });
+      mockDataAccess.Site.findByBaseURL.resolves(existingSite);
+      mockDataAccess.Site.findById.resolves(createMockSite({ orgId: TEST_ORG_ID }));
+
+      // The site's project currently lives in the internal org and is solo → move it.
+      mockProject.getOrganizationId.returns(INTERNAL_ORG_ID);
+      mockDataAccess.Project.findById.resolves(mockProject);
+      mockDataAccess.Site.allByProjectId.resolves([existingSite]);
+
+      stubs.mockEnv.ASO_PLG_EXCLUDED_ORGS = INTERNAL_ORG_ID;
+      stubs.mockEnv.ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS = '';
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const response = await controller.onboard(context);
+
+      expect(response.status).to.equal(200);
+      expect(mockProject.setOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
+      expect(mockProject.save).to.have.been.called;
+      // Solo move keeps the site's projectId — no split.
+      expect(existingSite.setProjectId).to.not.have.been.called;
+    });
+
+    it('splits a shared project so the reassigned site gets its own customer-org project', async () => {
+      const INTERNAL_ORG_ID = 'internal-org-999';
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(null);
+
+      const existingSite = createMockSite({
+        id: TEST_SITE_ID, orgId: INTERNAL_ORG_ID, projectId: 'shared-project-id',
+      });
+      mockDataAccess.Site.findByBaseURL.resolves(existingSite);
+      mockDataAccess.Site.findById.resolves(createMockSite({ orgId: TEST_ORG_ID }));
+
+      mockProject.getOrganizationId.returns(INTERNAL_ORG_ID);
+      mockDataAccess.Project.findById.resolves(mockProject);
+      // A sibling site stays behind on the shared project → split instead of move.
+      mockDataAccess.Site.allByProjectId.resolves([existingSite, createMockSite({ id: 'sibling-site' })]);
+      // No project in the customer org yet → createOrFindProject creates a new one.
+      mockDataAccess.Project.allByOrganizationId.resolves([]);
+      mockDataAccess.Project.create.resolves({
+        getId: () => 'new-customer-project', getProjectName: () => TEST_DOMAIN,
+      });
+
+      stubs.mockEnv.ASO_PLG_EXCLUDED_ORGS = INTERNAL_ORG_ID;
+      stubs.mockEnv.ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS = '';
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const response = await controller.onboard(context);
+
+      expect(response.status).to.equal(200);
+      // Shared project is left in place; the moved site is repointed to a new one.
+      expect(mockProject.setOrganizationId).to.not.have.been.called;
+      expect(existingSite.setProjectId).to.have.been.calledWith('new-customer-project');
+    });
+
+    it('re-parents the preonboarded project into the customer org on the fast path', async () => {
+      const INTERNAL_ORG_ID = 'internal-org-123';
+      const preonboardedOnboarding = createMockOnboarding({
+        status: 'PRE_ONBOARDING', siteId: TEST_SITE_ID, organizationId: INTERNAL_ORG_ID,
+      });
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(preonboardedOnboarding);
+
+      const siteInInternalOrg = createMockSite({
+        id: TEST_SITE_ID, orgId: INTERNAL_ORG_ID, projectId: 'stranded-project-id',
+      });
+      mockDataAccess.Site.findById.resolves(siteInInternalOrg);
+
+      mockProject.getOrganizationId.returns(INTERNAL_ORG_ID);
+      mockDataAccess.Project.findById.resolves(mockProject);
+      mockDataAccess.Site.allByProjectId.resolves([siteInInternalOrg]);
+
+      stubs.mockEnv.ASO_PLG_EXCLUDED_ORGS = INTERNAL_ORG_ID;
+      stubs.mockEnv.ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS = '';
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const response = await controller.onboard(context);
+
+      expect(response.status).to.equal(200);
+      expect(mockProject.setOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
+      expect(mockProject.save).to.have.been.called;
+    });
+
+    it('splits a shared preonboarded project on the fast path', async () => {
+      const INTERNAL_ORG_ID = 'internal-org-123';
+      const preonboardedOnboarding = createMockOnboarding({
+        status: 'PRE_ONBOARDING', siteId: TEST_SITE_ID, organizationId: INTERNAL_ORG_ID,
+      });
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(preonboardedOnboarding);
+
+      const siteInInternalOrg = createMockSite({
+        id: TEST_SITE_ID, orgId: INTERNAL_ORG_ID, projectId: 'shared-project-id',
+      });
+      mockDataAccess.Site.findById.resolves(siteInInternalOrg);
+
+      mockProject.getOrganizationId.returns(INTERNAL_ORG_ID);
+      mockDataAccess.Project.findById.resolves(mockProject);
+      // Sibling stays behind on the shared project → split.
+      mockDataAccess.Site.allByProjectId.resolves([siteInInternalOrg, createMockSite({ id: 'sibling' })]);
+      mockDataAccess.Project.allByOrganizationId.resolves([]);
+      mockDataAccess.Project.create.resolves({
+        getId: () => 'new-customer-project', getProjectName: () => TEST_DOMAIN,
+      });
+
+      stubs.mockEnv.ASO_PLG_EXCLUDED_ORGS = INTERNAL_ORG_ID;
+      stubs.mockEnv.ASO_PLG_INTERNAL_ORG_DEMO_SITE_IDS = '';
+
+      const context = buildContext({ domain: TEST_DOMAIN });
+      const response = await controller.onboard(context);
+
+      expect(response.status).to.equal(200);
+      expect(mockProject.setOrganizationId).to.not.have.been.called;
+      expect(siteInInternalOrg.setProjectId).to.have.been.calledWith('new-customer-project');
     });
   });
 });
