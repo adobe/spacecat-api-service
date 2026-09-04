@@ -182,13 +182,33 @@ describe('PLG onboarding helper dependency fallbacks', () => {
     expect(project).to.equal(createdProject);
   });
 
-  it('enrollPlgConfigHandlers logs warn and swallows when config write fails', async () => {
+  it('enrollPlgConfigHandlers logs warn and swallows when config lookup fails', async () => {
     const { enrollPlgConfigHandlers } = await import(
       '../../../src/controllers/plg/plg-onboarding/site-setup.js'
     );
 
+    const site = { getId: sandbox.stub().returns('site-id') };
+    const context = {
+      dataAccess: {
+        Configuration: { findLatest: sandbox.stub().rejects(new Error('lookup failed')) },
+      },
+      log,
+    };
+
+    await enrollPlgConfigHandlers(site, context);
+
+    expect(log.warn).to.have.been.calledWithMatch(/Failed to enroll site in config handlers/);
+  });
+
+  it('enrollPlgConfigHandlers logs a per-handler warn and still enrolls the rest when one '
+    + 'handler fails', async () => {
+    const { enrollPlgConfigHandlers, PLG_CONFIG_HANDLERS } = await import(
+      '../../../src/controllers/plg/plg-onboarding/site-setup.js'
+    );
+
     const configuration = {
-      enableHandlerForSite: sandbox.stub().throws(new Error('write failed')),
+      enableHandlerForSite: sandbox.stub().throws(new Error('missing dependency')),
+      save: sandbox.stub().resolves(),
     };
     const site = { getId: sandbox.stub().returns('site-id') };
     const context = {
@@ -198,7 +218,10 @@ describe('PLG onboarding helper dependency fallbacks', () => {
 
     await enrollPlgConfigHandlers(site, context);
 
-    expect(log.warn).to.have.been.calledWithMatch(/Failed to enroll site in config handlers/);
+    expect(configuration.enableHandlerForSite).to.have.callCount(PLG_CONFIG_HANDLERS.length);
+    expect(configuration.save).to.have.been.calledOnce;
+    expect(log.warn).to.have.been.calledWithMatch(/Failed to enable handler summit-plg for site site-id/);
+    expect(log.info).to.have.been.calledWithMatch(/Enrolled site site-id in config handlers: $/);
   });
 
   it('revokeAsoSiteEnrollments logs warn when disableSummitPlgHandler fails', async () => {

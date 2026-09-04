@@ -13,19 +13,15 @@
 import { deriveProjectName } from '../../../support/utils.js';
 
 // PLG sites get this fixed set of config handlers turned on (summit-plg notifications +
-// per-opportunity auto-suggest/auto-fix). Failure is logged and swallowed — onboarding
-// continues even if the configuration table is briefly unwritable.
+// the base audit handlers; auto-suggest/auto-fix are no longer part of PLG enrollment).
+// Each handler is enabled independently below — one handler's failure (e.g. an unmet
+// dependency for this site) does not block the others, and whatever succeeds is still
+// persisted.
 export const PLG_CONFIG_HANDLERS = [
   'summit-plg',
-  'top-pages',
+  'scrape-top-pages',
   'broken-backlinks',
-  'broken-backlinks-auto-suggest',
-  'broken-backlinks-auto-fix',
-  'alt-text-auto-fix',
-  'alt-text-auto-suggest-mystique',
   'alt-text',
-  'cwv-auto-fix',
-  'cwv-auto-suggest',
   'cwv',
 ];
 
@@ -50,14 +46,21 @@ export async function createOrFindProject(baseURL, organizationId, context) {
 
 export async function enrollPlgConfigHandlers(site, context) {
   const { dataAccess, log } = context;
+  const siteId = site.getId();
   try {
     const { Configuration } = dataAccess;
     const configuration = await Configuration.findLatest();
+    const enrolled = [];
     PLG_CONFIG_HANDLERS.forEach((handler) => {
-      configuration.enableHandlerForSite(handler, site);
+      try {
+        configuration.enableHandlerForSite(handler, site);
+        enrolled.push(handler);
+      } catch (error) {
+        log.warn(`Failed to enable handler ${handler} for site ${siteId}: ${error.message}`);
+      }
     });
     await configuration.save();
-    log.info(`Enrolled site ${site.getId()} in config handlers: ${PLG_CONFIG_HANDLERS.join(', ')}`);
+    log.info(`Enrolled site ${siteId} in config handlers: ${enrolled.join(', ')}`);
   } catch (error) {
     log.warn(`Failed to enroll site in config handlers: ${error.message}`);
   }
