@@ -392,16 +392,22 @@ describe('handleRequestBrandClaims (on-demand, LLMO-7263)', () => {
 
   afterEach(() => sandbox.restore());
 
-  it('triggers the brand-claims audit with onDemand and notifies Slack (202)', async () => {
+  it('triggers the prerequisite audits then the brand-claims audit (onDemand) and notifies Slack (202)', async () => {
     const result = await handleRequestBrandClaims(context, site);
     expect(result.status).to.equal(202);
-    expect(sqsSend).to.have.been.calledOnce;
-    const [queueUrl, msg] = sqsSend.getCall(0).args;
-    expect(queueUrl).to.equal('audit-q');
-    expect(msg.type).to.equal('brand-claims');
-    expect(msg.siteId).to.equal('site-1');
-    expect(msg.onDemand).to.equal(true);
-    expect(msg.auditContext).to.deep.equal({ trigger: 'on-demand-brand-claims' });
+    // offsite-brand-presence + wikipedia-analysis fire before brand-claims.
+    expect(sqsSend).to.have.been.calledThrice;
+    const types = sqsSend.getCalls().map((c) => c.args[1].type);
+    expect(types).to.deep.equal(['offsite-brand-presence', 'wikipedia-analysis', 'brand-claims']);
+    sqsSend.getCalls().forEach((c) => {
+      expect(c.args[0]).to.equal('audit-q');
+      expect(c.args[1].siteId).to.equal('site-1');
+      expect(c.args[1].auditContext).to.deep.equal({ trigger: 'on-demand-brand-claims' });
+    });
+    // Only the claims trigger carries onDemand; the prerequisite audits are plain triggers.
+    expect(sqsSend.getCall(0).args[1].onDemand).to.equal(undefined);
+    expect(sqsSend.getCall(1).args[1].onDemand).to.equal(undefined);
+    expect(sqsSend.getCall(2).args[1].onDemand).to.equal(true);
     expect(postSlackMessage).to.have.been.calledOnce;
   });
 
@@ -423,14 +429,14 @@ describe('handleRequestBrandClaims (on-demand, LLMO-7263)', () => {
     postSlackMessage.rejects(new Error('slack down'));
     const result = await handleRequestBrandClaims(context, site);
     expect(result.status).to.equal(202);
-    expect(sqsSend).to.have.been.calledOnce;
+    expect(sqsSend).to.have.been.calledThrice;
   });
 
   it('skips Slack when not configured but still triggers the audit', async () => {
     context.env.SLACK_BOT_TOKEN = undefined;
     const result = await handleRequestBrandClaims(context, site);
     expect(result.status).to.equal(202);
-    expect(sqsSend).to.have.been.calledOnce;
+    expect(sqsSend).to.have.been.calledThrice;
     expect(postSlackMessage).to.not.have.been.called;
   });
 
@@ -453,7 +459,7 @@ describe('handleRequestBrandClaims (on-demand, LLMO-7263)', () => {
     getLatestAudit.resolves({ getAuditedAt: () => ranAt });
     const result = await handleRequestBrandClaims(context, site);
     expect(result.status).to.equal(202);
-    expect(sqsSend).to.have.been.calledOnce;
+    expect(sqsSend).to.have.been.calledThrice;
   });
 
   it('proceeds (202) at the 7-day boundary (cooldown uses strict <)', async () => {
@@ -463,14 +469,14 @@ describe('handleRequestBrandClaims (on-demand, LLMO-7263)', () => {
     getLatestAudit.resolves({ getAuditedAt: () => ranAt });
     const result = await handleRequestBrandClaims(context, site);
     expect(result.status).to.equal(202);
-    expect(sqsSend).to.have.been.calledOnce;
+    expect(sqsSend).to.have.been.calledThrice;
   });
 
   it('fails open (202) when the cooldown lookup throws', async () => {
     getLatestAudit.rejects(new Error('db down'));
     const result = await handleRequestBrandClaims(context, site);
     expect(result.status).to.equal(202);
-    expect(sqsSend).to.have.been.calledOnce;
+    expect(sqsSend).to.have.been.calledThrice;
     expect(context.log.warn).to.have.been.called;
   });
 });
