@@ -17,12 +17,13 @@ import { COUNTRY_ENUM, LLM_ENUM } from '@quazar/ai-seo-ts/common/types_pb.js';
 import {
   StatsRequestSchema,
   StatsResponseSchema,
-} from '@quazar/ai-seo-ts/ai-cr/messages_pb.js';
+} from '@quazar/ai-seo-ts/v2/competitor/messages_pb.js';
 import {
   engineToLlm,
   PROTO_FROM_JSON,
   PROTO_TO_JSON,
   resolveCountry,
+  resolveSearchType,
   responseFromGrpcError,
 } from '../../../grpc-utils.js';
 
@@ -31,6 +32,7 @@ export async function handleCompetitorsStats(sp, clients) {
   const country = resolveCountry(sp) || COUNTRY_ENUM.US;
   const engine = engineToLlm(sp.get('engine')) || LLM_ENUM.ALL;
   const competitors = sp.get('competitors')?.split(',') || [];
+  const searchType = resolveSearchType(domain);
 
   let statsRequest;
   try {
@@ -44,6 +46,7 @@ export async function handleCompetitorsStats(sp, clients) {
           domain: competitor,
           name: competitor,
         })),
+        search_type: searchType,
       },
       PROTO_FROM_JSON,
     );
@@ -58,7 +61,7 @@ export async function handleCompetitorsStats(sp, clients) {
   }
 
   try {
-    const statsMessage = await clients.crMetricsClient.stats(statsRequest);
+    const statsMessage = await clients.competitorClient.stats(statsRequest);
     const statsJson = toJson(
       StatsResponseSchema,
       statsMessage,

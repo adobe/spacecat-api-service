@@ -1985,6 +1985,96 @@ llmo-brand-claims:
     security:
       - api_key: [ ]
 
+llmo-brand-claims-request:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  post:
+    tags:
+      - llmo
+    summary: Request an on-demand Brand Claims run
+    description: |
+      Triggers a single, on-demand Brand Claims pipeline run for the site
+      (LLMO-7263), bypassing the persistent weekly cadence. Intended for trial
+      customers who have no Brand Claims data yet and want to generate it once.
+
+      The request enqueues a `brand-claims` audit (which republishes the DRS
+      brand-presence ready-signal with `onDemand: true`); results appear once the
+      downstream claims pipeline completes.
+
+      Rate limited to **once per 7 days per site**: the last `brand-claims` audit's
+      timestamp is the cooldown anchor. A request inside the window returns `429`
+      with the `availableAt` timestamp and a `Retry-After` header. The request body
+      is empty.
+    operationId: requestBrandClaims
+    requestBody:
+      required: false
+      content:
+        application/json:
+          schema:
+            type: object
+            description: No body is required; any payload is ignored.
+    responses:
+      '202':
+        description: Brand Claims run accepted and enqueued
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                siteId:
+                  type: string
+                  format: uuid
+                  description: The site the run was requested for
+                  example: '9ae8877a-bbf3-407d-9adb-d6a72ce3c5e3'
+                message:
+                  type: string
+                  example: 'Brand Claims run requested; results appear once the pipeline completes.'
+              required:
+                - siteId
+                - message
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        description: >
+          Cooldown active — a Brand Claims run was requested for this site within
+          the last 7 days.
+        headers:
+          Retry-After:
+            description: Seconds until a new run can be requested.
+            required: true
+            schema:
+              type: integer
+              example: 432000
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                siteId:
+                  type: string
+                  format: uuid
+                  example: '9ae8877a-bbf3-407d-9adb-d6a72ce3c5e3'
+                availableAt:
+                  type: string
+                  format: date-time
+                  description: ISO 8601 timestamp when a new run can be requested
+                  example: '2026-09-09T12:00:00.000Z'
+                message:
+                  type: string
+                  example: 'A Brand Claims run was requested recently; a new run can be requested once per 7 days.'
+              required:
+                - siteId
+                - availableAt
+                - message
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
 llmo-opportunity-workspace-demo-brand-presence:
   parameters:
     - $ref: './parameters.yaml#/siteId'
@@ -3550,6 +3640,39 @@ site-llmo-cloudfront-permissions:
                           items:
                             - Scoped to All distributions
                             - Add the Edge Optimize origin and routing function.
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+site-llmo-cloudfront-template:
+  get:
+    tags:
+      - llmo
+    summary: Download the CloudFront connector role CloudFormation template
+    description: |
+      Returns the raw CloudFormation connector-role template as a YAML file download. It is the
+      same template the AWS quick-create link uses, for customers who create the stack manually
+      (expired quick-create presign, or no AWS console admin access). Read-only — no cross-account
+      customer AWS calls.
+    operationId: getLlmoCloudFrontTemplate
+    parameters:
+      - $ref: './parameters.yaml#/siteId'
+    responses:
+      '200':
+        description: The CloudFront connector role CloudFormation template YAML.
+        content:
+          text/yaml:
+            schema:
+              type: string
       '400':
         $ref: './responses.yaml#/400'
       '401':
@@ -5339,6 +5462,7 @@ llmo-referral-traffic-filter-dimensions:
       range. Queries `rpc_referral_traffic_filter_dimensions`.
     operationId: getReferralTrafficFilterDimensions
     parameters:
+      - $ref: './parameters.yaml#/referralUrlPathPrefix'
       - name: source
         in: query
         schema: { $ref: './schemas.yaml#/ReferralTrafficSource' }
@@ -5374,6 +5498,7 @@ llmo-referral-traffic-kpis:
       sources; meaningful for `optel` / `ga4`.
     operationId: getReferralTrafficKpis
     parameters:
+      - $ref: './parameters.yaml#/referralUrlPathPrefix'
       - name: source
         in: query
         schema: { $ref: './schemas.yaml#/ReferralTrafficSource' }
@@ -5414,6 +5539,7 @@ llmo-referral-traffic-trend:
       `cja` sources; null for `optel` / `cdn`.
     operationId: getReferralTrafficTrend
     parameters:
+      - $ref: './parameters.yaml#/referralUrlPathPrefix'
       - name: source
         in: query
         schema: { $ref: './schemas.yaml#/ReferralTrafficSource' }
@@ -5453,6 +5579,7 @@ llmo-referral-traffic-by-platform:
       and `orders` are null for `optel` / `cdn` sources.
     operationId: getReferralTrafficByPlatform
     parameters:
+      - $ref: './parameters.yaml#/referralUrlPathPrefix'
       - name: source
         in: query
         schema: { $ref: './schemas.yaml#/ReferralTrafficSource' }
@@ -5489,6 +5616,7 @@ llmo-referral-traffic-by-region:
     description: Queries `rpc_referral_traffic_by_region`. Returns rows ordered by pageviews descending.
     operationId: getReferralTrafficByRegion
     parameters:
+      - $ref: './parameters.yaml#/referralUrlPathPrefix'
       - name: source
         in: query
         schema: { $ref: './schemas.yaml#/ReferralTrafficSource' }
@@ -5525,6 +5653,7 @@ llmo-referral-traffic-by-page-intent:
     description: Queries `rpc_referral_traffic_by_page_intent`. Returns rows ordered by pageviews descending.
     operationId: getReferralTrafficByPageIntent
     parameters:
+      - $ref: './parameters.yaml#/referralUrlPathPrefix'
       - name: source
         in: query
         schema: { $ref: './schemas.yaml#/ReferralTrafficSource' }
@@ -5569,6 +5698,7 @@ llmo-referral-traffic-by-url:
       28-day window.
     operationId: getReferralTrafficByUrl
     parameters:
+      - $ref: './parameters.yaml#/referralUrlPathPrefix'
       - name: source
         in: query
         schema: { $ref: './schemas.yaml#/ReferralTrafficSource' }
@@ -5695,6 +5825,7 @@ llmo-referral-traffic-by-device:
       sources.
     operationId: getReferralTrafficByDevice
     parameters:
+      - $ref: './parameters.yaml#/referralUrlPathPrefix'
       - name: source
         in: query
         schema: { $ref: './schemas.yaml#/ReferralTrafficSource' }
@@ -5741,6 +5872,7 @@ llmo-referral-traffic-business-impact:
       28-day window.
     operationId: getReferralTrafficBusinessImpact
     parameters:
+      - $ref: './parameters.yaml#/referralUrlPathPrefix'
       - name: source
         in: query
         schema: { $ref: './schemas.yaml#/ReferralTrafficBusinessImpactSource' }

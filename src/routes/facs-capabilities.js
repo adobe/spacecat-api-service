@@ -177,6 +177,7 @@ const routeFacsCapabilities = {
     // Admin-only reads
     'GET /organizations', // admin OR S2S readAll
     'GET /organizations/by-product-code/:productCode', // admin OR S2S readAll
+    'GET /organizations/by-access-map-sheet/:productCode', // hasAdminReadAccess only
     'GET /sites', // admin OR S2S readAll
     'GET /sites.csv', // hasAdminReadAccess
     'GET /sites.xlsx', // hasAdminReadAccess
@@ -288,6 +289,7 @@ const routeFacsCapabilities = {
       // Site-level LLMO config
       'POST /sites/:siteId/llmo/config': 'llmo/can_configure',
       'PATCH /sites/:siteId/llmo/config': 'llmo/can_configure',
+      'POST /sites/:siteId/llmo/brand-claims/request': 'llmo/can_configure',
       // Site-level scraper config — a site write surfaced through the
       // generic /config namespace rather than under /llmo/, but
       // configuration nonetheless.
@@ -516,6 +518,7 @@ const routeFacsCapabilities = {
       'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/deploy': 'llmo/can_configure',
       'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/plan': 'llmo/can_configure',
       'GET /sites/:siteId/llmo/cdn-onboard/cloudfront/permissions': 'llmo/can_configure',
+      'GET /sites/:siteId/llmo/cdn-onboard/cloudfront/template': 'llmo/can_configure',
       'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/log-delivery': 'llmo/can_configure',
       'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/log-rescan': 'llmo/can_configure',
       'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/config': 'llmo/can_configure',
@@ -874,6 +877,7 @@ const routeFacsCapabilities = {
       'GET /trial-users/email-preferences': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId': 'llmo/can_view',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/markets': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': 'llmo/can_view',
       // Serenity proxy (Semrush AIO replacement) — reads under brand

@@ -37,7 +37,7 @@ import {
   revokePreviousAsoEnrollmentsForOrg,
 } from './entitlement.js';
 import { updateLaunchDarklyFlags } from './launchdarkly.js';
-import { createOrFindProject, enrollPlgConfigHandlers } from './site-setup.js';
+import { createOrFindProject, enrollPlgConfigHandlers, reparentSiteProjectToOrg } from './site-setup.js';
 import { STATUSES, REVIEW_DECISIONS } from './constants.js';
 
 const PLG_PROFILE_KEY = 'aso_plg';
@@ -376,6 +376,18 @@ async function handlePreonboardedFastPath({
     if (needsOrgReassignment) {
       site = await reassignSiteOrganization(site, customerOrgId);
       log.info(`Reassigned preonboarded site ${site.getId()} from internal org to customer org ${customerOrgId}`);
+    }
+
+    // Re-parent the preonboarding project (created under an internal/demo org) into
+    // the customer org so the site doesn't show as "Unassigned" in the Studio UI.
+    // No-op when the project already lives in the target org. Best-effort: a cosmetic
+    // re-parent must not fail onboarding. Only persists the site on a projectId change.
+    try {
+      if (await reparentSiteProjectToOrg(site, customerOrgId, context)) {
+        await site.save();
+      }
+    } catch (error) {
+      log.warn(`Failed to re-parent project for preonboarded site ${site.getId()}: ${error.message}`);
     }
 
     // Enable the aso_plg profile imports (e.g. top-pages) so their scheduled refreshes run.
@@ -818,8 +830,12 @@ export async function performAsoPlgOnboarding({
       }
     }
 
-    const project = await createOrFindProject(baseURL, organizationId, context);
+    // Only create/link a project when the site has none. A site that already
+    // carries a project (typically a preonboarding project stranded in an
+    // internal/demo org) is re-parented into the customer org after org
+    // reassignment below (Step 9), so creating one here would orphan it.
     if (!site.getProjectId()) {
+      const project = await createOrFindProject(baseURL, organizationId, context);
       site.setProjectId(project.getId());
     }
 
@@ -864,6 +880,19 @@ export async function performAsoPlgOnboarding({
       site = await reassignSiteOrganization(site, organizationId);
       onboarding.setOrganizationId(organizationId);
       steps.siteOrgReassigned = true;
+    }
+
+    // Re-parent the site's project into the resolved customer org so it doesn't
+    // render as "Unassigned" in the org-scoped Studio UI. No-op when the project
+    // already lives in the target org. Best-effort like the other post-reassignment
+    // enrichment steps — a cosmetic re-parent must not fail an otherwise-good
+    // onboarding. Only persists the site when the split branch changed its projectId.
+    try {
+      if (await reparentSiteProjectToOrg(site, organizationId, context)) {
+        await site.save();
+      }
+    } catch (error) {
+      log.warn(`Failed to re-parent project for site ${site.getId()}: ${error.message}`);
     }
 
     // Step 10: Add ASO entitlement, revoke any previous ASO enrollments for this org, update FF.

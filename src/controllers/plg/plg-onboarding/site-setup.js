@@ -42,6 +42,70 @@ export async function createOrFindProject(baseURL, organizationId, context) {
   return newProject;
 }
 
+/**
+ * Re-parents a site's project so it ends up in the same org as the site.
+ *
+ * Onboarding reassigns only `site.organizationId` (see `reassignSiteOrganization`),
+ * which leaves the site's project stranded in the org it was created under during
+ * preonboarding (typically an internal/demo org). The org-scoped Studio UI groups
+ * sites under `/organizations/{orgId}/projects`, so a site whose project lives in a
+ * different org can't be resolved in the customer's scope and renders as
+ * "Unassigned" — even though `site.organizationId` is correct. This is the
+ * automated-onboarding twin of the manual Slack fix in SITES-46200
+ * (`support/slack/actions/set-ims-org-modal.js` `reparentSiteProject`).
+ *
+ * Mutates `site` in place only in the split branch (where it sets a new projectId).
+ * Returns `true` when the site was mutated so the caller can persist it; the solo
+ * branch persists the project itself and the no-op branches return `false`.
+ *
+ * - No project on the site: nothing to do.
+ * - Project already in the target org: nothing to do.
+ * - Site is the only member of its project: move the whole project to the target
+ *   org (the site keeps its projectId).
+ * - Other sites still share the project: split — repoint this site to a project in
+ *   the target org (find-or-create by name) so the siblings keep their project.
+ *
+ * @param {object} site - The site being re-parented (already has its new orgId set).
+ * @param {string} targetOrgId - The Spacecat org id the site is moving to.
+ * @param {object} context - Lambda context (provides dataAccess + log).
+ * @returns {Promise<boolean>} `true` if `site` was mutated and needs a `save()`.
+ */
+export async function reparentSiteProjectToOrg(site, targetOrgId, context) {
+  const { dataAccess, log } = context;
+  const { Project, Site } = dataAccess;
+
+  const projectId = site.getProjectId();
+  if (!projectId) {
+    return false;
+  }
+
+  const project = await Project.findById(projectId);
+  if (!project) {
+    log.warn(`plg-onboarding: site ${site.getId()} references missing project ${projectId}; skipping project re-parent`);
+    return false;
+  }
+
+  if (project.getOrganizationId() === targetOrgId) {
+    return false;
+  }
+
+  const sitesOnProject = await Site.allByProjectId(projectId);
+  if (sitesOnProject.length <= 1) {
+    // Solo site on the project — move the whole project to the target org.
+    project.setOrganizationId(targetOrgId);
+    await project.save();
+    log.info(`plg-onboarding: moved project ${project.getId()} to org ${targetOrgId} so site ${site.getId()} stays resolvable in the site picker`);
+    return false;
+  }
+
+  // Project is shared with sites staying behind — split it so the moved site
+  // gets a project in the target org and the siblings keep theirs.
+  const newProject = await createOrFindProject(site.getBaseURL(), targetOrgId, context);
+  site.setProjectId(newProject.getId());
+  log.info(`plg-onboarding: split site ${site.getId()} onto project ${newProject.getId()} in org ${targetOrgId}`);
+  return true;
+}
+
 export async function enrollPlgConfigHandlers(site, context) {
   const { dataAccess, log } = context;
   const siteId = site.getId();
