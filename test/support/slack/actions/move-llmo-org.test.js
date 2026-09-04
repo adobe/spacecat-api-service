@@ -114,6 +114,8 @@ describe('move-llmo-org action', () => {
     };
     body = {
       user: { id: 'U123' },
+      channel: { id: 'C1' },
+      message: { ts: 'M1' },
       actions: [{
         value: JSON.stringify({
           baseURL: 'https://acme.com',
@@ -123,7 +125,6 @@ describe('move-llmo-org action', () => {
           imsOrgId: IMS_ORG,
           channelId: 'C1',
           threadTs: 'T1',
-          messageTs: 'M1',
         }),
       }],
     };
@@ -352,5 +353,80 @@ describe('move-llmo-org action', () => {
   it('carries the entitlement gotcha into the result message', async () => {
     await run();
     expect(lastUpdateText()).to.contain('Entitlements are not moved');
+  });
+
+  describe('message targeting and Slack failures', () => {
+    it('targets the message Bolt reports, not the timestamp in the button payload', async () => {
+      // A button posted before this fix carries a stale 'placeholder' timestamp. Bolt's
+      // own body is authoritative and keeps that button working.
+      const payload = JSON.parse(body.actions[0].value);
+      body.actions[0].value = JSON.stringify({
+        ...payload, messageTs: 'placeholder', channelId: 'stale-channel',
+      });
+      body.message.ts = 'REAL_TS';
+      body.channel.id = 'REAL_CHANNEL';
+
+      await run();
+
+      expect(client.chat.update).to.always.have.been.calledWithMatch({
+        channel: 'REAL_CHANNEL',
+        ts: 'REAL_TS',
+      });
+    });
+
+    it('routes the new-message fallback to Bolt\'s channel, not the stale payload one', async () => {
+      // The fallback has to agree with chat.update about where this button lives, or a
+      // failed update reports the move's outcome into a different channel entirely. The
+      // same say is handed to reparentSiteProject and createEntitlementAndEnrollment.
+      const payload = JSON.parse(body.actions[0].value);
+      body.actions[0].value = JSON.stringify({ ...payload, channelId: 'stale-channel' });
+      body.channel.id = 'REAL_CHANNEL';
+      client.chat.update.rejects(new Error('An API error occurred: message_not_found'));
+
+      await run();
+
+      expect(client.chat.postMessage).to.have.been.called;
+      expect(client.chat.postMessage).to.always.have.been.calledWithMatch({
+        channel: 'REAL_CHANNEL',
+      });
+      expect(client.chat.postMessage).to.not.have.been.calledWithMatch({
+        channel: 'stale-channel',
+      });
+    });
+
+    it('still performs the move when the progress update fails', async () => {
+      // Regression: the ":hourglass:" update sits immediately before executeOrgMove, so a
+      // Slack failure there used to abort the handler and silently skip the whole move.
+      client.chat.update.rejects(new Error('An API error occurred: message_not_found'));
+
+      await run();
+
+      expect(rpcStub).to.have.been.calledWith('wrpc_move_brandalf_org', sinon.match.object);
+      expect(createEntitlementAndEnrollmentStub).to.have.been.called;
+    });
+
+    it('reports via a new message when the message can no longer be updated', async () => {
+      client.chat.update.rejects(new Error('An API error occurred: message_not_found'));
+
+      await run();
+
+      expect(lambdaContext.log.warn).to.have.been.called;
+      expect(client.chat.postMessage).to.have.been.called;
+      const posted = client.chat.postMessage.getCalls()
+        .map((c) => c.args[0].text).join('\n');
+      expect(posted).to.contain('Moved LLMO organization');
+    });
+
+    it('never throws out of the handler when Slack is unreachable entirely', async () => {
+      client.chat.update.rejects(new Error('message_not_found'));
+      client.chat.postMessage.rejects(new Error('channel_not_found'));
+      siteStub.findById.rejects(new Error('db down'));
+
+      // Must resolve: an unhandled rejection here surfaces in Bolt as a bare stack trace
+      // with no operator-facing message at all.
+      await run();
+
+      expect(lambdaContext.log.error).to.have.been.called;
+    });
   });
 });

@@ -27,9 +27,8 @@ import {
 const PHRASES = ['move llmo org'];
 
 /**
- * Builds the confirmation message blocks. Kept in one place so the initial post and the
- * follow-up update (which injects the message's own timestamp into the button payload)
- * cannot drift apart.
+ * Builds the confirmation message blocks: the rendered preview plus the "Confirm Move"
+ * button that carries the move's parameters through to the action handler.
  *
  * @param {string} text - The rendered preview.
  * @param {object} payload - The button's JSON payload.
@@ -148,28 +147,25 @@ function MoveLlmoOrgCommand(context) {
       }
 
       const text = buildPreviewMessage(preview, baseURL);
-      const basePayload = {
-        baseURL,
-        siteId: site.getId(),
-        sourceOrgId,
-        destOrgId,
-        imsOrgId,
-        channelId,
-        threadTs,
-      };
 
-      const posted = await client.chat.postMessage({
+      // The confirm handler reads the message timestamp from Bolt's action body, so the
+      // payload doesn't have to carry it and this stays a single API call. An earlier
+      // version posted with a 'placeholder' timestamp and patched it in with a follow-up
+      // chat.update; when that second call failed the button was left unusable, and every
+      // chat.update in the confirm handler died with message_not_found.
+      await client.chat.postMessage({
         channel: channelId,
         thread_ts: threadTs,
         text: `Ready to move LLMO org for ${baseURL}`,
-        blocks: buildConfirmBlocks(text, { ...basePayload, messageTs: 'placeholder' }),
-      });
-
-      await client.chat.update({
-        channel: channelId,
-        ts: posted.ts,
-        text: `Ready to move LLMO org for ${baseURL}`,
-        blocks: buildConfirmBlocks(text, { ...basePayload, messageTs: posted.ts }),
+        blocks: buildConfirmBlocks(text, {
+          baseURL,
+          siteId: site.getId(),
+          sourceOrgId,
+          destOrgId,
+          imsOrgId,
+          channelId,
+          threadTs,
+        }),
       });
     } catch (error) {
       log.error(error);
