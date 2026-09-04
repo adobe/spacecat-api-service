@@ -12,10 +12,12 @@
 
 import { deriveProjectName } from '../../../support/utils.js';
 
-// Config handlers turned on for every PLG site. Failures are logged and swallowed —
-// onboarding continues even if a handler can't be enabled.
+// Config handlers turned on for every PLG site. scrape-top-pages must precede
+// broken-backlinks (its dependency). Failures are logged and swallowed — onboarding
+// continues even if a handler can't be enabled.
 export const PLG_CONFIG_HANDLERS = [
   'summit-plg',
+  'scrape-top-pages',
   'broken-backlinks',
   'alt-text',
   'cwv',
