@@ -1,3 +1,10 @@
+## [1.792.1](https://github.com/adobe/spacecat-api-service/compare/v1.792.0...v1.792.1) (2026-09-04)
+
+
+### Bug Fixes
+
+* **serenity:** exclude org parent workspace from sub-workspace adoption candidates ([#3198](https://github.com/adobe/spacecat-api-service/issues/3198)) ([4b3e261](https://github.com/adobe/spacecat-api-service/commit/4b3e2613fa8ca3cd66e3e6de87a1f0367fd51a34)), closes [Hi#level](https://github.com/Hi/issues/level)
+
 # [1.792.0](https://github.com/adobe/spacecat-api-service/compare/v1.791.1...v1.792.0) (2026-09-03)
 
 
