@@ -180,14 +180,17 @@ describe('prompt-suggestion-schedules support module', () => {
       expect(log.warn).to.have.been.calledWithMatch(/no entitlement found/);
     });
 
-    it('fails safe to false (with a warning) when the lookup throws', async () => {
+    it('fails safe to false (with an ERROR log, not a warning) when the lookup throws', async () => {
+      // .error, not .warn: a thrown lookup failure is a real operational problem (unlike
+      // the "no entitlement found" branch above, a normal state), and this result also
+      // decides a customer-visible schedule's tier param elsewhere -- must be alertable.
       tierClientStub = {
         checkValidEntitlement: sandbox.stub().rejects(new Error('tier service down')),
       };
       const log = buildLog();
       const result = await module.isPayingLlmoSite(buildSite(), { log });
       expect(result).to.equal(false);
-      expect(log.warn).to.have.been.calledWithMatch(/tier service down/);
+      expect(log.error).to.have.been.calledWithMatch(/tier service down/);
     });
   });
 });
