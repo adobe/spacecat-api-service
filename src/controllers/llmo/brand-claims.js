@@ -27,6 +27,12 @@ const WEEK_RE = /^\d{4}-W\d{2}$/;
 // bypassable). Kept in step with project-elmo-ui's BRAND_CLAIMS_REQUEST_COOLDOWN_MS.
 const BRAND_CLAIMS_AUDIT_TYPE = 'brand-claims';
 const BRAND_CLAIMS_REQUEST_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
+// Prerequisite audits fired before an on-demand claims run (LLMO-7263) so their
+// fresh outputs (off-site brand presence, Wikipedia facts) are available to
+// mystique's claims extraction. They share the audit queue with the claims
+// trigger; the audit-worker delays the claims ready-signal (onDemand) to let
+// these land first.
+const BRAND_CLAIMS_PREREQUISITE_AUDIT_TYPES = ['offsite-brand-presence', 'wikipedia-analysis'];
 // `model` is interpolated into the S3 key, so constrain it to alphanumerics,
 // dots, hyphens, underscores — no `/` — to prevent using HeadObject as an
 // object-existence probe across arbitrary key paths.
@@ -227,6 +233,17 @@ export async function handleRequestBrandClaims(context, site) {
   }
 
   try {
+    // Fire the prerequisite audits first so mystique has fresh inputs when it runs
+    // claims; the audit-worker delays the claims ready-signal (onDemand) to let these
+    // complete. All three land on the same audit queue.
+    for (const type of BRAND_CLAIMS_PREREQUISITE_AUDIT_TYPES) {
+      // eslint-disable-next-line no-await-in-loop
+      await sqs.sendMessage(queueUrl, {
+        type,
+        siteId: site.getId(),
+        auditContext: { trigger: 'on-demand-brand-claims' },
+      });
+    }
     await sqs.sendMessage(queueUrl, {
       type: 'brand-claims',
       siteId: site.getId(),
@@ -239,7 +256,7 @@ export async function handleRequestBrandClaims(context, site) {
     log.error(`Brand Claims on-demand: failed to enqueue audit for site ${site.getId()}: ${sqsError.message}`);
     return internalServerError('Brand Claims on-demand is temporarily unavailable');
   }
-  log.info(`Brand Claims on-demand: triggered brand-claims audit for site ${site.getId()}`);
+  log.info(`Brand Claims on-demand: triggered ${BRAND_CLAIMS_PREREQUISITE_AUDIT_TYPES.join(', ')} + brand-claims audits for site ${site.getId()}`);
 
   // Dedicated channel for on-demand Brand Claims request alerts (LLMO-7263),
   // set in Vault, so these can be routed/muted independently of other LLMO alerts.
