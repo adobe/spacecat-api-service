@@ -181,7 +181,9 @@ async function findAdoptableFamilyMatch(transport, parentWorkspaceId, title, log
   // gateway), so it must be excluded before any candidate logic runs — otherwise a brand
   // whose name matches the parent workspace's own title reaches the adoption candidate
   // set and assertNotParent() 409s AFTER the create attempt, instead of a fresh child
-  // ever being considered (LLMO-7349).
+  // ever being considered (LLMO-7349). No hasText(w?.id) guard here (unlike
+  // enforceLinkedGuard's mirror-image filter below): an id-less entry still falls out of
+  // the title/status check right after, so the guard would be redundant, not protective.
   const children = familyItems(family).filter((w) => w?.id !== parentWorkspaceId);
   const sameTitle = children.filter((w) => w?.title === title && w?.status === 'created');
 

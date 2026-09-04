@@ -714,6 +714,7 @@ describe('workspace-lifecycle', () => {
 
         await expect(ensureWithUnclaimedFamily(transport, brand))
           .to.be.rejectedWith(/no family match to adopt/);
+        expect(listWorkspaceFamily).to.have.been.calledTwice;
         expect(transport.listProjects).to.not.have.been.called;
         expect(brand.setSemrushSubWorkspaceId).to.not.have.been.called;
       });
