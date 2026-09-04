@@ -46,6 +46,10 @@ jobs:
   # fails, it runs anyway rather than skip -- this is a required blocking
   # check, and defaulting an inconclusive lookup to "skip" risks reproducing
   # the exact bug being fixed.
+  #
+  # No concurrency group on this job: the push and pull_request runs are meant
+  # to complete independently (that's the whole fix), so nothing here should
+  # cancel either one.
   type-check:
     if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref != 'refs/heads/main')
     runs-on: ubuntu-latest
@@ -65,14 +69,19 @@ jobs:
           set -euo pipefail
           PR_COUNT=$(gh pr list --head "$REF_NAME" --state open --repo "$REPO" \
             --json number --jq 'length') || true
-          if [ "$PR_COUNT" = "0" ]; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "::notice::No open PR found for the current branch — skipping type-check on this push"
+          # Match strictly-numeric output, not just non-empty: unexpected stdout
+          # ahead of a `gh` failure (e.g. a CLI notice) would otherwise slip past
+          # a bare `-z` check and skip the warning below.
+          if [[ "$PR_COUNT" =~ ^[0-9]+$ ]]; then
+            if [ "$PR_COUNT" = "0" ]; then
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              echo "::notice::No open PR found for the current branch — skipping type-check on this push"
+            else
+              echo "skip=false" >> "$GITHUB_OUTPUT"
+            fi
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
-            if [ -z "$PR_COUNT" ]; then
-              echo "::warning::Could not determine whether an open PR exists for the current branch (gh pr list failed, see log above) — running type-check anyway rather than risk skipping the only completed run for this commit"
-            fi
+            echo "::warning::Could not determine whether an open PR exists for the current branch (gh pr list failed, see log above) — running type-check anyway rather than risk skipping the only completed run for this commit"
           fi
 
       # steps.pr-check.outputs.skip is an empty string (not 'false') on pull_request
