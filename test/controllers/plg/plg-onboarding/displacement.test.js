@@ -106,6 +106,11 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
 
       expect(response.status).to.equal(200);
       expect(mockDataAccess.SiteEnrollment.create).to.have.been.called;
+      // Fast path enables the aso_plg profile imports (incl. top-pages) and persists them.
+      expect(stubs.enableImportsStub).to.have.been.called;
+      const importTypes = stubs.enableImportsStub.firstCall.args[1].map((d) => d.type);
+      expect(importTypes).to.include('top-pages');
+      expect(mockSite.setConfig).to.have.been.called;
       expect(stubs.triggerAuditsStub).to.not.have.been.called;
       expect(preonboardedOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
       expect(preonboardedOnboarding.setCompletedAt).to.have.been.called;

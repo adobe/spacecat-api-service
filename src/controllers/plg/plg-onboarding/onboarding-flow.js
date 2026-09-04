@@ -316,7 +316,7 @@ async function handlePreonboardedFastPath({
   onboarding, domain, imsOrgId,
 }, context) {
   const {
-    createOrFindOrganization, dataAccess, env, log,
+    createOrFindOrganization, enableImports, loadProfileConfig, Config, dataAccess, env, log,
   } = context;
   const { Site, Organization } = dataAccess;
 
@@ -377,6 +377,16 @@ async function handlePreonboardedFastPath({
       site = await reassignSiteOrganization(site, customerOrgId);
       log.info(`Reassigned preonboarded site ${site.getId()} from internal org to customer org ${customerOrgId}`);
     }
+
+    // Enable the aso_plg profile imports (e.g. top-pages) so their scheduled refreshes run.
+    // The full onboarding path does this via enableImports; the fast path previously skipped it,
+    // leaving preonboarded sites without the imports that feed audits like scrape-top-pages.
+    const profile = loadProfileConfig(PLG_PROFILE_KEY);
+    const siteConfig = site.getConfig();
+    const importDefs = Object.keys(profile.imports || {}).map((type) => ({ type }));
+    await enableImports(siteConfig, importDefs, log);
+    site.setConfig(Config.toDynamoItem(siteConfig));
+    await site.save();
 
     const { entitlement } = await ensureAsoEntitlement(site, organization, context);
     await revokePreviousAsoEnrollmentsForOrg(site, organization, entitlement, context);
