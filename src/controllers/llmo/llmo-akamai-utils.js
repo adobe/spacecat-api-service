@@ -785,8 +785,12 @@ export function redactPapiErrors(errors, extraSecrets = [], max = 25) {
  * deploy, so it's a per-deploy fingerprint: deploy-status compares it between a version and its
  * base to tell "this deploy's fresh write landed" (keys differ) from "the version is just an
  * unwritten clone inheriting the previous onboard's rule" (keys identical).
- * NEVER return this value to a client — it's a secret (redactSecrets scrubs it from responses); it
- * is only compared server-side. Walks the whole tree for the first matching header.
+ * This value IS a secret (a Bot Manager/WAF allowlist key) and is redacted from every OTHER
+ * response that leaves the server (redactSecrets, redactPapiErrors). The one exception:
+ * deploy-status returns it directly, and ONLY when it has confirmed (via the freshWrite compare
+ * above) that the key belongs to THIS deploy — never a stale/inherited one. Do not return this
+ * value from any other call site without the same freshWrite guard. Walks the whole tree for the
+ * first matching header.
  * @param {object} tree - a PAPI rule tree ({ rules: {...} })
  * @returns {string|null} the fetcher-key header value, or null when the tree has no managed rule
  */
