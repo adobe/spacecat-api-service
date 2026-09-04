@@ -374,6 +374,26 @@ describe('move-llmo-org action', () => {
       });
     });
 
+    it('routes the new-message fallback to Bolt\'s channel, not the stale payload one', async () => {
+      // The fallback has to agree with chat.update about where this button lives, or a
+      // failed update reports the move's outcome into a different channel entirely. The
+      // same say is handed to reparentSiteProject and createEntitlementAndEnrollment.
+      const payload = JSON.parse(body.actions[0].value);
+      body.actions[0].value = JSON.stringify({ ...payload, channelId: 'stale-channel' });
+      body.channel.id = 'REAL_CHANNEL';
+      client.chat.update.rejects(new Error('An API error occurred: message_not_found'));
+
+      await run();
+
+      expect(client.chat.postMessage).to.have.been.called;
+      expect(client.chat.postMessage).to.always.have.been.calledWithMatch({
+        channel: 'REAL_CHANNEL',
+      });
+      expect(client.chat.postMessage).to.not.have.been.calledWithMatch({
+        channel: 'stale-channel',
+      });
+    });
+
     it('still performs the move when the progress update fails', async () => {
       // Regression: the ":hourglass:" update sits immediately before executeOrgMove, so a
       // Slack failure there used to abort the handler and silently skip the whole move.

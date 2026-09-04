@@ -46,17 +46,18 @@ export function openMoveLlmoOrgModal(lambdaContext) {
     await ack();
 
     const {
-      baseURL, siteId, sourceOrgId, destOrgId, imsOrgId, channelId, threadTs, messageTs,
+      baseURL, siteId, sourceOrgId, destOrgId, imsOrgId, channelId, threadTs,
     } = JSON.parse(body.actions[0].value);
-    const say = createSayFunction(client, channelId, threadTs);
     const userId = body?.user?.id || 'unknown';
 
-    // Bolt already tells us which message the button lives in, so use that in preference
-    // to the timestamp carried in the button payload. The payload copy is only correct if
-    // the command's follow-up chat.update landed; when it didn't, the payload still reads
-    // 'placeholder' and every update below fails with message_not_found.
+    // Bolt's action body is authoritative for where this button actually lives, so prefer
+    // it over the channel carried in the payload. Everything that talks to Slack from here
+    // on - including the say passed down to reparentSiteProject and
+    // createEntitlementAndEnrollment - is bound to it, so a stale payload cannot misroute
+    // part of the output to another channel.
     const targetChannel = body?.channel?.id || channelId;
-    const targetTs = body?.message?.ts || messageTs;
+    const targetTs = body?.message?.ts;
+    const say = createSayFunction(client, targetChannel, threadTs);
 
     // Reporting progress must never decide whether the move runs. This previously threw
     // straight out of the handler - the first call sits immediately before executeOrgMove,
