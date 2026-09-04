@@ -1,3 +1,10 @@
+## [1.793.3](https://github.com/adobe/spacecat-api-service/compare/v1.793.2...v1.793.3) (2026-09-04)
+
+
+### Bug Fixes
+
+* make `move llmo org` resilient to slack message update failures ([#3205](https://github.com/adobe/spacecat-api-service/issues/3205)) ([5d8ef48](https://github.com/adobe/spacecat-api-service/commit/5d8ef48fbc4a354e5e755b92f0fbdb01bd6bbc2b))
+
 ## [1.793.2](https://github.com/adobe/spacecat-api-service/compare/v1.793.1...v1.793.2) (2026-09-04)
 
 
