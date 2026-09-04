@@ -30,6 +30,9 @@ import {
   isValidUrl,
   isWithinSiteScope,
   isPathPatternWithinSiteScope,
+  tracingFetch,
+  determineAEMCSPageId,
+  prependSchema,
 } from '@adobe/spacecat-shared-utils';
 
 import {
@@ -285,6 +288,116 @@ async function postPlgSuggestionSkipAlert(site, opportunity, suggestion, context
     });
   }
 }
+
+const AEM_CONTENT_API_BASE = '/adobe/experimental/aspm-expires-20251231/pages';
+
+// A capi-key ("0:1:0") is a colon-joined array-index path into the page content
+// tree; JSON Patch needs the same path as "/items/0/items/1/items/0".
+const capiKeyToPath = (capiKey) => `/items/${capiKey.split(':').join('/items/')}`;
+
+const parentPathAndIndex = (path) => {
+  const at = path.lastIndexOf('/');
+  return { parentPath: path.slice(0, at), index: Number(path.slice(at + 1)) };
+};
+
+const toSlug = (text) => (text || '')
+  .toLowerCase()
+  .replace(/[^0-9a-z]+/g, '-')
+  .replace(/^-+|-+$/g, '');
+
+/**
+ * Best-effort resolution of a CSS-like selector (a bare tag, e.g. "h1", or
+ * "tag#id") against an AEM page content tree. Only matches title/heading
+ * components — the only element kind these suggestions currently target.
+ * Returns null (never guesses a fallback position) when the selector doesn't
+ * parse or nothing matches, so the caller can report "not applicable" instead
+ * of writing to the wrong place — e.g. a selector naming a script-injected
+ * element that has no corresponding content-tree node.
+ * @param {object} root - The page content tree root.
+ * @param {string} selector - A "tag" or "tag#id" selector.
+ * @returns {object|null} The matched content-tree node, or null.
+ */
+const findNodeBySelector = (root, selector) => {
+  const match = /^([a-z0-9]+)(?:#([a-z0-9-]+))?$/i.exec((selector || '').trim());
+  if (!match) return null;
+  const [, tag, id] = match;
+
+  let found = null;
+  const walk = (node) => {
+    if (found || !node) return;
+    if (node.componentType?.includes('/title/')) {
+      const nodeTag = (node.properties?.titleType || 'h1').toLowerCase();
+      const nodeId = toSlug(node.properties?.title);
+      if (nodeTag === tag.toLowerCase() && (!id || nodeId === id.toLowerCase())) {
+        found = node;
+        return;
+      }
+    }
+    (node.items || []).forEach(walk);
+  };
+  walk(root);
+  return found;
+};
+
+/**
+ * Builds the single JSON Patch operation for a suggestion's transformRules
+ * action against its resolved content-tree node.
+ *
+ * Two distinct shapes of transformRules, both seen in real suggestion data:
+ *  - No `tag`: `selector` names the node being acted on directly (e.g. Summarization's
+ *    "insertAfter h1" — the h1 already exists, the new text goes next to it).
+ *  - `tag` present (e.g. a "missing heading" fix): `selector` only names an anchor
+ *    node that already exists; the thing that doesn't exist yet is a NEW element of
+ *    the given `tag`, created relative to the anchor. `replace` with a `tag` replaces
+ *    the anchor's own heading-ness (titleType + text) rather than a generic text prop.
+ *
+ * @param {object} target - The anchor/target node returned by {@link findNodeBySelector}.
+ * @param {string} action - One of insertAfter | insertBefore | appendChild | replace.
+ * @param {string|undefined} tag - Heading tag (e.g. "h1") when a new element must be
+ * created, e.g. for a "missing heading" fix. Undefined when `selector` already names
+ * an existing element to act on directly.
+ * @param {string} content - The suggestion's content: HTML markup when `tag` is
+ * unset (goes into a text component), plain text when `tag` is set (goes into a
+ * title component's `title` property, which is not HTML).
+ * @returns {Array<object>|null} A JSON Patch document, or null for an unknown action.
+ */
+const buildJsonPatch = (target, action, tag, content) => {
+  const path = capiKeyToPath(target['capi-key']);
+  const newNode = tag
+    ? {
+      componentType: 'core/franklin/components/title/v1/title',
+      properties: { titleType: tag, title: content },
+      items: [],
+    }
+    : {
+      componentType: 'core/franklin/components/text/v1/text',
+      properties: { text: content },
+      items: [],
+    };
+
+  switch (action) {
+    case 'insertAfter': {
+      const { parentPath, index } = parentPathAndIndex(path);
+      return [{ op: 'add', path: `${parentPath}/${index + 1}`, value: newNode }];
+    }
+    case 'insertBefore':
+      return [{ op: 'add', path, value: newNode }];
+    case 'appendChild':
+      return [{ op: 'add', path: `${path}/items/-`, value: newNode }];
+    case 'replace': {
+      if (tag) {
+        return [
+          { op: 'replace', path: `${path}/properties/titleType`, value: tag },
+          { op: 'replace', path: `${path}/properties/title`, value: content },
+        ];
+      }
+      const propName = target.componentType?.includes('/title/') ? 'title' : 'text';
+      return [{ op: 'replace', path: `${path}/properties/${propName}`, value: content }];
+    }
+    default:
+      return null;
+  }
+};
 
 /**
  * Suggestions controller.
@@ -2733,6 +2846,195 @@ function SuggestionsController(ctx, sqs, env) {
   };
 
   /**
+   * Applies suggestions' transformRules directly to an AEM page's own content tree
+   * (JCR/xwalk), editing the human-facing page — unlike deploySuggestionToEdge,
+   * which only ever writes a bot-targeted overlay at the Tokowaka CDN edge and
+   * never touches AEM.
+   *
+   * For each suggestion: reads the page content tree for its ETag, resolves
+   * transformRules.selector against it (see findNodeBySelector), builds the JSON
+   * Patch for transformRules.action (see buildJsonPatch), and PATCHes it back.
+   * Forwards the caller's own bearer token to AEM — the same pattern the
+   * `content-api-access` autofix-check probe already uses against this API.
+   *
+   * @param {Object} context of the request
+   * @returns {Promise<Response>} Per-suggestion apply results (207 multi-status)
+   */
+  const applySuggestionToAem = async (context) => {
+    const siteId = context.params?.siteId;
+    const opportunityId = context.params?.opportunityId;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+    if (!isValidUUID(opportunityId)) {
+      return badRequest('Opportunity ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('User does not belong to the organization');
+    }
+    if (!accessControlUtil.isLLMOAdministrator()) {
+      return forbidden('Only LLMO administrators can apply suggestions to AEM');
+    }
+
+    const opportunity = await Opportunity.findById(opportunityId);
+    if (!opportunity || opportunity.getSiteId() !== siteId) {
+      return notFound('Opportunity not found');
+    }
+
+    if (!isNonEmptyObject(context.data)) {
+      return badRequest('No data provided');
+    }
+    const { suggestionIds: rawSuggestionIds } = context.data;
+    if (!isArray(rawSuggestionIds) || rawSuggestionIds.length === 0) {
+      return badRequest('Request body must contain a non-empty array of suggestionIds');
+    }
+
+    if (site.getDeliveryType() !== 'aem_cs') {
+      return badRequest('Applying suggestions directly to AEM is only supported for AEM CS sites');
+    }
+    const deliveryConfig = site.getDeliveryConfig();
+    const authorURL = deliveryConfig?.authorURL;
+    if (!authorURL) {
+      return badRequest('Site has no authorURL configured');
+    }
+
+    const authorization = context.pathInfo?.headers?.authorization;
+    if (!authorization) {
+      return badRequest('Missing authorization header');
+    }
+
+    const suggestionIds = [...new Set(rawSuggestionIds)];
+    const allSuggestions = await Suggestion.allByOpportunityId(opportunityId);
+    const suggestionById = new Map(allSuggestions.map((s) => [s.getId(), s]));
+
+    const results = [];
+
+    for (let i = 0; i < suggestionIds.length; i += 1) {
+      const suggestionId = suggestionIds[i];
+      const suggestion = suggestionById.get(suggestionId);
+
+      if (!suggestion) {
+        results.push({
+          uuid: suggestionId, index: i, statusCode: 404, message: 'Suggestion not found',
+        });
+        continue; // eslint-disable-line no-continue
+      }
+
+      const data = suggestion.getData() || {};
+      const { selector, action, tag } = data.transformRules || {};
+      // `recommendedAction` is the content field for a "create the missing element"
+      // fix (e.g. a missing heading); `summarizationText` for a Summarization fix.
+      const rawContent = data.summarizationText || data.recommendedAction;
+      // A `tag` means we're creating a heading: its `title` property is plain text,
+      // not HTML. Otherwise the content lands in a text component's HTML property.
+      const content = hasText(rawContent) && tag
+        ? rawContent.replace(/\*\*(.+?)\*\*/g, '$1')
+        : hasText(rawContent)
+          ? `<p>${rawContent.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')}</p>`
+          : undefined;
+
+      if (!hasText(selector) || !hasText(action) || !hasText(content)) {
+        results.push({
+          uuid: suggestionId,
+          index: i,
+          statusCode: 422,
+          message: 'Suggestion is missing transformRules or content to apply',
+        });
+        continue; // eslint-disable-line no-continue
+      }
+
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        const pageId = await determineAEMCSPageId(
+          prependSchema(data.url),
+          authorURL,
+          authorization,
+          deliveryConfig?.preferContentApi ?? false,
+          context.log,
+        );
+        if (!pageId) {
+          results.push({
+            uuid: suggestionId, index: i, statusCode: 404, message: `Could not resolve AEM page for URL: ${data.url}`,
+          });
+          continue; // eslint-disable-line no-continue
+        }
+        const contentUrl = `${authorURL}${AEM_CONTENT_API_BASE}/${pageId}/content`;
+
+        // eslint-disable-next-line no-await-in-loop
+        const current = await tracingFetch(contentUrl, { headers: { Authorization: authorization } });
+        if (!current.ok) {
+          results.push({
+            uuid: suggestionId, index: i, statusCode: current.status, message: 'Failed to read page content',
+          });
+          continue; // eslint-disable-line no-continue
+        }
+        // eslint-disable-next-line no-await-in-loop
+        const tree = await current.json();
+        const etag = current.headers.get('etag');
+
+        const target = findNodeBySelector(tree, selector);
+        if (!target) {
+          results.push({
+            uuid: suggestionId,
+            index: i,
+            statusCode: 404,
+            message: `Selector not found in page content tree: ${selector}`,
+          });
+          continue; // eslint-disable-line no-continue
+        }
+
+        const patch = buildJsonPatch(target, action, tag, content);
+        if (!patch) {
+          results.push({
+            uuid: suggestionId, index: i, statusCode: 422, message: `Unsupported transformRules action: ${action}`,
+          });
+          continue; // eslint-disable-line no-continue
+        }
+
+        // eslint-disable-next-line no-await-in-loop
+        const patchRes = await tracingFetch(contentUrl, {
+          method: 'PATCH',
+          headers: {
+            Authorization: authorization,
+            'Content-Type': 'application/json-patch+json',
+            'If-Match': etag,
+          },
+          body: JSON.stringify(patch),
+        });
+
+        if (!patchRes.ok) {
+          results.push({
+            uuid: suggestionId, index: i, statusCode: patchRes.status, message: 'Failed to apply patch to AEM',
+          });
+          continue; // eslint-disable-line no-continue
+        }
+
+        results.push({ uuid: suggestionId, index: i, statusCode: 200 });
+      } catch (error) {
+        context.log.error(`[aem-apply-failed] site: ${siteId}, suggestion ${suggestionId}: ${error.message}`);
+        results.push({
+          uuid: suggestionId, index: i, statusCode: 500, message: error.message,
+        });
+      }
+    }
+
+    const success = results.filter((r) => r.statusCode >= 200 && r.statusCode < 300).length;
+    const failed = results.length - success;
+
+    return createResponse({
+      suggestions: results,
+      metadata: { total: results.length, success, failed },
+    }, 207);
+  };
+
+  /**
    * Returns the URLs already deployed to the edge by the site's non-prerender ELMO
    * ("Tokowaka") opportunities, as `[{ url, sources: [opportunityType] }]`.
    *
@@ -3725,6 +4027,7 @@ function SuggestionsController(ctx, sqs, env) {
     autofixSuggestions,
     createSuggestions,
     deploySuggestionToEdge,
+    applySuggestionToAem,
     getEdgeDeployedUrls,
     listGeoExperiments,
     getGeoExperiment,
