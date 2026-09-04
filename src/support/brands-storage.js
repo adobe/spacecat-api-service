@@ -13,12 +13,22 @@
 import { composeBaseURL, hasText } from '@adobe/spacecat-shared-utils';
 
 import { SERENITY_BRAND_SITE_TYPE } from './serenity/site-linkage.js';
+import { normalizeBrandName } from './normalize-brand-name.js';
 import { readFeatureFlagScopes, resolveFlagRowForBrand } from './feature-flags-storage.js';
 import {
   SERENITY_FEATURE_FLAG_NAME,
   SERENITY_FEATURE_FLAG_PRODUCT,
 } from './serenity/serenity-active.js';
 import { sanitizeRegions } from './customer-config-mapper.js';
+
+// Upper bound for the active-brand duplicate scan (LLMO-7284). Comfortably above
+// any realistic active-brands-per-org count. It makes a silent PostgREST
+// truncation DETECTABLE only when the server's `db-max-rows` is >= this value: a
+// full page then means "possibly truncated" and we fail closed. If a deployment
+// sets `db-max-rows` BELOW this, `.limit()` is capped lower, the full-page check
+// cannot fire, and the guarantee weakens — the durable fix is the SITES-49449 DB
+// partial unique index, which retires this app-layer scan entirely.
+const ACTIVE_BRAND_SCAN_LIMIT = 1000;
 
 /**
  * PostgREST select string — joins all normalized child tables.
@@ -1136,6 +1146,106 @@ export async function listSiteIdsForBrands(organizationId, brandIds, postgrestCl
   return siteIds;
 }
 
+// normalizeBrandName is the canonical brand-name comparison key. It is defined
+// once in ./normalize-brand-name.js and shared with the detection-side reconcile
+// report (scripts/reconcile-org-identity-integrity.mjs) so prevention and
+// detection can never drift. Re-exported here to preserve the existing public
+// import surface (`import { normalizeBrandName } from './brands-storage.js'`).
+export { normalizeBrandName };
+
+/**
+ * LLMO-7284 (AC13): prevent a SECOND active brand with the same normalized name in one
+ * organization at WRITE time — prevention, not post-hoc detection. The DB's
+ * `uq_brand_name_per_org` unique constraint only rejects EXACT `(organization_id, name)`
+ * collisions, so whitespace/casing variants ("Acme Inc" vs "acme  inc") slip past it and
+ * are exactly what scripts/reconcile-org-identity-integrity.mjs reports after the fact.
+ * This closes that gap at the two moments an active identity is created: an active
+ * create/upsert (upsertBrand) and a promotion/rename to active (updateBrand).
+ *
+ * Enforced in the application layer rather than as a DB constraint deliberately: a
+ * normalized-name partial unique index would require prod to already be free of the very
+ * duplicates the report exists to surface (an ADD ... VALIDATE would otherwise fail), and
+ * the duplicate-brand DB work tracked under SITES-49449 is a separate migration effort.
+ * See the PR description for the full rationale.
+ *
+ * Fails CLOSED on a lookup error (same rationale as the LLMO-5556 existing-brand guard):
+ * a swallowed error must not be read as "no duplicate" and let one through.
+ *
+ * @param {object} params
+ * @param {object} params.postgrestClient
+ * @param {string} params.organizationId
+ * @param {string} params.name              the name the brand will hold once written
+ * @param {string} [params.excludeBrandId]  the brand being written — its own row must not
+ *                                           be counted as its own duplicate
+ * @param {object} [params.log]             logger for the block/truncation breadcrumbs
+ * @throws {Error} `.status=409`, `.code='brand_duplicate_active_name'` on a collision
+ */
+// TODO(SITES-49449): remove this app-layer scan once the normalized-name partial
+// unique index lands and prod is de-duped — the DB then holds the invariant and a
+// second (drift-prone) enforcement point here becomes redundant cost.
+export async function assertNoDuplicateActiveBrandName({
+  postgrestClient,
+  organizationId,
+  name,
+  excludeBrandId = null,
+  log = console,
+}) {
+  const normalized = normalizeBrandName(name);
+  // An empty/whitespace-only name is rejected by the callers' own name validation;
+  // there is nothing to compare, and comparing "" would match other blank rows.
+  if (!normalized) {
+    return;
+  }
+
+  let query = postgrestClient
+    .from('brands')
+    .select('id, name')
+    .eq('organization_id', organizationId)
+    .eq('status', 'active')
+    // Bound the scan so a PostgREST truncation becomes DETECTABLE: a full page is
+    // treated as "possibly truncated" and fails closed below rather than validating
+    // a partial view. This detects truncation only when `db-max-rows` >= the limit
+    // (a lower server cap would cap `.limit()` too and mask the full page); real
+    // active-brands-per-org counts are tiny, and SITES-49449 moves the invariant
+    // into the DB and removes this scan.
+    .limit(ACTIVE_BRAND_SCAN_LIMIT);
+  if (hasText(excludeBrandId)) {
+    query = query.neq('id', excludeBrandId);
+  }
+  const { data, error } = await query;
+  if (error) {
+    throw new Error(`Failed to check for a duplicate active brand named "${name}": ${error.message}`);
+  }
+  if ((data || []).length >= ACTIVE_BRAND_SCAN_LIMIT) {
+    // Fail CLOSED: a full page means the scan may be truncated, so we cannot prove
+    // uniqueness. Rejecting is safer than admitting a possible duplicate silently.
+    throw new Error(
+      `Active-brand duplicate scan for org ${organizationId} returned the full `
+      + `${ACTIVE_BRAND_SCAN_LIMIT}-row cap; the result may be truncated and `
+      + 'uniqueness cannot be verified. Aborting the write (investigate db-max-rows / '
+      + 'the org\'s active-brand count).',
+    );
+  }
+
+  const clash = (data || []).find((b) => normalizeBrandName(b.name) === normalized);
+  if (clash) {
+    // Live ops breadcrumb: the after-the-fact reconcile report also catches this,
+    // but a warn here surfaces a blocked duplicate at the moment it happens.
+    log?.warn?.(
+      `[llmo-7284] blocked a duplicate active brand in org ${organizationId}: `
+      + `"${name}" collides with existing "${clash.name}" (normalized-equal).`,
+    );
+    const err = new Error(
+      `An active brand named "${clash.name}" already exists in this organization `
+      + '(brand names are compared case- and whitespace-insensitively). '
+      + 'Rename the brand or reuse the existing one.',
+    );
+    err.status = 409;
+    err.code = 'brand_duplicate_active_name';
+    throw err;
+  }
+}
+
 /**
  * Creates or updates a brand in the normalized brands table,
  * including all nested child tables (aliases, competitors, social, earned, sites).
@@ -1221,6 +1331,29 @@ export async function upsertBrand({
     err.status = 409;
     err.code = 'brand_status_demotion_not_allowed';
     throw err;
+  }
+
+  // LLMO-7284 (AC13): a create/upsert that produces a NET-NEW active identity must
+  // not introduce a second active brand with the same normalized name in this org.
+  // Only fire for a fresh create or a pending->active upsert (`existing?.status !==
+  // 'active'`): `name` is the upsert conflict key and cannot change here, so
+  // re-saving an ALREADY-active row by its own exact name introduces no new
+  // normalized identity — checking it would wrongly 409 a verbatim re-onboard in an
+  // org that already holds a pre-existing normalized-duplicate twin (the exact dirty
+  // data the reconcile report surfaces), wedging SQS-retried re-syncs. Excludes the
+  // same-name `existing` row for the same reason. The exact-name lookup above and the
+  // DB's `uq_brand_name_per_org` both miss a DIFFERENT exact name that normalizes to
+  // the same value; this closes that gap. Best-effort against a concurrent create of
+  // a normalized twin (read-then-write, no DB backstop for the normalized case — the
+  // partial unique index is deferred); the exact-name race is still caught by the DB.
+  if (status === 'active' && existing?.status !== 'active') {
+    await assertNoDuplicateActiveBrandName({
+      postgrestClient,
+      organizationId,
+      name: brand.name,
+      excludeBrandId: existing?.id,
+      log,
+    });
   }
 
   const row = {
@@ -1408,6 +1541,7 @@ export async function updateBrand({
   const needsExistingFetch = hasText(updates.baseSiteId)
     || wantsClearBaseSite
     || updates.status !== undefined
+    || updates.name !== undefined // LLMO-7284: a rename needs the current name+status
     || updates.expectedUpdatedAt !== undefined;
   let existing = null;
   if (needsExistingFetch) {
@@ -1517,6 +1651,30 @@ export async function updateBrand({
       err.status = 400;
       throw err;
     }
+  }
+
+  // LLMO-7284 (AC13): the write must not leave a second active brand with the same
+  // normalized name in this org. Two distinct new-active-identity events are checked
+  // (a routine save that echoes status:'active' with no rename is a no-op and skipped):
+  //   1. a genuine promotion (pending->active), and
+  //   2. a RENAME of an already-active brand to a different normalized name.
+  // `existing` is guaranteed loaded here (needsExistingFetch covers both status and
+  // name changes). Excludes this brand's own row. Best-effort against a concurrent
+  // twin (read-then-write, no DB backstop for the normalized case).
+  const isPromotion = patch.status === 'active' && existing?.status !== 'active';
+  const willBeActive = patch.status === 'active'
+    || (patch.status === undefined && existing?.status === 'active');
+  const isActiveRename = willBeActive
+    && hasText(patch.name)
+    && normalizeBrandName(patch.name) !== normalizeBrandName(existing?.name);
+  if (isPromotion || isActiveRename) {
+    const resultingName = hasText(patch.name) ? patch.name : existing?.name;
+    await assertNoDuplicateActiveBrandName({
+      postgrestClient,
+      organizationId,
+      name: resultingName,
+      excludeBrandId: brandId,
+    });
   }
 
   if (updates.region !== undefined) {
@@ -1803,9 +1961,33 @@ export async function setBrandStatus({
   status,
   postgrestClient,
   updatedBy = 'system',
+  log = console,
 }) {
   if (!postgrestClient?.from) {
     throw new Error('PostgREST client is required');
+  }
+
+  // LLMO-7284 (AC13): promoting a brand to active via the intentful status-transition
+  // path must also refuse to create a second active brand with the same normalized name
+  // in this org (parity with updateBrand's promotion guard). Fetch the row first for its
+  // name and current status, skip a no-op re-approval of an already-active brand, and let
+  // a missing/soft-deleted brand fall through to the UPDATE below (which 404s on no row).
+  if (status === 'active') {
+    const { data: current, error: currentError } = await postgrestClient
+      .from('brands')
+      .select('name, status')
+      .eq('organization_id', organizationId)
+      .eq('id', brandId)
+      .neq('status', 'deleted')
+      .maybeSingle();
+    if (currentError) {
+      throw new Error(`Failed to read brand before status transition: ${currentError.message}`);
+    }
+    if (current && current.status !== 'active') {
+      await assertNoDuplicateActiveBrandName({
+        postgrestClient, organizationId, name: current.name, excludeBrandId: brandId, log,
+      });
+    }
   }
 
   const { data, error } = await postgrestClient

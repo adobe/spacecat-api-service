@@ -35,6 +35,8 @@ import {
   setBrandClaimsEnabled,
   readSerenityFlagScopes,
   withSerenityState,
+  normalizeBrandName,
+  assertNoDuplicateActiveBrandName,
 } from '../../src/support/brands-storage.js';
 
 use(sinonChai);
@@ -1037,6 +1039,110 @@ describe('brands-storage', () => {
     return { from: sinon.stub().callsFake((t) => makeQuery(t)), capturedCalls: calls };
   }
 
+  describe('normalizeBrandName (LLMO-7284)', () => {
+    it('collapses whitespace and case-folds', () => {
+      expect(normalizeBrandName('Acme  Inc')).to.equal('acme inc');
+      expect(normalizeBrandName('  ACME\tInc\n')).to.equal('acme inc');
+      expect(normalizeBrandName('acme inc')).to.equal('acme inc');
+    });
+
+    it('treats nullish as empty string', () => {
+      expect(normalizeBrandName(null)).to.equal('');
+      expect(normalizeBrandName(undefined)).to.equal('');
+    });
+  });
+
+  describe('assertNoDuplicateActiveBrandName (LLMO-7284 AC13)', () => {
+    // A postgrest client whose brands query resolves to `result`, capturing the
+    // filters applied so we can assert the query is scoped to active brands.
+    function clientReturning(result) {
+      const eqCalls = [];
+      const neqCalls = [];
+      const query = {
+        select: sinon.stub().returnsThis(),
+        eq: sinon.stub().callsFake((col, val) => {
+          eqCalls.push([col, val]);
+          return query;
+        }),
+        neq: sinon.stub().callsFake((col, val) => {
+          neqCalls.push([col, val]);
+          return query;
+        }),
+        limit: sinon.stub().returnsThis(),
+        then: (resolve) => resolve(result),
+      };
+      return {
+        from: sinon.stub().returns(query),
+        capturedEq: eqCalls,
+        capturedNeq: neqCalls,
+      };
+    }
+
+    it('passes when no active brand shares the normalized name', async () => {
+      const client = clientReturning({ data: [{ id: 'b1', name: 'Other Brand' }], error: null });
+      await assertNoDuplicateActiveBrandName({
+        postgrestClient: client, organizationId: ORG_ID, name: 'Acme Inc',
+      });
+      // scoped to the org's ACTIVE brands
+      expect(client.capturedEq).to.deep.include(['organization_id', ORG_ID]);
+      expect(client.capturedEq).to.deep.include(['status', 'active']);
+    });
+
+    it('throws 409 brand_duplicate_active_name on a whitespace/case variant', async () => {
+      const client = clientReturning({ data: [{ id: 'b1', name: 'acme  inc' }], error: null });
+      const err = await assertNoDuplicateActiveBrandName({
+        postgrestClient: client, organizationId: ORG_ID, name: 'Acme Inc',
+      }).catch((e) => e);
+      expect(err).to.be.an('error');
+      expect(err.status).to.equal(409);
+      expect(err.code).to.equal('brand_duplicate_active_name');
+      expect(err.message).to.contain('acme  inc');
+    });
+
+    it('excludes the brand being written from its own duplicate check', async () => {
+      const client = clientReturning({ data: [], error: null });
+      await assertNoDuplicateActiveBrandName({
+        postgrestClient: client, organizationId: ORG_ID, name: 'Acme Inc', excludeBrandId: BRAND_ID,
+      });
+      expect(client.capturedNeq).to.deep.include(['id', BRAND_ID]);
+    });
+
+    it('skips the check for an empty/whitespace-only name (never queries)', async () => {
+      const client = clientReturning({ data: [], error: null });
+      await assertNoDuplicateActiveBrandName({
+        postgrestClient: client, organizationId: ORG_ID, name: '   ',
+      });
+      expect(client.from).to.have.callCount(0);
+    });
+
+    it('fails closed on a lookup error', async () => {
+      const client = clientReturning({ data: null, error: { message: 'boom' } });
+      await expect(assertNoDuplicateActiveBrandName({
+        postgrestClient: client, organizationId: ORG_ID, name: 'Acme Inc',
+      })).to.be.rejectedWith('Failed to check for a duplicate active brand named "Acme Inc": boom');
+    });
+
+    it('fails closed when the scan returns a full page (possible truncation)', async () => {
+      // A full 1000-row page (none of which collide) means the scan may be truncated,
+      // so uniqueness cannot be proven — the guard must reject rather than fail open.
+      const fullPage = Array.from({ length: 1000 }, (_, i) => ({ id: `b${i}`, name: `Brand ${i}` }));
+      const client = clientReturning({ data: fullPage, error: null });
+      await expect(assertNoDuplicateActiveBrandName({
+        postgrestClient: client, organizationId: ORG_ID, name: 'Acme Inc',
+      })).to.be.rejectedWith(/returned the full 1000-row cap.*uniqueness cannot be verified/);
+    });
+
+    it('logs a warning when it blocks a duplicate', async () => {
+      const client = clientReturning({ data: [{ id: 'b1', name: 'acme  inc' }], error: null });
+      const log = { warn: sinon.stub() };
+      await assertNoDuplicateActiveBrandName({
+        postgrestClient: client, organizationId: ORG_ID, name: 'Acme Inc', log,
+      }).catch(() => {});
+      expect(log.warn).to.have.been.calledOnce;
+      expect(log.warn.firstCall.args[0]).to.contain('blocked a duplicate active brand');
+    });
+  });
+
   describe('upsertBrand', () => {
     it('throws when postgrestClient is missing', async () => {
       await expect(upsertBrand({
@@ -1079,6 +1185,7 @@ describe('brands-storage', () => {
       const postgrestClient = createTableMockClient({
         brands: [
           { data: null, error: null }, // existing lookup OK (no brand)
+          { data: [], error: null }, // LLMO-7284: active-duplicate scan (no matches)
           { data: null, error: { code: '23505', message: 'brands_base_site_unique' } }, // upsert 409
         ],
         sites: { data: { id: 'some-site-id' }, error: null }, // site belongs to org
@@ -1094,6 +1201,48 @@ describe('brands-storage', () => {
       expect(err.status).to.equal(409);
     });
 
+    it('rejects an active create colliding with an existing active brand normalized name (LLMO-7284 AC13)', async () => {
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: null, error: null }, // existing exact-name lookup: none
+          { data: [{ id: 'other-brand', name: 'acme  inc' }], error: null }, // active-duplicate scan -> match
+        ],
+        sites: { data: { id: 'site-1' }, error: null },
+      });
+
+      const err = await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Acme Inc', status: 'active', baseSiteId: 'site-1' },
+        postgrestClient,
+      }).catch((e) => e);
+
+      expect(err.status).to.equal(409);
+      expect(err.code).to.equal('brand_duplicate_active_name');
+    });
+
+    it('does NOT re-check an already-active brand re-saved by its own exact name, even in an org with a normalized twin (LLMO-7284 AC13)', async () => {
+      // No active-duplicate scan slot is provided on purpose: the guard MUST be
+      // skipped for an already-active re-save (name is the upsert key and cannot
+      // change here, so no NET-NEW active identity is introduced). This prevents a
+      // verbatim re-onboard from 409ing in an org that already holds a pre-existing
+      // normalized twin (the dirty data the reconcile report surfaces).
+      const client = createCapturingClient({
+        brands: [
+          { data: { id: BRAND_ID, site_id: 'site-1', status: 'active' }, error: null }, // existing (active)
+          { data: { id: BRAND_ID, name: 'Acme Inc' }, error: null }, // upsert result
+          { data: makeBrandRow({ name: 'Acme Inc', status: 'active', site_id: 'site-1' }), error: null }, // getBrandById
+        ],
+      });
+
+      const result = await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Acme Inc', status: 'active' },
+        postgrestClient: client,
+      });
+
+      expect(result).to.not.be.null;
+    });
+
     it('does not downgrade active brand to pending when re-upserting without baseSiteId', async () => {
       const fullBrandRow = makeBrandRow({ name: 'Test', status: 'active', site_id: 'existing-site-id' });
 
@@ -1101,6 +1250,7 @@ describe('brands-storage', () => {
         brands: [
           // existing brand lookup — row already has site_id
           { data: { site_id: 'existing-site-id' }, error: null },
+          { data: [], error: null }, // LLMO-7284: active-duplicate scan (no matches)
           // upsert result
           { data: { id: BRAND_ID, name: 'Test' }, error: null },
           // getBrandById result
@@ -1123,6 +1273,7 @@ describe('brands-storage', () => {
       const postgrestClient = createTableMockClient({
         brands: [
           { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          { data: [], error: null }, // LLMO-7284: active-duplicate scan (no matches)
           { data: fullBrandRow, error: null },
         ],
         sites: { data: { id: 'site-uuid' }, error: null }, // site belongs to org
@@ -1141,6 +1292,7 @@ describe('brands-storage', () => {
       const client = createCapturingClient({
         brands: [
           { data: null, error: null }, // no existing brand
+          { data: [], error: null }, // LLMO-7284: active-duplicate scan (no matches)
           { data: { id: BRAND_ID, name: 'Test' }, error: null }, // upsert result
           { data: makeBrandRow({ name: 'Test', site_id: 'new-site' }), error: null },
         ],
@@ -1227,6 +1379,7 @@ describe('brands-storage', () => {
       const client = createCapturingClient({
         brands: [
           { data: null, error: null }, // no existing brand
+          { data: [], error: null }, // LLMO-7284: active-duplicate scan (no matches)
           { data: { id: BRAND_ID, name: 'Test' }, error: null },
           { data: makeBrandRow({ name: 'Test' }), error: null },
         ],
@@ -1306,6 +1459,7 @@ describe('brands-storage', () => {
       const client = createCapturingClient({
         brands: [
           { data: { site_id: 'existing-site' }, error: null },
+          { data: [], error: null }, // LLMO-7284: active-duplicate scan (no matches)
           { data: { id: BRAND_ID, name: 'Test' }, error: null },
           { data: makeBrandRow({ name: 'Test' }), error: null },
         ],
@@ -1348,6 +1502,7 @@ describe('brands-storage', () => {
       const client = createCapturingClient({
         brands: [
           { data: { site_id: 'original-site' }, error: null }, // existing lookup
+          { data: [], error: null }, // LLMO-7284: active-duplicate scan (no matches)
           { data: { id: BRAND_ID, name: 'Test' }, error: null }, // upsert result
           { data: makeBrandRow({ name: 'Test', site_id: 'original-site' }), error: null },
         ],
@@ -1382,6 +1537,7 @@ describe('brands-storage', () => {
       const client = createCapturingClient({
         brands: [
           { data: { site_id: 'same-site' }, error: null }, // existing lookup
+          { data: [], error: null }, // LLMO-7284: active-duplicate scan (no matches)
           { data: { id: BRAND_ID, name: 'Test' }, error: null }, // upsert result
           { data: makeBrandRow({ name: 'Test', site_id: 'same-site' }), error: null },
         ],
@@ -1405,6 +1561,7 @@ describe('brands-storage', () => {
       const client = createCapturingClient({
         brands: [
           { data: { site_id: 'existing-site' }, error: null },
+          { data: [], error: null }, // LLMO-7284: active-duplicate scan (no matches)
           { data: { id: BRAND_ID, name: 'Test' }, error: null },
           { data: makeBrandRow({ name: 'Test', site_id: 'existing-site' }), error: null },
         ],
@@ -1479,6 +1636,7 @@ describe('brands-storage', () => {
       const client = createCapturingClient({
         brands: [
           { data: { site_id: 'same-site' }, error: null },
+          { data: [], error: null }, // LLMO-7284: active-duplicate scan (no matches)
           { data: { id: BRAND_ID, name: 'Test' }, error: null },
           { data: makeBrandRow({ name: 'Test', site_id: 'same-site' }), error: null },
         ],
@@ -1501,6 +1659,7 @@ describe('brands-storage', () => {
       const client = createCapturingClient({
         brands: [
           { data: null, error: null }, // existing lookup: null (soft-deleted brand excluded)
+          { data: [], error: null }, // LLMO-7284: active-duplicate scan (no matches)
           { data: { id: BRAND_ID, name: 'Test' }, error: null }, // upsert result
           { data: makeBrandRow({ name: 'Test', site_id: 'new-site' }), error: null },
         ],
@@ -2678,7 +2837,11 @@ describe('brands-storage', () => {
 
     it('throws when update query fails', async () => {
       const postgrestClient = createTableMockClient({
-        brands: { data: null, error: { message: 'update failed' } },
+        brands: [
+          // LLMO-7284: a rename now reads the current row first (pending → no dup scan)
+          { data: { name: 'OldName', status: 'pending', site_id: null }, error: null },
+          { data: null, error: { message: 'update failed' } }, // update fails
+        ],
       });
 
       await expect(updateBrand({
@@ -3969,6 +4132,92 @@ describe('brands-storage', () => {
       expect(result.status).to.equal('active');
     });
 
+    it('updateBrand rejects a pending->active promotion colliding with an active brand name (LLMO-7284 AC13)', async () => {
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: { name: 'Acme Inc', site_id: 'site-1', status: 'pending' }, error: null }, // existing fetch
+          { data: [{ id: 'other-brand', name: 'acme  inc' }], error: null }, // active-duplicate scan -> match
+        ],
+      });
+
+      const err = await updateBrand({
+        organizationId: ORG_ID, brandId: BRAND_ID, updates: { status: 'active' }, postgrestClient,
+      }).catch((e) => e);
+
+      expect(err.status).to.equal(409);
+      expect(err.code).to.equal('brand_duplicate_active_name');
+    });
+
+    it('updateBrand allows a pending->active promotion when the name is unique among active brands (LLMO-7284 AC13)', async () => {
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: { name: 'Acme Inc', site_id: 'site-1', status: 'pending' }, error: null }, // existing fetch
+          { data: [], error: null }, // active-duplicate scan -> none
+          { data: { id: BRAND_ID }, error: null }, // update
+          { data: makeBrandRow({ status: 'active', site_id: 'site-1' }), error: null }, // getBrandById
+        ],
+      });
+
+      const result = await updateBrand({
+        organizationId: ORG_ID, brandId: BRAND_ID, updates: { status: 'active' }, postgrestClient,
+      });
+
+      expect(result.status).to.equal('active');
+    });
+
+    it('updateBrand rejects renaming an ACTIVE brand to a normalized variant of another active brand (LLMO-7284 AC13)', async () => {
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: { name: 'Foo', site_id: 'site-1', status: 'active' }, error: null }, // existing fetch
+          { data: [{ id: 'other-brand', name: 'acme  inc' }], error: null }, // duplicate scan -> match
+        ],
+      });
+
+      const err = await updateBrand({
+        organizationId: ORG_ID, brandId: BRAND_ID, updates: { name: 'Acme Inc' }, postgrestClient,
+      }).catch((e) => e);
+
+      expect(err.status).to.equal(409);
+      expect(err.code).to.equal('brand_duplicate_active_name');
+    });
+
+    it('updateBrand allows renaming an ACTIVE brand to a unique name', async () => {
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: { name: 'Foo', site_id: 'site-1', status: 'active' }, error: null }, // existing fetch
+          { data: [], error: null }, // duplicate scan -> none
+          { data: { id: BRAND_ID }, error: null }, // update
+          { data: makeBrandRow({ name: 'Bar', status: 'active', site_id: 'site-1' }), error: null }, // getBrandById
+        ],
+      });
+
+      const result = await updateBrand({
+        organizationId: ORG_ID, brandId: BRAND_ID, updates: { name: 'Bar' }, postgrestClient,
+      });
+
+      expect(result).to.not.be.null;
+    });
+
+    it('updateBrand SKIPS the duplicate scan when an active brand is renamed to its own normalized name (LLMO-7284 AC13)', async () => {
+      // Renaming "Acme Inc" -> "acme  inc" is the SAME normalized identity, so isActiveRename
+      // is false and the scan MUST NOT run. No duplicate-scan slot is provided: if the guard
+      // wrongly fired it would consume the update slot (an object, not an array) and throw,
+      // and it would 409 a cosmetic rename in an org that already holds a normalized twin.
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: { name: 'Acme Inc', site_id: 'site-1', status: 'active' }, error: null }, // existing fetch
+          { data: { id: BRAND_ID }, error: null }, // update (NO scan slot before it)
+          { data: makeBrandRow({ name: 'acme  inc', status: 'active', site_id: 'site-1' }), error: null }, // getBrandById
+        ],
+      });
+
+      const result = await updateBrand({
+        organizationId: ORG_ID, brandId: BRAND_ID, updates: { name: 'acme  inc' }, postgrestClient,
+      });
+
+      expect(result).to.not.be.null;
+    });
+
     it('updateBrand rejects a promote-to-active without a site_id with a 400 (re-land of #2504)', async () => {
       const postgrestClient = createTableMockClient({
         brands: [{ data: { site_id: null, status: 'pending' }, error: null }],
@@ -4023,6 +4272,7 @@ describe('brands-storage', () => {
       const postgrestClient = createTableMockClient({
         brands: [
           { data: null, error: null }, // existing fetch (new brand)
+          { data: [], error: null }, // LLMO-7284: active-duplicate scan (no matches)
           {
             data: null,
             error: {
@@ -4330,13 +4580,17 @@ describe('brands-storage', () => {
 
     it('maps chk_active_brand_has_site_id violation to a 400 (lifted from #2504)', async () => {
       const postgrestClient = createTableMockClient({
-        brands: [{
-          data: null,
-          error: {
-            code: '23514',
-            message: 'new row violates check constraint "chk_active_brand_has_site_id"',
+        brands: [
+          { data: { name: 'Test', status: 'pending' }, error: null }, // LLMO-7284: pre-transition read
+          { data: [], error: null }, // LLMO-7284: active-duplicate scan (no matches)
+          {
+            data: null,
+            error: {
+              code: '23514',
+              message: 'new row violates check constraint "chk_active_brand_has_site_id"',
+            },
           },
-        }],
+        ],
       });
 
       const err = await setBrandStatus({
@@ -4345,6 +4599,56 @@ describe('brands-storage', () => {
 
       expect(err.message).to.equal('Cannot activate a brand without a base site URL');
       expect(err.status).to.equal(400);
+    });
+
+    it('rejects a status transition to active that collides with an active brand name (LLMO-7284 AC13)', async () => {
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: { name: 'Acme Inc', status: 'pending' }, error: null }, // pre-transition read
+          { data: [{ id: 'other-brand', name: 'ACME  inc' }], error: null }, // duplicate scan -> match
+        ],
+      });
+
+      const err = await setBrandStatus({
+        organizationId: ORG_ID, brandId: BRAND_ID, status: 'active', postgrestClient,
+      }).catch((e) => e);
+
+      expect(err.status).to.equal(409);
+      expect(err.code).to.equal('brand_duplicate_active_name');
+    });
+
+    it('fails closed when the pre-transition read errors (LLMO-7284 AC13)', async () => {
+      // The read that determines whether the promotion guard should run must fail
+      // CLOSED: a swallowed read error must NOT let a brand be promoted unchecked.
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: null, error: { message: 'boom' } }, // pre-transition read errors
+        ],
+      });
+
+      await expect(setBrandStatus({
+        organizationId: ORG_ID, brandId: BRAND_ID, status: 'active', postgrestClient,
+      })).to.be.rejectedWith('Failed to read brand before status transition: boom');
+    });
+
+    it('setBrandStatus SKIPS the duplicate scan for a no-op re-approval of an already-active brand (LLMO-7284 AC13)', async () => {
+      // The pre-transition read shows the brand is ALREADY active, so the promotion guard is
+      // skipped (current.status !== 'active' is false). No duplicate-scan slot is provided: a
+      // scan here would 409 a harmless re-approval in an org that already holds a normalized
+      // twin (the dirty data the reconcile report surfaces).
+      const postgrestClient = createTableMockClient({
+        brands: [
+          { data: { name: 'Acme Inc', status: 'active' }, error: null }, // pre-transition read (already active)
+          { data: { id: BRAND_ID }, error: null }, // update (NO scan slot before it)
+          { data: makeBrandRow({ name: 'Acme Inc', status: 'active', site_id: 'site-1' }), error: null }, // getBrandById
+        ],
+      });
+
+      const result = await setBrandStatus({
+        organizationId: ORG_ID, brandId: BRAND_ID, status: 'active', postgrestClient,
+      });
+
+      expect(result.status).to.equal('active');
     });
 
     it('throws a generic error on other database failures', async () => {

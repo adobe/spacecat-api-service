@@ -24,6 +24,7 @@ import {
   enableImports,
 } from '../../../controllers/llmo/llmo-onboarding.js';
 import { triggerBrandProfileAgent } from '../../brand-profile-trigger.js';
+import { assertSiteOrgReassignmentSafe } from '../../site-org-reassignment.js';
 
 // LLMO-4683: ISO 3166-1 alpha-2 region for the onboarding modal.
 // Operator types the brand's primary market so DRS prompt generation conditions
@@ -326,6 +327,25 @@ async function checkOrg(imsOrgId, site, lambdaCtx, slackCtx) {
   // if the org is already set, do nothing
   if (existingOrgId === providedImsOrgId) {
     return;
+  }
+
+  // LLMO-7284 (AC12): refuse to reassign a site that still carries enrollments under
+  // its current org — either branch below re-parents the site only, orphaning those
+  // enrollments as foreign LLMO enrollments. Fail explicitly (surface the actionable
+  // reason to the operator, then re-throw so onboarding aborts before any enrollment
+  // is created) rather than drift silently. providedImsOrgId is undefined when the
+  // target org must still be created below (a guaranteed move to a fresh org); the
+  // guard treats that as a real move and only blocks when enrollments exist.
+  const { say } = slackCtx;
+  try {
+    await assertSiteOrgReassignmentSafe({
+      site,
+      targetOrgId: providedImsOrgId ?? null,
+      log: lambdaCtx.log,
+    });
+  } catch (guardError) {
+    await say(`:x: ${guardError.message}`);
+    throw guardError;
   }
 
   // if the provided ims org id exists, update the site to use this one

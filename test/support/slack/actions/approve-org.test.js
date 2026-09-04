@@ -32,6 +32,9 @@ describe('approveOrg', () => {
 
     site = {
       getId: () => 'site-id-1234',
+      getBaseURL: () => 'https://spacecat.com',
+      getOrganizationId: () => 'existing-org',
+      getSiteEnrollments: sinon.stub().resolves([]),
       setOrganizationId: sinon.stub(),
       save: sinon.stub().resolves(),
     };
@@ -101,6 +104,58 @@ describe('approveOrg', () => {
       text: 'Approved by @test-user :checked:',
       type: 'mrkdwn',
     });
+  });
+
+  it('responds actionably (no throw, no move) when the site cannot be resolved', async () => {
+    // Site removed between the message being posted and the approval click: the guard's
+    // contract needs a resolved site, so surface a reason instead of an opaque TypeError.
+    context.dataAccess.Organization.findByImsOrgId.resolves(org);
+    context.dataAccess.Site.findByBaseURL.resolves(null);
+
+    const approveOrgAction = approveOrg(context);
+    await approveOrgAction({ ack: ackMock, body, respond: respondMock });
+
+    expect(site.setOrganizationId).to.not.have.been.called;
+    expect(site.save).to.not.have.been.called;
+    const texts = respondMock.getCalls().map((c) => c.args[0]?.text ?? '');
+    expect(texts.some((t) => t.includes('no site found'))).to.be.true;
+  });
+
+  it('responds actionably (no throw, no move) when the org cannot be resolved', async () => {
+    context.dataAccess.Organization.findByImsOrgId.resolves(null);
+    context.dataAccess.Site.findByBaseURL.resolves(site);
+
+    const approveOrgAction = approveOrg(context);
+    await approveOrgAction({ ack: ackMock, body, respond: respondMock });
+
+    expect(site.setOrganizationId).to.not.have.been.called;
+    expect(site.save).to.not.have.been.called;
+    const texts = respondMock.getCalls().map((c) => c.args[0]?.text ?? '');
+    expect(texts.some((t) => t.includes('no org found'))).to.be.true;
+  });
+
+  it('blocks the org approval when the site still has enrollments to orphan (LLMO-7284 AC12)', async () => {
+    context.dataAccess.Organization.findByImsOrgId.resolves(org);
+    context.dataAccess.Site.findByBaseURL.resolves(site);
+    site.getSiteEnrollments = sinon.stub().resolves([{ getId: () => 'enr-1' }]);
+
+    const approveOrgAction = approveOrg(context);
+
+    let thrown;
+    await approveOrgAction({ ack: ackMock, body, respond: respondMock })
+      .catch((e) => {
+        thrown = e;
+      });
+
+    // The reassignment is refused explicitly and the site's org is never changed.
+    expect(thrown).to.be.an('error');
+    expect(thrown.code).to.equal('site_org_reassignment_blocked');
+    expect(site.setOrganizationId).to.not.have.been.called;
+    expect(site.save).to.not.have.been.called;
+    // LLMO-7284 (AC12): the operator is told, explicitly and actionably, why it was refused
+    // (parity with set-ims-org-modal / onboard-llmo-modal) — not just a log entry.
+    const respondTexts = respondMock.getCalls().map((c) => c.args[0]?.text ?? c.args[0]);
+    expect(respondTexts.some((t) => typeof t === 'string' && t.includes(':x:') && t.includes('enrollment'))).to.equal(true);
   });
 
   it('should do nothing if IMS org ID and base URL are not found in the message text', async () => {

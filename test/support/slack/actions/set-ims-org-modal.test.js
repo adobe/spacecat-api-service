@@ -211,6 +211,8 @@ describe('SetImsOrgModal', () => {
       const mockSite = {
         getId: () => 'site123',
         getProjectId: () => null,
+        getOrganizationId: () => 'existing-org',
+        getSiteEnrollments: sinon.stub().resolves([]),
         setOrganizationId: sinon.stub(),
         save: sinon.stub().resolves(),
       };
@@ -261,11 +263,68 @@ describe('SetImsOrgModal', () => {
       expect(client.chat.postMessage.getCall(0).args[0].text).to.include('No products selected');
     });
 
+    it('blocks the reassignment when the site still has enrollments under its current org (LLMO-7284 AC12)', async () => {
+      const ack = sinon.stub().resolves();
+      const mockSite = {
+        getId: () => 'site123',
+        getBaseURL: () => 'https://example.com',
+        getProjectId: () => null,
+        getOrganizationId: () => 'old-org',
+        getSiteEnrollments: sinon.stub().resolves([{ getId: () => 'enr-1' }]),
+        setOrganizationId: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+      const mockOrg = { getId: () => 'org123' };
+
+      mockDataAccess.Site.findByBaseURL.resolves(mockSite);
+      mockDataAccess.Organization.findByImsOrgId.resolves(mockOrg);
+
+      const body = {
+        view: {
+          private_metadata: JSON.stringify({
+            baseURL: 'https://example.com',
+            imsOrgId: 'ABC123@AdobeOrg',
+            channelId: 'C123',
+            threadTs: '1234567890.123456',
+            messageTs: '1234567890.123457',
+          }),
+          state: {
+            values: {
+              products_block: {
+                aso_checkbox: { selected_options: [{ value: 'ASO' }] },
+                llmo_checkbox: { selected_options: [] },
+              },
+            },
+          },
+        },
+        user: { id: 'U123' },
+      };
+      const client = {
+        chat: {
+          postMessage: sinon.stub().resolves(),
+          update: sinon.stub().resolves(),
+        },
+      };
+
+      const handler = setImsOrgModal(lambdaContext);
+      await handler({ ack, body, client });
+
+      // The reassignment is refused explicitly — the site's org is never changed
+      // and no entitlements are created for the (would-be) new org.
+      expect(mockSite.setOrganizationId.called).to.be.false;
+      expect(mockSite.save.called).to.be.false;
+      expect(mockCreateEntitlementsForProducts.called).to.be.false;
+      expect(client.chat.postMessage.getCall(0).args[0].text).to.include(':x:');
+      expect(client.chat.postMessage.getCall(0).args[0].text).to.include('enrollment');
+    });
+
     it('creates new org without entitlements if no products selected', async () => {
       const ack = sinon.stub().resolves();
       const mockSite = {
         getId: () => 'site123',
         getProjectId: () => null,
+        getOrganizationId: () => 'existing-org',
+        getSiteEnrollments: sinon.stub().resolves([]),
         setOrganizationId: sinon.stub(),
         save: sinon.stub().resolves(),
       };
@@ -326,6 +385,8 @@ describe('SetImsOrgModal', () => {
       const mockSite = {
         getId: () => 'site123',
         getProjectId: () => null,
+        getOrganizationId: () => 'existing-org',
+        getSiteEnrollments: sinon.stub().resolves([]),
         setOrganizationId: sinon.stub(),
         save: sinon.stub().resolves(),
       };
@@ -408,6 +469,8 @@ describe('SetImsOrgModal', () => {
       const mockSite = {
         getId: () => 'site456',
         getProjectId: () => null,
+        getOrganizationId: () => 'existing-org',
+        getSiteEnrollments: sinon.stub().resolves([]),
         setOrganizationId: sinon.stub(),
         save: sinon.stub().resolves(),
       };
@@ -514,6 +577,8 @@ describe('SetImsOrgModal', () => {
       const ack = sinon.stub().resolves();
       const mockSite = {
         getId: () => 'site789',
+        getOrganizationId: () => 'existing-org',
+        getSiteEnrollments: sinon.stub().resolves([]),
       };
 
       mockDataAccess.Site.findByBaseURL.resolves(mockSite);
@@ -558,6 +623,8 @@ describe('SetImsOrgModal', () => {
       const ack = sinon.stub().resolves();
       const mockSite = {
         getId: () => 'site999',
+        getOrganizationId: () => 'existing-org',
+        getSiteEnrollments: sinon.stub().resolves([]),
       };
 
       mockDataAccess.Site.findByBaseURL.resolves(mockSite);
@@ -681,6 +748,8 @@ describe('SetImsOrgModal', () => {
         const mockSite = {
           getId: () => 'site123',
           getProjectId: () => 'project123',
+          getOrganizationId: () => 'existing-org',
+          getSiteEnrollments: sinon.stub().resolves([]),
           setProjectId: sinon.stub(),
           setOrganizationId: sinon.stub(),
           save: sinon.stub().resolves(),
@@ -721,6 +790,8 @@ describe('SetImsOrgModal', () => {
         const mockSite = {
           getId: () => 'site123',
           getProjectId: () => 'project123',
+          getOrganizationId: () => 'existing-org',
+          getSiteEnrollments: sinon.stub().resolves([]),
           setProjectId: sinon.stub(),
           setOrganizationId: sinon.stub(),
           save: sinon.stub().resolves(),
@@ -762,6 +833,8 @@ describe('SetImsOrgModal', () => {
         const mockSite = {
           getId: () => 'site123',
           getProjectId: () => 'project123',
+          getOrganizationId: () => 'existing-org',
+          getSiteEnrollments: sinon.stub().resolves([]),
           setProjectId: sinon.stub(),
           setOrganizationId: sinon.stub(),
           save: sinon.stub().resolves(),
@@ -786,6 +859,8 @@ describe('SetImsOrgModal', () => {
         const mockSite = {
           getId: () => 'site123',
           getProjectId: () => 'missingProject',
+          getOrganizationId: () => 'existing-org',
+          getSiteEnrollments: sinon.stub().resolves([]),
           setProjectId: sinon.stub(),
           setOrganizationId: sinon.stub(),
           save: sinon.stub().resolves(),
@@ -816,6 +891,8 @@ describe('SetImsOrgModal', () => {
         const mockSite = {
           getId: () => 'site123',
           getProjectId: () => 'project123',
+          getOrganizationId: () => 'existing-org',
+          getSiteEnrollments: sinon.stub().resolves([]),
           setProjectId: sinon.stub(),
           setOrganizationId: sinon.stub(),
           save: sinon.stub().resolves(),
@@ -855,6 +932,8 @@ describe('SetImsOrgModal', () => {
         const mockSite = {
           getId: () => 'site123',
           getProjectId: () => 'project123',
+          getOrganizationId: () => 'existing-org',
+          getSiteEnrollments: sinon.stub().resolves([]),
           setProjectId: sinon.stub(),
           setOrganizationId: sinon.stub(),
           save: sinon.stub().resolves(),

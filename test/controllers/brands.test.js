@@ -5207,6 +5207,7 @@ describe('Brands Controller', () => {
           neq: sandbox.stub().returnsThis(),
           in: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           upsert: sandbox.stub().returnsThis(),
           delete: sandbox.stub().returnsThis(),
           single: sandbox.stub().resolves({
@@ -5363,6 +5364,32 @@ describe('Brands Controller', () => {
         const upsertArgs = upsertStub.firstCall.args[0];
         expect(upsertArgs.forceBrandId).to.equal(provisionArgs.brandId);
         expect(upsertArgs.semrushSubWorkspaceId).to.equal('ws-1');
+      });
+
+      it('surfaces a duplicate-active-brand rejection as a 409 with its code (LLMO-7284 AC13)', async () => {
+        // End-to-end seam the missing IT would otherwise cover: a typed 409 thrown by
+        // upsertBrand must reach the client as a 409 body carrying brand_duplicate_active_name.
+        const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
+        const dupErr = Object.assign(
+          new Error('An active brand named "Acme Inc" already exists in this organization'),
+          { status: 409, code: 'brand_duplicate_active_name' },
+        );
+        const upsertStub = sinon.stub().rejects(dupErr);
+        const controller = await buildController({
+          provisionBrandSubworkspace: provisionStub, upsertBrand: upsertStub,
+        });
+
+        const response = await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: { ...semrushData },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(409);
+        const body = await response.json();
+        expect(body.code).to.equal('brand_duplicate_active_name');
       });
 
       it('writes the mapping row for the initial market after the brand row is persisted', async () => {
@@ -8173,8 +8200,11 @@ describe('Brands Controller', () => {
         data: { id: BRAND_UUID },
         error: null,
       });
-      // Second call: updateBrand returns null (brand update returns no data)
+      // Second call: LLMO-7284 pre-read of the current row for the rename (null → no
+      // dup scan; this brand is being treated as absent).
       maybeSingleStub.onSecondCall().resolves({ data: null, error: null });
+      // Third call: updateBrand's UPDATE returns null (brand update returns no data)
+      maybeSingleStub.onThirdCall().resolves({ data: null, error: null });
 
       mockDataAccess.services.postgrestClient = {
         from: sandbox.stub().callsFake(() => ({
@@ -8182,6 +8212,7 @@ describe('Brands Controller', () => {
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           update: sandbox.stub().returnsThis(),
           ilike: sandbox.stub().returnsThis(),
           maybeSingle: maybeSingleStub,
@@ -9744,6 +9775,7 @@ describe('Brands Controller', () => {
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           update: sandbox.stub().returnsThis(),
           ilike: sandbox.stub().returnsThis(),
           maybeSingle: maybeSingleStub,
@@ -9946,8 +9978,12 @@ describe('Brands Controller', () => {
       const maybeSingleStub = sandbox.stub();
       // resolveBrandUuid succeeds...
       maybeSingleStub.onFirstCall().resolves({ data: { id: BRAND_UUID }, error: null });
-      // ...but the status update is filtered out by .neq('status','deleted') → no row.
+      // LLMO-7284 pre-transition read (status→active): the soft-deleted brand is
+      // excluded by .neq('status','deleted'), so it reads back as null and the
+      // duplicate-active check is skipped.
       maybeSingleStub.onSecondCall().resolves({ data: null, error: null });
+      // ...then the status update is filtered out by .neq('status','deleted') → no row.
+      maybeSingleStub.onThirdCall().resolves({ data: null, error: null });
 
       mockDataAccess.services.postgrestClient = {
         from: sandbox.stub().callsFake(() => ({
@@ -9955,6 +9991,7 @@ describe('Brands Controller', () => {
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           update: sandbox.stub().returnsThis(),
           ilike: sandbox.stub().returnsThis(),
           maybeSingle: maybeSingleStub,
@@ -10000,8 +10037,11 @@ describe('Brands Controller', () => {
       const maybeSingleStub = sandbox.stub();
       // resolveBrandUuid resolves the UUID...
       maybeSingleStub.onFirstCall().resolves({ data: { id: BRAND_UUID }, error: null });
+      // LLMO-7284 pre-transition read (status→active): a pending brand with a
+      // unique name, so the duplicate-active check passes and the write proceeds.
+      maybeSingleStub.onSecondCall().resolves({ data: { name: 'Test Brand', status: 'pending' }, error: null });
       // ...then setBrandStatus hits the DB constraint on the update.
-      maybeSingleStub.onSecondCall().resolves({
+      maybeSingleStub.onThirdCall().resolves({
         data: null,
         error: {
           code: '23514',
@@ -10015,6 +10055,7 @@ describe('Brands Controller', () => {
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           update: sandbox.stub().returnsThis(),
           ilike: sandbox.stub().returnsThis(),
           maybeSingle: maybeSingleStub,

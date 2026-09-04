@@ -18,6 +18,7 @@ import {
   postEntitlementMessages,
 } from './entitlement-modal-utils.js';
 import { createProject } from '../../utils.js';
+import { assertSiteOrgReassignmentSafe } from '../../site-org-reassignment.js';
 
 const MODAL_CALLBACK_ID = 'set_ims_org_modal';
 
@@ -159,6 +160,25 @@ export function setImsOrgModal(lambdaContext) {
       }
 
       let spaceCatOrg = await Organization.findByImsOrgId(userImsOrgId);
+
+      // LLMO-7284 (AC12): refuse to reassign a site that still carries enrollments
+      // under its CURRENT org — both branches below re-parent only the site (and its
+      // project), never the site_enrollments/brands, so a silent move would orphan them
+      // as foreign LLMO enrollments. Run this BEFORE creating a new org (below) so a
+      // blocked move doesn't leave an empty org behind. targetOrgId is null when the org
+      // doesn't exist yet (a guaranteed move to a fresh org); the guard treats that as a
+      // real move and no-ops only when the target equals the site's current org.
+      try {
+        await assertSiteOrgReassignmentSafe({
+          site,
+          targetOrgId: spaceCatOrg ? spaceCatOrg.getId() : null,
+          log,
+        });
+      } catch (guardError) {
+        log.warn(`set imsorg: reassignment blocked for ${baseURL}: ${guardError.message}`);
+        await say(`:x: ${guardError.message}`);
+        return;
+      }
 
       // if not found, try retrieving from IMS, then create a new spacecat org
       if (!spaceCatOrg) {
