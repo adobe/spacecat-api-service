@@ -75,7 +75,14 @@ export async function isPayingLlmoSite(site, context) {
     }
     return entitlement.getTier() === EntitlementModel.TIERS.PAID;
   } catch (error) {
-    log.warn(`Failed to read LLMO tier for site ${site.getId()}; `
+    // log.error (not .warn): unlike the "no entitlement found" branch above (a normal,
+    // expected state for many orgs), a THROWN lookup failure is a real operational
+    // problem -- and since activateBrandForOrg also uses this result to decide the
+    // brand-presence schedule's tier param (LLMO-7366), a swallowed failure here can
+    // silently mis-tier a paying org's schedule with no other signal. .error surfaces
+    // it in normal log-based alerting without changing this function's boolean-only
+    // contract for any of its callers.
+    log.error(`Failed to read LLMO tier for site ${site.getId()}; `
       + `defaulting to one-time (trial) prompt-suggestion runs: ${error.message}`);
     return false;
   }
