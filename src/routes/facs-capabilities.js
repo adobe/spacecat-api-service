@@ -592,6 +592,7 @@ const routeFacsCapabilities = {
 
       // ---- Deploy (edge optimizations + auto-fix) ------------------------
       'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-deploy': 'llmo/can_deploy',
+      'POST /sites/:siteId/opportunities/:opportunityId/suggestions/aem-apply': 'llmo/can_deploy',
       'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-preview': 'llmo/can_deploy',
       'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-live-preview': 'llmo/can_deploy',
       'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-rollback': 'llmo/can_deploy',
@@ -963,6 +964,7 @@ const routeFacsCapabilities = {
     ASO: {
       // ---- Deploy --------------------------------------------------------
       'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-deploy': 'aso/can_deploy',
+      'POST /sites/:siteId/opportunities/:opportunityId/suggestions/aem-apply': 'aso/can_deploy',
       'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-preview': 'aso/can_deploy',
       'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-live-preview': 'aso/can_deploy',
       'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-rollback': 'aso/can_deploy',

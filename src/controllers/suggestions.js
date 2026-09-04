@@ -319,12 +319,16 @@ const toSlug = (text) => (text || '')
  */
 const findNodeBySelector = (root, selector) => {
   const match = /^([a-z0-9]+)(?:#([a-z0-9-]+))?$/i.exec((selector || '').trim());
-  if (!match) return null;
+  if (!match) {
+    return null;
+  }
   const [, tag, id] = match;
 
   let found = null;
   const walk = (node) => {
-    if (found || !node) return;
+    if (found || !node) {
+      return;
+    }
     if (node.componentType?.includes('/title/')) {
       const nodeTag = (node.properties?.titleType || 'h1').toLowerCase();
       const nodeId = toSlug(node.properties?.title);
@@ -361,6 +365,24 @@ const findNodeBySelector = (root, selector) => {
  * title component's `title` property, which is not HTML).
  * @returns {Array<object>|null} A JSON Patch document, or null for an unknown action.
  */
+/**
+ * Converts a suggestion's raw content into what buildJsonPatch expects: plain text
+ * (markdown bold stripped) when a heading `tag` is being created, HTML (markdown
+ * bold converted to `<strong>`) otherwise. Returns undefined for empty content.
+ * @param {string|undefined} rawContent
+ * @param {string|undefined} tag
+ * @returns {string|undefined}
+ */
+const resolveSuggestionContent = (rawContent, tag) => {
+  if (!hasText(rawContent)) {
+    return undefined;
+  }
+  if (tag) {
+    return rawContent.replace(/\*\*(.+?)\*\*/g, '$1');
+  }
+  return `<p>${rawContent.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')}</p>`;
+};
+
 const buildJsonPatch = (target, action, tag, content) => {
   const path = capiKeyToPath(target['capi-key']);
   const newNode = tag
@@ -2934,11 +2956,7 @@ function SuggestionsController(ctx, sqs, env) {
       const rawContent = data.summarizationText || data.recommendedAction;
       // A `tag` means we're creating a heading: its `title` property is plain text,
       // not HTML. Otherwise the content lands in a text component's HTML property.
-      const content = hasText(rawContent) && tag
-        ? rawContent.replace(/\*\*(.+?)\*\*/g, '$1')
-        : hasText(rawContent)
-          ? `<p>${rawContent.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')}</p>`
-          : undefined;
+      const content = resolveSuggestionContent(rawContent, tag);
 
       if (!hasText(selector) || !hasText(action) || !hasText(content)) {
         results.push({
@@ -2968,7 +2986,9 @@ function SuggestionsController(ctx, sqs, env) {
         const contentUrl = `${authorURL}${AEM_CONTENT_API_BASE}/${pageId}/content`;
 
         // eslint-disable-next-line no-await-in-loop
-        const current = await tracingFetch(contentUrl, { headers: { Authorization: authorization } });
+        const current = await tracingFetch(contentUrl, {
+          headers: { Authorization: authorization },
+        });
         if (!current.ok) {
           results.push({
             uuid: suggestionId, index: i, statusCode: current.status, message: 'Failed to read page content',
