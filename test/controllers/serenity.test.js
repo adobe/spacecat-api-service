@@ -96,6 +96,7 @@ function fakeContext({
   brand = makeBrandModel(),
   env = {},
   promiseToken = undefined,
+  promiseAudience = undefined,
 } = {}) {
   return {
     env,
@@ -103,6 +104,7 @@ function fakeContext({
       headers: {
         ...(bearer ? { authorization: `Bearer ${bearer}` } : {}),
         ...(promiseToken ? { 'x-promise-token': promiseToken } : {}),
+        ...(promiseAudience ? { 'x-promise-audience': promiseAudience } : {}),
       },
     },
     attributes: {
@@ -184,6 +186,7 @@ describe('SerenityController', () => {
   let unlinkMarketSiteIfOrphanedStub;
   let getBrandBaseSiteIdStub;
   let exchangePromiseTokenStub;
+  let resolvePromisePairStub;
   let linkSiteToLiveRowsStub;
   let linkSiteToRowStub;
   let tombstoneAllForBrandStub;
@@ -222,6 +225,7 @@ describe('SerenityController', () => {
     unlinkMarketSiteIfOrphanedStub = sinon.stub().resolves(true);
     getBrandBaseSiteIdStub = sinon.stub().resolves(null);
     exchangePromiseTokenStub = sinon.stub().resolves('exchanged-ims-token');
+    resolvePromisePairStub = sinon.stub().returns('SEMRUSH');
     linkSiteToLiveRowsStub = sinon.stub().resolves();
     linkSiteToRowStub = sinon.stub().resolves();
     tombstoneAllForBrandStub = sinon.stub().resolves();
@@ -316,6 +320,7 @@ describe('SerenityController', () => {
         resolveSemrushImsToken: makeResolveSemrushImsTokenStub(
           (...args) => exchangePromiseTokenStub(...args),
         ),
+        resolvePromisePair: resolvePromisePairStub,
       },
       '../../src/support/serenity/mapping-rows.js': {
         linkSiteToLiveRows: linkSiteToLiveRowsStub,
@@ -2933,6 +2938,33 @@ describe('SerenityController', () => {
         });
         // The synchronous path never runs.
         expect(handlers.handleCreatePrompts).to.not.have.been.called;
+        expect(exchangePromiseTokenStub).to.not.have.been.called;
+        expect(enqueueArgs).to.not.have.property('promiseToken');
+        expect(enqueueArgs).to.not.have.property('promisePair');
+      });
+
+      it('forwards the browser promise token and audience pair without exchanging it before enqueue', async () => {
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const prompts = [{
+          text: 'What is your return policy?', geoTargetId: 2840, languageCode: 'en', tagIds: ['tag-1'],
+        }];
+        const response = await controller.createPrompts(fakeContext({
+          authType: 'jwt',
+          bearer: 'spacecat-session-jwt',
+          data: { async: true, prompts },
+          promiseToken: 'browser%2Fpromise%2Btoken',
+          promiseAudience: 'semrush',
+        }));
+
+        expect(response.status).to.equal(202);
+        expect(exchangePromiseTokenStub).to.not.have.been.called;
+        expect(resolvePromisePairStub).to.have.been.calledOnce;
+        expect(createAndEnqueueJobStub).to.have.been.calledOnce;
+        const [, enqueueArgs] = createAndEnqueueJobStub.firstCall.args;
+        expect(enqueueArgs.promiseToken).to.deep.equal({
+          promise_token: 'browser/promise+token',
+        });
+        expect(enqueueArgs.promisePair).to.equal('SEMRUSH');
       });
 
       it('enqueues a serenity-classify-prompts job and returns 202 for subworkspace-mode async import, carrying authMode + parentWorkspaceId', async () => {

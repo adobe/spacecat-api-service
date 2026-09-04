@@ -83,7 +83,12 @@ import { resolveBrandUuid } from '../support/prompts-storage.js';
 import {
   getBrandAliases, getBrandUrlSources, getBrandCompetitors, updateBrand, getBrandBaseSiteId,
 } from '../support/brands-storage.js';
-import { ErrorWithStatusCode, resolveSemrushImsToken as resolveImsTokenViaPromise } from '../support/utils.js';
+import {
+  ErrorWithStatusCode,
+  resolvePromisePair,
+  resolveSemrushImsToken as resolveImsTokenViaPromise,
+} from '../support/utils.js';
+import { getHeader } from '../support/http-headers.js';
 import {
   ensureMarketSite,
   resolveSiteIdentity,
@@ -563,7 +568,13 @@ function SerenityController(context, log, env) {
   const createPrompts = async (ctx) => {
     let auth;
     try {
-      const imsToken = await resolveSemrushImsToken(ctx);
+      const body = ctx.data || {};
+      const isAsync = validateAsync(body);
+      // Async jobs carry the promise token into the worker, which performs the
+      // exchange immediately before calling Semrush. Exchanging it here would
+      // rotate the browser-supplied token before enqueue and then leave the
+      // runner trying to mint a replacement from the SpaceCat session JWT.
+      const imsToken = isAsync ? null : await resolveSemrushImsToken(ctx);
       auth = await authorize(ctx);
       if (auth.error) {
         return auth.error;
@@ -580,8 +591,7 @@ function SerenityController(context, log, env) {
       // metadata below — `authMode` picks the subworkspace-vs-flat create branch,
       // `workspaceId`/`parentWorkspaceId` give it the sub-workspace and org parent
       // it needs.
-      const body = ctx.data || {};
-      if (validateAsync(body)) {
+      if (isAsync) {
         const prompts = Array.isArray(body.prompts) ? body.prompts : [];
         if (prompts.length === 0) {
           return createResponse(
@@ -595,8 +605,20 @@ function SerenityController(context, log, env) {
             400,
           );
         }
+        let promiseTokenHeader = getHeader(ctx, X_PROMISE_TOKEN_HEADER);
+        if (promiseTokenHeader) {
+          try {
+            promiseTokenHeader = decodeURIComponent(promiseTokenHeader);
+          } catch {
+            // Bearer-style tokens may contain literal %; use as-is.
+          }
+        }
         const job = await createAndEnqueueJob(ctx, {
           jobType: CLASSIFY_PROMPTS_JOB_TYPE,
+          ...(promiseTokenHeader ? {
+            promiseToken: { promise_token: promiseTokenHeader },
+            promisePair: resolvePromisePair(ctx),
+          } : {}),
           metadata: {
             mode: 'create',
             brandId: auth.brandUuid,
