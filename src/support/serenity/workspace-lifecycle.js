@@ -177,13 +177,12 @@ async function claimedBrandId(brandCollection, workspaceId) {
 async function findAdoptableFamilyMatch(transport, parentWorkspaceId, title, log, claim) {
   const { brandCollection, selfBrandId } = claim;
   const family = await transport.listWorkspaceFamily(parentWorkspaceId);
-  // The family listing includes the queried parent itself (live-verified against the
-  // gateway), so it must be excluded before any candidate logic runs — otherwise a brand
-  // whose name matches the parent workspace's own title reaches the adoption candidate
-  // set and assertNotParent() 409s AFTER the create attempt, instead of a fresh child
-  // ever being considered (LLMO-7349). No hasText(w?.id) guard here (unlike
-  // enforceLinkedGuard's mirror-image filter below): an id-less entry still falls out of
-  // the title/status check right after, so the guard would be redundant, not protective.
+  // The family response includes the queried parent itself (live-verified against the
+  // gateway); exclude it before candidate selection, or a brand whose name matches the
+  // parent workspace's own title is returned as the match here and a fresh child is
+  // never even attempted (LLMO-7349). No hasText(w?.id) guard here (unlike
+  // enforceLinkedGuard's mirror-image filter below): keep ID-less entries so the
+  // existing missing-ID guard further down fails safely instead of silently dropping them.
   const children = familyItems(family).filter((w) => w?.id !== parentWorkspaceId);
   const sameTitle = children.filter((w) => w?.title === title && w?.status === 'created');
 
