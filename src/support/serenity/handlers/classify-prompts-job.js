@@ -28,7 +28,7 @@ import {
   publishAffected,
   BULK_CREATE_CONCURRENCY,
 } from './prompts.js';
-import { ORIGIN_VALUE } from '../prompt-tags.js';
+import { ORIGIN_VALUE, PROXY_CREATE_SOURCE_VALUE } from '../prompt-tags.js';
 import { resolveIntentValueInjection } from '../tag-tree.js';
 import { buildSliceProjectMap, sliceKey } from '../subworkspace-projects.js';
 
@@ -148,11 +148,11 @@ async function createAndClassify(context, job, transport, metadata) {
   const {
     dataAccess, env, log,
   } = context;
-  // Authorship (LLMO-6289): the caller id captured at enqueue time in the create
-  // controller, carried through the async job so classified-on-create prompts are
-  // stamped with the human/service that submitted them, not the job runner.
+  // Capture both audit attribution and trusted authorship at enqueue time so the
+  // async worker stamps the submitting principal rather than the job runner.
   const {
     brandId, semrushWorkspaceId, callerId = 'unknown', authMode,
+    originValue = ORIGIN_VALUE.HUMAN,
   } = metadata;
   const inputs = Array.isArray(metadata.prompts) ? metadata.prompts : [];
 
@@ -190,7 +190,7 @@ async function createAndClassify(context, job, transport, metadata) {
     semrushWorkspaceId,
     classifyPromptType,
     log,
-    { originValue: ORIGIN_VALUE.HUMAN },
+    { originValue, sourceValue: PROXY_CREATE_SOURCE_VALUE },
   );
 
   // No time budget (serenity-docs#33): retries with backoff until resolved or

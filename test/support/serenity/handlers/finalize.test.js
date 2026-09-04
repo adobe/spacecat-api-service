@@ -108,11 +108,11 @@ describe('finalizeSerenityProjects (publish-after-populate)', () => {
     expect(pArgs[6]).to.equal(classify);
     // env (7) + writeDeadline (8) are threaded from options (undefined here),
     // then the resolved callerId (9, no controller ctx on this trigger-driven
-    // path so it degrades to 'unknown'), then the { publish: false } option (10).
+    // path so it degrades to 'unknown'), then the service-authored origin option (10).
     expect(pArgs[7]).to.equal(undefined);
     expect(pArgs[8]).to.equal(undefined);
     expect(pArgs[9]).to.equal('unknown');
-    expect(pArgs[10]).to.deep.equal({ publish: false });
+    expect(pArgs[10]).to.deep.equal({ publish: false, originValue: 'ai' });
     // models set with publish deferred
     expect(handleUpdateModels.firstCall.args[6]).to.deep.equal({ publish: false });
     // single publish + confirm

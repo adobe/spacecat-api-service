@@ -105,11 +105,47 @@ describe('handlers/classify-prompts-job.js (serenity-docs#33)', () => {
 
       const result = await classifyPromptsHandler(context, job, 'token');
       expect(result.created).to.have.lengthOf(1);
-      expect(result.created[0].tagIds).to.include(TAG_IDS.intentTask);
+      expect(result.created[0].tagIds).to.include.members([
+        TAG_IDS.intentTask,
+        TAG_IDS.originHuman,
+        TAG_IDS.sourceConfig,
+      ]);
       expect(result.published).to.equal(true);
       expect(result.pendingClassificationCount).to.equal(0);
       expect(result.requeuedJobId).to.equal(null);
       expect(createAndEnqueueJobStub).to.not.have.been.called;
+    });
+
+    it('uses the trusted ai origin from job metadata while retaining source/config', async () => {
+      const intentByTextMap = new Map([['generated prompt', 'Task']]);
+      const { classifyPromptsHandler } = await load({
+        intentByTextMap,
+        createAndEnqueueJobStub: sinon.stub(),
+        transport,
+      });
+      const project = { getGeoTargetId: () => 2840, getLanguageCode: () => 'en', getSemrushProjectId: () => 'proj-1' };
+      const context = {
+        env: {}, log: fakeLog(), dataAccess: dataAccessFor([project]),
+      };
+      const job = makeJob({
+        brandId: 'brand-1',
+        semrushWorkspaceId: WORKSPACE,
+        originValue: 'ai',
+        prompts: [{
+          text: 'generated prompt',
+          geoTargetId: 2840,
+          languageCode: 'en',
+          tagIds: ['customer-tag'],
+        }],
+      });
+
+      const result = await classifyPromptsHandler(context, job, 'token');
+
+      expect(result.created[0].tagIds).to.include.members([
+        TAG_IDS.originAi,
+        TAG_IDS.sourceConfig,
+      ]);
+      expect(result.created[0].tagIds).to.not.include(TAG_IDS.originHuman);
     });
 
     it('creates a prompt with NO intent value and requeues a reclassify job when classification is exhausted', async () => {

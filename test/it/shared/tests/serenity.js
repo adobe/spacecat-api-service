@@ -797,18 +797,17 @@ export default function serenityTests(
       expect(created.status).to.equal(200);
       expect(created.body.created).to.have.lengthOf(1);
       expect(created.body.created[0].semrushPromptId).to.be.a('string').that.is.not.empty;
-      // The write path server-stamps THREE dimensions the caller may not set: a
+      // The write path server-stamps FOUR dimensions the caller may not set: a
       // branded/non-branded `type:` tag (classified from the text), the producing
       // `source:` tag (`config` on this proxy-create path — source-dimension.md
       // §1 / WP-S2, LLMO-6282), AND an `intent:<Value>` tag (serenity-docs#31,
       // #32). Azure OpenAI is not configured in this IT environment, so intent
       // deterministically defaults to `intent:Informational` (never null/omitted
-      // — see the fallback ladder). `origin` no longer gets its own tag
-      // (tag-display-names.md §3 — authorship folds into `source` via
-      // `deriveSource`, WP-D2/SITES-50446). So the created prompt carries the
-      // two supplied tags plus the three computed ones.
+      // — see the fallback ladder). The human-authored create also carries
+      // `origin:human`. So the created prompt carries the two supplied tags plus
+      // the four computed ones.
       expect(created.body.created[0].tagIds).to.include.members([category.body.id, child.body.id]);
-      expect(created.body.created[0].tagIds).to.have.lengthOf(5);
+      expect(created.body.created[0].tagIds).to.have.lengthOf(6);
       expect(created.body.failed).to.deep.equal([]);
 
       // by_tags correlation: the id-based create embeds the tag ids, so filtering the prompt list

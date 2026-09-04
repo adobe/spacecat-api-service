@@ -19,8 +19,8 @@
  * serenity flow.
  *
  * A tag's DIMENSION is its root ancestor, not a prefix on its name. Every
- * project's tag tree has exactly four roots — `category`, `intent`, `origin`,
- * `type` — and every tag value is a bare-named descendant of one of them. No
+ * project's tag tree has five roots — `category`, `intent`, `origin`, `type`,
+ * and `source` — and every tag value is a bare-named descendant of one of them. No
  * tag name contains a `:`. A tag's dimension is therefore `path[0]` of the
  * upstream breadcrumb (verified against the live Semrush API: `path[]` is a
  * full root-first ancestry at any depth), never something parsed out of a name.
@@ -94,8 +94,8 @@ export const INTENT_ROOT_NAME = `${HIDDEN_TAG_MARKER}intent`;
  * The customer-facing DISPLAY root name for a dimension whose root gets renamed
  * (tag-display-names.md §1 item 4) — `category` → `Category`, `type` → `Type`,
  * `source` → `Source`. `intent` is excluded (permanently hidden under
- * {@link INTENT_ROOT_NAME}, no display rename) and `origin` is excluded (retired
- * by remap rather than renamed, tag-display-names.md §3).
+ * {@link INTENT_ROOT_NAME}, no display rename) and `origin` keeps its canonical
+ * root name.
  *
  * IDENTITY PLACEHOLDER — serenity-docs#407 (the vocabulary sign-off PR) is not
  * yet merged, so every value here is its own key, verbatim. Do NOT add or remove
@@ -361,31 +361,9 @@ export const PROXY_CREATE_SOURCE_VALUE = 'config';
 export const GENERATED_PROMPT_SOURCE_VALUE = 'semrush';
 
 /**
- * The `source` values that exist ONLY as the output of {@link deriveSource} —
- * never a legal `prompts.source` input, never accepted by the v2 create
- * validator or the create-tag closed-value enum (tag-display-names.md §6 item
- * 3). `ai-onboarding` is the remap target for the retired `origin` dimension
- * (tag-display-names.md §3): it is a real, structural slug (not a display
- * placeholder) — it must be disjoint from {@link SOURCE_VALUES} today, exactly
- * as it will be once the vocabulary freezes. Python twin:
- * `DERIVED_PROMPT_SOURCES` beside `KNOWN_PROMPT_SOURCES`
- * (mysticat-data-service `scripts/serenity_migration/tags.py`); keep the two
- * in sync (slugs, not labels — no drift risk from the identity placeholders).
- */
-export const DERIVED_SOURCE_VALUES = Object.freeze(['ai-onboarding']);
-
-/** The single derived `source` slug — the remap target of {@link deriveSource}. */
-const AI_ONBOARDING_SOURCE_VALUE = DERIVED_SOURCE_VALUES[0];
-
-/**
  * Canonical producing-system slug → customer-facing TAG NAME (the tree-write
  * boundary map, tag-display-names.md §1 item 3 — "the tag-name map"). Covers
- * every {@link SOURCE_VALUES} entry that can still reach the tree as its own
- * tag PLUS every {@link DERIVED_SOURCE_VALUES} entry — together, the full
- * codomain of {@link deriveSource}. `llm-generated` is deliberately ABSENT: it
- * folds into `ai-onboarding` at the derivation boundary and never becomes a
- * tag name of its own (tag-display-names.md §1 item 3, §3) — the exhaustiveness
- * gate counts it as covered-by-fold, not as needing its own entry (§6 item 1).
+ * every {@link SOURCE_VALUES} entry.
  *
  * FROZEN and EXHAUSTIVE over that set, enforced by a unit test that FAILS the
  * moment a canonical value is added without an entry. There is deliberately NO
@@ -405,11 +383,10 @@ const AI_ONBOARDING_SOURCE_VALUE = DERIVED_SOURCE_VALUES[0];
  * many-to-one; that map is WP-D3, out of scope here.)
  */
 export const SOURCE_LABEL = Object.freeze(
-  [...SOURCE_VALUES.filter((slug) => slug !== 'llm-generated'), ...DERIVED_SOURCE_VALUES]
-    .reduce((acc, slug) => {
-      acc[slug] = slug;
-      return acc;
-    }, /** @type {Record<string, string>} */ ({})),
+  SOURCE_VALUES.reduce((acc, slug) => {
+    acc[slug] = slug;
+    return acc;
+  }, /** @type {Record<string, string>} */ ({})),
 );
 
 /** Backing map for {@link displayToSlug} — built once from {@link SOURCE_LABEL}. */
@@ -494,16 +471,14 @@ export function valueSlugOfDisplayName(dimension, displayName) {
  * default `Informational` intent (the most common intent for brand-topic
  * prompts; re-classification can refine it later). The `type` value is
  * classified per prompt at generation time (branded vs non-branded — see the
- * handler), so it is NOT seeded here. The `origin` entry this list used to
- * carry (`{ dimension: 'origin', name: 'ai' }`) is RETIRED
- * (tag-display-names.md §3): every writer that stamped an `origin` tag stops
- * doing so, `origin` being derivable from the producer everywhere it still
- * matters (`derived_source`, above).
+ * handler), so it is NOT seeded here. AI-generated prompts carry `origin/ai`
+ * independently from their producing-system `source`.
  *
  * Each entry names a dimension and the bare value beneath it; the caller resolves
  * the pair to an upstream tag id against the project's tree.
  */
 export const STANDARD_PROMPT_TAG_VALUES = Object.freeze([
+  Object.freeze({ dimension: DIMENSION.ORIGIN, name: ORIGIN_VALUE.AI }),
   Object.freeze({ dimension: DIMENSION.INTENT, name: INTENT_VALUE.INFORMATIONAL }),
 ]);
 
@@ -633,44 +608,6 @@ export function canonicalizeSource(value) {
     || canonical.length > MAX_TAG_NAME_LEN
     || isDimensionRootName(canonical)) {
     return null;
-  }
-  return canonical;
-}
-
-/**
- * `derived_source(source, origin)` (tag-display-names.md §3) — the fold that
- * retires the `origin` dimension into `source` at the single point a slug
- * becomes a tag name. REAL, structural logic (it operates on slugs, never on
- * display strings) — NOT an identity placeholder, unlike the maps above.
- *
- *  - `canonicalizeSource(source) === 'config' && origin === 'ai'` → the
- *    `config` bucket's AI-authored half (origin-dimension.md §3's `origin/ai`
- *    population) remaps to {@link AI_ONBOARDING_SOURCE_VALUE}.
- *  - `canonicalizeSource(source) === 'llm-generated'` → folds into the same
- *    derived value (the "AI generated" collapse, tag-display-names.md §1 item
- *    4) — `prompts.source` keeps recording `llm-generated` verbatim; only the
- *    TAG folds.
- *  - otherwise → `canonicalizeSource(source)`, unchanged (a prompt with a
- *    specific producer — `gsc`, `drs`, … — carries no information in `origin`,
- *    which is exactly why the dimension can retire).
- *
- * `null` propagates from {@link canonicalizeSource}: "do not tag this prompt",
- * never a substituted default (mirrors `canonicalizeSource`'s own contract).
- *
- * @param {unknown} source - a raw or already-canonical `prompts.source` value.
- * @param {string | null | undefined} origin - the bare `origin` value
- *   (`ai`/`human`) for THIS write, or `undefined`/`null` on a path that never
- *   derives origin (e.g. an UPDATE, where `origin` is never re-derived).
- * @returns {string | null} the `source`-dimension tag slug to attach, or
- *   `null` when the prompt must not be tagged at all.
- */
-export function deriveSource(source, origin) {
-  const canonical = canonicalizeSource(source);
-  if (canonical === null) {
-    return null;
-  }
-  if (canonical === 'llm-generated' || (canonical === 'config' && origin === ORIGIN_VALUE.AI)) {
-    return AI_ONBOARDING_SOURCE_VALUE;
   }
   return canonical;
 }

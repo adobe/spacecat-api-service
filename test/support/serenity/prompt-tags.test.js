@@ -31,7 +31,6 @@ import {
   ALL_DIMENSIONS,
   SOURCE_VALUES,
   SOURCE_LABEL,
-  DERIVED_SOURCE_VALUES,
   MAX_TAG_NAME_LEN,
   STANDARD_PROMPT_TAG_VALUES,
   isDimensionRootName,
@@ -42,7 +41,6 @@ import {
   displayToSlug,
   displayNameOfValue,
   valueSlugOfDisplayName,
-  deriveSource,
 } from '../../../src/support/serenity/prompt-tags.js';
 
 describe('serenity prompt-tags taxonomy', () => {
@@ -144,10 +142,9 @@ describe('serenity prompt-tags taxonomy', () => {
   });
 
   describe('STANDARD_PROMPT_TAG_VALUES', () => {
-    it('seeds intent=Informational only (type is classified per prompt, origin is retired)', () => {
-      // tag-display-names.md §3: the `origin/ai` entry this list used to carry
-      // is retired — every writer that stamped an `origin` tag has stopped.
+    it('seeds origin=ai and intent=Informational (type is classified per prompt)', () => {
       expect(STANDARD_PROMPT_TAG_VALUES.map((t) => [t.dimension, t.name])).to.deep.equal([
+        ['origin', 'ai'],
         ['intent', 'Informational'],
       ]);
     });
@@ -201,25 +198,9 @@ describe('serenity prompt-tags taxonomy', () => {
       expect(Object.isFrozen(SOURCE_LABEL)).to.equal(true);
     });
 
-    it('every SOURCE_VALUES entry either has its own label, or is `llm-generated` (covered by the fold into ai-onboarding) — CI gate', () => {
-      // This assertion FAILS the moment a canonical value is added to
-      // SOURCE_VALUES without a label AND without being the one deliberate
-      // fold exemption (tag-display-names.md §6 item 1, §1 item 3). No
-      // pass-through slug default is permitted.
+    it('labels every SOURCE_VALUES entry — CI gate', () => {
       SOURCE_VALUES.forEach((slug) => {
-        if (slug === 'llm-generated') {
-          expect(SOURCE_LABEL).to.not.have.property(slug);
-          expect(deriveSource(slug, undefined)).to.equal('ai-onboarding');
-        } else {
-          expect(SOURCE_LABEL[slug], `missing SOURCE_LABEL for ${slug}`)
-            .to.be.a('string').and.not.equal('');
-        }
-      });
-    });
-
-    it('also labels every DERIVED_SOURCE_VALUES entry (the fold target)', () => {
-      DERIVED_SOURCE_VALUES.forEach((slug) => {
-        expect(SOURCE_LABEL[slug], `missing SOURCE_LABEL for derived value ${slug}`)
+        expect(SOURCE_LABEL[slug], `missing SOURCE_LABEL for ${slug}`)
           .to.be.a('string').and.not.equal('');
       });
     });
@@ -252,57 +233,13 @@ describe('serenity prompt-tags taxonomy', () => {
     });
 
     it('every canonical value that keeps its own tag name canonicalizes to itself (already folded)', () => {
-      SOURCE_VALUES.filter((slug) => slug !== 'llm-generated').forEach((slug) => {
+      SOURCE_VALUES.forEach((slug) => {
         expect(canonicalizeSource(slug)).to.equal(slug);
       });
     });
 
     it('is frozen for SOURCE_VALUES too', () => {
       expect(Object.isFrozen(SOURCE_VALUES)).to.equal(true);
-    });
-  });
-
-  describe('DERIVED_SOURCE_VALUES (tag-display-names.md §6 item 3)', () => {
-    it('is frozen and contains ai-onboarding', () => {
-      expect(Object.isFrozen(DERIVED_SOURCE_VALUES)).to.equal(true);
-      expect([...DERIVED_SOURCE_VALUES]).to.include('ai-onboarding');
-    });
-
-    it('is disjoint from the create-accepted enum (SOURCE_VALUES) — never a legal stored value', () => {
-      DERIVED_SOURCE_VALUES.forEach((value) => {
-        expect(SOURCE_VALUES).to.not.include(value);
-      });
-    });
-  });
-
-  describe('deriveSource (tag-display-names.md §3)', () => {
-    it('folds `config` + origin `ai` into ai-onboarding', () => {
-      expect(deriveSource('config', ORIGIN_VALUE.AI)).to.equal('ai-onboarding');
-    });
-
-    it('leaves `config` + origin `human` as config (the producer wins)', () => {
-      expect(deriveSource('config', ORIGIN_VALUE.HUMAN)).to.equal('config');
-    });
-
-    it('folds llm-generated into ai-onboarding regardless of origin', () => {
-      expect(deriveSource('llm-generated', ORIGIN_VALUE.HUMAN)).to.equal('ai-onboarding');
-      expect(deriveSource('llm-generated', ORIGIN_VALUE.AI)).to.equal('ai-onboarding');
-      expect(deriveSource('llm-generated', undefined)).to.equal('ai-onboarding');
-    });
-
-    it('leaves a specific producer untouched — origin carries no information for it', () => {
-      expect(deriveSource('gsc', ORIGIN_VALUE.HUMAN)).to.equal('gsc');
-      expect(deriveSource('drs', ORIGIN_VALUE.AI)).to.equal('drs');
-    });
-
-    it('canonicalizes before folding (case/underscore variants)', () => {
-      expect(deriveSource('CONFIG', ORIGIN_VALUE.AI)).to.equal('ai-onboarding');
-      expect(deriveSource('LLM_GENERATED', ORIGIN_VALUE.HUMAN)).to.equal('ai-onboarding');
-    });
-
-    it('propagates canonicalizeSource\'s null (do-not-tag) rather than substituting a default', () => {
-      expect(deriveSource('', ORIGIN_VALUE.AI)).to.equal(null);
-      expect(deriveSource(undefined, ORIGIN_VALUE.AI)).to.equal(null);
     });
   });
 
@@ -314,7 +251,7 @@ describe('serenity prompt-tags taxonomy', () => {
       expect(ROOT_DISPLAY_NAME[DIMENSION.SOURCE]).to.equal(DIMENSION.SOURCE);
     });
 
-    it('does NOT cover intent or origin — intent stays hidden, origin retires rather than renames', () => {
+    it('does NOT cover intent or origin — intent stays hidden and origin keeps its name', () => {
       expect(ROOT_DISPLAY_NAME).to.not.have.property(DIMENSION.INTENT);
       expect(ROOT_DISPLAY_NAME).to.not.have.property(DIMENSION.ORIGIN);
       expect(rootNameOfDimension(DIMENSION.INTENT)).to.equal(INTENT_ROOT_NAME);

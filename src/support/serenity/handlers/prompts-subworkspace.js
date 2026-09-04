@@ -148,6 +148,7 @@ export async function handleListPromptsSubworkspace(transport, workspaceId, quer
  * @param {object} [options]
  * @param {string | null} [options.orgId] - serenity-docs#72 §5 alert payload only.
  * @param {string | null} [options.brandId] - serenity-docs#72 §5 alert payload only.
+ * @param {string} [options.originValue=human] - trusted caller-principal origin.
  */
 export async function handleCreatePromptsSubworkspace(
   transport,
@@ -161,6 +162,7 @@ export async function handleCreatePromptsSubworkspace(
   {
     orgId = null,
     brandId = null,
+    originValue = ORIGIN_VALUE.HUMAN,
   } = {},
 ) {
   const inputs = Array.isArray(body?.prompts) ? body.prompts : [];
@@ -176,16 +178,14 @@ export async function handleCreatePromptsSubworkspace(
   const deferPublish = validateDeferPublish(body);
 
   const projectsBySlice = await buildSliceProjectMap(transport, workspaceId, log);
-  // CREATE: user-authenticated write → `originValue` = `human` feeds
-  // `deriveSource` (tag-display-names.md §3 — `origin` no longer gets its own
-  // tag) and producing `source` is the constant `config` (see the flat-mode
-  // twin handleCreatePrompts, source-dimension.md §1).
+  // CREATE: origin comes from the trusted request-principal classification;
+  // source defaults independently to `config`.
   const injectComputedTags = makePromptTagInjector(
     transport,
     workspaceId,
     classifyPromptType,
     log,
-    { originValue: ORIGIN_VALUE.HUMAN, sourceValue: PROXY_CREATE_SOURCE_VALUE },
+    { originValue, sourceValue: PROXY_CREATE_SOURCE_VALUE },
   );
   // Unified layer (serenity-docs#32): batch-classify every distinct text ONCE
   // under the shared request deadline, then thread the resolved map into each
@@ -228,11 +228,9 @@ export async function handleCreatePromptsSubworkspace(
     }
     const projectId = String(project.id);
     try {
-      // Unified layer: strip caller-supplied type/source/intent, then inject the
-      // computed type + the derived `source` (tag-display-names.md §3 — `origin`
-      // no longer gets its own tag, so it is never stripped or injected here) and
-      // the classified intent (serenity-docs#32). The injectors act on disjoint
-      // dimensions.
+      // Unified layer: strip caller-supplied type/origin/source/intent, then inject
+      // the computed type, derived origin, producing source, and classified intent.
+      // The injectors act on disjoint dimensions.
       let typed = await injectComputedTags(projectId, input);
       typed = await injectComputedIntent(projectId, typed);
       // Intentional (not an inconsistency to fix): each item stamps its OWN
