@@ -12,14 +12,10 @@
 
 import { deriveProjectName } from '../../../support/utils.js';
 
-// PLG sites get this fixed set of config handlers turned on (summit-plg notifications +
-// the base audit handlers; auto-suggest/auto-fix are no longer part of PLG enrollment).
-// Each handler is enabled independently below — one handler's failure (e.g. an unmet
-// dependency for this site) does not block the others, and whatever succeeds is still
-// persisted.
+// Config handlers turned on for every PLG site. Failures are logged and swallowed —
+// onboarding continues even if a handler can't be enabled.
 export const PLG_CONFIG_HANDLERS = [
   'summit-plg',
-  'scrape-top-pages',
   'broken-backlinks',
   'alt-text',
   'cwv',
