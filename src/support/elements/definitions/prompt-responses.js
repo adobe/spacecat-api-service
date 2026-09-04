@@ -10,7 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
-import { resolveElementModel } from '../constants.js';
+import { buildAdvancedFilters, resolveElementModel } from '../constants.js';
 
 /**
  * Default page size for a Prompt Responses call.
@@ -42,9 +42,13 @@ const RESPONSE_SORT_COLUMNS = Object.freeze(['prompt asc']);
  * {@link DEFAULT_RESPONSE_PAGE_SIZE} for absent/non-numeric input.
  *
  * @param {number|string} [limit] - Requested page size.
+ * Exported so {@link module:response-sources} shares one definition rather than duplicating
+ * it — both elements page under the same per-workspace request budget.
+ *
+ * @param {number|string} [limit] - Requested page size.
  * @returns {number} Clamped page size.
  */
-function clampLimit(limit) {
+export function clampLimit(limit) {
   const parsed = Number.parseInt(limit, 10);
   if (!Number.isFinite(parsed)) {
     return DEFAULT_RESPONSE_PAGE_SIZE;
@@ -58,7 +62,7 @@ function clampLimit(limit) {
  * @param {number|string} [offset] - Requested row offset.
  * @returns {number} Non-negative offset.
  */
-function clampOffset(offset) {
+export function clampOffset(offset) {
   const parsed = Number.parseInt(offset, 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
 }
@@ -132,12 +136,16 @@ export function buildPromptResponsesPayload({
     filters: {
       // Duplicated in simple AND advanced — see the grammar warning above.
       ...(end ? { simple: { CBF_date__start: start, CBF_date__end: end } } : {}),
-      advanced: { op: 'and', filters: advancedFilters },
+      ...buildAdvancedFilters(advancedFilters),
     },
     pagination: {
       limit: clampLimit(limit),
       offset: clampOffset(offset),
       // Required for deterministic pagination — see RESPONSE_SORT_COLUMNS.
+      // [unverified] wire format: no other definition in this repo sends `pagination`, so the
+      // field name and the `'<col> asc'` string form are encoded from live observation rather
+      // than from an in-repo precedent. Confirm against a real call before an endpoint depends
+      // on this shape.
       sort_columns: [...RESPONSE_SORT_COLUMNS],
     },
   };

@@ -218,6 +218,26 @@ describe('response-feed join', () => {
     // returns [] for any prompt that also ran earlier in the window — verified against two live
     // adjacent-day captures, where a set difference gave 0 rows and a multiset difference gave
     // 4 and 5. [] is indistinguishable from "nothing ran", the data-loss outcome we forbid.
+    it('does not let a U+001F inside a prompt forge a key boundary', () => {
+      // U+001F is the vector a separator-joined key is most exposed to, since it is the
+      // character such a key would use. These two tuples are DIFFERENT executions but would
+      // join to one identical string under any separator scheme:
+      //   ('p', 'a<US>b', 'm')  vs  ('p', 'a', 'b<US>m')
+      // They must remain distinct, so neither can consume the other's row in the difference.
+      const sneaky = answer({ projectId: 'p', prompt: 'a\u001Fb', model: 'm' });
+      const other = answer({ projectId: 'p', prompt: 'a', model: 'b\u001Fm' });
+
+      // If the keys collided, `other` would consume `sneaky`'s prior row and this would be 0.
+      expect(diffDayExecutions([sneaky], [other])).to.have.lengthOf(1);
+      expect(diffDayExecutions([other], [sneaky])).to.have.lengthOf(1);
+    });
+
+    it('keeps a pipe inside a prompt from forging a key boundary', () => {
+      const a = answer({ projectId: 'p', prompt: 'a|b', model: 'm' });
+      const b = answer({ projectId: 'p', prompt: 'a', model: 'b|m' });
+      expect(diffDayExecutions([a], [b])).to.have.lengthOf(1);
+    });
+
     it('counts repeats: a daily prompt already in the D-1 page still reports its day-D row', () => {
       // Same (project, prompt, model) 3x on D-1 and 4x on D: exactly one execution on day D.
       const prev = [answer(), answer(), answer()];

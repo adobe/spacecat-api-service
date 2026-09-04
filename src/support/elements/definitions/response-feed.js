@@ -17,7 +17,20 @@
  * free text: any printable choice (`|`, `::`, tab) could occur inside a prompt and let two
  * different tuples collide on one key. A control character cannot appear in these values.
  */
-const KEY_SEP = '\u001F';
+/**
+ * Composite keys are built with `JSON.stringify` over the component array rather than by
+ * joining on a separator.
+ *
+ * A separator — ANY separator, including a control character such as U+001F — is forgeable:
+ * `(project 'p', prompt 'a<SEP>b', model 'm')` and `(project 'p', prompt 'a', model 'b<SEP>m')`
+ * join to the identical string, so two distinct executions would share one key. `prompt` is
+ * free text supplied by the customer, so this is a data-dependent correctness bug rather than
+ * a theoretical one. JSON escaping removes the ambiguity: quotes and control characters inside
+ * a component are escaped, so no component can forge a boundary.
+ */
+function compositeKey(parts) {
+  return JSON.stringify(parts);
+}
 
 /**
  * Builds the composite join key `(project_id, prompt, model, date)`.
@@ -38,13 +51,30 @@ const KEY_SEP = '\u001F';
  *   carry it, response rows do not — see the module docs).
  * @returns {string} Composite key.
  */
+function identityKey(row) {
+  return compositeKey([row.projectId ?? '', row.prompt ?? '', row.model ?? '']);
+}
+
+/**
+ * Builds the dateless identity used by {@link diffDayExecutions}. Kept adjacent to
+ * {@link joinKey} and derived from the same {@link identityKey} prefix so the two cannot
+ * drift apart if the key tuple ever changes.
+ *
+ * @param {object} row - A normalised response row.
+ * @returns {string} Dateless composite key.
+ */
+function dayIdentity(row) {
+  return identityKey(row);
+}
+
 function joinKey(row, date) {
-  return [
+  // Derived from the same components as the dateless identity so the two cannot drift.
+  return compositeKey([
     row.projectId ?? '',
     row.prompt ?? '',
     row.model ?? '',
     date ?? row.date ?? '',
-  ].join(KEY_SEP);
+  ]);
 }
 
 /**
@@ -181,7 +211,7 @@ export function diffDayExecutions(rowsEndD, rowsEndDminus1) {
   const current = Array.isArray(rowsEndD) ? rowsEndD : [];
   const previous = Array.isArray(rowsEndDminus1) ? rowsEndDminus1 : [];
   // Date is constant across a single call pair, so compare on the other three components.
-  const identity = (row) => [row.projectId ?? '', row.prompt ?? '', row.model ?? ''].join(KEY_SEP);
+  const identity = dayIdentity;
   // Multiset difference: consume one prior occurrence per matching row. A distinct Set here
   // would return [] for any prompt that also ran earlier in the rolling window (see above).
   const remaining = new Map();

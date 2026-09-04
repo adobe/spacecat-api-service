@@ -10,11 +10,8 @@
  * governing permissions and limitations under the License.
  */
 
-import { resolveElementModel } from '../constants.js';
-import {
-  DEFAULT_RESPONSE_PAGE_SIZE,
-  MAX_RESPONSE_PAGE_SIZE,
-} from './prompt-responses.js';
+import { buildAdvancedFilters, resolveElementModel } from '../constants.js';
+import { clampLimit, clampOffset } from './prompt-responses.js';
 
 /**
  * Sort applied to every Response Sources call.
@@ -25,32 +22,6 @@ import {
  * is what {@link transformResponseSourcesResponse} preserves.
  */
 const SOURCE_SORT_COLUMNS = Object.freeze(['prompt asc', 'position asc']);
-
-/**
- * Clamps a caller-supplied page size into `[1, MAX_RESPONSE_PAGE_SIZE]`, falling back to
- * {@link DEFAULT_RESPONSE_PAGE_SIZE} for absent/non-numeric input.
- *
- * @param {number|string} [limit] - Requested page size.
- * @returns {number} Clamped page size.
- */
-function clampLimit(limit) {
-  const parsed = Number.parseInt(limit, 10);
-  if (!Number.isFinite(parsed)) {
-    return DEFAULT_RESPONSE_PAGE_SIZE;
-  }
-  return Math.min(Math.max(1, parsed), MAX_RESPONSE_PAGE_SIZE);
-}
-
-/**
- * Floors a caller-supplied offset at 0, falling back to 0 for absent/non-numeric input.
- *
- * @param {number|string} [offset] - Requested row offset.
- * @returns {number} Non-negative offset.
- */
-function clampOffset(offset) {
-  const parsed = Number.parseInt(offset, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
-}
 
 /**
  * Builds the payload for the Response Sources element (404fb017, `SOURCES_DATES`). Returns
@@ -108,7 +79,7 @@ export function buildResponseSourcesPayload({
     filters: {
       // Duplicated in simple AND advanced — see the grammar warning above.
       ...(end ? { simple: { CBF_date__start: start, CBF_date__end: end } } : {}),
-      advanced: { op: 'and', filters: advancedFilters },
+      ...buildAdvancedFilters(advancedFilters),
     },
     pagination: {
       limit: clampLimit(limit),
