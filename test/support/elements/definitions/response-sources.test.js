@@ -143,6 +143,29 @@ describe('response-sources definitions', () => {
       });
     });
 
+    // Regression: the live element returns `date` as a FULL TIMESTAMP
+    // (`2026-09-03T00:00:00Z`, measured 2026-09-04), not the bare `YYYY-MM-DD` the fixtures
+    // above use. `date` is a join-key component and the answer side supplies a bare day, so
+    // an untruncated value never matches: every record would come back with an empty
+    // `sources` array — indistinguishable from the legitimate "cited nothing that day" case,
+    // and therefore silent data loss rather than an error.
+    it('truncates the live full-timestamp date to a calendar day', () => {
+      const [row] = transformResponseSourcesResponse(
+        rawWith(sourceRow({ date: '2026-09-03T00:00:00Z' })),
+      );
+      expect(row.date).to.equal('2026-09-03');
+    });
+
+    it('leaves an already-bare calendar day unchanged', () => {
+      const [row] = transformResponseSourcesResponse(rawWith(sourceRow({ date: '2026-08-24' })));
+      expect(row.date).to.equal('2026-08-24');
+    });
+
+    it('normalises a non-string date to the empty day rather than throwing', () => {
+      const [row] = transformResponseSourcesResponse(rawWith(sourceRow({ date: 20260824 })));
+      expect(row.date).to.equal('');
+    });
+
     it('falls back to source when url_cbf is absent', () => {
       const [row] = transformResponseSourcesResponse(rawWith(sourceRow({ url_cbf: null })));
       expect(row.url).to.equal('runnersworld.com');

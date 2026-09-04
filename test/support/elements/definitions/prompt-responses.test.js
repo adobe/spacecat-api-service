@@ -106,16 +106,22 @@ describe('prompt-responses definitions', () => {
     });
 
     it('pins the page bounds to the values measured against the live element', () => {
-      // These are evidence, not preferences (measured 2026-09-04, Repsol ES workspace):
-      //   20,000 -> 200 in 44.6s / 60.6 MB      50,000 -> 504 Gateway Timeout
-      //    5,000 -> 200 in 12.4s / 14.7 MB
-      // Asserted as literals so that changing the constant away from the measured ceiling
-      // fails here rather than silently tracking it. Re-measure before changing these.
+      // Evidence, not preference. Measured 2026-09-04 on BOTH routes this endpoint must
+      // run over (per page):
+      //            internal (IMS)          external (technical account)
+      //    5,000   200 - 12.8s /  14.7MB   200 - 12.4s / 14.7MB
+      //   20,000   200 - 41.6s /  60.7MB   200 - 44.6s / 60.6MB
+      //   50,000   200 - 95.9s / 149.6MB   504 Gateway Timeout
+      // 20,000 is the largest page that works on BOTH, which is why it is the ceiling:
+      // 50,000 is unavailable on the external gateway (the feed's production path) and
+      // ~96s/~150MB on the internal route, hostile to Lambda timeout and memory.
+      // Asserted as literals so changing a constant away from the measured basis fails
+      // here rather than silently tracking it. Re-measure before changing these.
       expect(MAX_RESPONSE_PAGE_SIZE).to.equal(20000);
       expect(DEFAULT_RESPONSE_PAGE_SIZE).to.equal(5000);
     });
 
-    it('clamps a limit above the 504-inducing ceiling', () => {
+    it('clamps a limit above the page-size ceiling', () => {
       expect(buildPromptResponsesPayload({ limit: 99999 }).pagination.limit)
         .to.equal(MAX_RESPONSE_PAGE_SIZE);
     });

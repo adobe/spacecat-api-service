@@ -15,29 +15,39 @@ import { buildAdvancedFilters, resolveElementModel } from '../constants.js';
 /**
  * Default page size for a Prompt Responses call.
  *
- * Measured live 2026-09-04 against the external route (Repsol ES workspace), timing and
- * payload per page:
+ * This endpoint must run over BOTH upstream routes, so the bounds are calibrated to the
+ * more restrictive of the two:
  *
- *   |   limit | result                    |
- *   |--------:|---------------------------|
- *   |     400 | 200 —  6.8s,  1.3 MB      |
- *   |   1,500 | 200 —  8.3s,  4.9 MB      |
- *   |   5,000 | 200 — 12.4s, 14.7 MB      |
- *   |  20,000 | 200 — 44.6s, 60.6 MB      |
- *   |  50,000 | 504 Gateway Timeout       |
+ *  - INTERNAL  `/enterprise/pages/api/v3/...`, IMS bearer — today's transport, used for an
+ *    interactive caller whose own token drives the x-promise-token flow.
+ *  - EXTERNAL  `api.semrush.com/apis/v4-raw/...`, `Authorization: Apikey` — the technical
+ *    account, and the INTENDED PRODUCTION PATH for the Brand Claims feed, which is a
+ *    background job with no caller token to borrow. Binding it is the auth-seam work
+ *    (spec PR-B / LLMO-6836).
  *
- * 5,000 is the default: it is an order of magnitude fewer round trips than 400 while keeping
- * a page near ten seconds and well inside gateway timeouts. Raising `limit` is strongly
- * preferable to walking `offset`, because every call re-scans the whole rolling window.
+ * Measured live 2026-09-04, per page:
+ *
+ *   |   limit | internal (IMS)          | external (technical account) |
+ *   |--------:|-------------------------|------------------------------|
+ *   |   5,000 | 200 — 12.8s,  14.7 MB   | 200 — 12.4s, 14.7 MB         |
+ *   |  20,000 | 200 — 41.6s,  60.7 MB   | 200 — 44.6s, 60.6 MB         |
+ *   |  50,000 | 200 — 95.9s, 149.6 MB   | 504 Gateway Timeout          |
+ *
+ * 5,000 is the default: an order of magnitude fewer round trips than a 400-row page while
+ * keeping a page near ten seconds on both routes. Raising `limit` is strongly preferable to
+ * walking `offset`, because every call re-scans the whole rolling window.
  */
 export const DEFAULT_RESPONSE_PAGE_SIZE = 5000;
 
 /**
- * Hard ceiling on `limit`. 20,000 is the largest page observed to succeed; 50,000 returns a
- * `504` (see the table above). A caller asking for more is clamped rather than allowed to fail
- * upstream. An earlier revision of this file set the ceiling at 1,000 on the belief that the
- * element 504s above ~1,500 rows — that was wrong by more than a factor of ten, and it clamped
- * callers to twenty times below what the element actually serves.
+ * Hard ceiling on `limit`. 20,000 is the largest page that works on BOTH routes — which is
+ * the real reason it is the ceiling, and a stronger basis than either measurement alone.
+ *
+ * Two independent limits happen to agree here. On the external gateway 50,000 returns a
+ * `504`, so it is simply unavailable on the production path for this feed. On the internal
+ * route 50,000 does succeed, but at ~96s and ~150 MB per page it is hostile to Lambda
+ * execution time and memory. A caller asking for more is clamped rather than allowed to hit
+ * either wall.
  */
 export const MAX_RESPONSE_PAGE_SIZE = 20000;
 
@@ -55,9 +65,8 @@ const RESPONSE_SORT_COLUMNS = Object.freeze(['prompt asc']);
  * Clamps a caller-supplied page size into `[1, MAX_RESPONSE_PAGE_SIZE]`, falling back to
  * {@link DEFAULT_RESPONSE_PAGE_SIZE} for absent/non-numeric input.
  *
- * @param {number|string} [limit] - Requested page size.
  * Exported so {@link module:response-sources} shares one definition rather than duplicating
- * it — both elements page under the same per-workspace request budget.
+ * it — both elements page under the same request budget and the same page-size ceiling.
  *
  * @param {number|string} [limit] - Requested page size.
  * @returns {number} Clamped page size.

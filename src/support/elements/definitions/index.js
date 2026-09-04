@@ -36,6 +36,7 @@ export {
 export {
   buildPromptResponsesPayload,
   transformPromptResponsesResponse,
+  clampLimit,
   DEFAULT_RESPONSE_PAGE_SIZE,
   MAX_RESPONSE_PAGE_SIZE,
 } from './prompt-responses.js';

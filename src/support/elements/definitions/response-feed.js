@@ -11,13 +11,6 @@
  */
 
 /**
- * Field separator for the composite join key.
- *
- * U+001F (UNIT SEPARATOR) is used rather than a printable delimiter because `prompt` is
- * free text: any printable choice (`|`, `::`, tab) could occur inside a prompt and let two
- * different tuples collide on one key. A control character cannot appear in these values.
- */
-/**
  * Composite keys are built with `JSON.stringify` over the component array rather than by
  * joining on a separator.
  *
@@ -33,40 +26,39 @@ function compositeKey(parts) {
 }
 
 /**
- * Builds the composite join key `(project_id, prompt, model, date)`.
- *
- * This exact tuple is the join contract, and its soundness rests on a MEASURED invariant:
- * at most ONE execution exists per `(project_id, prompt, model, date)`. Advancing the window
- * end by one day added exactly 10 new responses for one prompt in a 10-model project — never
- * 11, never 20. A model may contribute ZERO on a given day (`deepseek` was observed at +0),
- * but never two. So the key cannot pair one answer with another execution's citations.
- *
- * ⚠️ This invariant is measured, not contractual — Semrush has not confirmed it as a
- * guarantee. If it were ever violated, the symptom would be an answer carrying a merged
- * source list from two executions rather than an error. {@link joinResponsesToSources}
- * therefore records `sourceRowCount` so a caller can spot an implausible fan-out.
+ * Builds the dateless identity `(project_id, prompt, model)` used by both
+ * {@link joinKey} and {@link diffDayExecutions}, so the two cannot drift apart if the key
+ * tuple ever changes.
  *
  * @param {object} row - A normalised response or source row.
- * @param {string} [date] - Date component; taken from `row.date` when omitted (source rows
- *   carry it, response rows do not — see the module docs).
- * @returns {string} Composite key.
+ * @returns {string} Dateless composite key.
  */
 function identityKey(row) {
   return compositeKey([row.projectId ?? '', row.prompt ?? '', row.model ?? '']);
 }
 
 /**
- * Builds the dateless identity used by {@link diffDayExecutions}. Kept adjacent to
- * {@link joinKey} and derived from the same {@link identityKey} prefix so the two cannot
- * drift apart if the key tuple ever changes.
+ * Builds the full composite join key `(project_id, prompt, model, date)`.
  *
- * @param {object} row - A normalised response row.
- * @returns {string} Dateless composite key.
+ * This exact tuple is the join contract, and its soundness rests on a MEASURED invariant:
+ * at most ONE execution exists per `(project_id, prompt, model, date)`. Verified directly
+ * against element 404fb017, which carries both `execution_id` and `date`: across 2,553
+ * tuples every one mapped to exactly one `execution_id`, with zero violations (2026-09-04).
+ * A model may contribute ZERO on a given day, but never two.
+ *
+ * ⚠️ This invariant is measured, not contractual — Semrush has not confirmed it as a
+ * guarantee. If it were ever violated, the symptom would be an answer carrying a merged
+ * source list from two executions rather than an error. {@link joinResponsesToSources}
+ * therefore records `sourceRowCount` so a caller can spot an implausible fan-out.
+ *
+ * Both sides must express `date` as a bare `YYYY-MM-DD`: the source transform truncates the
+ * element's full timestamp, and the answer side supplies the requested day.
+ *
+ * @param {object} row - A normalised response or source row.
+ * @param {string} [date] - Date component; taken from `row.date` when omitted (source rows
+ *   carry it, response rows do not — see the module docs).
+ * @returns {string} Composite key.
  */
-function dayIdentity(row) {
-  return identityKey(row);
-}
-
 function joinKey(row, date) {
   // Derived from the same components as the dateless identity so the two cannot drift.
   return compositeKey([
@@ -178,10 +170,11 @@ export function joinResponsesToSources(responseRows, sourceRows, { date } = {}) 
  *   executions(D) = responses(end = D) MINUS responses(end = D-1)
  *
  * This is necessary because the element ignores `CBF_date__start` and honours
- * `CBF_date__end` as an upper bound over a ROLLING (~50 day) window, so a single day cannot
- * be requested directly — see {@link module:prompt-responses}. Two calls are therefore the
- * documented cost of one day. A Semrush fix honouring `CBF_date__start` would halve it, and
- * this function would become unnecessary rather than merely cheaper.
+ * `CBF_date__end` as an upper bound over a ROLLING window (~74 days measured 2026-09-04), so
+ * a single day cannot be requested directly — see {@link module:prompt-responses}. Two calls
+ * are therefore the documented cost of ONE isolated day. Consecutive days share a boundary,
+ * so a caller recovering a RANGE should fetch each boundary once and reuse it for the two
+ * days it borders: N days cost N+1 pulls, not 2N.
  *
  * Rows are identified by `(project_id, prompt, model)`, and the difference is a MULTISET
  * (count-based) difference, NOT a distinct-set difference. This is load-bearing.
@@ -211,7 +204,7 @@ export function diffDayExecutions(rowsEndD, rowsEndDminus1) {
   const current = Array.isArray(rowsEndD) ? rowsEndD : [];
   const previous = Array.isArray(rowsEndDminus1) ? rowsEndDminus1 : [];
   // Date is constant across a single call pair, so compare on the other three components.
-  const identity = dayIdentity;
+  const identity = identityKey;
   // Multiset difference: consume one prior occurrence per matching row. A distinct Set here
   // would return [] for any prompt that also ran earlier in the rolling window (see above).
   const remaining = new Map();

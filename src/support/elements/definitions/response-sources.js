@@ -14,6 +14,28 @@ import { buildAdvancedFilters, resolveElementModel } from '../constants.js';
 import { clampLimit, clampOffset } from './prompt-responses.js';
 
 /**
+ * Normalises the element's `date` column to a bare `YYYY-MM-DD` calendar day.
+ *
+ * ⚠️ LOAD-BEARING. The element returns a full timestamp (`2026-09-03T00:00:00Z` — measured
+ * live 2026-09-04), but `date` is one of the four join-key components and the answer side
+ * supplies it as a bare `YYYY-MM-DD` (element 141adc88 has no date column at all, so the
+ * caller passes the day it requested). Comparing the two raw forms never matches, and the
+ * failure is SILENT: every record would come back with an empty `sources` array, which is
+ * indistinguishable from the legitimate "that model cited nothing that day" case. Truncating
+ * here — at the boundary where the upstream shape is normalised — keeps both sides of the
+ * join in one vocabulary.
+ *
+ * Truncation is safe because the element is day-granular: the time component was `00:00:00Z`
+ * on every row observed, and `execution_id` itself is a day-granular composite.
+ *
+ * @param {string} value - Raw `date` cell.
+ * @returns {string} `YYYY-MM-DD`, or `''` when absent.
+ */
+function toCalendarDay(value) {
+  return typeof value === 'string' ? value.slice(0, 10) : '';
+}
+
+/**
  * Sort applied to every Response Sources call.
  *
  * `sort_columns` is REQUIRED for deterministic pagination (see the same note in
@@ -97,7 +119,8 @@ export function buildResponseSourcesPayload({
  *   `projectId`   ← `project_id`
  *   `prompt`      ← `prompt`
  *   `model`       ← `model`
- *   `date`        ← `date`         (the join component PROMPT_RESPONSES cannot supply)
+ *   `date`        ← `date`, TRUNCATED to `YYYY-MM-DD` (see {@link toCalendarDay} — the raw
+ *                  cell is a full timestamp and would never match the join key otherwise)
  *   `url`         ← `url_cbf`, falling back to `source`
  *   `source`      ← `source`
  *   `position`    ← `position`
@@ -118,7 +141,9 @@ export function transformResponseSourcesResponse(raw) {
       projectId: row.project_id || '',
       prompt: row.prompt,
       model: row.model || '',
-      date: row.date,
+      // Truncated to the calendar day: the raw cell is `YYYY-MM-DDTHH:mm:ssZ` and the join
+      // key's other side carries a bare `YYYY-MM-DD`. See {@link toCalendarDay}.
+      date: toCalendarDay(row.date),
       // `url_cbf` is the citation target; `source` is the display/domain form. Prefer the
       // former and fall back so a row with only one populated still yields a usable URL.
       url: row.url_cbf || row.source || '',
