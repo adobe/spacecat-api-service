@@ -18,7 +18,7 @@ import {
   managedRuleTree,
   buildRoutingEdgeRule,
   buildRoutingParentRule,
-  buildRemoveMarkerRule,
+  buildFailoverCleanupRule,
   buildSiteFailoverRule,
   buildFailoverTestRule,
   buildFragments,
@@ -175,22 +175,56 @@ describe('llmo-akamai-utils', () => {
       expect(injectsApiKey).to.equal(false);
     });
 
-    it('nests only the marker-removal child (Site Failover is now a wrapper-level sibling)', () => {
-      expect(parent.children.map((c) => c.name)).to.deep.equal([
-        cfg.ruleNames.removeMarker,
-      ]);
+    it('does NOT nest a marker-removal child (marker persists for multi-hop, stripped only on recreation)', () => {
+      expect(parent.children).to.deep.equal([]);
     });
   });
 
-  describe('buildRemoveMarkerRule', () => {
-    it('strips the edge-routed marker from the incoming request before origin', () => {
+  describe('buildFailoverCleanupRule', () => {
+    it('strips the edge-routed marker on the failover recreation (CLIENT_REQ + api-key EXISTS)', () => {
       const cfg = buildRuleConfig({ hostname: HOSTNAME, apiKey: API_KEY });
-      const rule = buildRemoveMarkerRule(cfg);
-      expect(rule.name).to.equal(cfg.ruleNames.removeMarker);
-      expect(rule.criteria).to.deep.equal([]);
+      const rule = buildFailoverCleanupRule(cfg);
+      expect(rule.name).to.equal(cfg.ruleNames.cleanup);
+      expect(rule.criteriaMustSatisfy).to.equal('all');
+      const reqType = rule.criteria.find((c) => c.name === 'requestType');
+      expect(reqType.options.matchOperator).to.equal('IS');
+      expect(reqType.options.value).to.equal('CLIENT_REQ');
+      const apiKey = rule.criteria.find(
+        (c) => c.name === 'requestHeader' && c.options.headerName === 'x-edgeoptimize-api-key',
+      );
+      expect(apiKey.options.matchOperator).to.equal('EXISTS');
       const del = findBehavior(rule, 'modifyIncomingRequestHeader');
       expect(del.options.action).to.equal('DELETE');
       expect(del.options.customHeaderName).to.equal(EDGE_ROUTED_MARKER);
+      expect(rule.children).to.deep.equal([]);
+    });
+
+    it('is mutually exclusive with Routing Edge (api-key EXISTS vs DOES_NOT_EXIST)', () => {
+      const cfg = buildRuleConfig({ hostname: HOSTNAME, apiKey: API_KEY });
+      const apiKeyOp = (rule) => rule.criteria.find(
+        (c) => c.name === 'requestHeader' && c.options.headerName === 'x-edgeoptimize-api-key',
+      ).options.matchOperator;
+      expect(apiKeyOp(buildFailoverCleanupRule(cfg))).to.equal('EXISTS');
+      expect(apiKeyOp(buildRoutingEdgeRule(cfg))).to.equal('DOES_NOT_EXIST');
+    });
+
+    it('no single managed rule both sets and deletes the edge-routed marker', () => {
+      const cfg = buildRuleConfig({ hostname: HOSTNAME, apiKey: API_KEY });
+      const walk = (rule, acc = []) => {
+        acc.push(rule);
+        (rule.children || []).forEach((c) => walk(c, acc));
+        return acc;
+      };
+      walk(buildParentRule(cfg)).forEach((rule) => {
+        const actions = new Set(
+          (rule.behaviors || [])
+            .filter((b) => b.name === 'modifyIncomingRequestHeader'
+              && b.options.customHeaderName === EDGE_ROUTED_MARKER)
+            .map((b) => b.options.action),
+        );
+        const setsAndDeletes = actions.has('DELETE') && (actions.has('MODIFY') || actions.has('ADD'));
+        expect(setsAndDeletes).to.equal(false);
+      });
     });
   });
 
@@ -225,11 +259,12 @@ describe('llmo-akamai-utils', () => {
   });
 
   describe('buildParentRule / buildFragments', () => {
-    it('wraps the two routing rules, the site-failover sibling, and the failover-test sibling', () => {
+    it('wraps the cleanup rule, the two routing rules, the site-failover sibling, and the failover-test sibling', () => {
       const cfg = buildRuleConfig({ hostname: HOSTNAME, apiKey: API_KEY });
       const parent = buildParentRule(cfg);
       expect(parent.name).to.equal(cfg.ruleNames.parent);
       expect(parent.children.map((c) => c.name)).to.deep.equal([
+        cfg.ruleNames.cleanup,
         cfg.ruleNames.routingEdge,
         cfg.ruleNames.routingParent,
         'Site Failover Behavior',
@@ -271,13 +306,14 @@ describe('llmo-akamai-utils', () => {
       const tree = managedRuleTree(cfg);
       expect(tree.name).to.equal(cfg.ruleNames.parent);
       expect(tree.children.map((c) => c.name)).to.deep.equal([
+        cfg.ruleNames.cleanup,
         cfg.ruleNames.routingEdge,
         cfg.ruleNames.routingParent,
         'Site Failover Behavior',
         cfg.ruleNames.failoverTest,
       ]);
       const parentRule = tree.children.find((c) => c.name === cfg.ruleNames.routingParent);
-      expect(parentRule.children.map((c) => c.name)).to.deep.equal([cfg.ruleNames.removeMarker]);
+      expect(parentRule.children).to.deep.equal([]);
       expect(JSON.stringify(tree)).to.not.contain('fk-secret');
     });
   });
