@@ -1,3 +1,10 @@
+## [1.793.2](https://github.com/adobe/spacecat-api-service/compare/v1.793.1...v1.793.2) (2026-09-04)
+
+
+### Bug Fixes
+
+* **plg:** fix fast-path handler enrollment + enable aso_plg imports ([#3202](https://github.com/adobe/spacecat-api-service/issues/3202)) ([12ad7ff](https://github.com/adobe/spacecat-api-service/commit/12ad7fff16d67b7e81242aa43fc662d84ab6b255))
+
 ## [1.793.1](https://github.com/adobe/spacecat-api-service/compare/v1.793.0...v1.793.1) (2026-09-04)
 
 
