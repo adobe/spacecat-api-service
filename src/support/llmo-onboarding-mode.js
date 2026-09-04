@@ -15,6 +15,11 @@ import { readFeatureFlag } from './feature-flags-storage.js';
 export const LLMO_FEATURE_FLAG_PRODUCT = 'LLMO';
 export const LLMO_BRANDALF_FLAG = 'brandalf';
 export const LLMO_BRANDALF_MIGRATION_FLAG = 'brandalf_migration';
+/**
+ * @deprecated The resolver can no longer return v1 (brandalf-migration cleanup §2),
+ * so this constant now has zero production importers. Retained only for the §1
+ * follow-up that deletes the remaining v1 plumbing; remove it there.
+ */
 export const LLMO_ONBOARDING_MODE_V1 = 'v1';
 export const LLMO_ONBOARDING_MODE_V2 = 'v2';
 
@@ -56,38 +61,33 @@ export async function readBrandalfMigrationFlagOverride(organizationId, postgres
 }
 
 /**
- * Resolves the LLMO onboarding mode (v1 or v2) for the given organization.
+ * Resolves the LLMO onboarding mode for the given organization. Always resolves
+ * v2 — the service no longer produces v1 orgs (brandalf-migration cleanup §2;
+ * upstream gate for DRS #2807 Phase 2).
  *
- * Decision order:
- *  1. If brandalf=true on the org → return v2 (explicit v2 migration).
- *  2. If brandalf_migration=true on the org → return v2. brandalf_migration
- *     marks an existing v1 customer that's mid-migration to v2: v2 brand
- *     entities exist and the org reads v2 config. Runs before the kill switch
- *     so ops can't accidentally pin a brandalf_migration org back to v1.
- *  3. If LLMO_ONBOARDING_DEFAULT_VERSION is 'v1' → return v1 (global kill
- *     switch for orgs that have not been migrated to v2).
- *  4. Otherwise → return v2 (default for everyone else).
+ * Decision order (all paths now converge on v2):
+ *  1. If brandalf=true on the org → v2 (explicit v2 migration).
+ *  2. If brandalf_migration=true on the org → v2. brandalf_migration marks an
+ *     existing customer mid-migration to v2: v2 brand entities exist and the org
+ *     reads v2 config.
+ *  3. Otherwise → v2 (default for everyone else).
  *
- * The legacy-site cutoff that previously forced pre-GA customers onto v1
- * (createdAt before LLMO_BRANDALF_GA_CUTOFF_MS) was removed in LLMO-7108 so every
- * new onboarding defaults to v2 unless the kill switch holds the org back.
+ * The LLMO_ONBOARDING_DEFAULT_VERSION==='v1' kill switch was removed here so the
+ * resolver can never return v1. The env var read is retained only to warn on a
+ * lingering non-v2 pin — a stale 'v1' now logs "invalid" and resolves v2. The
+ * env var and this whole flag-reading module are deleted in the sequenced
+ * follow-ups (§1) once all v1 customers are gone.
  *
  * This is consumed on two paths, not just onboarding: performLlmoOnboarding
- * (which upserts brandalf=true org-wide on a v2 result) and the read-only
- * (org, site) -> brand resolver in brands.js (hit by BP refresh and the DRS
- * scheduler). Removing the cutoff flips a flagless pre-cutoff org to v2 on both
- * — the brand resolver now returns the v2 brand where it used to 404. It does
- * not by itself flip an already-onboarded org's brandalf flag (only an
- * onboarding does that, org-wide), and DRS gates on the flag independently, so a
- * still-flagless org keeps running v1 downstream until it is onboarded/flagged.
- *
- * TEMPORARY — the LLMO_ONBOARDING_DEFAULT_VERSION kill switch and the v1 branch
- * should be removed once all v1 customers have been migrated to v2, at which
- * point this collapses to "always v2".
+ * (which upserts brandalf=true org-wide) and the read-only (org, site) -> brand
+ * resolver in brands.js (hit by BP refresh and the DRS scheduler). Because the
+ * resolver can no longer return v1, the brand resolver now always resolves the
+ * v2 brand for a flagless org where a v1 result previously produced a 404 — this
+ * is the intended "stops producing v1 orgs" behavior on both paths.
  *
  * @param {string} organizationId
  * @param {object} context - Request context
- * @returns {Promise<'v1'|'v2'>}
+ * @returns {Promise<'v2'>}
  */
 export async function resolveLlmoOnboardingMode(organizationId, context) {
   const { log = console } = context || {};
@@ -137,11 +137,10 @@ export async function resolveLlmoOnboardingMode(organizationId, context) {
   }
 
   // 2. Environment-level default (brandalf is false/missing from here on).
-  //    'v1' is the global kill switch; anything else defaults to v2.
+  //    The 'v1' kill switch was removed — the resolver can never return v1.
+  //    Any non-v2 value (including a stale 'v1' pin) is treated as invalid and
+  //    resolves v2, surfacing the lingering pin in the logs.
   const configuredDefault = context?.env?.LLMO_ONBOARDING_DEFAULT_VERSION;
-  if (configuredDefault === LLMO_ONBOARDING_MODE_V1) {
-    return LLMO_ONBOARDING_MODE_V1;
-  }
   if (configuredDefault && configuredDefault !== LLMO_ONBOARDING_MODE_V2) {
     log.warn(
       `Invalid LLMO_ONBOARDING_DEFAULT_VERSION "${configuredDefault}", falling back to ${LLMO_ONBOARDING_MODE_V2}`,
