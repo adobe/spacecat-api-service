@@ -15,17 +15,31 @@ import { buildAdvancedFilters, resolveElementModel } from '../constants.js';
 /**
  * Default page size for a Prompt Responses call.
  *
- * Kept well under the ~1500-row ceiling at which this element starts returning 504s
- * (measured live). Callers paginating a large project should walk `offset` rather than
- * raise `limit` past that ceiling.
+ * Measured live 2026-09-04 against the external route (Repsol ES workspace), timing and
+ * payload per page:
+ *
+ *   |   limit | result                    |
+ *   |--------:|---------------------------|
+ *   |     400 | 200 —  6.8s,  1.3 MB      |
+ *   |   1,500 | 200 —  8.3s,  4.9 MB      |
+ *   |   5,000 | 200 — 12.4s, 14.7 MB      |
+ *   |  20,000 | 200 — 44.6s, 60.6 MB      |
+ *   |  50,000 | 504 Gateway Timeout       |
+ *
+ * 5,000 is the default: it is an order of magnitude fewer round trips than 400 while keeping
+ * a page near ten seconds and well inside gateway timeouts. Raising `limit` is strongly
+ * preferable to walking `offset`, because every call re-scans the whole rolling window.
  */
-export const DEFAULT_RESPONSE_PAGE_SIZE = 400;
+export const DEFAULT_RESPONSE_PAGE_SIZE = 5000;
 
 /**
- * Hard ceiling on `limit`. Above roughly 1500 rows per page the element 504s instead of
- * paginating, so a caller asking for more is clamped rather than allowed to fail upstream.
+ * Hard ceiling on `limit`. 20,000 is the largest page observed to succeed; 50,000 returns a
+ * `504` (see the table above). A caller asking for more is clamped rather than allowed to fail
+ * upstream. An earlier revision of this file set the ceiling at 1,000 on the belief that the
+ * element 504s above ~1,500 rows — that was wrong by more than a factor of ten, and it clamped
+ * callers to twenty times below what the element actually serves.
  */
-export const MAX_RESPONSE_PAGE_SIZE = 1000;
+export const MAX_RESPONSE_PAGE_SIZE = 20000;
 
 /**
  * Sort applied to every Prompt Responses call.
@@ -142,10 +156,9 @@ export function buildPromptResponsesPayload({
       limit: clampLimit(limit),
       offset: clampOffset(offset),
       // Required for deterministic pagination — see RESPONSE_SORT_COLUMNS.
-      // [unverified] wire format: no other definition in this repo sends `pagination`, so the
-      // field name and the `'<col> asc'` string form are encoded from live observation rather
-      // than from an in-repo precedent. Confirm against a real call before an endpoint depends
-      // on this shape.
+      // Wire format VERIFIED live 2026-09-04: `["prompt asc"]` and `["prompt desc"]` return
+      // 200. A bare `["prompt"]` (no direction), the object form `[{col,dir}]`, and an unknown
+      // column all return 400. So the direction suffix is required and the column must exist.
       sort_columns: [...RESPONSE_SORT_COLUMNS],
     },
   };

@@ -105,6 +105,16 @@ describe('prompt-responses definitions', () => {
       expect(pagination.offset).to.equal(100);
     });
 
+    it('pins the page bounds to the values measured against the live element', () => {
+      // These are evidence, not preferences (measured 2026-09-04, Repsol ES workspace):
+      //   20,000 -> 200 in 44.6s / 60.6 MB      50,000 -> 504 Gateway Timeout
+      //    5,000 -> 200 in 12.4s / 14.7 MB
+      // Asserted as literals so that changing the constant away from the measured ceiling
+      // fails here rather than silently tracking it. Re-measure before changing these.
+      expect(MAX_RESPONSE_PAGE_SIZE).to.equal(20000);
+      expect(DEFAULT_RESPONSE_PAGE_SIZE).to.equal(5000);
+    });
+
     it('clamps a limit above the 504-inducing ceiling', () => {
       expect(buildPromptResponsesPayload({ limit: 99999 }).pagination.limit)
         .to.equal(MAX_RESPONSE_PAGE_SIZE);
