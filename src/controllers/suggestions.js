@@ -291,6 +291,25 @@ async function postPlgSuggestionSkipAlert(site, opportunity, suggestion, context
 
 const AEM_CONTENT_API_BASE = '/adobe/experimental/aspm-expires-20251231/pages';
 
+/**
+ * Derives an AEM CS author host from a page's publish URL, for when a site has no
+ * explicit deliveryConfig.authorURL. AEM CS hosts mirror publish<->author:
+ * publish-p<prog>-e<env>.adobeaemcloud.(com|net) -> author-p<prog>-e<env>...
+ * Returns null for anything that isn't an AEM CS publish host (e.g. a custom
+ * domain), where the author host genuinely can't be inferred.
+ * @param {string} pageUrl
+ * @returns {string|null}
+ */
+const deriveAuthorUrlFromPublishUrl = (pageUrl) => {
+  try {
+    const u = new URL(pageUrl.startsWith('http') ? pageUrl : `https://${pageUrl}`);
+    const m = u.hostname.match(/^publish-(p\d+-e\d+)\.(adobeaemcloud\.(?:com|net))$/i);
+    return m ? `https://author-${m[1]}.${m[2]}` : null;
+  } catch {
+    return null;
+  }
+};
+
 // A capi-key ("0:1:0") is a colon-joined array-index path into the page content
 // tree; JSON Patch needs the same path as "/items/0/items/1/items/0".
 const capiKeyToPath = (capiKey) => `/items/${capiKey.split(':').join('/items/')}`;
@@ -305,14 +324,61 @@ const toSlug = (text) => (text || '')
   .replace(/[^0-9a-z]+/g, '-')
   .replace(/^-+|-+$/g, '');
 
+// True for a heading/title component in EITHER content model: Franklin
+// (core/franklin/components/title/v1/title) or classic AEM Sites/WCM
+// (e.g. wknd/components/title, core/wcm/components/title/v3/title). Both carry a
+// 'title' path segment, so a segment check matches both without hardcoding a vendor.
+const isTitleComponent = (node) => (node?.componentType || '').split('/').includes('title');
+
+// A title component's heading level lives in `type` (classic WCM) or `titleType`
+// (Franklin); its display text in `jcr:title` (classic) or `title` (Franklin).
+const titleLevelOf = (node) => (node?.properties?.type || node?.properties?.titleType || 'h1');
+const titleTextOf = (node) => (node?.properties?.['jcr:title'] ?? node?.properties?.title);
+
+/**
+ * Resolves the component vocabulary (types + property names) from the page tree's
+ * own root componentType, so a patch inserts nodes native to that page's model:
+ *  - Franklin/EDS crosswalk  -> core/franklin/components/{text,title} (title text in
+ *    `title`, level in `titleType`, plain text body).
+ *  - Classic AEM Sites/WCM   -> <project>/components/{text,title} derived from the
+ *    page's own namespace (e.g. wknd/components/page -> wknd/components/text|title),
+ *    title text in `jcr:title`, level in `type`, rich-text body (textIsRich).
+ * @param {object} root - The page content tree root node.
+ * @returns {object} vocab describing node types and property names to emit.
+ */
+const componentVocab = (root) => {
+  const pageType = root?.componentType || '';
+  if (pageType.includes('core/franklin')) {
+    return {
+      textType: 'core/franklin/components/text/v1/text',
+      titleType: 'core/franklin/components/title/v1/title',
+      titleTextProp: 'title',
+      titleLevelProp: 'titleType',
+      rich: false,
+    };
+  }
+  // Classic WCM: strip the page's last path segment to get the project component
+  // namespace (wknd/components/page -> wknd/components), fall back to the AEM
+  // foundation namespace if the shape is unexpected.
+  const base = pageType.includes('/') ? pageType.slice(0, pageType.lastIndexOf('/')) : 'wcm/foundation/components';
+  return {
+    textType: `${base}/text`,
+    titleType: `${base}/title`,
+    titleTextProp: 'jcr:title',
+    titleLevelProp: 'type',
+    rich: true,
+  };
+};
+
 /**
  * Best-effort resolution of a CSS-like selector (a bare tag, e.g. "h1", or
  * "tag#id") against an AEM page content tree. Only matches title/heading
- * components — the only element kind these suggestions currently target.
- * Returns null (never guesses a fallback position) when the selector doesn't
- * parse or nothing matches, so the caller can report "not applicable" instead
- * of writing to the wrong place — e.g. a selector naming a script-injected
- * element that has no corresponding content-tree node.
+ * components — the only element kind these suggestions currently target — in
+ * both the Franklin and classic WCM content models. Returns null (never guesses
+ * a fallback position) when the selector doesn't parse or nothing matches, so the
+ * caller can report "not applicable" instead of writing to the wrong place — e.g.
+ * a compound CSS selector or one naming a script-injected element that has no
+ * corresponding content-tree node.
  * @param {object} root - The page content tree root.
  * @param {string} selector - A "tag" or "tag#id" selector.
  * @returns {object|null} The matched content-tree node, or null.
@@ -329,9 +395,9 @@ const findNodeBySelector = (root, selector) => {
     if (found || !node) {
       return;
     }
-    if (node.componentType?.includes('/title/')) {
-      const nodeTag = (node.properties?.titleType || 'h1').toLowerCase();
-      const nodeId = toSlug(node.properties?.title);
+    if (isTitleComponent(node)) {
+      const nodeTag = titleLevelOf(node).toLowerCase();
+      const nodeId = toSlug(titleTextOf(node));
       if (nodeTag === tag.toLowerCase() && (!id || nodeId === id.toLowerCase())) {
         found = node;
         return;
@@ -383,17 +449,22 @@ const resolveSuggestionContent = (rawContent, tag) => {
   return `<p>${rawContent.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')}</p>`;
 };
 
-const buildJsonPatch = (target, action, tag, content) => {
+const buildJsonPatch = (target, action, tag, content, vocab) => {
   const path = capiKeyToPath(target['capi-key']);
+  // A `tag` means create a heading; otherwise a text/paragraph component. Node
+  // types + property names come from the page's own model vocabulary (see
+  // componentVocab), so classic WCM pages get wknd/... nodes and Franklin pages
+  // get core/franklin/... nodes.
+  const textProps = vocab.rich ? { text: content, textIsRich: true } : { text: content };
   const newNode = tag
     ? {
-      componentType: 'core/franklin/components/title/v1/title',
-      properties: { titleType: tag, title: content },
+      componentType: vocab.titleType,
+      properties: { [vocab.titleLevelProp]: tag, [vocab.titleTextProp]: content },
       items: [],
     }
     : {
-      componentType: 'core/franklin/components/text/v1/text',
-      properties: { text: content },
+      componentType: vocab.textType,
+      properties: textProps,
       items: [],
     };
 
@@ -409,11 +480,11 @@ const buildJsonPatch = (target, action, tag, content) => {
     case 'replace': {
       if (tag) {
         return [
-          { op: 'replace', path: `${path}/properties/titleType`, value: tag },
-          { op: 'replace', path: `${path}/properties/title`, value: content },
+          { op: 'replace', path: `${path}/properties/${vocab.titleLevelProp}`, value: tag },
+          { op: 'replace', path: `${path}/properties/${vocab.titleTextProp}`, value: content },
         ];
       }
-      const propName = target.componentType?.includes('/title/') ? 'title' : 'text';
+      const propName = isTitleComponent(target) ? vocab.titleTextProp : 'text';
       return [{ op: 'replace', path: `${path}/properties/${propName}`, value: content }];
     }
     default:
@@ -2922,10 +2993,11 @@ function SuggestionsController(ctx, sqs, env) {
       return badRequest('Applying suggestions directly to AEM is only supported for AEM CS sites');
     }
     const deliveryConfig = site.getDeliveryConfig();
-    const authorURL = deliveryConfig?.authorURL;
-    if (!authorURL) {
-      return badRequest('Site has no authorURL configured');
-    }
+    // Prefer the site's configured authorURL (required for custom domains, where the
+    // author host can't be inferred). When absent, we derive it per-suggestion from
+    // the page's own publish URL below — so the apply button works out-of-the-box for
+    // AEM CS adobeaemcloud hosts without a separate config step.
+    const configuredAuthorURL = deliveryConfig?.authorURL;
 
     const authorization = context.pathInfo?.headers?.authorization;
     if (!authorization) {
@@ -2964,6 +3036,19 @@ function SuggestionsController(ctx, sqs, env) {
           index: i,
           statusCode: 422,
           message: 'Suggestion is missing transformRules or content to apply',
+        });
+        continue; // eslint-disable-line no-continue
+      }
+
+      // Use the configured authorURL, else derive it from this page's publish URL
+      // (publish-pNNN-eNNN.adobeaemcloud.* -> author-pNNN-eNNN.adobeaemcloud.*).
+      const authorURL = configuredAuthorURL || deriveAuthorUrlFromPublishUrl(data.url);
+      if (!authorURL) {
+        results.push({
+          uuid: suggestionId,
+          index: i,
+          statusCode: 422,
+          message: `Site has no authorURL configured and it could not be derived from URL: ${data.url}`,
         });
         continue; // eslint-disable-line no-continue
       }
@@ -3010,7 +3095,7 @@ function SuggestionsController(ctx, sqs, env) {
           continue; // eslint-disable-line no-continue
         }
 
-        const patch = buildJsonPatch(target, action, tag, content);
+        const patch = buildJsonPatch(target, action, tag, content, componentVocab(tree));
         if (!patch) {
           results.push({
             uuid: suggestionId, index: i, statusCode: 422, message: `Unsupported transformRules action: ${action}`,
@@ -3036,7 +3121,32 @@ function SuggestionsController(ctx, sqs, env) {
           continue; // eslint-disable-line no-continue
         }
 
-        results.push({ uuid: suggestionId, index: i, statusCode: 200 });
+        // Best-effort: fetch the page object for its author preview/edit links so the
+        // UI can link straight to the edited (author) page. The change lives on author
+        // until published, so the publish URL won't reflect it yet. Never fail the
+        // apply if this lookup fails — the patch already succeeded.
+        let previewUrl;
+        let editUrl;
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          const pageRes = await tracingFetch(`${authorURL}${AEM_CONTENT_API_BASE}/${pageId}`, {
+            headers: { Authorization: authorization },
+          });
+          if (pageRes.ok) {
+            // eslint-disable-next-line no-await-in-loop
+            const pageObj = await pageRes.json();
+            // eslint-disable-next-line no-underscore-dangle
+            const links = pageObj?._links || {};
+            previewUrl = links.preview?.href || links.preview;
+            editUrl = links.edit?.href || links.edit;
+          }
+        } catch (linkErr) {
+          context.log.info(`[aem-apply] could not resolve preview link for ${suggestionId}: ${linkErr.message}`);
+        }
+
+        results.push({
+          uuid: suggestionId, index: i, statusCode: 200, previewUrl, editUrl,
+        });
       } catch (error) {
         context.log.error(`[aem-apply-failed] site: ${siteId}, suggestion ${suggestionId}: ${error.message}`);
         results.push({
