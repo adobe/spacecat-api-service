@@ -9,7 +9,7 @@ permissions:
 on:
   push:
   pull_request:
-    types: [opened, synchronize, ready_for_review, reopened, edited]
+    types: [opened, synchronize, ready_for_review, reopened]
   workflow_dispatch:
     inputs:
       environment:
@@ -35,24 +35,60 @@ jobs:
   # `// @ts-check`-annotated files (currently src/support/serenity/**). Blocking.
   # The reusable service-ci workflow has no type-check seam yet, so this runs as
   # a self-contained job here. See docs/decisions/005-opt-in-type-checking.md.
+  #
+  # Also runs on `push` (adobe/spacecat-api-service#3199): the reusable
+  # service-ci workflow's own concurrency group (mysticat-ci service-ci.yaml,
+  # keyed on ${{ github.workflow }}-${{ github.ref }} with cancel-in-progress
+  # on non-main refs) can cancel a PR's `pull_request`-triggered run of this
+  # job, leaving its head commit with no completed run. The `push` run is a
+  # fallback, skipped when no open PR exists yet for the branch (nothing to
+  # protect on `main` or a pre-PR branch). If the PR-existence lookup itself
+  # fails, it runs anyway rather than skip -- this is a required blocking
+  # check, and defaulting an inconclusive lookup to "skip" risks reproducing
+  # the exact bug being fixed.
   type-check:
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref != 'refs/heads/main')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       contents: read
+      pull-requests: read
     steps:
+      - name: Check for open PR (push only)
+        id: pr-check
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF_NAME: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          PR_COUNT=$(gh pr list --head "$REF_NAME" --state open --repo "$REPO" \
+            --json number --jq 'length' 2>/dev/null) || true
+          if [ "$PR_COUNT" = "0" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::No open PR found for branch ${REF_NAME} — skipping type-check on this push"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            if [ -z "$PR_COUNT" ]; then
+              echo "::warning::Could not determine whether an open PR exists for ${REF_NAME} (gh pr list failed) — running type-check anyway rather than risk skipping the only completed run for this commit"
+            fi
+          fi
+
       - name: Check out
+        if: steps.pr-check.outputs.skip != 'true'
         uses: actions/checkout@v6
         with:
           persist-credentials: false
 
       - name: Setup Node & NPM
+        if: steps.pr-check.outputs.skip != 'true'
         uses: adobe/mysticat-ci/.github/actions/setup-node-npm@v1
         env:
           MYSTICAT_DATA_SERVICE_REPO_READ_TOKEN: ${{ secrets.MYSTICAT_DATA_SERVICE_REPO_READ_TOKEN }}
 
       - name: Type-check
+        if: steps.pr-check.outputs.skip != 'true'
         run: npm run type-check
 
   # serenity-job-runner WORKER Lambda deploy (adobe/serenity-docs#186). Rationale
