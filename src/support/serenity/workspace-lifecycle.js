@@ -177,8 +177,13 @@ async function claimedBrandId(brandCollection, workspaceId) {
 async function findAdoptableFamilyMatch(transport, parentWorkspaceId, title, log, claim) {
   const { brandCollection, selfBrandId } = claim;
   const family = await transport.listWorkspaceFamily(parentWorkspaceId);
-  const items = familyItems(family);
-  const sameTitle = items.filter((w) => w?.title === title && w?.status === 'created');
+  // The family listing includes the queried parent itself (live-verified against the
+  // gateway), so it must be excluded before any candidate logic runs — otherwise a brand
+  // whose name matches the parent workspace's own title reaches the adoption candidate
+  // set and assertNotParent() 409s AFTER the create attempt, instead of a fresh child
+  // ever being considered (LLMO-7349).
+  const children = familyItems(family).filter((w) => w?.id !== parentWorkspaceId);
+  const sameTitle = children.filter((w) => w?.title === title && w?.status === 'created');
 
   if (sameTitle.length > 0
     && typeof brandCollection?.findBySemrushSubWorkspaceId !== 'function') {
@@ -208,7 +213,7 @@ async function findAdoptableFamilyMatch(transport, parentWorkspaceId, title, log
     // Surface filtered-out non-`created` same-title stubs (Semrush ack-then-fail
     // zombies) so their accumulation is visible in logs without a manual family
     // query — they are the exact failure mode this status filter absorbs (#2718).
-    const ignored = items.filter((w) => w?.title === title && w?.status !== 'created');
+    const ignored = children.filter((w) => w?.title === title && w?.status !== 'created');
     if (ignored.length > 0) {
       log?.info?.('ensureSubworkspace: ignoring non-created same-title family stub(s)', {
         parentWorkspaceId,

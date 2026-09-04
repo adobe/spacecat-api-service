@@ -662,6 +662,63 @@ describe('workspace-lifecycle', () => {
       });
     });
 
+    describe('parent workspace title collision (LLMO-7349)', () => {
+      // The family endpoint returns the queried parent itself as one of its own family
+      // items (live-verified against the gateway). A brand named identically to the
+      // parent workspace's title must never let the parent reach the adoption
+      // candidate set — only a genuine child may ever be created or adopted.
+      it('proactive create-or-adopt: does not adopt a same-titled, created, empty PARENT; creates a fresh child instead', async () => {
+        const transport = makeTransport({
+          listWorkspaceFamily: sinon.stub().resolves([
+            { id: PARENT_WS, title: EXPECTED_TITLE, status: 'created' },
+          ]),
+        });
+        const brand = makeBrand();
+
+        const result = await ensureWithUnclaimedFamily(transport, brand);
+
+        expect(result).to.equal(SUB_WS);
+        expect(transport.createSubworkspace).to.have.been.calledOnceWith(PARENT_WS, EXPECTED_TITLE);
+        expect(transport.listProjects).to.not.have.been.calledWith(PARENT_WS);
+        expect(brand.setSemrushSubWorkspaceId).to.have.been.calledOnceWithExactly(SUB_WS);
+      });
+
+      it('adopts the real same-titled CHILD and ignores the same-titled parent sitting beside it', async () => {
+        const transport = makeTransport({
+          listWorkspaceFamily: sinon.stub().resolves([
+            { id: PARENT_WS, title: EXPECTED_TITLE, status: 'created' },
+            { id: 'real-child-ws', title: EXPECTED_TITLE, status: 'created' },
+          ]),
+        });
+        const brand = makeBrand();
+
+        const result = await ensureWithUnclaimedFamily(transport, brand);
+
+        expect(result).to.equal('real-child-ws');
+        expect(transport.createSubworkspace).to.not.have.been.called;
+        expect(transport.listProjects).to.have.been.calledOnceWith('real-child-ws');
+        expect(brand.setSemrushSubWorkspaceId).to.have.been.calledOnceWithExactly('real-child-ws');
+      });
+
+      it('504-recovery: reports no adoptable family match rather than adopting the parent', async () => {
+        const listWorkspaceFamily = sinon.stub();
+        listWorkspaceFamily.onFirstCall().resolves([]);
+        listWorkspaceFamily.onSecondCall().resolves([
+          { id: PARENT_WS, title: EXPECTED_TITLE, status: 'created' },
+        ]);
+        const transport = makeTransport({
+          createSubworkspace: sinon.stub().rejects(new SerenityTransportError(504, 'timeout')),
+          listWorkspaceFamily,
+        });
+        const brand = makeBrand();
+
+        await expect(ensureWithUnclaimedFamily(transport, brand))
+          .to.be.rejectedWith(/no family match to adopt/);
+        expect(transport.listProjects).to.not.have.been.called;
+        expect(brand.setSemrushSubWorkspaceId).to.not.have.been.called;
+      });
+    });
+
     it('502s when create returns no id', async () => {
       const transport = makeTransport({
         createSubworkspace: sinon.stub().resolves({ id: '' }),
