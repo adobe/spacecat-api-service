@@ -13022,6 +13022,7 @@ SerenityBrandPresenceTopicPromptRow:
     - citations
     - visibility
     - volume
+    - executions
   properties:
     prompt:
       type: string
@@ -13037,7 +13038,9 @@ SerenityBrandPresenceTopicPromptRow:
       description: Semrush project title for the prompt's market (e.g. `US-en`).
     mentions:
       type: integer
-      description: Brand mentions for this prompt.
+      description: >-
+        Executions where the brand was mentioned for this prompt (a subset of
+        `executions`, so `mentions <= executions`). Not the total run count.
     citations:
       type: integer
       description: Citations for this prompt.
@@ -13055,6 +13058,12 @@ SerenityBrandPresenceTopicPromptRow:
     volume:
       type: integer
       description: Search volume for the prompt.
+    executions:
+      type: integer
+      description: >-
+        Number of executions (Semrush runs) for this prompt in the window —
+        the denominator for a per-execution citation rate (`citations / executions`).
+        Semrush runs a prompt at most once per model/date/project.
 
 SerenityFilterDimensionItem:
   type: object
