@@ -381,12 +381,18 @@ async function handlePreonboardedFastPath({
     // Enable the aso_plg profile imports (e.g. top-pages) so their scheduled refreshes run.
     // The full onboarding path does this via enableImports; the fast path previously skipped it,
     // leaving preonboarded sites without the imports that feed audits like scrape-top-pages.
-    const profile = loadProfileConfig(PLG_PROFILE_KEY);
-    const siteConfig = site.getConfig();
-    const importDefs = Object.keys(profile.imports || {}).map((type) => ({ type }));
-    await enableImports(siteConfig, importDefs, log);
-    site.setConfig(Config.toDynamoItem(siteConfig));
-    await site.save();
+    // Best-effort: like enrollPlgConfigHandlers below, this is supplementary — a failure here
+    // must not abort onboarding (a missing import is recoverable via backfill / next attempt).
+    try {
+      const profile = loadProfileConfig(PLG_PROFILE_KEY);
+      const siteConfig = site.getConfig();
+      const importDefs = Object.keys(profile.imports || {}).map((type) => ({ type }));
+      await enableImports(siteConfig, importDefs, log);
+      site.setConfig(Config.toDynamoItem(siteConfig));
+      await site.save();
+    } catch (importError) {
+      log.warn(`Failed to enable imports for site ${site.getId()}: ${importError.message}`);
+    }
 
     const { entitlement } = await ensureAsoEntitlement(site, organization, context);
     await revokePreviousAsoEnrollmentsForOrg(site, organization, entitlement, context);

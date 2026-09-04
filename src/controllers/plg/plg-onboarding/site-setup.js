@@ -57,6 +57,10 @@ export async function enrollPlgConfigHandlers(site, context) {
         log.warn(`Failed to enable handler ${handler} for site ${siteId}: ${error.message}`);
       }
     });
+    if (enrolled.length === 0) {
+      log.warn(`No config handlers could be enabled for site ${siteId}; skipping save`);
+      return;
+    }
     await configuration.save();
     log.info(`Enrolled site ${siteId} in config handlers: ${enrolled.join(', ')}`);
   } catch (error) {

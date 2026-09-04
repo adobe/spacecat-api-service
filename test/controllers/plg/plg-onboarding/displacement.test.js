@@ -141,6 +141,25 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       expect(stubs.detectBotBlockerStub).to.not.have.been.called;
     });
 
+    it('fast-track still completes onboarding when enableImports fails', async () => {
+      const preonboardedOnboarding = createMockOnboarding({
+        status: 'PRE_ONBOARDING',
+        siteId: TEST_SITE_ID,
+        organizationId: TEST_ORG_ID,
+      });
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(preonboardedOnboarding);
+      const mockSiteInOrg = createMockSite({ id: TEST_SITE_ID, orgId: TEST_ORG_ID });
+      mockDataAccess.Site.findById.resolves(mockSiteInOrg);
+      // Supplementary import-enable step throws — must not abort onboarding.
+      stubs.enableImportsStub.rejects(new Error('dynamo throttle'));
+
+      const response = await controller.onboard(buildContext({ domain: TEST_DOMAIN }));
+
+      expect(response.status).to.equal(200);
+      expect(preonboardedOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+      expect(mockLog.warn).to.have.been.calledWithMatch(/Failed to enable imports for site/);
+    });
+
     it('fast-tracks preonboarded site with null steps', async () => {
       const preonboardedOnboarding = createMockOnboarding({
         status: 'PRE_ONBOARDING',
