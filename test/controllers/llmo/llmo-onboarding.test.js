@@ -6430,7 +6430,10 @@ describe('LLMO Onboarding Functions', () => {
       ]);
     });
 
-    it('defaults to one-time runs (trial) and WARNs when the tier cannot be read', async () => {
+    it('defaults to one-time runs (trial) and ERRORs when the tier cannot be read', async () => {
+      // .error, not .warn (LLMO-7366): a thrown lookup failure is a real operational
+      // problem, distinct from "no entitlement found" below, and this result also
+      // decides a customer-visible schedule's tier param elsewhere -- must be alertable.
       const mockDrsClient = createMockDrsClient(sandbox);
       // TierClient whose entitlement lookup throws → tier indeterminate.
       const failingTierClient = {
@@ -6453,8 +6456,8 @@ describe('LLMO Onboarding Functions', () => {
       // Fail-safe: no recurring schedule for a site of unknown paying status.
       expect(instance.createSchedule).to.not.have.been.called;
       expect(instance.submitJob.callCount).to.equal(4); // Brandalf + 3 one-shots
-      const warnLogs = context.log.warn.getCalls().map((c) => c.args[0]);
-      expect(warnLogs.some((m) => m.includes('Failed to read LLMO tier for site site-123'))).to.be.true;
+      const errorLogs = context.log.error.getCalls().map((c) => c.args[0]);
+      expect(errorLogs.some((m) => m.includes('Failed to read LLMO tier for site site-123'))).to.be.true;
     });
 
     it('defaults to one-time runs (trial) and WARNs when no entitlement exists', async () => {
