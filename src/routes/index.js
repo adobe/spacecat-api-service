@@ -406,6 +406,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/opportunities/:opportunityId/suggestions/paged/:limit': suggestionsController.getAllForOpportunityPaged,
     'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/auto-fix': suggestionsController.autofixSuggestions,
     'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-deploy': suggestionsController.deploySuggestionToEdge,
+    'POST /sites/:siteId/opportunities/:opportunityId/suggestions/aem-apply': suggestionsController.applySuggestionToAem,
     'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-rollback': suggestionsController.rollbackSuggestionFromEdge,
     'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-preview': suggestionsController.previewSuggestions,
     'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-live-preview': suggestionsController.fetchFromEdge,
