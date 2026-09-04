@@ -1,3 +1,10 @@
+# [1.793.0](https://github.com/adobe/spacecat-api-service/compare/v1.792.1...v1.793.0) (2026-09-04)
+
+
+### Features
+
+* add `move llmo org` slack command to relocate a site's full brand graph ([#3181](https://github.com/adobe/spacecat-api-service/issues/3181)) ([17b9f90](https://github.com/adobe/spacecat-api-service/commit/17b9f909fe3556775b5832ed146f9bcd301b5847))
+
 ## [1.792.1](https://github.com/adobe/spacecat-api-service/compare/v1.792.0...v1.792.1) (2026-09-04)
 
 
