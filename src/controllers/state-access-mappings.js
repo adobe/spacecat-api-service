@@ -388,6 +388,54 @@ function StateAccessMappingsController(context) {
   }
 
   /**
+   * Admin-only tenant-scope override for read endpoints.
+   *
+   * FACS reads are scoped to the caller's own IMS org (`preamble` resolves it
+   * from the JWT tenant claim), so an internal admin previewing the customer
+   * ASO UI with `?organizationId=<uuid>` would otherwise query their OWN org's
+   * bindings and see nothing — unlike every other resource-addressed endpoint,
+   * which honours the preview org. This lets an admin (and only an admin) point
+   * the scope at the previewed org, mirroring the org-resolution already used by
+   * `adminCreateMapping` (org from input) and `getAuditLogs` (org from param).
+   *
+   * Non-admins always stay caller-scoped: the `organizationId` param is ignored
+   * for them, preserving tenant isolation.
+   *
+   * @param {object} ctx
+   * @param {string} callerImsOrgId Canonical caller org id from `preamble`.
+   * @returns {Promise<{ imsOrgId: string } | { error: Response }>}
+   */
+  async function resolveScopeImsOrgId(ctx, callerImsOrgId) {
+    if (!ctx.attributes?.authInfo?.isAdmin?.()) {
+      return { imsOrgId: callerImsOrgId };
+    }
+    const { organizationId } = getQueryParams(ctx);
+    if (!hasText(organizationId)) {
+      return { imsOrgId: callerImsOrgId };
+    }
+    if (!isValidUUID(organizationId)) {
+      return { error: badRequest('organizationId must be a valid UUID') };
+    }
+    try {
+      const org = await ctx.dataAccess.Organization.findById(organizationId);
+      if (!org) {
+        return { error: notFound('Organization not found') };
+      }
+      const orgImsOrgId = normalizeImsOrgId(org.getImsOrgId?.());
+      if (!orgImsOrgId) {
+        return { error: notFound('Organization has no IMS org') };
+      }
+      return { imsOrgId: orgImsOrgId };
+    } catch (error) {
+      log.error(
+        { tag: 'state-access-mappings', err: error.message, organizationId },
+        'Failed to resolve organization for scope override',
+      );
+      return { error: internalServerError('Failed to resolve organization') };
+    }
+  }
+
+  /**
    * True when the caller holds `<product>/can_manage_users` at the **FACS (JWT)**
    * layer (or is admin). This is the *strong* form of management authority: only
    * a FACS-layer manager may grant `can_manage_users` itself (hybrid-model §8.3 —
@@ -772,7 +820,12 @@ function StateAccessMappingsController(context) {
     if (pre.error) {
       return pre.error;
     }
-    const { product, imsOrgId } = pre;
+    const { product } = pre;
+    const scoped = await resolveScopeImsOrgId(ctx, pre.imsOrgId);
+    if (scoped.error) {
+      return scoped.error;
+    }
+    const { imsOrgId } = scoped;
     const { error: gateErr, authority } = await gateManager(ctx, product, imsOrgId);
     if (gateErr) {
       return gateErr;
@@ -828,7 +881,12 @@ function StateAccessMappingsController(context) {
     if (pre.error) {
       return pre.error;
     }
-    const { product, imsOrgId } = pre;
+    const { product } = pre;
+    const scoped = await resolveScopeImsOrgId(ctx, pre.imsOrgId);
+    if (scoped.error) {
+      return scoped.error;
+    }
+    const { imsOrgId } = scoped;
     const { error: gateErr, authority } = await gateManager(ctx, product, imsOrgId);
     if (gateErr) {
       return gateErr;
