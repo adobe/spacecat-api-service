@@ -1,3 +1,10 @@
+## [1.793.4](https://github.com/adobe/spacecat-api-service/compare/v1.793.3...v1.793.4) (2026-09-04)
+
+
+### Bug Fixes
+
+* **brands:** resolve real LLMO entitlement tier for activate-brand's schedule (LLMO-7366) ([#3206](https://github.com/adobe/spacecat-api-service/issues/3206)) ([9e2cd03](https://github.com/adobe/spacecat-api-service/commit/9e2cd033453399737a6ce5e55b6e3164950457a4)), closes [#2952](https://github.com/adobe/spacecat-api-service/issues/2952) [#1915](https://github.com/adobe/spacecat-api-service/issues/1915) [#1915](https://github.com/adobe/spacecat-api-service/issues/1915) [#2942](https://github.com/adobe/spacecat-api-service/issues/2942) [#3178](https://github.com/adobe/spacecat-api-service/issues/3178)
+
 ## [1.793.3](https://github.com/adobe/spacecat-api-service/compare/v1.793.2...v1.793.3) (2026-09-04)
 
 
