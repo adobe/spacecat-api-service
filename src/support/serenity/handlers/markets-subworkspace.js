@@ -300,8 +300,7 @@ function validateCreateBody(body) {
  * (transport.getBrandTopics) and attaches them to the project. Keeps the top
  * `topicCap` topics by search volume (0 = keep all) and tags every prompt with
  * the standard closed-dimension values ({@link STANDARD_PROMPT_TAG_VALUES} —
- * today just its seeded `intent` default, since the `origin` entry it used to
- * carry is retired, tag-display-names.md §3 — minus that seeded `intent`
+ * `origin/ai` plus the seeded `intent` default — minus that seeded `intent`
  * default, which is classified per prompt below instead), the producing
  * `source/semrush` value, plus a branded / non-branded `type` value derived
  * from `brandNames` (brand name + aliases) and a per-prompt server-classified
@@ -687,7 +686,7 @@ export async function handleCreateMarketSubworkspace(
   // so classification can later apply intent/origin/type values per prompt and the
   // Categories surface has a `category` root to hang customer categories under.
   // Idempotent (resolve-before-create), and unconditional: every project carries
-  // exactly the four dimension roots, whether or not it has prompts yet.
+  // exactly the five dimension roots, whether or not it has prompts yet.
   const provisioned = await provisionDimensionTree(transport, workspaceId, projectId, log);
 
   // Attach the selected AI models (LLMs) to the project before populating /

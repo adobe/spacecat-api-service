@@ -33,7 +33,7 @@ function fakeLog() {
   };
 }
 
-// The default transport serves the full dimension-root tree, so the four roots
+// The default transport serves the full dimension-root tree, so the five roots
 // already exist and an open-dimension create hangs its value under the
 // `category` root without provisioning anything.
 function makeTransport(overrides = {}) {
@@ -123,7 +123,7 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
         parentId: TAG_IDS.categoryRoot,
       });
       // An omitted parentId means "directly under the dimension root", never
-      // "at the root level" — the root level is reserved for the four roots.
+      // "at the root level" — the root level is reserved for the five roots.
       expect(transport.createProjectTags)
         .to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-1', ['Footwear'], { parentId: TAG_IDS.categoryRoot });
       // A create leaves the project in `live_with_unpublished_updates`; the
@@ -244,7 +244,7 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
     });
 
     // `topic` was a dimension under the prefix model; the dimension-root model
-    // has exactly four roots and `topic` is not one of them.
+    // has exactly five roots and `topic` is not one of them.
     it('400s the retired topic dimension', async () => {
       const transport = makeTransport();
       const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
@@ -1049,7 +1049,7 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
     });
 
     // Promote-to-root is never a legal request: the root level is reserved for
-    // the four dimension roots, so a promoted tag would have no dimension.
+    // the five dimension roots, so a promoted tag would have no dimension.
     it('400s an explicit null parentId rather than promoting the tag to a root', async () => {
       const transport = makeTransport();
       const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });

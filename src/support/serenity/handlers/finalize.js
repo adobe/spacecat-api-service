@@ -19,6 +19,7 @@ import { ERROR_CODES, isMeteredQuota } from '../errors.js';
 import { handleCreatePrompts, resolveCallerId } from './prompts.js';
 import { handleUpdateModels } from './markets.js';
 import { pollProjectPublished, PUBLISH_OUTCOME } from './publish-status.js';
+import { ORIGIN_VALUE } from '../prompt-tags.js';
 
 // Slice identity shared between the model results (echoed from body.models) and
 // the DB rows (canonical). Normalise both sides — geoTargetId may arrive as a
@@ -139,7 +140,7 @@ export async function finalizeSerenityProjects(
       // to the documented 'unknown' sentinel (LLMO-6289 policy: an unknown-attributed
       // write is accepted, never rejected).
       resolveCallerId(undefined),
-      { publish: false },
+      { publish: false, originValue: ORIGIN_VALUE.AI },
     );
   }
 
