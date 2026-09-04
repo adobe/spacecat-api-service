@@ -3059,7 +3059,10 @@ function SuggestionsController(ctx, sqs, env) {
           prependSchema(data.url),
           authorURL,
           authorization,
-          deliveryConfig?.preferContentApi ?? false,
+          // Resolve the content-page-ref via the Content API (/adobe/pages/resolve),
+          // not the legacy PSS path (/adobe/experimental/pss/...), which is restricted
+          // (403) on these instances. Default true; a site can still opt out via config.
+          deliveryConfig?.preferContentApi ?? true,
           context.log,
         );
         if (!pageId) {
