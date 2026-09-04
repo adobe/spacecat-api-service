@@ -152,6 +152,7 @@ describe('topic-prompts definitions', () => {
         position: 1,
         sentiment: 0.72,
         volume: 5658,
+        executions: 30,
       }]);
     });
 
@@ -178,6 +179,7 @@ describe('topic-prompts definitions', () => {
       expect(row.citations).to.equal(0);
       expect(row.visibility).to.equal(0);
       expect(row.volume).to.equal(0);
+      expect(row.executions).to.equal(0);
     });
 
     it('defaults missing string fields to empty strings', () => {
