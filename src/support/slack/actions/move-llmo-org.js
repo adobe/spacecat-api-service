@@ -51,12 +51,37 @@ export function openMoveLlmoOrgModal(lambdaContext) {
     const say = createSayFunction(client, channelId, threadTs);
     const userId = body?.user?.id || 'unknown';
 
-    const updateMessage = async (text) => client.chat.update({
-      channel: channelId,
-      ts: messageTs,
-      text,
-      blocks: [{ type: 'section', text: { type: 'mrkdwn', text } }],
-    });
+    // Bolt already tells us which message the button lives in, so use that in preference
+    // to the timestamp carried in the button payload. The payload copy is only correct if
+    // the command's follow-up chat.update landed; when it didn't, the payload still reads
+    // 'placeholder' and every update below fails with message_not_found.
+    const targetChannel = body?.channel?.id || channelId;
+    const targetTs = body?.message?.ts || messageTs;
+
+    // Reporting progress must never decide whether the move runs. This previously threw
+    // straight out of the handler - the first call sits immediately before executeOrgMove,
+    // so a cosmetic Slack failure aborted the move, and the identical call in the catch
+    // below rethrew into Bolt, leaving the operator with no feedback at all.
+    const updateMessage = async (text) => {
+      try {
+        await client.chat.update({
+          channel: targetChannel,
+          ts: targetTs,
+          text,
+          blocks: [{ type: 'section', text: { type: 'mrkdwn', text } }],
+        });
+      } catch (updateError) {
+        log.warn(
+          `move llmo org: could not update message ${targetTs} in ${targetChannel}: `
+          + `${updateError.message}. Falling back to a new message.`,
+        );
+        try {
+          await say(text);
+        } catch (sayError) {
+          log.error(`move llmo org: could not report to Slack at all: ${sayError.message}`);
+        }
+      }
+    };
 
     try {
       const site = await Site.findById(siteId);
