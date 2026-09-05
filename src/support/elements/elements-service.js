@@ -14,7 +14,7 @@ import { hasText } from '@adobe/spacecat-shared-utils';
 import { ELEMENT_IDS } from './element-ids.js';
 import { SEP } from './constants.js';
 import { mapWithConcurrency } from './concurrency.js';
-import { splitDateRangeIntoWeeksBackward } from './week-utils.js';
+import { splitDateRangeIntoWeeksBackward, addDaysToDate } from './week-utils.js';
 import {
   DIMENSION,
   INTENT_VALUE,
@@ -41,6 +41,13 @@ import {
   buildCitedDomainsPayload,
   transformCitedDomainsResponse,
   transformCitedDomainsResponses,
+  buildPromptResponsesPayload,
+  transformPromptResponsesResponse,
+  clampLimit,
+  buildResponseSourcesPayload,
+  transformResponseSourcesResponse,
+  joinResponsesToSources,
+  diffDayExecutions,
   buildSubredditsPayload,
   transformSubredditsResponse,
   buildRedditThreadsPayload,
@@ -93,6 +100,45 @@ const SOURCE_VISIBILITY_CALL_MAX_RETRIES = 1;
 // TRENDS_MAX_WEEKS=8 weeks x 4 element calls each) so a wide date range can't
 // spawn an unbounded number of parallel Semrush requests.
 const STATS_TRENDS_WEEK_CONCURRENCY = 4;
+
+/**
+ * Bounds parallel per-project (per-market) fan-out for the response feed.
+ *
+ * Deliberately lower than {@link FANOUT_CONCURRENCY} elsewhere in this file. The production
+ * path for this feed is the technical account over the external gateway, whose rate limit is
+ * 100 requests per ~60s window and is PER CREDENTIAL, not per workspace (measured
+ * 2026-09-04: three different workspaces decremented one shared counter under one reset
+ * timestamp). The budget therefore does NOT scale with the number of brands — every
+ * consumer of that credential draws from one pool, so this feed contends fleet-wide and a
+ * large multi-market brand must not be able to spend the budget in a burst.
+ *
+ * The internal IMS route exposes no `x-ratelimit-*` headers, but that is absence of
+ * evidence, not a higher limit — the bound above is the one to design against.
+ *
+ * Each unit of concurrency costs 2 requests per boundary (one per element), so 4 markets
+ * over a 7-day range is already 4 x 8 x 2 = 64 requests against a 100-per-minute pool.
+ */
+const RESPONSE_FEED_CONCURRENCY = 4;
+
+/**
+ * Expands an inclusive `YYYY-MM-DD` range into its individual days, oldest first.
+ *
+ * The controller has already validated both ends and capped the span, so this does no
+ * validation of its own beyond guarding against a non-terminating loop.
+ *
+ * @param {string} startDate - First day, `YYYY-MM-DD`.
+ * @param {string} endDate - Last day, `YYYY-MM-DD`.
+ * @returns {string[]} Days from `startDate` to `endDate` inclusive.
+ */
+function enumerateDays(startDate, endDate) {
+  const days = [];
+  let cursor = startDate;
+  while (cursor <= endDate) {
+    days.push(cursor);
+    cursor = addDaysToDate(cursor, 1);
+  }
+  return days;
+}
 
 /**
  * Creates the Elements service that composes transport calls with per-element
@@ -290,6 +336,146 @@ export function createElementsService(transport, log) {
       return { count: base.count, prompts };
     },
 
+    /**
+     * Fetches the Brand Claims RESPONSE FEED for a date range: each AI answer paired with
+     * the sources cited in that same execution.
+     *
+     * Neither element can serve this alone. `CITATIONS_SOURCES` (141adc88) has the answer
+     * text but NO date; `SOURCES_DATES` (404fb017) has the date and the cited URLs but no
+     * answer. They are joined on `(project_id, prompt, model, date)` — sound because at most
+     * one execution exists per that tuple (measured 2026-09-04: 2,553 tuples, every one
+     * mapping to exactly one `execution_id`, zero violations).
+     *
+     * BOUNDARY AMORTISATION — the reason this is range-based rather than per-day. The
+     * element ignores `CBF_date__start` and honours `CBF_date__end` as an upper bound over a
+     * rolling window, so a single day is recovered as a difference of two pulls:
+     *
+     *     executions(D) = responses(end = D) MINUS responses(end = D-1)
+     *
+     * Consecutive days SHARE a boundary, so fetching each boundary exactly once and reusing
+     * it for the two days it borders costs N+1 pulls for N days rather than 2N — a ~43%
+     * saving at a week, approaching 2x for longer ranges. The boundary set below is built
+     * once and indexed; no day re-fetches a boundary its neighbour already pulled.
+     *
+     * BUDGET. The production path for this feed is the technical account over the external
+     * gateway, where the rate limit is 100 requests per ~60s window and is PER CREDENTIAL,
+     * not per workspace (measured 2026-09-04: three different workspaces decremented one
+     * shared counter under one reset timestamp). The budget does NOT scale with brands, so
+     * this endpoint contends fleet-wide with every other consumer of that credential. Hence
+     * the deliberately low {@link RESPONSE_FEED_CONCURRENCY}, no retry logic here (a retry
+     * storm would consume the shared pool), and a preference for fewer/larger pages: every
+     * call re-scans the whole rolling window, so raising `limit` is strictly better than
+     * walking `offset`. The internal IMS route publishes no rate-limit headers, which is
+     * absence of evidence rather than a higher ceiling.
+     *
+     * ABSENCE IS MEANINGFUL. A `(prompt, model)` tuple runs on a median 61 of 74 days
+     * (`google-ai-overview` on only 50), so gaps are ROUTINE. A missing tuple means that
+     * model did not run that day — never an error, never data loss. No branch here treats an
+     * empty page or an unmatched key as a failure.
+     *
+     * @param {string} workspaceId - Semrush workspace UUID (resolved from the brand; the
+     *   caller never supplies one).
+     * @param {object} params - Query params.
+     * @param {string[]} [params.projectIds] - Ownership-checked project ids (one per
+     *   market). Empty → a single workspace-wide call.
+     * @param {string} params.startDate - First day to report, `YYYY-MM-DD`.
+     * @param {string} params.endDate - Last day to report, `YYYY-MM-DD`.
+     * @param {string} [params.model] - Model/platform filter.
+     * @param {number} [params.limit] - Upstream page size (clamped by the payload builders).
+     * @returns {Promise<object>} `{ records, days, projectIds, pageSize, truncated,
+     *   unmatchedSourceKeyCount }`.
+     */
+    async getResponseFeed(workspaceId, params) {
+      const {
+        projectIds, startDate, endDate, model, limit,
+      } = params;
+      const ids = Array.isArray(projectIds)
+        // `.trim()` before the emptiness test: `hasText('  ')` is true, so a whitespace-only
+        // id would otherwise become a scope and be sent upstream as `project_id: '  '`.
+        // The controller's UUID validation makes that unreachable today, but the service
+        // must not depend on a caller-side check for its own correctness.
+        ? [...new Set(projectIds.map((id) => String(id ?? '').trim()).filter(hasText))]
+        : [];
+      // No project id → one workspace-wide read. `undefined` (not '') so the payload
+      // builders omit `project_id` entirely rather than sending an empty scope.
+      const scopes = ids.length > 0 ? ids : [undefined];
+
+      // Days to report, plus the extra D-1 boundary the first day needs. Each boundary is
+      // fetched ONCE below and reused by the (at most two) days that border it.
+      const days = enumerateDays(startDate, endDate);
+      const boundaries = [addDaysToDate(days[0], -1), ...days];
+
+      const perScope = await mapWithConcurrency(
+        scopes,
+        RESPONSE_FEED_CONCURRENCY,
+        async (projectId) => {
+          const answersByBoundary = new Map();
+          const sourcesByBoundary = new Map();
+          // Sequential across boundaries: the credential's budget is shared fleet-wide, so
+          // this trades wall-clock for a smaller instantaneous burst against the 100/min pool.
+          for (const boundary of boundaries) {
+            /* eslint-disable no-await-in-loop */
+            const [rawAnswers, rawSources] = await Promise.all([
+              transport.fetchElement(
+                workspaceId,
+                ELEMENT_IDS.CITATIONS_SOURCES,
+                buildPromptResponsesPayload({
+                  projectId, model, endDate: boundary, limit,
+                }),
+              ),
+              transport.fetchElement(
+                workspaceId,
+                ELEMENT_IDS.SOURCES_DATES,
+                buildResponseSourcesPayload({
+                  projectId, model, endDate: boundary, limit,
+                }),
+              ),
+            ]);
+            /* eslint-enable no-await-in-loop */
+            answersByBoundary.set(boundary, transformPromptResponsesResponse(rawAnswers));
+            sourcesByBoundary.set(boundary, transformResponseSourcesResponse(rawSources));
+          }
+          return { answersByBoundary, sourcesByBoundary };
+        },
+      );
+
+      const records = [];
+      let unmatchedSourceKeyCount = 0;
+      let truncated = false;
+      const pageSize = clampLimit(limit);
+
+      for (const { answersByBoundary, sourcesByBoundary } of perScope) {
+        for (const day of days) {
+          // Every `day` and its `D-1` predecessor are members of `boundaries`, which was
+          // fully populated above — so these lookups always hit. No `?? []` fallback: it
+          // would be unreachable, and would mask a genuine gap if the boundary set and the
+          // day list ever fell out of step.
+          const answersToday = answersByBoundary.get(day);
+          const answersYesterday = answersByBoundary.get(addDaysToDate(day, -1));
+          // A full page means the upstream window was cut off, so this day's difference may
+          // be incomplete. Reported rather than silently served as if it were whole.
+          if (answersToday.length >= pageSize) {
+            truncated = true;
+          }
+          const dayAnswers = diffDayExecutions(answersToday, answersYesterday);
+          // Source rows carry their own date, so the day's rows are selected directly
+          // rather than by difference — no second pull needed on this side.
+          const daySources = sourcesByBoundary.get(day).filter((row) => row.date === day);
+          const joined = joinResponsesToSources(dayAnswers, daySources, { date: day });
+          records.push(...joined.records);
+          unmatchedSourceKeyCount += joined.unmatchedSourceKeys.length;
+        }
+      }
+
+      return {
+        records,
+        days,
+        projectIds: ids,
+        pageSize,
+        truncated,
+        unmatchedSourceKeyCount,
+      };
+    },
     /**
      * Fetches domains most frequently cited alongside owned URLs (URL Inspector
      * Cited Domains panel), backed by element 98b91d00 ("Stats per Domain").

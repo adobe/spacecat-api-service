@@ -269,6 +269,7 @@ export default function getRouteHandlers(
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/prompts': elementsController.listPrompts,
     // eslint-disable-next-line max-len
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/cited-domains': elementsController.listCitedDomains,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/responses': elementsController.listResponseFeed,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/sentiment-overview': elementsController.listSentimentOverview,
     // Per-subreddit Reddit stats (Subreddits element faf56e29).
     // eslint-disable-next-line max-len

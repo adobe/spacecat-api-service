@@ -895,6 +895,9 @@ const routeFacsCapabilities = {
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/access': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/prompts': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/cited-domains': 'llmo/can_view',
+      // Brand Claims response feed. Sits under Brand Presence within the ABV product, and
+      // is a read of the brand's own answer corpus — same `can_view` gate as its siblings.
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/responses': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/sentiment-overview': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/subreddits': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/reddit-threads': 'llmo/can_view',

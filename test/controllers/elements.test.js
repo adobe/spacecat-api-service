@@ -1972,6 +1972,232 @@ describe('ElementsController', () => {
 
   // ─── extractQuery edge cases ──────────────────────────────────────────────
 
+  // ─── listResponseFeed (Brand Claims response feed) ─────────────────────────
+
+  describe('listResponseFeed', () => {
+    const FEED_RESULT = {
+      records: [{
+        projectId: 'proj-1',
+        prompt: 'best running shoes',
+        model: 'chatgpt-paid',
+        date: '2026-08-24',
+        response: 'Some answer',
+        sources: [],
+        sourceRowCount: 0,
+      }],
+      days: ['2026-08-24'],
+      projectIds: ['proj-1'],
+      pageSize: 5000,
+      truncated: false,
+      unmatchedSourceKeyCount: 0,
+    };
+
+    const feedUrl = (qs = '') => `https://api.example.com/v2/orgs/${ORG_ID}/brands/${BRAND_ID}`
+      + `/serenity/brand-presence/responses${qs}`;
+
+    beforeEach(() => {
+      serviceStub.getResponseFeed = sinon.stub().resolves(FEED_RESULT);
+    });
+
+    it('returns the DTO envelope for a valid range', async () => {
+      const ctx = fakeContext({ url: feedUrl('?from=2026-08-24&to=2026-08-24') });
+      const res = await ElementsController(ctx, fakeLog(), ENV).listResponseFeed(ctx);
+
+      expect(res.status).to.equal(200);
+      const body = await readBody(res);
+      expect(body.totalCount).to.equal(1);
+      expect(body.records[0].model).to.equal('chatgpt-paid');
+      expect(body.records[0].date).to.equal('2026-08-24');
+      expect(body.truncated).to.equal(false);
+    });
+
+    it('passes the resolved workspace, never a caller-supplied one', async () => {
+      const ctx = fakeContext({ url: feedUrl('?from=2026-08-24&to=2026-08-24&workspaceId=evil') });
+      await ElementsController(ctx, fakeLog(), ENV).listResponseFeed(ctx);
+
+      expect(serviceStub.getResponseFeed).to.have.been.calledWith(SUB_WORKSPACE_ID);
+    });
+
+    describe('date range', () => {
+      it('rejects a malformed from/to', async () => {
+        const ctx = fakeContext({ url: feedUrl('?from=24-08-2026&to=2026-08-24') });
+        const res = await ElementsController(ctx, fakeLog(), ENV).listResponseFeed(ctx);
+        expect(res.status).to.equal(400);
+      });
+
+      it('rejects an impossible calendar date', async () => {
+        const ctx = fakeContext({ url: feedUrl('?from=2026-13-45&to=2026-08-24') });
+        const res = await ElementsController(ctx, fakeLog(), ENV).listResponseFeed(ctx);
+        expect(res.status).to.equal(400);
+      });
+
+      it('rejects an inverted range', async () => {
+        const ctx = fakeContext({ url: feedUrl('?from=2026-08-24&to=2026-08-20') });
+        const res = await ElementsController(ctx, fakeLog(), ENV).listResponseFeed(ctx);
+        expect(res.status).to.equal(400);
+      });
+
+      // The upstream window is rolling and ~74 days. Beyond it a day is UNRECOVERABLE, and
+      // the upstream returns nothing rather than erroring — which would be served as an
+      // empty result indistinguishable from "no model ran". Rejecting keeps that
+      // ambiguity out of the response.
+      it('rejects a span beyond the rolling window rather than returning an empty result', async () => {
+        const ctx = fakeContext({ url: feedUrl('?from=2026-01-01&to=2026-08-24') });
+        const res = await ElementsController(ctx, fakeLog(), ENV).listResponseFeed(ctx);
+
+        expect(res.status).to.equal(400);
+        const body = await readBody(res);
+        expect(body.message).to.contain('unrecoverable');
+        expect(serviceStub.getResponseFeed).to.not.have.been.called;
+      });
+
+      it('accepts a span just inside the window', async () => {
+        const ctx = fakeContext({ url: feedUrl('?from=2026-06-13&to=2026-08-24') });
+        const res = await ElementsController(ctx, fakeLog(), ENV).listResponseFeed(ctx);
+        expect(res.status).to.equal(200);
+      });
+
+      it('accepts the startDate/endDate aliases', async () => {
+        const ctx = fakeContext({ url: feedUrl('?startDate=2026-08-23&endDate=2026-08-24') });
+        const res = await ElementsController(ctx, fakeLog(), ENV).listResponseFeed(ctx);
+
+        expect(res.status).to.equal(200);
+        expect(serviceStub.getResponseFeed.firstCall.args[1]).to.include({
+          startDate: '2026-08-23', endDate: '2026-08-24',
+        });
+      });
+
+      // Ending yesterday, not today: today's executions are still landing, so ending on
+      // today would report a partial day as if it were complete.
+      it('defaults to the last 7 days ending yesterday', async () => {
+        const ctx = fakeContext({ url: feedUrl() });
+        await ElementsController(ctx, fakeLog(), ENV).listResponseFeed(ctx);
+
+        const today = new Date().toISOString().slice(0, 10);
+        const { startDate, endDate } = serviceStub.getResponseFeed.firstCall.args[1];
+        expect(endDate).to.equal(addDaysToDate(today, -1));
+        expect(startDate).to.equal(addDaysToDate(today, -7));
+      });
+    });
+
+    describe('project ownership (tenant isolation)', () => {
+      // LOAD-BEARING: the technical account is broadly entitled, so a caller who guessed
+      // another brand's Semrush project UUID could otherwise read that tenant's answers.
+      it('forbids a projectId this brand does not own', async () => {
+        const ctx = fakeContext({
+          url: feedUrl('?from=2026-08-24&to=2026-08-24&projectId=11111111-1111-4111-8111-111111111111'),
+          withBrandSemrushProject: true,
+          brandSemrushProjects: brandSemrushProjectsFor(['22222222-2222-4222-8222-222222222222']),
+        });
+        const res = await ElementsController(ctx, fakeLog(), ENV).listResponseFeed(ctx);
+
+        expect(res.status).to.equal(403);
+        expect(serviceStub.getResponseFeed).to.not.have.been.called;
+      });
+
+      it('allows a projectId the brand owns', async () => {
+        const owned = '22222222-2222-4222-8222-222222222222';
+        const ctx = fakeContext({
+          url: feedUrl(`?from=2026-08-24&to=2026-08-24&projectId=${owned}`),
+          withBrandSemrushProject: true,
+          brandSemrushProjects: brandSemrushProjectsFor([owned]),
+        });
+        const res = await ElementsController(ctx, fakeLog(), ENV).listResponseFeed(ctx);
+
+        expect(res.status).to.equal(200);
+        expect(serviceStub.getResponseFeed.firstCall.args[1].projectIds).to.deep.equal([owned]);
+      });
+
+      it('rejects a non-UUID projectId before any upstream call', async () => {
+        const ctx = fakeContext({ url: feedUrl('?from=2026-08-24&to=2026-08-24&projectId=not-a-uuid') });
+        const res = await ElementsController(ctx, fakeLog(), ENV).listResponseFeed(ctx);
+
+        expect(res.status).to.equal(400);
+        expect(serviceStub.getResponseFeed).to.not.have.been.called;
+      });
+
+      it('scopes to all of the brand markets when no projectId is given', async () => {
+        const ctx = fakeContext({ url: feedUrl('?from=2026-08-24&to=2026-08-24') });
+        await ElementsController(ctx, fakeLog(), ENV).listResponseFeed(ctx);
+
+        expect(serviceStub.getResponseFeed.firstCall.args[1].projectIds).to.deep.equal([]);
+      });
+
+      // The ownership check must fail CLOSED when the data-access layer yields no
+      // BrandSemrushProject: the owned set is empty, so any supplied id is unowned and the
+      // request is denied rather than passed upstream unchecked.
+      it('denies a supplied projectId when no brand projects are resolvable', async () => {
+        const ctx = fakeContext({
+          url: feedUrl('?from=2026-08-24&to=2026-08-24&projectId=22222222-2222-4222-8222-222222222222'),
+          withBrandSemrushProject: true,
+          brandSemrushProjects: [],
+        });
+        const res = await ElementsController(ctx, fakeLog(), ENV).listResponseFeed(ctx);
+
+        expect(res.status).to.equal(403);
+        expect(serviceStub.getResponseFeed).to.not.have.been.called;
+      });
+    });
+
+    describe('auth guards', () => {
+      it('403s when the caller lacks access to the organization', async () => {
+        accessControlHasAccessStub.resolves(false);
+        const ctx = fakeContext({ url: feedUrl('?from=2026-08-24&to=2026-08-24') });
+        const res = await ElementsController(ctx, fakeLog(), ENV).listResponseFeed(ctx);
+
+        expect(res.status).to.equal(403);
+        expect(serviceStub.getResponseFeed).to.not.have.been.called;
+      });
+
+      it('404s when serenity is not active for the brand', async () => {
+        isSerenityActiveForBrandStub.resolves(false);
+        const ctx = fakeContext({ url: feedUrl('?from=2026-08-24&to=2026-08-24') });
+        const res = await ElementsController(ctx, fakeLog(), ENV).listResponseFeed(ctx);
+
+        expect(res.status).to.equal(404);
+      });
+
+      it('400s on a malformed brand id', async () => {
+        const ctx = fakeContext({
+          url: feedUrl('?from=2026-08-24&to=2026-08-24'),
+          params: { brandId: 'not-a-uuid' },
+        });
+        const res = await ElementsController(ctx, fakeLog(), ENV).listResponseFeed(ctx);
+
+        expect(res.status).to.equal(400);
+      });
+    });
+
+    describe('query passthrough', () => {
+      it('forwards the model filter and page limit', async () => {
+        const ctx = fakeContext({
+          url: feedUrl('?from=2026-08-24&to=2026-08-24&model=perplexity&limit=100'),
+        });
+        await ElementsController(ctx, fakeLog(), ENV).listResponseFeed(ctx);
+
+        expect(serviceStub.getResponseFeed.firstCall.args[1]).to.include({
+          model: 'perplexity', limit: '100',
+        });
+      });
+
+      it('accepts platform as a legacy alias for model', async () => {
+        const ctx = fakeContext({
+          url: feedUrl('?from=2026-08-24&to=2026-08-24&platform=grok'),
+        });
+        await ElementsController(ctx, fakeLog(), ENV).listResponseFeed(ctx);
+
+        expect(serviceStub.getResponseFeed.firstCall.args[1].model).to.equal('grok');
+      });
+    });
+
+    it('maps an upstream transport failure to 502', async () => {
+      serviceStub.getResponseFeed.rejects(new MockElementsTransportError(500, 'boom'));
+      const ctx = fakeContext({ url: feedUrl('?from=2026-08-24&to=2026-08-24') });
+      const res = await ElementsController(ctx, fakeLog(), ENV).listResponseFeed(ctx);
+
+      expect(res.status).to.equal(502);
+    });
+  });
   describe('extractQuery', () => {
     it('returns empty params (plus an empty projectIds) when request URL is missing', async () => {
       const ctx = fakeContext({ url: null });

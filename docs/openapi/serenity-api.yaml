@@ -1500,6 +1500,138 @@ v2-serenity-brand-presence-sentiment-overview:
             schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
       '500': { $ref: './responses.yaml#/500' }
 
+v2-serenity-brand-presence-responses:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID-only on the /serenity/* surface)
+      schema:
+        type: string
+        format: uuid
+  get:
+    tags: [serenity]
+    summary: Brand Claims response feed — AI answers paired with the sources cited in the same execution
+    description: |
+      Returns one record per AI answer for each day in the range, carrying that
+      execution's own cited sources. Brand Claims sits under Brand Presence within the
+      ABV product.
+
+      Assembled from two Semrush elements that each hold half the record: `141adc88`
+      has the answer text but no date, `404fb017` has the date and the cited URLs but
+      no answer. They are joined on `(project_id, prompt, model, date)`, which is sound
+      because at most one execution exists per that tuple (measured: 2,553 tuples, each
+      mapping to exactly one execution id).
+
+      Brand-scoped via the brand's Semrush sub-workspace, resolved from `:brandId` — the
+      caller never supplies a workspace and never holds a Semrush credential.
+
+      **Range-based by design.** The upstream window is bounded above only, so a single
+      day is recovered as the difference between two pulls. Consecutive days share a
+      boundary, so an N-day range costs N+1 upstream pulls per element rather than 2N.
+
+      **Absence is meaningful.** A `(prompt, model)` tuple runs on roughly 61 of 74 days
+      in practice; some models far fewer. A missing tuple means that model did not run
+      that day — never an error, and never lost data. An answer that cited nothing is
+      returned with an empty `sources` array rather than omitted.
+
+      **Ordering caveat.** `sources` is ordered by the element's aggregate `rank`, which
+      is NOT the order the sources appeared inline in the answer. True inline citation
+      order is not available upstream; do not present this as citation order.
+    operationId: listSerenityBrandPresenceResponses
+    security:
+      - session_token: []
+    parameters:
+      - name: from
+        in: query
+        required: false
+        description: |
+          Inclusive range start (YYYY-MM-DD). Alias `startDate`. Defaults to 7 days
+          before `to`. The span must be under 74 days — the upstream window is rolling
+          and older executions are unrecoverable, so a wider request is rejected rather
+          than served as an empty result.
+        schema: { type: string, format: date }
+      - name: to
+        in: query
+        required: false
+        description: |
+          Inclusive range end (YYYY-MM-DD). Alias `endDate`. Defaults to yesterday —
+          today's executions are still landing, so ending on today would report a
+          partial day as though complete.
+        schema: { type: string, format: date }
+      - name: startDate
+        in: query
+        required: false
+        description: Alias for `from`; `from` takes precedence when both are given.
+        schema: { type: string, format: date }
+      - name: endDate
+        in: query
+        required: false
+        description: Alias for `to`; `to` takes precedence when both are given.
+        schema: { type: string, format: date }
+      - name: model
+        in: query
+        required: false
+        description: |
+          AI model to scope to. Accepts a Semrush Elements model name directly, or a
+          UI platform code which is translated server-side.
+        schema: { type: string }
+      - name: platform
+        in: query
+        required: false
+        description: Legacy alias for `model`; `model` takes precedence when both are given.
+        schema: { type: string }
+      - name: projectId
+        in: query
+        required: false
+        description: |
+          Comma-separated Semrush project UUIDs (one project per market). Alias
+          `project_id`. Omitted → all of the brand's markets. Each id must be a valid
+          UUID (400 otherwise) and must be owned by this brand (403 otherwise).
+        schema: { type: string, pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(,[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}){0,7}$' }
+      - name: project_id
+        in: query
+        required: false
+        description: Snake_case alias for `projectId`.
+        schema: { type: string }
+      - name: limit
+        in: query
+        required: false
+        description: |
+          Upstream page size, clamped to 1..20000 (default 5000). 20000 is the largest
+          page that works on both upstream routes. Raising this is preferable to paging,
+          because every upstream call re-scans the whole rolling window.
+        schema: { type: integer, minimum: 1, maximum: 20000, default: 5000 }
+    responses:
+      '200':
+        description: Response feed retrieved.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityBrandPresenceResponseFeed' }
+      '400': { $ref: './responses.yaml#/400' }
+      '403':
+        description: Caller lacks access to the organization, or a supplied projectId is not owned by the brand.
+      '404':
+        description: Organization not found, brand not found for this organization, serenity is not active for the brand, or the brand has no resolvable Semrush workspace.
+      '502':
+        description: Upstream returned a non-2xx response.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '503':
+        description: PostgREST client not available (required to resolve the brand's Semrush workspace before the element call).
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '500': { $ref: './responses.yaml#/500' }
+
 v2-serenity-brand-presence-subreddits:
   parameters:
     - name: spaceCatId
