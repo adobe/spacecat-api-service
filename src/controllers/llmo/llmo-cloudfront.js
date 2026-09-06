@@ -144,10 +144,11 @@ function LlmoCloudFrontController(ctx) {
       const region = 'us-east-1';
       const roleName = env.EDGE_OPTIMIZE_ROLE_NAME || 'AdobeLLMOptimizerCloudFrontConnectorRole';
       const stackName = env.EDGE_OPTIMIZE_STACK_NAME || 'adobe-edgeoptimize-connector-role';
-      // Short-lived presign: the customer opens the link immediately, so a tight TTL
-      // shrinks the exposure window if the URL leaks (it only grants GetObject on this
-      // one template object until expiry — see security notes). Override via env.
-      const presignTtlSeconds = Number(env.EDGE_OPTIMIZE_PRESIGN_TTL || 900);
+      // TEMP (chore/observe-presign-ttl — do NOT merge): default bumped to 2 days to empirically
+      // test whether the presigned URL actually survives past the STS session ceiling (~12h). The
+      // signer uses temporary session-token creds, so the URL likely dies well before 172800s.
+      // Override via env.
+      const presignTtlSeconds = Number(env.EDGE_OPTIMIZE_PRESIGN_TTL || 172800);
       // Server-derived external ID (site's IMS org id) baked into the connector-role trust policy
       // below; never client-supplied. See resolveConnectorExternalId.
       const externalId = await resolveConnectorExternalId(site);
