@@ -162,6 +162,17 @@ function LlmoCloudFrontController(ctx) {
         return badRequest('CloudFront connector is not configured for this environment (missing trusted principal)');
       }
 
+      // TEMP DIAGNOSTIC (chore/observe-presign-ttl — do NOT merge): log the signer credentials'
+      // real expiration, which is the true ceiling a presign can't outlive (vs the requested TTL).
+      try {
+        const creds = await s3.s3Client.config.credentials();
+        log.info(`[cf-presign] signerExpiration=${creds?.expiration?.toISOString?.() ?? 'none (long-lived)'} `
+          + `remainingSec=${creds?.expiration ? Math.round((creds.expiration.getTime() - Date.now()) / 1000) : 'n/a'} `
+          + `requestedTtl=${presignTtlSeconds} hasSessionToken=${Boolean(creds?.sessionToken)}`);
+      } catch (e) {
+        log.info(`[cf-presign] could not resolve signer creds: ${e.message}`);
+      }
+
       // Presign the (private) template so the customer's CloudFormation can read it
       // cross-account via the signature — no public bucket, no customer S3 access.
       const templateUrl = await s3.getSignedUrl(
