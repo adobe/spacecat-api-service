@@ -359,8 +359,9 @@ function createTechnicalElementsTransport({ env, credentialProfile }) {
  * @param {object} args.env
  * @param {string} [args.purpose]
  * @param {() => Promise<string>} args.resolveImsToken
- * @param {number} [args.maxRetries]
- * @param {number} [args.retryBaseDelayMs]
+ * @param {number} [args.maxRetries] IMS fallback only; mapped technical profiles force zero
+ *   retries.
+ * @param {number} [args.retryBaseDelayMs] IMS fallback only; technical requests never retry.
  * @returns {Promise<object>}
  */
 export async function createElementsTransportForPurpose({

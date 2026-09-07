@@ -343,6 +343,32 @@ describe('createElementsTransport', () => {
 
       expect(fetchStub).to.have.been.calledOnce;
     });
+
+    it('honors a per-call timeout override on the technical transport', async () => {
+      const clock = sinon.useFakeTimers();
+      try {
+        fetchStub.callsFake((url, init) => new Promise((resolve, reject) => {
+          init.signal.addEventListener('abort', () => {
+            reject(Object.assign(new Error('The operation was aborted'), { name: 'AbortError' }));
+          });
+        }));
+        const transport = await makePurposeTransport();
+        const settledPromise = transport
+          .fetchElement(WORKSPACE_ID, ELEMENT_ID, {}, { timeoutMs: 1234 })
+          .catch((e) => e);
+
+        await clock.tickAsync(1233);
+        expect(fetchStub.firstCall.args[1].signal.aborted).to.be.false;
+        await clock.tickAsync(1);
+
+        const err = await settledPromise;
+        expect(err).to.be.instanceOf(ElementsTransportError);
+        expect(err.status).to.equal(504);
+        expect(fetchStub.firstCall.args[1].signal.aborted).to.be.true;
+      } finally {
+        clock.restore();
+      }
+    });
   });
 
   describe('fetchElement', () => {
