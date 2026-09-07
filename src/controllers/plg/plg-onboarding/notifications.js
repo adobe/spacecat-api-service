@@ -23,6 +23,9 @@ export const REVIEW_REASONS = {
 export const DOMAIN_ALREADY_ASSIGNED = 'already assigned to another organization';
 export const DOMAIN_ALREADY_ONBOARDED_IN_ORG = 'another domain is already onboarded for this IMS org';
 export const NON_PROD_DOMAIN = 'appears to be a non-production domain (contains qa, stage, dev, author, or publish subdomain, or is an hlx/AEM delivery URL).';
+// Authenticated (login/SSO-gated) sites are rejected outright at the onboarding gate (there is
+// no self-service remediation), so this is a terminal-reason string, not a REVIEW_REASONS key.
+export const AUTHENTICATED_SITE = 'requires authentication (login/SSO) to access, which ASO does not support';
 
 /**
  * Derives the review check key from the onboarding record's current state.
@@ -140,6 +143,13 @@ export async function postPlgOnboardingNotification(onboarding, context, hints =
     const lastReview = reviews?.length ? reviews[reviews.length - 1] : null;
     if (lastReview?.justification) {
       message += `\n• *Justification:* ${lastReview.justification}`;
+    } else if (status === STATUSES.REJECTED) {
+      // Auto-rejections (e.g. authenticated-site detection) carry no admin review; surface the
+      // record's reason so the channel sees why it was rejected.
+      const reason = onboarding.getWaitlistReason();
+      if (reason) {
+        message += `\n• *Reason:* ${reason}`;
+      }
     }
   }
 

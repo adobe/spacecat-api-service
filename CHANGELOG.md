@@ -1,3 +1,30 @@
+## [1.797.1](https://github.com/adobe/spacecat-api-service/compare/v1.797.0...v1.797.1) (2026-09-07)
+
+
+### Bug Fixes
+
+* **plg-onboard:** only treat a 401 as auth when WWW-Authenticate is present ([#3227](https://github.com/adobe/spacecat-api-service/issues/3227)) ([fd9e323](https://github.com/adobe/spacecat-api-service/commit/fd9e3239173a962f6a27501cbfa513c08443d128))
+
+# [1.797.0](https://github.com/adobe/spacecat-api-service/compare/v1.796.1...v1.797.0) (2026-09-07)
+
+
+### Bug Fixes
+
+* add diagnostic logging to edge-live-preview fetch (LLMO-7416) ([#3216](https://github.com/adobe/spacecat-api-service/issues/3216)) ([4279a84](https://github.com/adobe/spacecat-api-service/commit/4279a84f62501c0ee5736fd498efd1bf2532c498))
+
+
+### Features
+
+* **brand-claims:** name the requester in the on-demand claims Slack alert (LLMO-7263) ([#3215](https://github.com/adobe/spacecat-api-service/issues/3215)) ([143d1c4](https://github.com/adobe/spacecat-api-service/commit/143d1c495824e190748b07bcdfff056edb3b2d45)), closes [adobe/spacecat-api-service#3208](https://github.com/adobe/spacecat-api-service/issues/3208)
+* **plg-onboard:** waitlist authenticated (login/SSO) sites during onboarding ([#3142](https://github.com/adobe/spacecat-api-service/issues/3142)) ([be909a9](https://github.com/adobe/spacecat-api-service/commit/be909a98a9d267f7458293391bed214eb76d4148)), closes [Hi#level](https://github.com/Hi/issues/level) [hi#precision](https://github.com/hi/issues/precision) [hi#precision](https://github.com/hi/issues/precision)
+
+## [1.796.1](https://github.com/adobe/spacecat-api-service/compare/v1.796.0...v1.796.1) (2026-09-07)
+
+
+### Bug Fixes
+
+* **serenity:** restore prompt origin tagging ([663cf6c](https://github.com/adobe/spacecat-api-service/commit/663cf6c7bea5cb1a9c4eef4a27f7b474d4b6cadf)), closes [Hi#level](https://github.com/Hi/issues/level)
+
 # [1.796.0](https://github.com/adobe/spacecat-api-service/compare/v1.795.0...v1.796.0) (2026-09-07)
 
 
