@@ -198,6 +198,7 @@ describe('ElementsController', () => {
   let serviceStub;
   let createElementsServiceStub;
   let createElementsTransportStub;
+  let createElementsTransportForPurposeStub;
   let exchangePromiseTokenStub;
   let resolveBrandUuidStub;
   let MockElementsTransportError;
@@ -229,6 +230,7 @@ describe('ElementsController', () => {
     };
     createElementsServiceStub = sinon.stub().returns(serviceStub);
     createElementsTransportStub = sinon.stub().returns({ fetchElement: sinon.stub() });
+    createElementsTransportForPurposeStub = sinon.stub().resolves({ fetchElement: sinon.stub() });
     exchangePromiseTokenStub = sinon.stub().resolves('exchanged-ims-token');
 
     MockElementsTransportError = class ElementsTransportError extends Error {
@@ -255,6 +257,8 @@ describe('ElementsController', () => {
     ElementsController = (await esmock('../../src/controllers/elements.js', {
       '../../src/support/elements/elements-transport.js': {
         createElementsTransport: createElementsTransportStub,
+        createElementsTransportForPurpose: createElementsTransportForPurposeStub,
+        ELEMENTS_PURPOSE_BRAND_CLAIMS: 'brand_claims',
       },
       '../../src/support/elements/elements-service.js': {
         createElementsService: createElementsServiceStub,
@@ -2009,6 +2013,33 @@ describe('ElementsController', () => {
       expect(body.records[0].model).to.equal('chatgpt-paid');
       expect(body.records[0].date).to.equal('2026-08-24');
       expect(body.truncated).to.equal(false);
+      expect(createElementsTransportForPurposeStub).to.have.been.calledOnceWith(
+        sinon.match({ env: ENV, purpose: 'brand_claims', resolveImsToken: sinon.match.func }),
+      );
+      expect(exchangePromiseTokenStub).to.not.have.been.called;
+      expect(createElementsTransportStub).to.not.have.been.called;
+    });
+
+    it('binds purpose to brand_claims regardless of request input', async () => {
+      const ctx = fakeContext({
+        url: feedUrl('?from=2026-08-24&to=2026-08-24&purpose=hallucination_detection'),
+      });
+      ctx.data = { purpose: 'hallucination_detection' };
+      ctx.pathInfo.headers['x-elements-purpose'] = 'hallucination_detection';
+
+      await ElementsController(ctx, fakeLog(), ENV).listResponseFeed(ctx);
+
+      expect(createElementsTransportForPurposeStub.firstCall.args[0].purpose)
+        .to.equal('brand_claims');
+    });
+
+    it('keeps generic Elements handlers on the IMS-only factory', async () => {
+      const ctx = fakeContext();
+
+      await ElementsController(ctx, fakeLog(), ENV).listUrlInspectorFilterDimensions(ctx);
+
+      expect(createElementsTransportStub).to.have.been.calledOnce;
+      expect(createElementsTransportForPurposeStub).to.not.have.been.called;
     });
 
     it('passes the resolved workspace, never a caller-supplied one', async () => {
@@ -2093,6 +2124,8 @@ describe('ElementsController', () => {
 
         expect(res.status).to.equal(403);
         expect(serviceStub.getResponseFeed).to.not.have.been.called;
+        expect(createElementsTransportForPurposeStub).to.not.have.been.called;
+        expect(exchangePromiseTokenStub).to.not.have.been.called;
       });
 
       it('allows a projectId the brand owns', async () => {
@@ -2114,6 +2147,8 @@ describe('ElementsController', () => {
 
         expect(res.status).to.equal(400);
         expect(serviceStub.getResponseFeed).to.not.have.been.called;
+        expect(createElementsTransportForPurposeStub).to.not.have.been.called;
+        expect(exchangePromiseTokenStub).to.not.have.been.called;
       });
 
       it('scopes to all of the brand markets when no projectId is given', async () => {
@@ -2136,6 +2171,21 @@ describe('ElementsController', () => {
 
         expect(res.status).to.equal(403);
         expect(serviceStub.getResponseFeed).to.not.have.been.called;
+        expect(createElementsTransportForPurposeStub).to.not.have.been.called;
+      });
+
+      it('checks project ownership before constructing the purpose transport', async () => {
+        const owned = '22222222-2222-4222-8222-222222222222';
+        const ctx = fakeContext({
+          url: feedUrl(`?from=2026-08-24&to=2026-08-24&projectId=${owned}`),
+          withBrandSemrushProject: true,
+          brandSemrushProjects: brandSemrushProjectsFor([owned]),
+        });
+
+        await ElementsController(ctx, fakeLog(), ENV).listResponseFeed(ctx);
+
+        expect(ctx.dataAccess.BrandSemrushProject.allByBrandId)
+          .to.have.been.calledBefore(createElementsTransportForPurposeStub);
       });
     });
 
@@ -2147,6 +2197,8 @@ describe('ElementsController', () => {
 
         expect(res.status).to.equal(403);
         expect(serviceStub.getResponseFeed).to.not.have.been.called;
+        expect(createElementsTransportForPurposeStub).to.not.have.been.called;
+        expect(exchangePromiseTokenStub).to.not.have.been.called;
       });
 
       it('404s when serenity is not active for the brand', async () => {
@@ -2155,6 +2207,8 @@ describe('ElementsController', () => {
         const res = await ElementsController(ctx, fakeLog(), ENV).listResponseFeed(ctx);
 
         expect(res.status).to.equal(404);
+        expect(createElementsTransportForPurposeStub).to.not.have.been.called;
+        expect(exchangePromiseTokenStub).to.not.have.been.called;
       });
 
       it('400s on a malformed brand id', async () => {
@@ -2165,6 +2219,8 @@ describe('ElementsController', () => {
         const res = await ElementsController(ctx, fakeLog(), ENV).listResponseFeed(ctx);
 
         expect(res.status).to.equal(400);
+        expect(createElementsTransportForPurposeStub).to.not.have.been.called;
+        expect(exchangePromiseTokenStub).to.not.have.been.called;
       });
     });
 
@@ -2196,6 +2252,22 @@ describe('ElementsController', () => {
       const res = await ElementsController(ctx, fakeLog(), ENV).listResponseFeed(ctx);
 
       expect(res.status).to.equal(502);
+    });
+
+    it('fails closed with a safe 503 when technical authentication is misconfigured', async () => {
+      createElementsTransportForPurposeStub.rejects(
+        new ErrorWithStatusCode('SEMRUSH_ELEMENTS_TECHNICAL_API_KEY is not configured', 503),
+      );
+      const ctx = fakeContext({ url: feedUrl('?from=2026-08-24&to=2026-08-24') });
+      const res = await ElementsController(ctx, fakeLog(), ENV).listResponseFeed(ctx);
+
+      expect(res.status).to.equal(503);
+      expect(await readBody(res)).to.deep.equal({
+        error: 'configurationError',
+        message: 'SEMRUSH_ELEMENTS_TECHNICAL_API_KEY is not configured',
+      });
+      expect(serviceStub.getResponseFeed).to.not.have.been.called;
+      expect(exchangePromiseTokenStub).to.not.have.been.called;
     });
   });
   describe('extractQuery', () => {

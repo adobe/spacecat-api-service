@@ -16,6 +16,15 @@ import { endpointOf } from '../url-utils.js';
 import { ElementsTransportError } from './errors.js';
 
 const ELEMENTS_API_PATH = '/enterprise/pages/api/v3/workspaces';
+const EXTERNAL_ELEMENTS_API_PATH = '/apis/v4-raw/external-api/v1/workspaces';
+
+export const ELEMENTS_PURPOSE_BRAND_CLAIMS = 'brand_claims';
+export const ELEMENTS_PURPOSE_HALLUCINATION_DETECTION = 'hallucination_detection';
+
+const TECHNICAL_AUTH_PURPOSES = new Set([
+  ELEMENTS_PURPOSE_BRAND_CLAIMS,
+  ELEMENTS_PURPOSE_HALLUCINATION_DETECTION,
+]);
 // Verified against a real Semrush-provisioned brand: individual Stats-per-URL
 // calls were timing out at 15s roughly half the time; 30s was needed for them
 // to reliably complete (and even then, some calls come in close to that
@@ -77,6 +86,55 @@ function buildHeaders(imsToken) {
   }
   return {
     Authorization: `Bearer ${imsToken}`,
+    Accept: 'application/json',
+    'Content-Type': 'application/json',
+  };
+}
+
+function externalBaseUrl(env) {
+  const raw = typeof env?.SEMRUSH_ELEMENTS_EXTERNAL_BASE_URL === 'string'
+    ? env.SEMRUSH_ELEMENTS_EXTERNAL_BASE_URL.trim()
+    : env?.SEMRUSH_ELEMENTS_EXTERNAL_BASE_URL;
+  if (!hasText(raw)) {
+    throw new ErrorWithStatusCode(
+      'SEMRUSH_ELEMENTS_EXTERNAL_BASE_URL is not configured',
+      503,
+    );
+  }
+  let parsed;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    throw new ErrorWithStatusCode(
+      'SEMRUSH_ELEMENTS_EXTERNAL_BASE_URL is invalid',
+      503,
+    );
+  }
+  if (parsed.protocol !== 'https:') {
+    throw new ErrorWithStatusCode(
+      'SEMRUSH_ELEMENTS_EXTERNAL_BASE_URL must use HTTPS',
+      503,
+    );
+  }
+  return `${parsed.protocol}//${parsed.host}`;
+}
+
+function technicalApiKey(env) {
+  const key = typeof env?.SEMRUSH_ELEMENTS_TECHNICAL_API_KEY === 'string'
+    ? env.SEMRUSH_ELEMENTS_TECHNICAL_API_KEY.trim()
+    : env?.SEMRUSH_ELEMENTS_TECHNICAL_API_KEY;
+  if (!hasText(key)) {
+    throw new ErrorWithStatusCode(
+      'SEMRUSH_ELEMENTS_TECHNICAL_API_KEY is not configured',
+      503,
+    );
+  }
+  return key;
+}
+
+function buildTechnicalHeaders(apiKey) {
+  return {
+    Authorization: `Apikey ${apiKey}`,
     Accept: 'application/json',
     'Content-Type': 'application/json',
   };
@@ -160,7 +218,7 @@ function nextRetryDelayMs(completedAttempt, baseDelayMs, response) {
  * budget). The body is a JSON string, so it is safe to re-send unchanged across attempts.
  *
  * @param {string} url
- * @param {string} imsToken
+ * @param {object} headers request headers, containing either caller IMS or technical auth
  * @param {object} body request payload (serialised once, re-sent per attempt)
  * @param {object} [opts]
  * @param {number} [opts.timeoutMs] per-attempt timeout
@@ -171,7 +229,7 @@ function nextRetryDelayMs(completedAttempt, baseDelayMs, response) {
  * @param {string} [opts.elementId] id of the element being called, ditto
  * @returns {Promise<*>} parsed response body on success
  */
-async function request(url, imsToken, body, {
+async function request(url, headers, body, {
   timeoutMs = DEFAULT_TIMEOUT_MS,
   maxRetries = DEFAULT_MAX_RETRIES,
   retryBaseDelayMs = DEFAULT_RETRY_BASE_DELAY_MS,
@@ -195,7 +253,7 @@ async function request(url, imsToken, body, {
       // eslint-disable-next-line no-await-in-loop
       response = await fetch(url, {
         method: 'POST',
-        headers: buildHeaders(imsToken),
+        headers,
         signal: controller.signal,
         body: jsonBody,
       });
@@ -279,7 +337,7 @@ export function createElementsTransport({
      */
     async fetchElement(workspaceId, elementId, payload, callOpts = {}) {
       const url = `${root}${ELEMENTS_API_PATH}/${enc(workspaceId)}/products/ai/elements/${enc(elementId)}/data`;
-      return request(url, imsToken, payload, {
+      return request(url, buildHeaders(imsToken), payload, {
         maxRetries: callOpts.maxRetries ?? maxRetries,
         retryBaseDelayMs,
         timeoutMs: callOpts.timeoutMs,
@@ -288,4 +346,58 @@ export function createElementsTransport({
       });
     },
   };
+}
+
+function createTechnicalElementsTransport({ env }) {
+  const root = externalBaseUrl(env);
+  const apiKey = technicalApiKey(env);
+
+  return {
+    async fetchElement(workspaceId, elementId, payload, callOpts = {}) {
+      const url = `${root}${EXTERNAL_ELEMENTS_API_PATH}/${enc(workspaceId)}/products/ai/elements/${enc(elementId)}`;
+      return request(url, buildTechnicalHeaders(apiKey), { render_data: payload }, {
+        // Brand Claims and Hallucination Detection share a small per-credential pool. Never replay
+        // technical-account requests: retries would amplify concurrent background-job traffic.
+        maxRetries: 0,
+        timeoutMs: callOpts.timeoutMs,
+        workspaceId,
+        elementId,
+      });
+    },
+  };
+}
+
+/**
+ * Selects the temporary technical-account transport only for an explicitly allowed ABV purpose.
+ * All other calls lazily resolve caller IMS credentials and retain the existing transport.
+ *
+ * This is the single replacement boundary for the temporary credential. Future S2S auth should
+ * replace only the allowed-purpose branch without changing the service or its callers.
+ *
+ * @param {object} args
+ * @param {object} args.env
+ * @param {string} [args.purpose]
+ * @param {() => Promise<string>} args.resolveImsToken
+ * @param {number} [args.maxRetries]
+ * @param {number} [args.retryBaseDelayMs]
+ * @returns {Promise<object>}
+ */
+export async function createElementsTransportForPurpose({
+  env,
+  purpose,
+  resolveImsToken,
+  maxRetries = DEFAULT_MAX_RETRIES,
+  retryBaseDelayMs = DEFAULT_RETRY_BASE_DELAY_MS,
+}) {
+  const useTechnicalAuth = env?.SEMRUSH_ELEMENTS_TECHNICAL_AUTH_ENABLED === 'true'
+    && TECHNICAL_AUTH_PURPOSES.has(purpose);
+
+  if (useTechnicalAuth) {
+    return createTechnicalElementsTransport({ env });
+  }
+
+  const imsToken = await resolveImsToken();
+  return createElementsTransport({
+    env, imsToken, maxRetries, retryBaseDelayMs,
+  });
 }

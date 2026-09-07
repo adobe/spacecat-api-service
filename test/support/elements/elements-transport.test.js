@@ -14,7 +14,12 @@ import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
-import { createElementsTransport } from '../../../src/support/elements/elements-transport.js';
+import {
+  createElementsTransport,
+  createElementsTransportForPurpose,
+  ELEMENTS_PURPOSE_BRAND_CLAIMS,
+  ELEMENTS_PURPOSE_HALLUCINATION_DETECTION,
+} from '../../../src/support/elements/elements-transport.js';
 import { ElementsTransportError } from '../../../src/support/elements/errors.js';
 
 use(chaiAsPromised);
@@ -26,6 +31,16 @@ const WORKSPACE_ID = 'ws-uuid-123';
 const ELEMENT_ID = 'el-uuid-456';
 const EXPECTED_URL = `${BASE_URL}/enterprise/pages/api/v3/workspaces/${WORKSPACE_ID}/products/ai/elements/${ELEMENT_ID}/data`;
 const ENV = { SEMRUSH_PROJECTS_BASE_URL: BASE_URL };
+const EXTERNAL_BASE_URL = 'https://api.semrush.com';
+const TECHNICAL_API_KEY = 'technical-api-key';
+const TECHNICAL_ENV = {
+  ...ENV,
+  SEMRUSH_ELEMENTS_TECHNICAL_AUTH_ENABLED: 'true',
+  SEMRUSH_ELEMENTS_TECHNICAL_API_KEY: TECHNICAL_API_KEY,
+  SEMRUSH_ELEMENTS_EXTERNAL_BASE_URL: EXTERNAL_BASE_URL,
+};
+const EXPECTED_EXTERNAL_URL = `${EXTERNAL_BASE_URL}/apis/v4-raw/external-api/v1/workspaces/`
+  + `${WORKSPACE_ID}/products/ai/elements/${ELEMENT_ID}`;
 
 function makeResponse(status, body, headers = {}) {
   const text = typeof body === 'string' ? body : JSON.stringify(body);
@@ -89,6 +104,163 @@ describe('createElementsTransport', () => {
       await transport.fetchElement(WORKSPACE_ID, ELEMENT_ID, {});
       const [url] = fetchStub.firstCall.args;
       expect(url).to.equal(EXPECTED_URL);
+    });
+  });
+
+  describe('purpose-aware technical authentication', () => {
+    const makePurposeTransport = (extra = {}) => createElementsTransportForPurpose({
+      env: TECHNICAL_ENV,
+      purpose: ELEMENTS_PURPOSE_BRAND_CLAIMS,
+      resolveImsToken: sinon.stub().resolves(IMS_TOKEN),
+      ...extra,
+    });
+
+    it('uses the external route, Apikey header, and render_data envelope for brand claims', async () => {
+      fetchStub.resolves(makeResponse(200, { blocks: { value: [] } }));
+      const resolveImsToken = sinon.stub().resolves(IMS_TOKEN);
+      const payload = { comparison_data_formatting: 'union' };
+      const transport = await makePurposeTransport({ resolveImsToken });
+
+      await transport.fetchElement(WORKSPACE_ID, ELEMENT_ID, payload);
+
+      const [url, init] = fetchStub.firstCall.args;
+      expect(url).to.equal(EXPECTED_EXTERNAL_URL);
+      expect(url).to.not.match(/\/data$/);
+      expect(init.headers.Authorization).to.equal(`Apikey ${TECHNICAL_API_KEY}`);
+      expect(init.headers.Authorization).to.not.contain('Bearer');
+      expect(init.body).to.equal(JSON.stringify({ render_data: payload }));
+      expect(resolveImsToken).to.not.have.been.called;
+    });
+
+    it('reserves hallucination detection as the other allowed technical purpose', async () => {
+      expect(ELEMENTS_PURPOSE_HALLUCINATION_DETECTION).to.equal('hallucination_detection');
+      fetchStub.resolves(makeResponse(200, {}));
+      const resolveImsToken = sinon.stub().resolves(IMS_TOKEN);
+      const transport = await makePurposeTransport({
+        purpose: 'hallucination_detection',
+        resolveImsToken,
+      });
+
+      await transport.fetchElement(WORKSPACE_ID, ELEMENT_ID, {});
+
+      expect(fetchStub.firstCall.args[1].headers.Authorization)
+        .to.equal(`Apikey ${TECHNICAL_API_KEY}`);
+      expect(resolveImsToken).to.not.have.been.called;
+    });
+
+    ['TRUE', '1', 'false', true, undefined].forEach((flag) => {
+      it(`keeps IMS auth when the enable flag is ${String(flag)}`, async () => {
+        fetchStub.resolves(makeResponse(200, {}));
+        const resolveImsToken = sinon.stub().resolves(IMS_TOKEN);
+        const transport = await makePurposeTransport({
+          env: { ...TECHNICAL_ENV, SEMRUSH_ELEMENTS_TECHNICAL_AUTH_ENABLED: flag },
+          resolveImsToken,
+        });
+
+        await transport.fetchElement(WORKSPACE_ID, ELEMENT_ID, { original: true });
+
+        expect(resolveImsToken).to.have.been.calledOnce;
+        expect(fetchStub.firstCall.args[0]).to.equal(EXPECTED_URL);
+        expect(fetchStub.firstCall.args[1].headers.Authorization).to.equal(`Bearer ${IMS_TOKEN}`);
+        expect(fetchStub.firstCall.args[1].body).to.equal(JSON.stringify({ original: true }));
+      });
+    });
+
+    [undefined, 'unknown'].forEach((purpose) => {
+      it(`keeps IMS auth for purpose ${String(purpose)}`, async () => {
+        fetchStub.resolves(makeResponse(200, {}));
+        const resolveImsToken = sinon.stub().resolves(IMS_TOKEN);
+        const transport = await makePurposeTransport({ purpose, resolveImsToken });
+
+        await transport.fetchElement(WORKSPACE_ID, ELEMENT_ID, {});
+
+        expect(resolveImsToken).to.have.been.calledOnce;
+        expect(fetchStub.firstCall.args[1].headers.Authorization).to.equal(`Bearer ${IMS_TOKEN}`);
+      });
+    });
+
+    [
+      [{ SEMRUSH_ELEMENTS_TECHNICAL_API_KEY: undefined }, 'SEMRUSH_ELEMENTS_TECHNICAL_API_KEY'],
+      [{ SEMRUSH_ELEMENTS_TECHNICAL_API_KEY: '   ' }, 'SEMRUSH_ELEMENTS_TECHNICAL_API_KEY'],
+      [{ SEMRUSH_ELEMENTS_EXTERNAL_BASE_URL: undefined }, 'SEMRUSH_ELEMENTS_EXTERNAL_BASE_URL'],
+      [{ SEMRUSH_ELEMENTS_EXTERNAL_BASE_URL: '   ' }, 'SEMRUSH_ELEMENTS_EXTERNAL_BASE_URL'],
+      [{ SEMRUSH_ELEMENTS_EXTERNAL_BASE_URL: 'not a url' }, 'SEMRUSH_ELEMENTS_EXTERNAL_BASE_URL'],
+      [{ SEMRUSH_ELEMENTS_EXTERNAL_BASE_URL: 'http://api.semrush.com' }, 'SEMRUSH_ELEMENTS_EXTERNAL_BASE_URL'],
+    ].forEach(([envOverride, variable]) => {
+      it(`fails closed with 503 for invalid ${variable} configuration`, async () => {
+        const resolveImsToken = sinon.stub().resolves(IMS_TOKEN);
+        let err;
+        try {
+          await makePurposeTransport({
+            env: { ...TECHNICAL_ENV, ...envOverride },
+            resolveImsToken,
+          });
+        } catch (e) {
+          err = e;
+        }
+
+        expect(err.status).to.equal(503);
+        expect(err.message).to.contain(variable);
+        expect(err.message).to.not.contain(TECHNICAL_API_KEY);
+        expect(resolveImsToken).to.not.have.been.called;
+        expect(fetchStub).to.not.have.been.called;
+      });
+    });
+
+    it('normalizes the external base to its HTTPS origin and URL-encodes ids', async () => {
+      fetchStub.resolves(makeResponse(200, {}));
+      const transport = await makePurposeTransport({
+        env: {
+          ...TECHNICAL_ENV,
+          SEMRUSH_ELEMENTS_EXTERNAL_BASE_URL: `${EXTERNAL_BASE_URL}/ignored/path/`,
+        },
+      });
+
+      await transport.fetchElement('ws/special', 'el/special', {});
+
+      expect(fetchStub.firstCall.args[0]).to.equal(
+        `${EXTERNAL_BASE_URL}/apis/v4-raw/external-api/v1/workspaces/ws%2Fspecial/`
+        + 'products/ai/elements/el%2Fspecial',
+      );
+    });
+
+    it('keeps technical credentials out of upstream error metadata', async () => {
+      fetchStub.resolves(makeResponse(403, { error: 'denied' }));
+      const transport = await makePurposeTransport();
+      let err;
+      try {
+        await transport.fetchElement(WORKSPACE_ID, ELEMENT_ID, {});
+      } catch (e) {
+        err = e;
+      }
+
+      expect(err).to.be.instanceOf(ElementsTransportError);
+      expect(err).to.include({
+        method: 'POST',
+        endpoint: `/apis/v4-raw/external-api/v1/workspaces/${WORKSPACE_ID}`
+          + `/products/ai/elements/${ELEMENT_ID}`,
+        workspaceId: WORKSPACE_ID,
+        elementId: ELEMENT_ID,
+      });
+      expect(JSON.stringify(err)).to.not.contain(TECHNICAL_API_KEY);
+      expect(err.message).to.not.contain(TECHNICAL_API_KEY);
+    });
+
+    it('does not retry a technical-account request on 429', async () => {
+      fetchStub.resolves(makeResponse(429, { error: 'rate limited' }));
+      const transport = await makePurposeTransport({
+        maxRetries: 2,
+        retryBaseDelayMs: 0,
+      });
+
+      await expect(transport.fetchElement(
+        WORKSPACE_ID,
+        ELEMENT_ID,
+        {},
+        { maxRetries: 2 },
+      )).to.be.rejectedWith(ElementsTransportError);
+
+      expect(fetchStub).to.have.been.calledOnce;
     });
   });
 

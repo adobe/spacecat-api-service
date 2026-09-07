@@ -18,7 +18,11 @@ import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
 
 import { getBrandIdentity, getBrandBySite } from '../support/brands-storage.js';
 import { resolveBrandUuid } from '../support/prompts-storage.js';
-import { createElementsTransport } from '../support/elements/elements-transport.js';
+import {
+  createElementsTransport,
+  createElementsTransportForPurpose,
+  ELEMENTS_PURPOSE_BRAND_CLAIMS,
+} from '../support/elements/elements-transport.js';
 import { ElementsTransportError } from '../support/elements/errors.js';
 import { createElementsService } from '../support/elements/elements-service.js';
 import { fetchOwnedUrlsTraffic, mergeOwnedUrlsTraffic } from '../support/elements/owned-urls-traffic.js';
@@ -533,7 +537,16 @@ export default function ElementsController(context, log, env) {
     return resolveSemrushImsToken(ctx, log, 'elements', requireImsBearer);
   }
 
-  async function buildService(ctx) {
+  async function buildService(ctx, purpose = undefined) {
+    if (purpose) {
+      const transport = await createElementsTransportForPurpose({
+        env,
+        purpose,
+        resolveImsToken: () => resolveElementsImsToken(ctx),
+      });
+      return createElementsService(transport, log);
+    }
+
     const imsToken = await resolveElementsImsToken(ctx);
     return createElementsService(createElementsTransport({ env, imsToken }), log);
   }
@@ -2242,8 +2255,6 @@ export default function ElementsController(context, log, env) {
         );
       }
 
-      const service = await buildService(ctx);
-
       // Project scoping: caller-supplied projectId(s) (CSV) scope to those Semrush projects;
       // absent → all of the brand's markets. LOAD-BEARING: the technical account is broadly
       // entitled, so a caller who guessed another brand's project UUID could otherwise read
@@ -2259,6 +2270,7 @@ export default function ElementsController(context, log, env) {
         return ownershipError;
       }
 
+      const service = await buildService(ctx, ELEMENTS_PURPOSE_BRAND_CLAIMS);
       const result = await service.getResponseFeed(workspaceId, {
         projectIds,
         startDate,

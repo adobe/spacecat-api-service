@@ -52,7 +52,7 @@ SpaceCat wraps these as standard `GET` REST endpoints, hiding the POST/payload c
 
 ## Upstream API Pattern
 
-All Semrush Elements calls follow this shape:
+Generic Semrush Elements calls use the internal IMS route:
 
 ```
 POST {SEMRUSH_PROJECTS_BASE_URL}/enterprise/pages/api/v3/workspaces/{workspaceId}/products/ai/elements/{elementId}/data
@@ -60,6 +60,18 @@ Authorization: Bearer <ims-access-token>
 Content-Type: application/json
 
 { ...element-specific payload }
+```
+
+The temporary technical-account exception for the code-owned `brand_claims` and
+`hallucination_detection` purposes uses the external route. The response-feed handler is statically
+bound to `brand_claims`; there is currently no Hallucination Detection call site.
+
+```
+POST {SEMRUSH_ELEMENTS_EXTERNAL_BASE_URL}/apis/v4-raw/external-api/v1/workspaces/{workspaceId}/products/ai/elements/{elementId}
+Authorization: Apikey <technical-api-key>
+Content-Type: application/json
+
+{ "render_data": { ...element-specific payload } }
 ```
 
 **Response envelope** (always):
@@ -249,12 +261,20 @@ const listUrlInspectorFilterDimensions = async (ctx) => {
 
 ## Authentication
 
-The Semrush Elements APIs authenticate via the caller's **IMS access token**. The token is:
+Generic Semrush Elements APIs authenticate via the caller's **IMS access token**. The token is:
 
 1. Extracted from the inbound `Authorization: Bearer <token>` header by `requireImsBearer(ctx)`
 2. Forwarded unchanged to Semrush in the upstream `Authorization: Bearer <token>` header
 
-No service-to-service credentials are involved — the user's own IMS token is the auth mechanism. `requireImsBearer` throws `ErrorWithStatusCode(401)` if the header is missing or if the caller used a non-IMS auth method (e.g. scoped API key).
+`requireImsBearer` throws `ErrorWithStatusCode(401)` if the header is missing or if the caller used a
+non-IMS auth method (e.g. scoped API key).
+
+There is one temporary exception: when `SEMRUSH_ELEMENTS_TECHNICAL_AUTH_ENABLED` is exactly `true`,
+the code-owned `brand_claims` and reserved `hallucination_detection` purposes use the external API
+with a Vault-injected technical-account API key. Generic Elements handlers cannot select this mode,
+and request query, header, and body values cannot choose the purpose. Enabled technical mode fails
+closed with HTTP 503 if its base URL or key is missing or invalid, without falling back to IMS.
+Technical-account 429 responses are not retried because both purposes share one credential rate pool.
 
 ---
 
@@ -461,6 +481,12 @@ Upstream error bodies are **never forwarded to clients** — they are logged ser
 
 | Variable | Source | Used by |
 |---|---|---|
-| `SEMRUSH_PROJECTS_BASE_URL` | Vault `dx_mysticat/<env>/api-service` | `elements-transport.js` `baseUrl()` — the Elements API base host (e.g. `https://www.semrush.com`) |
+| `SEMRUSH_PROJECTS_BASE_URL` | Vault `dx_mysticat/<env>/api-service` | Internal IMS Elements API base host (e.g. `https://www.semrush.com`) |
+| `SEMRUSH_ELEMENTS_TECHNICAL_AUTH_ENABLED` | Environment configuration | Exact string `true` enables the temporary technical-account route for the code-owned `brand_claims` and `hallucination_detection` purposes only |
+| `SEMRUSH_ELEMENTS_EXTERNAL_BASE_URL` | Vault `dx_mysticat/<env>/api-service` | HTTPS origin for the external Elements API (e.g. `https://api.semrush.com`) |
+| `SEMRUSH_ELEMENTS_TECHNICAL_API_KEY` | Vault `dx_mysticat/<env>/api-service` | Temporary technical-account API key; never store it in source or local documentation |
 
-No additional secrets are required. The Elements transport reuses the same `SEMRUSH_PROJECTS_BASE_URL` already configured for the Serenity (prompts/markets) transport.
+The technical-account branch is a temporary stopgap until S2S authentication is available. Configure
+the external base and key before setting the enable flag. An enabled allowed purpose fails closed with
+HTTP 503 when either value is missing or invalid; it never falls back to caller IMS or another key.
+Generic Elements endpoints remain IMS-only.
