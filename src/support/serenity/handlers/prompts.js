@@ -36,6 +36,7 @@ import {
   canonicalizeSource, SOURCE_VALUES, rootNameOfDimension,
 } from '../prompt-tags.js';
 import { classifyPromptIntents } from '../intent-classification.js';
+import { classifyTagCompatibility } from '../tag-compatibility.js';
 import { logPromptDeleteEvent } from '../prompt-delete-log.js';
 
 /** @typedef {import('../rest-transport.js').SerenityTransport} SerenityTransport */
@@ -284,7 +285,7 @@ function buildTagsOf(item, compatibilityById) {
   if (!Array.isArray(item?.tags)) {
     return [];
   }
-  return item.tags.reduce((acc, t) => {
+  const tags = item.tags.reduce((acc, t) => {
     if (typeof t === 'string' && t) {
       acc.push({
         id: '',
@@ -321,6 +322,10 @@ function buildTagsOf(item, compatibilityById) {
     }
     return acc;
   }, []);
+  return classifyTagCompatibility(tags).map((tag) => ({
+    ...tag,
+    compatibility: compatibilityById?.get(tag.id) ?? tag.compatibility,
+  }));
 }
 
 /**

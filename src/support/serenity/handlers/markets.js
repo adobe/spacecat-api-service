@@ -23,6 +23,7 @@ import { resolveLocation } from '../locations.js';
 import { resolveSiteIdentity, resolveMarketIdentity, logMarketCreated } from '../site-linkage.js';
 import { createProvisionAndPublishProject, CreateNoProjectIdError } from '../project-provisioning.js';
 import { alertQuotaRejection } from '../quota-alerts.js';
+import { classifyTagCompatibility } from '../tag-compatibility.js';
 
 /** @typedef {import('../rest-transport.js').SerenityTransport} SerenityTransport */
 /** @typedef {import('../rest-transport.js').ProjectCreateBody} ProjectCreateBody */
@@ -899,34 +900,7 @@ function normalizeTreeItems(batch) {
 }
 
 export function decorateTagTreeItems(items) {
-  const normalizedPaths = new Map();
-  for (const item of items) {
-    const names = [...(item.path ?? []).map((part) => part.name), item.name];
-    const key = names.map((name) => name.normalize('NFKC').toLocaleLowerCase()).join('__');
-    normalizedPaths.set(key, (normalizedPaths.get(key) ?? 0) + 1);
-  }
-  return items.map((item) => {
-    const names = [...(item.path ?? []).map((part) => part.name), item.name];
-    const rootName = item.path?.[0]?.name ?? item.name;
-    const key = names.map((name) => name.normalize('NFKC').toLocaleLowerCase()).join('__');
-    let reason = null;
-    if (rootName.toLocaleLowerCase() === 'tag' && rootName !== 'tag') {
-      reason = 'caseVariantRoot';
-    } else if (names.some((name) => name.includes(':') || name.includes('__'))) {
-      reason = 'separatorInName';
-    } else if ((item.path?.length ?? 0) + 1 > 3 && rootName === 'tag') {
-      reason = 'unsupportedDepth';
-    } else if ((normalizedPaths.get(key) ?? 0) > 1) {
-      reason = 'ambiguousPath';
-    }
-    return {
-      ...item,
-      compatibility: {
-        state: reason ? 'readOnly' : 'canonical',
-        reason,
-      },
-    };
-  });
+  return classifyTagCompatibility(items);
 }
 
 export function tagConstraints() {

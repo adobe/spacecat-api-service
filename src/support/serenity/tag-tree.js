@@ -58,6 +58,7 @@ import {
   displayNameOfValue,
   valueSlugOfDisplayName,
 } from './prompt-tags.js';
+import { classifyTagCompatibility } from './tag-compatibility.js';
 
 /** @typedef {import('./rest-transport.js').SerenityTransport} SerenityTransport */
 
@@ -685,32 +686,7 @@ export async function readTagTreeSnapshot(
     frontier = next;
   }
 
-  const pathCounts = new Map();
-  for (const node of nodes) {
-    const key = node.fullPath
-      .map((part) => part.name.normalize('NFKC').toLocaleLowerCase())
-      .join('__');
-    pathCounts.set(key, (pathCounts.get(key) ?? 0) + 1);
-  }
-  const items = nodes.map((node) => {
-    const key = node.fullPath
-      .map((part) => part.name.normalize('NFKC').toLocaleLowerCase())
-      .join('__');
-    let reason = null;
-    if (node.rootName.toLocaleLowerCase() === DIMENSION.TAG && node.rootName !== DIMENSION.TAG) {
-      reason = 'caseVariantRoot';
-    } else if (node.fullPath.some((part) => part.name.includes(':') || part.name.includes('__'))) {
-      reason = 'separatorInName';
-    } else if (node.rootName === DIMENSION.TAG && node.depth > 3) {
-      reason = 'unsupportedDepth';
-    } else if ((pathCounts.get(key) ?? 0) > 1) {
-      reason = 'ambiguousPath';
-    }
-    return {
-      ...node,
-      compatibility: { state: reason ? 'readOnly' : 'canonical', reason },
-    };
-  });
+  const items = classifyTagCompatibility(nodes);
   return {
     items,
     byId: new Map(items.map((item) => [item.id, item])),
