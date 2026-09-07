@@ -207,7 +207,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     dataAccess.BrandSemrushProject.findBySlice.resolves(null);
     dataAccess.BrandSemrushProject.create.resolves();
     const transport = {
-      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English', code: 'en' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-new' }),
       updateProject: sinon.stub().resolves(),
       publishProject: sinon.stub().resolves(),
@@ -260,7 +260,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     dataAccess.BrandSemrushProject.findBySlice.resolves(null);
     dataAccess.BrandSemrushProject.create.resolves();
     const transport = {
-      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English', code: 'en' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-new' }),
       updateProject: sinon.stub().resolves(),
       publishProject: sinon.stub().resolves(),
@@ -288,7 +288,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     dataAccess.BrandSemrushProject.findBySlice.resolves(null);
     dataAccess.BrandSemrushProject.create.resolves();
     const transport = {
-      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English', code: 'en' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-new' }),
       updateProject: sinon.stub().resolves(),
       publishProject: sinon.stub().resolves(),
@@ -313,7 +313,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     dataAccess.BrandSemrushProject.findBySlice.resolves(null);
     dataAccess.BrandSemrushProject.create.resolves();
     const transport = {
-      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English', code: 'en' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-new' }),
       updateProject: sinon.stub().rejects(new Error('patch boom')),
       publishProject: sinon.stub().resolves(),
@@ -338,7 +338,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     dataAccess.BrandSemrushProject.create.resolves();
     dataAccess.Site.findById.resolves({ getBaseURL: () => 'https://acme.com/path' });
     const transport = {
-      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English', code: 'en' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-new' }),
       updateProject: sinon.stub().resolves(),
       publishProject: sinon.stub().resolves(),
@@ -360,7 +360,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     dataAccess.BrandSemrushProject.create.resolves();
     dataAccess.Site.findById.resolves({ getBaseURL: () => 'https://kisqali.de' });
     const transport = {
-      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-de', name: 'German' }] }),
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-de', name: 'German', code: 'de' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-de' }),
       updateProject: sinon.stub().resolves(),
       publishProject: sinon.stub().resolves(),
@@ -388,7 +388,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     dataAccess.BrandSemrushProject.findBySlice.resolves(null);
     dataAccess.BrandSemrushProject.create.resolves();
     const transport = {
-      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English', code: 'en' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-new' }),
       updateProject: sinon.stub().resolves(),
       publishProject: sinon.stub().resolves(),
@@ -410,7 +410,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     dataAccess.BrandSemrushProject.create.resolves();
     dataAccess.Site.findById.resolves({ getBaseURL: () => 'https://nba.com/kings' });
     const transport = {
-      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English', code: 'en' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-new' }),
       updateProject: sinon.stub().resolves(),
       publishProject: sinon.stub().resolves(),
@@ -435,7 +435,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     dataAccess.BrandSemrushProject.findBySlice.resolves(null);
     dataAccess.BrandSemrushProject.create.resolves();
     const transport = {
-      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English', code: 'en' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-new' }),
       updateProject: sinon.stub().resolves(),
       publishProject: sinon.stub().resolves(),
@@ -459,7 +459,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     dataAccess.BrandSemrushProject.create.resolves();
     dataAccess.Site.findById.resolves({ getBaseURL: () => 'https://nba.com/kings' });
     const transport = {
-      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English', code: 'en' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-orphan-patch' }),
       updateProject: sinon.stub().rejects(new Error('upstream 503')),
       publishProject: sinon.stub().resolves(),
@@ -492,7 +492,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     dataAccess.BrandSemrushProject.create.resolves();
     dataAccess.Site.findById.resolves({ getBaseURL: () => 'https://nba.com/kings' });
     const transport = {
-      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English', code: 'en' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-new' }),
       updateProject: sinon.stub().resolves(),
       publishProject: sinon.stub().resolves(),
@@ -518,7 +518,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     dataAccess.BrandSemrushProject.findBySlice.resolves(null);
     dataAccess.BrandSemrushProject.create.resolves();
     const transport = {
-      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English', code: 'en' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-new' }),
       updateProject: sinon.stub().resolves(),
       publishProject: sinon.stub().resolves(),
@@ -549,7 +549,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     dataAccess.BrandSemrushProject.findBySlice.resolves(null);
     dataAccess.Site.findById.resolves(null); // unknown site
     const transport = {
-      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English', code: 'en' }] }),
     };
 
     const result = await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
@@ -597,7 +597,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     dataAccess.BrandSemrushProject.findBySlice.resolves(null);
     const transport = {
       // English not in catalog → resolveLanguageId returns null
-      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-de', name: 'German' }] }),
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-de', name: 'German', code: 'de' }] }),
     };
 
     const result = await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
@@ -615,7 +615,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     const dataAccess = makeDataAccess([]);
     dataAccess.BrandSemrushProject.findBySlice.resolves(null);
     const transport = {
-      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English', code: 'en' }] }),
     };
     clearLanguageCache();
 
@@ -653,7 +653,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     const dataAccess = makeDataAccess([]);
     dataAccess.BrandSemrushProject.findBySlice.resolves(null);
     const transport = {
-      // Items exist but the {name, id} contract is broken — no `name` field.
+      // Items exist but the {code, id} contract is broken — no `code` field.
       listLanguages: sinon.stub().resolves({ items: [{ unexpected: 'shape' }] }),
     };
     const log = fakeLog();
@@ -665,7 +665,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
 
     expect(result.status).to.equal(400);
     expect(log.warn).to.have.been.calledWithMatch(
-      'resolveLanguageId: language catalog returned no usable names — upstream field shape may have changed',
+      'resolveLanguageId: language catalog returned no usable codes — upstream field shape may have changed',
       sinon.match.object,
     );
   });
@@ -710,7 +710,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     dataAccess.BrandSemrushProject.findBySlice.resolves(null);
     dataAccess.BrandSemrushProject.create.resolves();
     const transport = {
-      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English', code: 'en' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-orphan-1' }),
       updateProject: sinon.stub().resolves(),
       publishProject: sinon.stub().rejects(new Error('upstream 503')),
@@ -744,7 +744,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     const dataAccess = makeDataAccess([]);
     dataAccess.BrandSemrushProject.findBySlice.resolves(null);
     const transport = {
-      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English', code: 'en' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-orphan-3' }),
       updateProject: sinon.stub().resolves(),
       publishProject: sinon.stub().rejects(new Error('upstream 503')),
@@ -776,7 +776,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     dataAccess.BrandSemrushProject.findBySlice.resolves(null);
     dataAccess.BrandSemrushProject.create.rejects(new Error('duplicate key value violates unique constraint'));
     const transport = {
-      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English', code: 'en' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-orphan-2' }),
       updateProject: sinon.stub().resolves(),
       publishProject: sinon.stub().resolves(),
@@ -802,7 +802,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     const dataAccess = makeDataAccess([]);
     dataAccess.BrandSemrushProject.findBySlice.resolves(null);
     const transport = {
-      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English', code: 'en' }] }),
       createProject: sinon.stub().resolves({}), // missing id
       updateProject: sinon.stub().resolves(),
       publishProject: sinon.stub(),
@@ -822,7 +822,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     dataAccess.BrandSemrushProject.findBySlice.resolves(null);
     dataAccess.BrandSemrushProject.create.resolves();
     const transport = {
-      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-de', name: 'German' }] }),
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-de', name: 'German', code: 'de' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-x' }),
       updateProject: sinon.stub().resolves(),
       publishProject: sinon.stub().resolves(),
@@ -847,7 +847,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     dataAccess.BrandSemrushProject.findBySlice.resolves(null);
     dataAccess.BrandSemrushProject.create.resolves();
     const transport = {
-      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English', code: 'en' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-x' }),
       updateProject: sinon.stub().resolves(),
       publishProject: sinon.stub().resolves(),
@@ -904,7 +904,7 @@ describe('handlers/markets.js — language-catalog cache (Important #8)', () => 
     dataAccess.BrandSemrushProject.findBySlice.resolves(null);
     dataAccess.BrandSemrushProject.create.resolves();
     const transport = {
-      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English', code: 'en' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-1' }),
       updateProject: sinon.stub().resolves(),
       publishProject: sinon.stub().resolves(),
@@ -934,7 +934,7 @@ describe('handlers/markets.js — language-catalog cache (Important #8)', () => 
       dataAccess.BrandSemrushProject.findBySlice.resolves(null);
       dataAccess.BrandSemrushProject.create.resolves();
       const transport = {
-        listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+        listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English', code: 'en' }] }),
         createProject: sinon.stub().resolves({ id: 'proj-1' }),
         updateProject: sinon.stub().resolves(),
         publishProject: sinon.stub().resolves(),
@@ -2197,20 +2197,21 @@ describe('handlers/markets.js — handleUpdateModels', () => {
 });
 
 describe('listLanguageCatalog', () => {
-  it('returns the Semrush language catalog, name-sorted, dropping nameless rows', async () => {
+  it('returns the Semrush language catalog, name-sorted, dropping nameless/codeless rows', async () => {
     const transport = {
       listLanguages: sinon.stub().resolves({
         items: [
-          { id: 'l-fr', name: 'French' },
-          { id: 'l-en', name: 'English' },
-          { id: 'l-bad' }, // no name → dropped
+          { id: 'l-fr', name: 'French', code: 'fr' },
+          { id: 'l-en', name: 'English', code: 'en' },
+          { id: 'l-bad' }, // no name/code → dropped
+          { id: 'l-nocode', name: 'NoCode' }, // no code → dropped
         ],
       }),
     };
     const result = await listLanguageCatalog(transport);
     expect(result.items).to.deep.equal([
-      { id: 'l-en', name: 'English' },
-      { id: 'l-fr', name: 'French' },
+      { id: 'l-en', name: 'English', code: 'en' },
+      { id: 'l-fr', name: 'French', code: 'fr' },
     ]);
   });
 
@@ -2269,14 +2270,14 @@ describe('handlers/markets.js — defensive branch coverage', () => {
     const transport = {
       listLanguages: sinon.stub().resolves({
         items: [
-          { name: 'English' }, // no id at all
-          { id: '', name: 'French' }, // blank id — hasText('') is false
-          { id: 'l-de', name: 'German' }, // normal
+          { name: 'English', code: 'en' }, // no id at all
+          { id: '', name: 'French', code: 'fr' }, // blank id — hasText('') is false
+          { id: 'l-de', name: 'German', code: 'de' }, // normal
         ],
       }),
     };
     const result = await listLanguageCatalog(transport);
-    // All three have names so none are dropped. id-less/blank-id rows get null.
+    // All three have names+codes so none are dropped. id-less/blank-id rows get null.
     const english = result.items.find((l) => l.name === 'English');
     const french = result.items.find((l) => l.name === 'French');
     const german = result.items.find((l) => l.name === 'German');

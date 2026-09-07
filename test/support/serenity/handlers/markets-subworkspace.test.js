@@ -90,7 +90,7 @@ function makeTransport(overrides = {}) {
     updateProject: sinon.stub().resolves(null),
     publishProject: sinon.stub().resolves(null),
     deleteProject: sinon.stub().resolves(null),
-    listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+    listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English', code: 'en' }] }),
     getWorkspaceStatus: sinon.stub().resolves({ status: 'created' }),
     listPromptsByTags: sinon.stub().resolves({ items: [] }),
     listAiModels: sinon.stub().resolves({ items: [] }),

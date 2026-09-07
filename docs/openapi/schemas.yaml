@@ -12627,14 +12627,17 @@ SerenityModelListResponse:
 
 SerenityLanguage:
   type: object
-  required: [name]
+  required: [name, code]
   properties:
     id:
       type: [string, 'null']
       description: Semrush language catalog id (null when the catalog omits it).
     name:
       type: string
-      description: English language name as Semrush spells it (the match key).
+      description: English language name as Semrush spells it. Metadata/fallback text only — not a resolution key (LLMO-7420).
+    code:
+      type: string
+      description: BCP-47 language code (e.g. zh-Hans, zh-Hant, fil) — the stable identifier a client persists and later sends back as languageCode (LLMO-7420).
 
 SerenityLanguageListResponse:
   type: object
