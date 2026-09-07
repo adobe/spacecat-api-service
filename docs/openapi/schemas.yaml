@@ -6813,11 +6813,14 @@ V2PromptInput:
       default: human
       description: >-
         Who authored the prompt's text. SERVICE-PRINCIPAL-ONLY and read-only for
-        end users: a user-authenticated request (IMS/JWT) has this field IGNORED
+        end users: an end-user request (IMS/JWT session) has this field IGNORED
         (never rejected) and the value derived as `human`; only a service
-        principal (e.g. the generation pipeline) may assert it, validated against
-        the enum. It is never patched on update — it is fixed by the writer that
-        created the row (origin-dimension.md §3).
+        principal may assert it, validated against the enum. A service principal
+        is an S2S consumer/admin or a scoped/legacy API key — e.g. the DRS
+        generation pipeline, which posts `origin: ai`. Note an S2S caller
+        authenticates with a JWT, so the principal is resolved from the token's
+        S2S claims, not the auth type alone. It is never patched on update — it is
+        fixed by the writer that created the row (origin-dimension.md §3).
     intent:
       type: string
       description: >-
@@ -6953,7 +6956,7 @@ CustomerConfigUrl:
       items:
         type: string
       description: Regions where this URL is applicable
-      example: ["GL", "US", "GB"]
+      example: ["US", "GB"]
 CustomerConfigSocialAccount:
   type: object
   description: A social media account for a brand
@@ -6976,7 +6979,7 @@ CustomerConfigSocialAccount:
       items:
         type: string
       description: Regions where this account is relevant
-      example: ["GL"]
+      example: ["US"]
 CustomerConfigBrandAlias:
   type: object
   description: An alternative name for a brand
@@ -7039,7 +7042,7 @@ CustomerConfigRelatedBrand:
       items:
         type: string
       description: Regions where this relationship is relevant
-      example: ["GL"]
+      example: ["US"]
 CustomerConfigEarnedContent:
   type: object
   description: Earned media content source
@@ -7072,7 +7075,7 @@ CustomerConfigEarnedContent:
       items:
         type: string
       description: Regions where this source is relevant
-      example: ["GL"]
+      example: ["US"]
 CustomerConfigBrand:
   type: object
   description: A brand configuration with all associated metadata
@@ -7107,7 +7110,7 @@ CustomerConfigBrand:
       items:
         type: string
       description: Regions where this brand operates
-      example: ["GL", "US", "GB"]
+      example: ["US", "GB"]
     description:
       type: string
       description: Detailed description of the brand
@@ -8201,6 +8204,50 @@ V2BrandActivateResponse:
     baseSiteId: 'b2c3d4e5-6789-01ab-cdef-2345678901ab'
     promptGenerationJobId: 'c3d4e5f6-7890-12ab-cdef-3456789012ab'
     scheduleId: 'd4e5f6a7-8901-23ab-cdef-4567890123ab'
+
+BrandMarket:
+  type: object
+  description: |
+    A whole-country market configured for a brand, derived from a
+    `BrandSemrushProject` row. `region` is derived server-side from the
+    row's `geoTargetId` (a Google Ads Geo Target ID) via the whole-country
+    inverse of the `criterion_id = 2000 + ISO numeric` formula — a row whose
+    `geoTargetId` is not a whole country (city/region/postal code, etc.) is
+    omitted rather than mislabeled. This shape has no `status` or `siteId`:
+    the underlying store carries neither column.
+  required:
+    - region
+    - languageCode
+    - geoTargetId
+  properties:
+    # Whole-country only today; sub-national geo would land as a new field, not an overload of region.
+    region:
+      type: string
+      description: ISO 3166-1 alpha-2 country code.
+      example: 'IN'
+    languageCode:
+      type: string
+      description: BCP-47 primary subtag.
+      example: 'en'
+    geoTargetId:
+      type: integer
+      description: Google Ads Geo Target ID for the market.
+      example: 2356
+  example:
+    region: 'IN'
+    languageCode: 'en'
+    geoTargetId: 2356
+
+BrandMarketsResponse:
+  type: object
+  description: Response envelope for listing a brand's markets.
+  required:
+    - markets
+  properties:
+    markets:
+      type: array
+      items:
+        $ref: '#/BrandMarket'
 
 V2Category:
   type: object
@@ -10461,11 +10508,17 @@ AiVisibilityV1BrandStatsByLLMResponse:
 AiVisibilityV1BrandCompetitorsStatsByDate:
   type: object
   description: |
-    One row from `CompetitorsMetrics.StatsResponse.ByDate` as native protobuf JSON.
+    One row from `CompetitorService.StatsResponse.ByDate` (v2) as native protobuf JSON.
     UInt64 fields are serialized as JSON strings.
   properties:
     date:
       $ref: '#/AiVisibilitySemrushDate'
+    isoDate:
+      type: string
+      description: |
+        The row's date as an ISO-8601 string. Added by the v2 `CompetitorService`
+        message; the v1 `CompetitorsMetrics` message did not carry it. Always
+        present in the response.
     visibility:
       type: integer
       description: AI Visibility score for the brand on this date
@@ -10501,7 +10554,7 @@ AiVisibilityV1BrandCompetitorsStatsByBrand:
 AiVisibilityV1BrandCompetitorsStatsResponse:
   type: object
   description: |
-    Native Semrush `CompetitorsMetrics.StatsResponse` protobuf JSON from
+    Native Semrush `CompetitorService.StatsResponse` (v2) protobuf JSON from
     `GET /llmo/ai-visibility/v1/brand/competitors-stats`, plus `srFilters`
     from the API layer.
   properties:
@@ -12029,7 +12082,20 @@ SerenityCreatePromptsRequest:
         carries `published: false`). Used for chunked CSV imports, where the
         client posts several chunks and issues a single publish after the last
         one (serenity-docs#32). Omitted/false publishes once at the end of the
-        call as usual.
+        call as usual. This is a SYNCHRONOUS-path hint only and does NOT trigger
+        async processing — use `async` for that.
+    async:
+      type: boolean
+      default: false
+      description: >
+        When true, the request is processed ASYNCHRONOUSLY: instead of
+        classifying + creating + publishing inline, the whole write is enqueued
+        to a background job and the endpoint returns 202 with a job id to poll
+        via `GET .../serenity/prompts/jobs/{jobId}` (serenity-docs#33).
+        Deliberately distinct from `deferPublish` (a synchronous publish-batching
+        hint) so that the synchronous CSV-chunking client — which sets
+        `deferPublish` on every non-final chunk — is never routed to async
+        unexpectedly. Omitted/false processes synchronously as usual.
 
 SerenityCreatePromptsResponse:
   type: object
@@ -12064,6 +12130,53 @@ SerenityCreatePromptsResponse:
         unless the request set `deferPublish: true`, in which case the prompts
         were written as drafts and the caller must publish separately
         (serenity-docs#32).
+
+SerenityPromptsJobAccepted:
+  type: object
+  description: |
+    202 body for an async prompt-create (`async: true`). The write runs
+    asynchronously on the job runner; poll `jobId` at
+    `GET .../serenity/prompts/jobs/{jobId}`.
+  required: [jobId, status]
+  properties:
+    jobId:
+      type: string
+      format: uuid
+    status:
+      type: string
+      description: The job's initial state (IN_PROGRESS at enqueue time).
+      enum: [IN_PROGRESS, COMPLETED, FAILED]
+
+SerenityPromptsJobStatus:
+  type: object
+  description: |
+    Poll response for an async `serenity-classify-prompts` job. Secret-free by
+    design — the job's internal metadata (promise token etc.) is never exposed.
+  required: [jobId, status]
+  properties:
+    jobId:
+      type: string
+      format: uuid
+    status:
+      type: string
+      enum: [IN_PROGRESS, COMPLETED, FAILED]
+    result:
+      description: >
+        The job result once COMPLETED (the same envelope the synchronous create
+        returns: created/skipped/failed/published, plus
+        pendingClassificationCount/requeuedJobId). Null while IN_PROGRESS or on
+        FAILED.
+      oneOf:
+        - { $ref: '#/SerenityCreatePromptsResponse' }
+        - { type: 'null' }
+    error:
+      description: The failure envelope once FAILED; null otherwise.
+      oneOf:
+        - type: object
+          properties:
+            code: { type: string }
+            message: { type: string }
+        - { type: 'null' }
 
 SerenityUpdatePromptRequest:
   type: object
@@ -12465,6 +12578,13 @@ SerenityTag:
       description: |
         Number of direct children under this tag. Populated by the TREE read
         (typically non-zero only on root categories).
+    promptsCount:
+      type: integer
+      description: |
+        Number of prompts directly carrying this tag. Populated by the TREE read;
+        used to show cascade impact before a delete. Deliberately not in the
+        top-level `required` list, same as `childrenCount`: absent on the flat,
+        prompt-derived listing.
     path:
       type: [array, 'null']
       description: |
@@ -12689,6 +12809,123 @@ SerenityBrandPresenceSubredditRow:
       description: Semrush project the row belongs to.
       example: 'cb4f6443-e01f-4075-a586-85511f136e31'
 
+SerenityBrandPresenceResponseFeedSource:
+  type: object
+  description: |
+    One source cited by an AI answer.
+
+    Ordered within `sources` by `rank`, which is the element's AGGREGATE ranking for
+    that domain — NOT the position the citation occupied inline in the answer text.
+    True inline citation order is not available upstream; do not present this as
+    citation order.
+  required: [url, domain, rank, domainType]
+  properties:
+    url:
+      type: string
+      description: Cited URL.
+      example: 'https://www.runnersworld.com/gear/best-running-shoes'
+    domain:
+      type: string
+      description: Display/domain form of the source.
+      example: 'runnersworld.com'
+    rank:
+      type: integer
+      description: Aggregate ranking from the element (see the ordering caveat above).
+      example: 1
+    domainType:
+      type: string
+      description: Semrush domain classification.
+      example: 'Earned'
+
+SerenityBrandPresenceResponseFeedRecord:
+  type: object
+  description: |
+    One AI answer with the sources cited in that same execution, keyed by
+    `(projectId, prompt, model, date)`.
+
+    `model` and `date` are always present and are load-bearing: the downstream consumer
+    keys on `(prompt, region)` and carries neither dimension, so it cannot reconstruct
+    them. An empty `sources` array means that execution cited nothing — never that
+    sources were lost.
+  required: [projectId, prompt, model, date, response, sources, sourceCount]
+  properties:
+    projectId:
+      type: string
+      description: Semrush project (one per market).
+      example: '460e0a7b-b8db-44f4-8b16-0e1bd1241efa'
+    prompt:
+      type: string
+      example: 'best running shoes for flat feet'
+    model:
+      type: string
+      description: AI model that produced the answer.
+      example: 'chatgpt-paid'
+    date:
+      type: string
+      format: date
+      description: Calendar day of the execution (YYYY-MM-DD).
+      example: '2026-08-24'
+    response:
+      type: string
+      description: The answer text.
+    sources:
+      type: array
+      items:
+        $ref: '#/SerenityBrandPresenceResponseFeedSource'
+    sourceCount:
+      type: integer
+      description: |
+        Number of source rows joined to this answer. Exposed so a caller can spot an
+        implausible fan-out if the one-execution-per-tuple invariant were violated
+        upstream.
+      example: 3
+
+SerenityBrandPresenceResponseFeed:
+  type: object
+  description: |
+    Brand Claims response feed for the requested days: each AI answer paired with the
+    sources cited in the same execution.
+
+    `truncated` and `unmatchedSourceKeyCount` exist so a consumer can tell an incomplete
+    read from a genuinely quiet day — the distinction the feed depends on, since a
+    missing tuple is normally legitimate.
+  required: [records, totalCount, days, projectIds, pageSize, truncated, unmatchedSourceKeyCount]
+  properties:
+    records:
+      type: array
+      items:
+        $ref: '#/SerenityBrandPresenceResponseFeedRecord'
+    totalCount:
+      type: integer
+      example: 42
+    days:
+      type: array
+      description: Calendar days covered, oldest first.
+      items: { type: string, format: date }
+      example: ['2026-08-23', '2026-08-24']
+    projectIds:
+      type: array
+      description: Projects (markets) scoped to. Empty means workspace-wide.
+      items: { type: string }
+    pageSize:
+      type: integer
+      description: Upstream page size actually used, after clamping.
+      example: 5000
+    truncated:
+      type: boolean
+      description: |
+        True when at least one upstream page came back full, so the window may be
+        clipped and this day's set incomplete. A consumer seeing this should narrow the
+        range rather than treat the result as whole.
+      example: false
+    unmatchedSourceKeyCount:
+      type: integer
+      description: |
+        Source rows whose answer was not present in the same page. Normally 0; a
+        persistently high value means the two elements disagreed and the join is losing
+        citations.
+      example: 0
+
 SerenityBrandPresenceSubreddits:
   type: object
   description: |
@@ -12751,6 +12988,56 @@ SerenityBrandPresenceRedditThreads:
       type: array
       items:
         $ref: '#/SerenityBrandPresenceRedditThreadRow'
+    totalCount:
+      type: integer
+      example: 42
+
+SerenityBrandPresenceYoutubeVideoRow:
+  type: object
+  description: A single YouTube video ranked by citation count.
+  required: [channel, citations, link, prompts, video, views]
+  properties:
+    channel:
+      type: string
+      description: YouTube channel name. Empty string when the element has no channel data for this video.
+      example: 'Lovesac'
+    citations:
+      type: integer
+      description: Number of AI responses citing this video. Endpoint's ranking metric ("citation count").
+      example: 53
+    link:
+      type: string
+      description: Video URL.
+      example: 'https://www.youtube.com/watch?v=4ECf112-SSc'
+    prompts:
+      type: integer
+      description: Number of prompts whose responses cited this video.
+      example: 47
+    video:
+      type: string
+      description: Video title, as returned by the element.
+      example: 'Lovesac Product Guide - CitySac Overview'
+    views:
+      type: integer
+      description: View count, coerced to 0 when the element has no tracked view count for this video.
+      example: 106100
+    urlCbf:
+      type: string
+      description: Opaque Semrush custom-field-value key for the video URL.
+      example: '59bfcb03-11df-44ff-867a-ac2b30c49578:eq:https_C0L_//www.youtube.com/watch?v=4ECf112-SSc'
+
+SerenityBrandPresenceYoutubeVideos:
+  type: object
+  description: |
+    Top YouTube videos from the Semrush "YouTube Videos" element (05e624db), sorted by
+    `citations` descending (tie-broken by `urlCbf`) and paginated. `totalCount` is the
+    full pre-pagination row count.
+  required: [videos, totalCount]
+  properties:
+    videos:
+      type: array
+      items:
+        $ref: '#/SerenityBrandPresenceYoutubeVideoRow'
     totalCount:
       type: integer
       example: 42
@@ -12852,6 +13139,7 @@ SerenityBrandPresenceTopicPromptRow:
     - citations
     - visibility
     - volume
+    - executions
   properties:
     prompt:
       type: string
@@ -12867,10 +13155,19 @@ SerenityBrandPresenceTopicPromptRow:
       description: Semrush project title for the prompt's market (e.g. `US-en`).
     mentions:
       type: integer
-      description: Brand mentions for this prompt.
+      description: >-
+        Executions where the brand was mentioned for this prompt (a subset of
+        `executions`, so `mentions <= executions`). Not the total run count.
+        CONTRACT VERIFIED live 2026-09-07 (Lovesac, one topic, 30-day window, 10
+        models = 100 rows): 0 violations of `mentions <= days <= window`.
     citations:
       type: integer
-      description: Citations for this prompt.
+      description: >-
+        Per-execution citation count for this prompt. Not bounded by `mentions`
+        (`citations > mentions` occurs — a prompt can be cited more often than the
+        brand is named), and may even exceed `executions` when a single response
+        cites multiple owned sources — so clamp `citations / executions` to 1 when
+        presenting it as a percentage (the consumer does).
     visibility:
       type: number
       description: Visibility score (0-100).
@@ -12885,6 +13182,17 @@ SerenityBrandPresenceTopicPromptRow:
     volume:
       type: integer
       description: Search volume for the prompt.
+    executions:
+      type: integer
+      description: >-
+        Number of executions (Semrush runs) for this prompt in the window —
+        the denominator for a per-execution citation rate (`citations / executions`).
+        Semrush runs a prompt at most once per model/date/project, so this equals
+        the count of days the prompt ran (days-with-data). Scoped to this element's
+        single model (default `search-gpt`), topic, and any requested project(s)
+        (`CBF_project`) — it is NOT an all-model aggregate and is not comparable to
+        `stats.total_executions` (which OMITS `CBF_model` on the default view, so it
+        is an all-model figure — see `buildModelFilter`, LLMO-7093).
 
 SerenityFilterDimensionItem:
   type: object
@@ -13835,6 +14143,23 @@ StateAccessMapping:
     resourceId:
       type: string
       example: '11111111-2222-4333-9444-555555555555'
+    compositeKeyType1:
+      type: string
+      description: |
+        Composite-key slot 1 *type* (DB `composite_key_type_1`) — the scope
+        dimension the binding is narrowed by. Product-anchored (ASO →
+        `opportunity`); `all` is the sentinel meaning no composite scoping. NOT
+        NULL server-side (defaults to `all`), so it is always present.
+      example: opportunity
+    compositeKeyValue1:
+      type: string
+      description: |
+        Composite-key slot 1 *value* (DB `composite_key_value_1`) paired with
+        `compositeKeyType1` (e.g. an opportunity type such as `security`). `all`
+        means every value in the dimension (site-wide). NOT NULL server-side
+        (defaults to `all`). Matched exactly and case-sensitively against the live
+        `Opportunity.type` at enforcement — send the exact type string.
+      example: security
     imsOrgId:
       type: string
       example: ABC123@AdobeOrg
@@ -13885,6 +14210,24 @@ StateAccessMappingCreateRequest:
     resourceId:
       type: string
       example: '11111111-2222-4333-9444-555555555555'
+    compositeKeyType1:
+      type: string
+      description: |
+        Optional composite-key slot 1 *type* (mirrors DB `composite_key_type_1`).
+        Anchored per product: when sent it MUST equal the product's slot-1
+        dimension (ASO → `opportunity`) or the request is rejected; omit to have it
+        filled from config. Products without composite scoping reject a non-`all`
+        value here (an explicit `all` is accepted as a no-op).
+      example: opportunity
+    compositeKeyValue1:
+      type: string
+      description: |
+        Composite-key slot 1 *value* (mirrors DB `composite_key_value_1`) paired
+        with `compositeKeyType1` (e.g. `security`). Omit — or send `all` — to scope
+        to every value in the dimension; defaults to `all` server-side. Trimmed on
+        write and matched exactly and case-sensitively against the live
+        `Opportunity.type` at enforcement — send the exact type string.
+      example: security
     grantedCapabilities:
       type: array
       minItems: 1

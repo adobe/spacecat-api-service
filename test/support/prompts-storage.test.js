@@ -31,6 +31,7 @@ import {
   findPromptsBlockingRegionRemoval,
   getIntentsByPromptIds,
   deriveV2PromptOrigin,
+  isServicePrincipal,
 } from '../../src/support/prompts-storage.js';
 
 use(chaiAsPromised);
@@ -94,6 +95,50 @@ describe('prompts-storage', () => {
     it('defaults a SERVICE principal to `human` when the body value is out-of-vocabulary', () => {
       expect(deriveV2PromptOrigin('robot', false)).to.equal('human');
       expect(deriveV2PromptOrigin('', false)).to.equal('human');
+    });
+  });
+
+  describe('isServicePrincipal (origin-dimension.md §3)', () => {
+    it('classifies an S2S consumer (JWT) as a service principal', () => {
+      // authType is `jwt` (same as an end user) — recognised only by the claim.
+      expect(isServicePrincipal({
+        getType: () => 'jwt',
+        isS2SConsumer: () => true,
+        isS2SAdmin: () => false,
+      })).to.equal(true);
+    });
+
+    it('classifies an S2S admin (JWT) as a service principal', () => {
+      expect(isServicePrincipal({
+        getType: () => 'jwt',
+        isS2SConsumer: () => false,
+        isS2SAdmin: () => true,
+      })).to.equal(true);
+    });
+
+    it('classifies a scoped/legacy API key (non-jwt/ims authType) as a service principal', () => {
+      expect(isServicePrincipal({ getType: () => 'scopedApiKey' })).to.equal(true);
+      expect(isServicePrincipal({ getType: () => 'legacyApiKey' })).to.equal(true);
+    });
+
+    it('classifies an end-user JWT/IMS session (no S2S claim) as NOT a service principal', () => {
+      expect(isServicePrincipal({
+        getType: () => 'jwt',
+        isS2SConsumer: () => false,
+        isS2SAdmin: () => false,
+      })).to.equal(false);
+      expect(isServicePrincipal({ getType: () => 'ims' })).to.equal(false);
+    });
+
+    it('fails SAFE to a user principal for absent / indeterminate auth', () => {
+      // no authInfo at all
+      expect(isServicePrincipal(undefined)).to.equal(false);
+      expect(isServicePrincipal(null)).to.equal(false);
+      // authInfo present but non-function getType and no S2S signal
+      expect(isServicePrincipal({})).to.equal(false);
+      expect(isServicePrincipal({ getType: 'not-a-function' })).to.equal(false);
+      // absent authType (getType returns undefined) with no S2S signal
+      expect(isServicePrincipal({ getType: () => undefined })).to.equal(false);
     });
   });
 

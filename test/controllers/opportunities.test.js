@@ -301,6 +301,36 @@ describe('Opportunities Controller', () => {
     expect(opportunities[0]).to.have.property('id', OPPORTUNITY_ID);
   });
 
+  it('narrows opportunities to the caller\'s permitted types when the resolver deferred (D4)', async () => {
+    const response = await opportunitiesController.getAllForSite({
+      params: { siteId: SITE_ID },
+      attributes: { facsComposite: { values: ['__no-match__'] } },
+    });
+    expect(response.status).to.equal(200);
+    const opportunities = await response.json();
+    expect(opportunities).to.be.an('array').with.lengthOf(0);
+  });
+
+  it('returns all opportunities for a site-wide (all) composite grant (D4)', async () => {
+    const response = await opportunitiesController.getAllForSite({
+      params: { siteId: SITE_ID },
+      attributes: { facsComposite: { values: 'all' } },
+    });
+    expect(response.status).to.equal(200);
+    const opportunities = await response.json();
+    expect(opportunities).to.be.an('array').with.lengthOf(1);
+  });
+
+  it('narrows by-status opportunities to the caller\'s permitted types (D4)', async () => {
+    const response = await opportunitiesController.getByStatus({
+      params: { siteId: SITE_ID, status: 'NEW' },
+      attributes: { facsComposite: { values: ['__no-match__'] } },
+    });
+    expect(response.status).to.equal(200);
+    const opportunities = await response.json();
+    expect(opportunities).to.be.an('array').with.lengthOf(0);
+  });
+
   it('projects opportunities to the requested fields when ?fields= is passed', async () => {
     const response = await opportunitiesController.getAllForSite({
       params: { siteId: SITE_ID },

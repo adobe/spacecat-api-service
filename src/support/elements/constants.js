@@ -47,6 +47,30 @@ export function isAllPlatforms(value) {
   return typeof value === 'string' && value.trim().toLowerCase() === ALL_PLATFORMS;
 }
 
+/**
+ * True when a brand-presence model/platform filter should aggregate across ALL of the
+ * brand's models rather than scope to a single one — i.e. the value is ABSENT (empty /
+ * non-string) OR the explicit {@link ALL_PLATFORMS} sentinel. When true, the affected
+ * brand-presence element payloads OMIT the `CBF_model` filter, so Semrush returns the
+ * deduped cross-model aggregate across whatever models produced data (the brand's enabled
+ * models) — LLMO-7093.
+ *
+ * Distinct from {@link isAllPlatforms}, which matches ONLY the literal `'all'` string: this
+ * ALSO treats the absent value as "all models". The Serenity "All Platforms" UI omits the
+ * `platform` query param entirely (project-elmo-ui#2888), so for these endpoints "no
+ * platform" means "all platforms" — NOT the {@link DEFAULT_ELEMENT_MODEL} single-model
+ * default that {@link resolveElementModel} would otherwise apply. (The `url-prompts`
+ * endpoint deliberately keeps the `absent → default model` behaviour and uses the plain
+ * {@link isAllPlatforms} check instead; only the brand-presence family opts into
+ * `absent → aggregate`.)
+ *
+ * @param {string} [value] - Raw value from the `model` or `platform` query param.
+ * @returns {boolean}
+ */
+export function isAllModelsFilter(value) {
+  return typeof value !== 'string' || value.trim().length === 0 || isAllPlatforms(value);
+}
+
 export const ELEMENT_MODELS = Object.freeze([
   'google-ai-mode',
   'grok-3',
@@ -96,3 +120,67 @@ export function resolveElementModel(value) {
   return ELEMENT_MODELS.includes(mapped) ? mapped : DEFAULT_ELEMENT_MODEL;
 }
 /* c8 ignore stop */
+
+/**
+ * Builds the single-model `CBF_model` advanced filter for a brand-presence element, or
+ * returns `null` when the request is an all-models aggregate ({@link isAllModelsFilter} —
+ * param absent or the `'all'` sentinel), so the caller simply omits the filter and Semrush
+ * aggregates across every model the brand has data for (LLMO-7093). Centralises the
+ * `absent/'all' → omit, else resolve-and-scope` branch shared by the brand-presence family
+ * (stats, kpi-headlines, market-tracking-trends, sentiment-overview).
+ *
+ * ⚠️ Two DIFFERENT "absent platform" semantics coexist on this surface — pick deliberately:
+ *
+ *  - `buildModelFilter` (this one): absent/`'all'` → `null`, so the filter is OMITTED and
+ *    the result is an all-model aggregate. Use for the brand-presence family (stats,
+ *    kpi-headlines, market-tracking-trends, sentiment-overview) — the surfaces whose UI
+ *    exposes a real "All Platforms" option.
+ *  - {@link resolveElementModel}: absent/unrecognized → {@link DEFAULT_ELEMENT_MODEL}
+ *    (`search-gpt`). Use for url-prompts, topics, cited-domains, owned-urls and
+ *    url-inspector — surfaces with no "All Platforms" option, where falling back to a
+ *    single default model is the intended contract.
+ *
+ * The distinction is enforced only by which helper a definition file calls, so switching a
+ * caller from one to the other silently changes that endpoint's aggregation semantics.
+ *
+ * @param {string} [requestedModel] - Raw model/platform value (callers pass `model || platform`).
+ * @param {object} [opts]
+ * @param {boolean} [opts.wrap=true] - Wrap the `eq` in a one-member `or` block (the shape most
+ *   elements use); pass `false` for the bare-`eq` elements (stats mentions/citations).
+ * @returns {object|null} The `CBF_model` filter node, or `null` for the aggregate case.
+ */
+export function buildModelFilter(requestedModel, { wrap = true } = {}) {
+  if (isAllModelsFilter(requestedModel)) {
+    return null;
+  }
+  const eq = { op: 'eq', val: resolveElementModel(requestedModel), col: 'CBF_model' };
+  return wrap ? { op: 'or', filters: [eq] } : eq;
+}
+
+/**
+ * Builds the `filters.advanced` fragment of an Elements payload, OMITTING the key entirely
+ * when there is nothing to filter on. Spread into the `filters` object by the caller.
+ *
+ * Semrush REJECTS an empty AND block: `advanced: { op: 'and', filters: [] }` returns
+ * HTTP 422 `{"message":"request could not be processed"}` — it does NOT treat it as the
+ * vacuously-true "match all". Dropping the key instead returns the unfiltered result.
+ *
+ * Verified live 2026-09-02 (brand "Asian Paints", sub-workspace c8feffff-6e58-41db-b804-
+ * 5652033dd292, 2026-08-04→2026-09-02) against all three elements that can reach the
+ * empty case — SENTIMENT (f4153af8), TRENDS_MV (b5281393) and MARKET_CITATIONS_TREND
+ * (2e5a6f4e): empty AND → 422 on every one, key omitted → 200 on every one. The 422 is
+ * caused by the empty AND itself, not by a missing required filter — an `advanced` block
+ * carrying only `CBF_model` (no `CBF_project`) returns 200.
+ *
+ * This case is reachable in production: the Overview-SR sentiment card requests
+ * "all platforms" with no region and no category, which leaves every optional filter
+ * unset (LLMO-7093).
+ *
+ * @param {object[]} [filters] - Advanced filter nodes; empty/absent → `{}`.
+ * @returns {{ advanced?: object }} Fragment to spread into `filters`.
+ */
+export function buildAdvancedFilters(filters) {
+  return Array.isArray(filters) && filters.length > 0
+    ? { advanced: { op: 'and', filters } }
+    : {};
+}

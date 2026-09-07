@@ -112,6 +112,30 @@ describe('brand-presence-stats definitions', () => {
       });
       expect(payload.filters.advanced.filters[1].filters[0].val).to.equal('search-gpt');
     });
+
+    it('omits the CBF_model filter entirely when the model/platform is absent (All Platforms aggregate)', () => {
+      const payload = buildStatsTotalExecutionsPayload({
+        startDate: '2026-07-01', endDate: '2026-07-14', brandName: 'Lovesac',
+      });
+      expect(payload.filters.advanced.filters).to.deep.equal([
+        { op: 'or', filters: [{ op: 'eq', val: 'Lovesac', col: 'CBF_ws_brand' }] },
+      ]);
+    });
+
+    it("omits the CBF_model filter for the explicit 'all' sentinel but keeps brand + project", () => {
+      const payload = buildStatsTotalExecutionsPayload({
+        platform: 'all',
+        startDate: '2026-07-01',
+        endDate: '2026-07-14',
+        brandName: 'Lovesac',
+        projectIds: ['proj-1'],
+      });
+      const hasModel = payload.filters.advanced.filters.some(
+        (f) => f.filters?.some((sub) => sub.col === 'CBF_model'),
+      );
+      expect(hasModel).to.equal(false);
+      expect(payload.filters.advanced.filters).to.have.lengthOf(2);
+    });
   });
 
   describe('transformStatsTotalExecutionsResponse', () => {
@@ -157,6 +181,15 @@ describe('brand-presence-stats definitions', () => {
         ],
       });
     });
+
+    it('omits the CBF_model filter when the model/platform is absent (All Platforms aggregate)', () => {
+      const payload = buildStatsMentionsPayload({
+        startDate: '2026-07-01', endDate: '2026-07-14', brandName: 'Lovesac',
+      });
+      expect(payload.filters.advanced.filters).to.deep.equal([
+        { op: 'eq', val: 'Lovesac', col: 'CBF_ws_brand' },
+      ]);
+    });
   });
 
   describe('transformStatsMentionsResponse', () => {
@@ -192,6 +225,19 @@ describe('brand-presence-stats definitions', () => {
       expect(projectFilter.filters).to.deep.equal([
         { op: 'eq', val: 'proj-1', col: 'CBF_project' },
         { op: 'eq', val: 'proj-2', col: 'CBF_project' },
+      ]);
+    });
+
+    it('omits the CBF_model or-block when the model/platform is absent (All Platforms aggregate)', () => {
+      const payload = buildStatsVisibilityPayload({
+        startDate: '2026-07-01', endDate: '2026-07-14', brandName: 'Lovesac',
+      });
+      const hasModel = payload.filters.advanced.filters.some(
+        (f) => f.filters?.some((sub) => sub.col === 'CBF_model'),
+      );
+      expect(hasModel).to.equal(false);
+      expect(payload.filters.advanced.filters).to.deep.equal([
+        { op: 'eq', val: 'Lovesac', col: 'CBF_ws_brand' },
       ]);
     });
   });
@@ -236,6 +282,15 @@ describe('brand-presence-stats definitions', () => {
           { op: 'eq', val: 'proj-2', col: 'CBF_projects' },
         ],
       });
+    });
+
+    it('omits the CBF_model filter when the model/platform is absent (All Platforms aggregate)', () => {
+      const payload = buildStatsCitationsPayload({
+        startDate: '2026-07-01', endDate: '2026-07-14', brandName: 'Lovesac',
+      });
+      expect(payload.filters.advanced.filters).to.deep.equal([
+        { op: 'eq', val: 'Lovesac', col: 'CBF_brand' },
+      ]);
     });
   });
 

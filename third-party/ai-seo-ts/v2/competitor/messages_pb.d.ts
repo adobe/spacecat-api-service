@@ -4,7 +4,7 @@
 
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import type { Message } from "@bufbuild/protobuf";
-import type { Brand, BrandJson } from "../../common/types_pb.js";
+import type { Brand, BrandJson, COUNTRY_ENUM, COUNTRY_ENUMJson, Date, DateJson, DateRange, DateRangeJson, LLM_ENUM, LLM_ENUMJson } from "../../common/types_pb.js";
 import type { SEARCH_TYPE_ENUM, SEARCH_TYPE_ENUMJson } from "../source/enums_pb.js";
 
 /**
@@ -101,4 +101,338 @@ export declare type BrandCompetitorsResponseJson = {
  * Use `create(BrandCompetitorsResponseSchema)` to create a new message.
  */
 export declare const BrandCompetitorsResponseSchema: GenMessage<BrandCompetitorsResponse, {jsonType: BrandCompetitorsResponseJson}>;
+
+/**
+ * StatsRequest is the v2 successor of cr.v1.CompetitorsMetrics.StatsRequest,
+ * adding search_type (target URL scope) and ISO date_from / date_to.
+ *
+ * @generated from message semrush.services.ai_seo.v2.competitor.StatsRequest
+ */
+export declare type StatsRequest = Message<"semrush.services.ai_seo.v2.competitor.StatsRequest"> & {
+  /**
+   * DEPRECATED: use date_from / date_to instead.
+   *
+   * @generated from field: semrush.services.ai_seo.common.v1.DateRange date_range = 1;
+   */
+  dateRange?: DateRange;
+
+  /**
+   * country represents the country for which the statistics are needed.
+   *
+   * @generated from field: semrush.services.ai_seo.common.v1.COUNTRY.ENUM country = 2;
+   */
+  country: COUNTRY_ENUM;
+
+  /**
+   * llm is the specific LLM for which data is requested. UNSPECIFIED value means
+   * aggregated values for all supported LLMs.
+   *
+   * @generated from field: optional semrush.services.ai_seo.common.v1.LLM.ENUM llm = 3;
+   */
+  llm?: LLM_ENUM;
+
+  /**
+   * target is the brand for which statistics are being retrieved.
+   *
+   * @generated from field: semrush.services.ai_seo.common.v1.Brand target = 4;
+   */
+  target?: Brand;
+
+  /**
+   * competitors is a list of competitor brands to compare against the target. At
+   * least one is required. Competitors are always compared at their root domain
+   * and are never affected by search_type.
+   *
+   * @generated from field: repeated semrush.services.ai_seo.common.v1.Brand competitors = 5;
+   */
+  competitors: Brand[];
+
+  /**
+   * date_from specifies the start of the requested period in YYYY-MM or YYYY-MM-DD format.
+   *
+   * @generated from field: optional string date_from = 6;
+   */
+  dateFrom?: string;
+
+  /**
+   * date_to specifies the end of the requested period in YYYY-MM or YYYY-MM-DD format.
+   *
+   * @generated from field: optional string date_to = 7;
+   */
+  dateTo?: string;
+
+  /**
+   * search_type scopes the target.domain (root domain / subdomain / subfolder /
+   * exact URL). Unset / UNSPECIFIED is treated as DOMAIN. Only the target is
+   * scoped: its mentions and owned_sources are recomputed scope-aware, while
+   * audience and visibility stay root-domain.
+   *
+   * @generated from field: semrush.services.ai_seo.v2.source.SEARCH_TYPE.ENUM search_type = 8;
+   */
+  searchType: SEARCH_TYPE_ENUM;
+};
+
+/**
+ * StatsRequest is the v2 successor of cr.v1.CompetitorsMetrics.StatsRequest,
+ * adding search_type (target URL scope) and ISO date_from / date_to.
+ *
+ * @generated from message semrush.services.ai_seo.v2.competitor.StatsRequest
+ */
+export declare type StatsRequestJson = {
+  /**
+   * DEPRECATED: use date_from / date_to instead.
+   *
+   * @generated from field: semrush.services.ai_seo.common.v1.DateRange date_range = 1;
+   */
+  dateRange?: DateRangeJson;
+
+  /**
+   * country represents the country for which the statistics are needed.
+   *
+   * @generated from field: semrush.services.ai_seo.common.v1.COUNTRY.ENUM country = 2;
+   */
+  country?: COUNTRY_ENUMJson;
+
+  /**
+   * llm is the specific LLM for which data is requested. UNSPECIFIED value means
+   * aggregated values for all supported LLMs.
+   *
+   * @generated from field: optional semrush.services.ai_seo.common.v1.LLM.ENUM llm = 3;
+   */
+  llm?: LLM_ENUMJson;
+
+  /**
+   * target is the brand for which statistics are being retrieved.
+   *
+   * @generated from field: semrush.services.ai_seo.common.v1.Brand target = 4;
+   */
+  target?: BrandJson;
+
+  /**
+   * competitors is a list of competitor brands to compare against the target. At
+   * least one is required. Competitors are always compared at their root domain
+   * and are never affected by search_type.
+   *
+   * @generated from field: repeated semrush.services.ai_seo.common.v1.Brand competitors = 5;
+   */
+  competitors?: BrandJson[];
+
+  /**
+   * date_from specifies the start of the requested period in YYYY-MM or YYYY-MM-DD format.
+   *
+   * @generated from field: optional string date_from = 6;
+   */
+  dateFrom?: string;
+
+  /**
+   * date_to specifies the end of the requested period in YYYY-MM or YYYY-MM-DD format.
+   *
+   * @generated from field: optional string date_to = 7;
+   */
+  dateTo?: string;
+
+  /**
+   * search_type scopes the target.domain (root domain / subdomain / subfolder /
+   * exact URL). Unset / UNSPECIFIED is treated as DOMAIN. Only the target is
+   * scoped: its mentions and owned_sources are recomputed scope-aware, while
+   * audience and visibility stay root-domain.
+   *
+   * @generated from field: semrush.services.ai_seo.v2.source.SEARCH_TYPE.ENUM search_type = 8;
+   */
+  searchType?: SEARCH_TYPE_ENUMJson;
+};
+
+/**
+ * Describes the message semrush.services.ai_seo.v2.competitor.StatsRequest.
+ * Use `create(StatsRequestSchema)` to create a new message.
+ */
+export declare const StatsRequestSchema: GenMessage<StatsRequest, {jsonType: StatsRequestJson}>;
+
+/**
+ * StatsResponse is the v2 successor of cr.v1.CompetitorsMetrics.StatsResponse.
+ *
+ * @generated from message semrush.services.ai_seo.v2.competitor.StatsResponse
+ */
+export declare type StatsResponse = Message<"semrush.services.ai_seo.v2.competitor.StatsResponse"> & {
+  /**
+   * by_brand contains statistics broken down by brand (target first, then
+   * competitors in request order).
+   *
+   * @generated from field: repeated semrush.services.ai_seo.v2.competitor.StatsResponse.ByBrand by_brand = 1;
+   */
+  byBrand: StatsResponse_ByBrand[];
+};
+
+/**
+ * StatsResponse is the v2 successor of cr.v1.CompetitorsMetrics.StatsResponse.
+ *
+ * @generated from message semrush.services.ai_seo.v2.competitor.StatsResponse
+ */
+export declare type StatsResponseJson = {
+  /**
+   * by_brand contains statistics broken down by brand (target first, then
+   * competitors in request order).
+   *
+   * @generated from field: repeated semrush.services.ai_seo.v2.competitor.StatsResponse.ByBrand by_brand = 1;
+   */
+  byBrand?: StatsResponse_ByBrandJson[];
+};
+
+/**
+ * Describes the message semrush.services.ai_seo.v2.competitor.StatsResponse.
+ * Use `create(StatsResponseSchema)` to create a new message.
+ */
+export declare const StatsResponseSchema: GenMessage<StatsResponse, {jsonType: StatsResponseJson}>;
+
+/**
+ * ByBrand represents statistics for a specific brand.
+ *
+ * @generated from message semrush.services.ai_seo.v2.competitor.StatsResponse.ByBrand
+ */
+export declare type StatsResponse_ByBrand = Message<"semrush.services.ai_seo.v2.competitor.StatsResponse.ByBrand"> & {
+  /**
+   * brand is the specific brand for which data is provided.
+   *
+   * @generated from field: semrush.services.ai_seo.common.v1.Brand brand = 1;
+   */
+  brand?: Brand;
+
+  /**
+   * by_date contains statistics broken down by date.
+   *
+   * @generated from field: repeated semrush.services.ai_seo.v2.competitor.StatsResponse.ByDate by_date = 2;
+   */
+  byDate: StatsResponse_ByDate[];
+};
+
+/**
+ * ByBrand represents statistics for a specific brand.
+ *
+ * @generated from message semrush.services.ai_seo.v2.competitor.StatsResponse.ByBrand
+ */
+export declare type StatsResponse_ByBrandJson = {
+  /**
+   * brand is the specific brand for which data is provided.
+   *
+   * @generated from field: semrush.services.ai_seo.common.v1.Brand brand = 1;
+   */
+  brand?: BrandJson;
+
+  /**
+   * by_date contains statistics broken down by date.
+   *
+   * @generated from field: repeated semrush.services.ai_seo.v2.competitor.StatsResponse.ByDate by_date = 2;
+   */
+  byDate?: StatsResponse_ByDateJson[];
+};
+
+/**
+ * Describes the message semrush.services.ai_seo.v2.competitor.StatsResponse.ByBrand.
+ * Use `create(StatsResponse_ByBrandSchema)` to create a new message.
+ */
+export declare const StatsResponse_ByBrandSchema: GenMessage<StatsResponse_ByBrand, {jsonType: StatsResponse_ByBrandJson}>;
+
+/**
+ * ByDate represents statistics for a specific date.
+ *
+ * @generated from message semrush.services.ai_seo.v2.competitor.StatsResponse.ByDate
+ */
+export declare type StatsResponse_ByDate = Message<"semrush.services.ai_seo.v2.competitor.StatsResponse.ByDate"> & {
+  /**
+   * date for which data is provided (monthly is normalized to the first of the month).
+   *
+   * @generated from field: semrush.services.ai_seo.common.v1.Date date = 1;
+   */
+  date?: Date;
+
+  /**
+   * visibility is the AI Visibility score. Root-domain, never scoped.
+   *
+   * @generated from field: uint32 visibility = 2;
+   */
+  visibility: number;
+
+  /**
+   * mentions of the brand in prompt responses. Scope-aware for the target.
+   *
+   * @generated from field: uint64 mentions = 3;
+   */
+  mentions: bigint;
+
+  /**
+   * audience is the estimated brand audience size. Root-domain, never scoped.
+   *
+   * @generated from field: uint64 audience = 4;
+   */
+  audience: bigint;
+
+  /**
+   * owned_sources is how many times the brand domain was cited. Scope-aware for the target.
+   *
+   * @generated from field: uint64 owned_sources = 5;
+   */
+  ownedSources: bigint;
+
+  /**
+   * iso_date is the normalized date, YYYY-MM (monthly) or YYYY-MM-DD (daily).
+   *
+   * @generated from field: string iso_date = 6;
+   */
+  isoDate: string;
+};
+
+/**
+ * ByDate represents statistics for a specific date.
+ *
+ * @generated from message semrush.services.ai_seo.v2.competitor.StatsResponse.ByDate
+ */
+export declare type StatsResponse_ByDateJson = {
+  /**
+   * date for which data is provided (monthly is normalized to the first of the month).
+   *
+   * @generated from field: semrush.services.ai_seo.common.v1.Date date = 1;
+   */
+  date?: DateJson;
+
+  /**
+   * visibility is the AI Visibility score. Root-domain, never scoped.
+   *
+   * @generated from field: uint32 visibility = 2;
+   */
+  visibility?: number;
+
+  /**
+   * mentions of the brand in prompt responses. Scope-aware for the target.
+   *
+   * @generated from field: uint64 mentions = 3;
+   */
+  mentions?: string;
+
+  /**
+   * audience is the estimated brand audience size. Root-domain, never scoped.
+   *
+   * @generated from field: uint64 audience = 4;
+   */
+  audience?: string;
+
+  /**
+   * owned_sources is how many times the brand domain was cited. Scope-aware for the target.
+   *
+   * @generated from field: uint64 owned_sources = 5;
+   */
+  ownedSources?: string;
+
+  /**
+   * iso_date is the normalized date, YYYY-MM (monthly) or YYYY-MM-DD (daily).
+   *
+   * @generated from field: string iso_date = 6;
+   */
+  isoDate?: string;
+};
+
+/**
+ * Describes the message semrush.services.ai_seo.v2.competitor.StatsResponse.ByDate.
+ * Use `create(StatsResponse_ByDateSchema)` to create a new message.
+ */
+export declare const StatsResponse_ByDateSchema: GenMessage<StatsResponse_ByDate, {jsonType: StatsResponse_ByDateJson}>;
 

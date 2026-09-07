@@ -116,6 +116,35 @@ export const sendAuditMessage = async (
   data: auditData,
 });
 
+/**
+ * Triggers a Brand Claims off-site opportunity ENRICHMENT run for a site (LLMO-7312).
+ *
+ * Sends the `brand-claims` audit message with a top-level `mode: 'enrich'` field
+ * (mirrors `onDemand`), which the audit worker forwards onto its ready-signal so
+ * mystique's BP consumer runs the cache-safe link refresh (force only the matcher +
+ * delivery) instead of a full claims recompute.
+ *
+ * @param {Site} site - The site object.
+ * @param {Object} slackContext - The Slack context object.
+ * @param {Object} lambdaContext - The Lambda context object.
+ * @returns {Promise} A promise representing the trigger operation.
+ */
+export const triggerBrandClaimsEnrich = async (
+  site,
+  slackContext,
+  lambdaContext,
+) => lambdaContext.sqs.sendMessage(lambdaContext.env.AUDIT_JOBS_QUEUE_URL, {
+  type: 'brand-claims',
+  siteId: site.getId(),
+  mode: 'enrich',
+  auditContext: {
+    slackContext: {
+      channelId: slackContext.channelId,
+      threadTs: slackContext.threadTs,
+    },
+  },
+});
+
 // todo: prototype - untested
 /* c8 ignore start */
 export const sendExperimentationCandidatesMessage = async (
@@ -322,6 +351,18 @@ export const sendAuditMessages = async (
  * @param {Object} lambdaContext - The Lambda context object.
  * @return {Promise} - A promise representing the audit trigger operation.
  */
+// Offsite Opportunities audit types (LLMO-6973). Single source of truth — imported by
+// src/support/slack/commands/run-audit.js, which already depends on this module for
+// triggerAuditForSite, so importing this predicate back into it introduces no new cycle.
+export const OFFSITE_AUDIT_TYPES = [
+  'offsite-brand-presence',
+  'cited-analysis',
+  'reddit-analysis',
+  'youtube-analysis',
+  'wikipedia-analysis',
+];
+export const isOffsiteAuditType = (auditType) => OFFSITE_AUDIT_TYPES.includes(auditType);
+
 export const triggerAuditForSite = async (
   site,
   auditType,
@@ -338,6 +379,15 @@ export const triggerAuditForSite = async (
       channelId: slackContext.channelId,
       threadTs: slackContext.threadTs,
     },
+    // LLMO-6973: stamp the dispatching service into the message's auditContext, scoped
+    // strictly to the five offsite audit types — spacecat-audit-worker reads this (via an
+    // `origin` marker, see the audit_orchestration_spacecat_request_received "trigger"/"peer"
+    // fields) to tell a scheduled run apart from a Slack-triggered one, but only for offsite
+    // analyses. Gated here (rather than added unconditionally) to keep this shared framework
+    // code's message shape byte-for-byte unchanged for every other audit type in the system,
+    // mirroring how spacecat-jobs-dispatcher's equivalent change stays strictly scoped to
+    // offsite-brand-presence in its own shared dispatch path.
+    ...(isOffsiteAuditType(auditType) && { origin: 'api-service' }),
     ...auditContext,
   },
   site.getId(),
@@ -401,6 +451,33 @@ export const triggerGeoExperimentImpactMeasurement = async (
   lambdaContext,
 ) => lambdaContext.sqs.sendMessage(lambdaContext.env.LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL, {
   type: 'TRIGGER_IMPACT_MEASUREMENT',
+  geoExperimentId,
+  triggeredBy: triggeredBy || 'unknown',
+});
+
+/**
+ * Sends a message to the llmo-experimentation-engine-queue to manually check an in-flight
+ * Mystique impact-measurement task for a GeoExperiment (see
+ * llmo-experimentation-engine's docs/decisions/007-manual-impact-measurement-check-completed-
+ * status.md for the handler contract).
+ *
+ * NOTE: this does NOT return the check result — it only requests that the engine poll Mystique
+ * and update the GeoExperiment if the task has finished. Needed because
+ * triggerGeoExperimentImpactMeasurement can re-arm a COMPLETED experiment while leaving it
+ * COMPLETED (invisible to the engine's cron sweep), so a manual check is the only way to advance
+ * it short of the engine's own bounded stuck-check safety net.
+ *
+ * @param {string} geoExperimentId - The GeoExperiment ID to check.
+ * @param {string} triggeredBy - Identity of the caller, for the engine's log line.
+ * @param {Object} lambdaContext - The Lambda context object (sqs, env).
+ * @return {Promise} - A promise representing the SQS send operation.
+ */
+export const checkGeoExperimentImpactMeasurement = async (
+  geoExperimentId,
+  triggeredBy,
+  lambdaContext,
+) => lambdaContext.sqs.sendMessage(lambdaContext.env.LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL, {
+  type: 'CHECK_IMPACT_MEASUREMENT',
   geoExperimentId,
   triggeredBy: triggeredBy || 'unknown',
 });
@@ -1786,9 +1863,10 @@ export async function queueDeliveryConfigWriter(
  * @param {Object} additionalParams - Additional parameters
  * @param {string} additionalParams.tier - Entitlement tier
  * @param {boolean} [additionalParams.forceTierUpdate] - When true, allows the onboard
- *   command to change a PLG/PRE_ONBOARD org's tier/entitlement and audit config. By
- *   default these tiers are preserved (SITES-49886). Separate from `force`, which only
- *   overrides the paid-profile downgrade guard.
+ *   command to promote a protected tier to the requested one. By default a PLG org's
+ *   tier/entitlement/enrollment and audit config are fully preserved, and a PRE_ONBOARD org's
+ *   tier is preserved while its enrollment is still bound (SITES-49886). Separate from
+ *   `force`, which only overrides the paid-profile downgrade guard.
  * @param {Object} options - Additional options
  * @param {Function} options.urlProcessor - Function to process the URL
  *                                          (e.g., extractURLFromSlackInput)
@@ -2014,44 +2092,70 @@ export const onboardSingleSite = async (
       prefetchedSite,
     );
 
-    // Protected-tier guard (SITES-49886): ASO entitlements are org-level. If the org
-    // already holds a PLG or PRE_ONBOARD ASO entitlement, the onboard command must NOT
-    // touch the tier/entitlement/enrollment — TierClient.createEntitlement(FREE_TRIAL)
-    // would otherwise overwrite (downgrade) the existing tier, exposing all opportunities
-    // instead of the limited PLG set. Onboarding is unsupported for these tiers; we only
-    // run audits/opportunities once (below) and leave the earlier config untouched.
-    // An explicit additionalParams.forceTierUpdate is the sole escape hatch (kept separate
-    // from `force`, which only overrides the paid-profile downgrade guard).
+    // Protected-tier guard (SITES-49886): ASO entitlements are org-level.
+    //
+    // PLG: the onboard command must NOT touch the tier/entitlement/enrollment —
+    // TierClient.createEntitlement(FREE_TRIAL) would otherwise overwrite (downgrade) the
+    // existing PLG tier, exposing all opportunities instead of the limited PLG set.
+    // Onboarding is unsupported for PLG; we only run audits/opportunities once (below) and
+    // leave the earlier config untouched.
+    //
+    // PRE_ONBOARD: an internal staging tier (set by the move-plg-site flow) that must be
+    // promoted deliberately, never silently downgraded. We preserve the TIER but still bind
+    // the site enrollment — passing the org's existing PRE_ONBOARD tier to createEntitlement
+    // leaves the tier as-is (currentTier === tier, so no setTier) while still creating the
+    // enrollment when the site has none. Audits/opportunities run normally (PRE_ONBOARD is not
+    // in the PLG skip branch). This is not a RESTRICTED_TIERS violation: that guard blocks
+    // *requesting* tier=PRE_ONBOARD; here we only re-assert the org's already-existing tier.
+    //
+    // additionalParams.forceTierUpdate is the sole escape hatch for both tiers (kept separate
+    // from `force`, which only overrides the paid-profile downgrade guard): it lets onboarding
+    // promote either tier to the requested FREE_TRIAL/PAID.
     const existingAso = await getAsoEntitlement(organizationId, context);
     const existingTier = existingAso?.getTier() ?? null;
-    const PROTECTED_EXISTING_TIERS = [
-      EntitlementModel.TIERS.PLG,
-      EntitlementModel.TIERS.PRE_ONBOARD,
-    ];
-    const isProtectedOrg = existingTier != null && PROTECTED_EXISTING_TIERS.includes(existingTier);
-    const preserveProtectedTier = isProtectedOrg && !additionalParams.forceTierUpdate;
+    const forced = !!additionalParams.forceTierUpdate;
+    const isPlgOrg = existingTier === EntitlementModel.TIERS.PLG;
+    const isPreOnboardOrg = existingTier === EntitlementModel.TIERS.PRE_ONBOARD;
+    // preservePlgTier: PLG is fully preserved — skip the entitlement/enrollment write AND the
+    // audit-config change below. preservePreOnboardTier: preserve only the tier — the enrollment
+    // is still bound and audit config still runs normally. `forced` overrides both.
+    const preservePlgTier = isPlgOrg && !forced;
+    const preservePreOnboardTier = isPreOnboardOrg && !forced;
+
+    // Both preserve paths report the org's true, unchanged tier rather than the requested one.
+    if (preservePlgTier || preservePreOnboardTier) {
+      reportLine.tier = existingTier;
+    }
 
     // Create entitlement and enrollment
-    if (preserveProtectedTier) {
-      reportLine.tier = existingTier; // report the true, unchanged tier
+    if (preservePlgTier) {
       log.info(`Preserving ${existingTier} tier for org ${organizationId} - skipping entitlement/enrollment write during onboard of ${baseURL}`);
       await say(`:lock: Org for \`${baseURL}\` is on the *${existingTier}* tier — onboarding will NOT change the tier, entitlement, or enrollment. Running audits and opportunities only. (Use *Force Tier Update* to override.)`);
     } else {
+      // Preserve a PRE_ONBOARD staging tier by re-asserting it (createEntitlement then only
+      // binds the missing enrollment); promote everything else — and PRE_ONBOARD too when
+      // forceTierUpdate is set — to the requested tier.
+      if (preservePreOnboardTier) {
+        log.info(`Preserving ${existingTier} tier for org ${organizationId} while binding the site enrollment during onboard of ${baseURL}`);
+        await say(`:lock: Org for \`${baseURL}\` is on the internal *${existingTier}* tier — onboarding will keep that tier and only ensure the site enrollment. (Use *Force Tier Update* to promote it.)`);
+      }
+      const effectiveTier = preservePreOnboardTier ? existingTier : tier;
       const { entitlement } = await createEntitlementAndEnrollment(
         site,
         context,
         slackContext,
         reportLine,
         EntitlementModel.PRODUCT_CODES.ASO,
-        tier,
+        effectiveTier,
       );
 
-      // SITES-50179: the Force Tier Update escape hatch was exercised on a protected org
-      // (isProtectedOrg is only true here when forceTierUpdate bypassed the guard above). If it
-      // downgraded a PLG/PRE_ONBOARD org to FREE_TRIAL — the exact transition that silently exposed
-      // the full opportunity set in the original incident — alert the team so every deliberate
-      // override is visible without manual auditing. Best-effort: never blocks onboarding.
-      if (isProtectedOrg && tier === EntitlementModel.TIERS.FREE_TRIAL) {
+      // SITES-50179: the Force Tier Update escape hatch was exercised on a PLG org (isPlgOrg is
+      // only true in this branch when forceTierUpdate bypassed the guard above). If it downgraded
+      // PLG to FREE_TRIAL — the exact transition that silently exposed the full opportunity set in
+      // the original incident — alert the team so every deliberate override is visible without
+      // manual auditing. A PRE_ONBOARD promotion is an expected admin action and is deliberately
+      // not alerted. Best-effort: never blocks onboarding.
+      if (isPlgOrg && tier === EntitlementModel.TIERS.FREE_TRIAL) {
         await notifyForcedTierDowngrade(
           {
             baseURL,
@@ -2244,9 +2348,9 @@ export const onboardSingleSite = async (
     //     fire once — enable status only gates scheduling, not triggering.
     const wantEnabled = scheduledRun || profile.protected;
     // Protected-tier orgs (SITES-49886): leave the existing audit scheduling config exactly
-    // as-is. Enabling/disabling handlers here would alter a PLG/PRE_ONBOARD customer's
-    // recurring-audit setup; we only run audits once (below). Skipped unless forceTierUpdate.
-    if (preserveProtectedTier) {
+    // as-is. Enabling/disabling handlers here would alter a PLG customer's recurring-audit
+    // setup; we only run audits once (below). Skipped unless forceTierUpdate.
+    if (preservePlgTier) {
       log.debug(`Preserving existing audit configuration for ${existingTier}-tier site ${siteID}`);
     } else {
       const latestConfiguration = await Configuration.findLatest();
@@ -2289,7 +2393,7 @@ export const onboardSingleSite = async (
     const auditsMessage = reportLine.audits || 'None';
     const importsMessage = reportLine.imports || 'None';
     let statusMessage;
-    if (preserveProtectedTier) {
+    if (preservePlgTier) {
       statusMessage = `:white_check_mark: *For site ${baseURL}*: Audit scheduling config preserved (${existingTier} tier); triggered audits once: ${auditsMessage}`;
     } else if (scheduledRun) {
       statusMessage = `:white_check_mark: *For site ${baseURL}*: Adding imports: ${importsMessage} and audits: ${auditsMessage} to scheduled run`;

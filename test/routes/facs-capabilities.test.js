@@ -16,6 +16,7 @@ import { fileURLToPath } from 'url';
 import { expect } from 'chai';
 
 import routeFacsCapabilities, { isFacsRebacResource } from '../../src/routes/facs-capabilities.js';
+import { isOpportunityDerivedCollectionRoute } from '../../src/support/facs-composite-resolvers.js';
 
 const testDir = dirname(fileURLToPath(import.meta.url));
 const projectRoot = join(testDir, '..', '..');
@@ -95,6 +96,7 @@ describe('routeFacsCapabilities', () => {
         'PRODUCTS_ROUTES',
         'PRODUCTS_FACS_RESOURCE_PARAM_ALIASES',
         'PRODUCTS_FACS_SECONDARY_RESOURCE',
+        'PRODUCTS_FACS_COMPOSITE_RESOURCE',
         'FACS_NON_RESOURCE_PARAMS',
       );
     });
@@ -105,6 +107,49 @@ describe('routeFacsCapabilities', () => {
 
     it('PRODUCTS_ROUTES is an object', () => {
       expect(routeFacsCapabilities.PRODUCTS_ROUTES).to.be.an('object');
+    });
+  });
+
+  describe('PRODUCTS_FACS_COMPOSITE_RESOURCE.ASO (composite resolver config)', () => {
+    // The wrapper only invokes the composite resolver when compositeSpec.resourceType
+    // matches the resolved resource type; a wrong resourceType would silently skip the
+    // resolver and fail OPEN (unfiltered lists, un-type-scoped items). Pin the shape.
+    it('anchors ASO to site + the asoOpportunityComposite resolver + a single opportunity slot', () => {
+      const aso = routeFacsCapabilities.PRODUCTS_FACS_COMPOSITE_RESOURCE.ASO;
+      expect(aso).to.be.an('object');
+      expect(aso.resourceType).to.equal('site');
+      expect(aso.resolver).to.equal('asoOpportunityComposite');
+      expect(aso.compositeKeySlots).to.deep.equal(['opportunity']);
+    });
+  });
+
+  describe('ASO opportunity-derived GET route coverage (composite enforcement)', () => {
+    // Enforces the coupling that isOpportunityDerivedCollectionRoute() has no other
+    // guard for: EVERY ASO GET route that returns opportunity-derived data
+    // (opportunities, their fixes, or edge-deployed URLs) must be either
+    //   - item-scoped: carries :opportunityId, so the resolver's item branch
+    //     type-scopes it against that opportunity's own type; or
+    //   - a classified collection: matched by isOpportunityDerivedCollectionRoute,
+    //     so the resolver defers and the controller result-filters (D4).
+    // A new such route that is NEITHER falls to the resolver's grant-on-any branch
+    // and leaks cross-type data. This test catches that drift before release.
+    const OPP_DERIVED = /opportunit|\/fixes(\/|$)|\/edge-deployed-urls(\/|$)/;
+
+    it('classifies every ASO opportunity-derived GET route as item-scoped or a deferred collection', () => {
+      const derived = Object.keys(routeFacsCapabilities.PRODUCTS_ROUTES.ASO ?? {})
+        .filter((r) => r.startsWith('GET ') && OPP_DERIVED.test(r));
+      // Guard against the heuristic going stale (e.g. all such routes renamed).
+      expect(derived.length, 'no ASO opportunity-derived GET routes matched - heuristic stale?')
+        .to.be.greaterThan(0);
+      const uncovered = derived.filter(
+        (r) => !r.includes(':opportunityId') && !isOpportunityDerivedCollectionRoute(r),
+      );
+      expect(
+        uncovered,
+        'ASO opportunity-derived GET routes that are neither item-scoped nor a classified collection '
+          + '(they would grant-on-any and leak cross-type opportunity data - add them to '
+          + `isOpportunityDerivedCollectionRoute + wire the controller filter): ${uncovered.join(', ')}`,
+      ).to.deep.equal([]);
     });
   });
 

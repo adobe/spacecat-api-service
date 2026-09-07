@@ -16,6 +16,8 @@ import sinon from 'sinon';
 import {
   ensureMarketSite,
   resolveSiteIdentity,
+  resolveMarketIdentity,
+  logMarketCreated,
   unlinkMarketSiteIfOrphaned,
   SERENITY_BRAND_SITE_TYPE,
 } from '../../../src/support/serenity/site-linkage.js';
@@ -503,6 +505,94 @@ describe('serenity site-linkage: resolveSiteIdentity', () => {
     Site.findById.rejects(new Error('timeout'));
     expect(await resolveSiteIdentity(dataAccess, 'site-1', log)).to.equal(null);
     expect(log.warn).to.have.been.calledOnce;
+  });
+});
+
+describe('serenity site-linkage: resolveMarketIdentity', () => {
+  it('a resolved siteId wins over a conflicting brandDomain', () => {
+    // The bug this function fixes: a supplied siteId must be authoritative
+    // even when the request also carries a brandDomain that differs from it.
+    const siteIdentity = { domain: 'site.example.com', primaryUrl: 'site.example.com/markets' };
+    expect(resolveMarketIdentity(siteIdentity, true, 'conflicting-brand.com', undefined))
+      .to.deep.equal({ domain: 'site.example.com', primaryUrl: 'site.example.com/markets' });
+  });
+
+  it('passes through a resolved siteId with a null primaryUrl unchanged', () => {
+    // Pins the shape when the resolved Site identity itself carries no
+    // primaryUrl — the siteId branch returns the identity's fields verbatim,
+    // it does not derive a fallback from anything else.
+    const siteIdentity = { domain: 'example.com', primaryUrl: null };
+    expect(resolveMarketIdentity(siteIdentity, true, 'conflicting-brand.com', undefined))
+      .to.deep.equal({ domain: 'example.com', primaryUrl: null });
+  });
+
+  it('a supplied-but-unresolved siteId hard-fails (nulls), never falling back to brandDomain', () => {
+    expect(resolveMarketIdentity(null, true, 'brand.com', undefined))
+      .to.deep.equal({ domain: null, primaryUrl: null });
+  });
+
+  it('falls back to brandDomain when no siteId was supplied at all', () => {
+    expect(resolveMarketIdentity(null, false, 'brand.com', undefined))
+      .to.deep.equal({ domain: 'brand.com', primaryUrl: 'brand.com' });
+  });
+
+  it('prefers a supplied primaryUrl over brandDomain when deriving the fallback', () => {
+    expect(resolveMarketIdentity(null, false, 'brand.com', 'brand.com/path'))
+      .to.deep.equal({ domain: 'brand.com', primaryUrl: 'brand.com/path' });
+  });
+
+  it('returns nulls when neither siteId nor brandDomain was supplied', () => {
+    expect(resolveMarketIdentity(null, false, undefined, undefined))
+      .to.deep.equal({ domain: null, primaryUrl: null });
+  });
+});
+
+describe('serenity site-linkage: logMarketCreated', () => {
+  function baseFields(overrides = {}) {
+    return {
+      brandId: 'brand-1',
+      geoTargetId: 2840,
+      languageCode: 'en',
+      siteId: 'site-1',
+      brandDomain: 'acme.com',
+      primaryUrl: 'acme.com',
+      semrushWorkspaceId: 'ws-1',
+      semrushProjectId: 'proj-1',
+      generatePrompts: false,
+      ...overrides,
+    };
+  }
+
+  it('logs the full field set with the same message shared by both create-market paths', () => {
+    const log = { info: sinon.stub() };
+    logMarketCreated(log, baseFields());
+    expect(log.info).to.have.been.calledOnceWith('serenity create-market: market created', {
+      brandId: 'brand-1',
+      geoTargetId: 2840,
+      languageCode: 'en',
+      siteId: 'site-1',
+      brandDomain: 'acme.com',
+      primaryUrl: 'acme.com',
+      semrushWorkspaceId: 'ws-1',
+      semrushProjectId: 'proj-1',
+      generatePrompts: false,
+    });
+  });
+
+  it('includes promptCount when generatePrompts is true', () => {
+    const log = { info: sinon.stub() };
+    logMarketCreated(log, baseFields({ generatePrompts: true, promptCount: 5 }));
+    expect(log.info.firstCall.args[1]).to.include({ generatePrompts: true, promptCount: 5 });
+  });
+
+  it('omits promptCount (not just nulls it) when generatePrompts is false', () => {
+    const log = { info: sinon.stub() };
+    logMarketCreated(log, baseFields({ generatePrompts: false, promptCount: 5 }));
+    expect(log.info.firstCall.args[1]).to.not.have.property('promptCount');
+  });
+
+  it('tolerates a missing logger (optional chaining, never throws)', () => {
+    expect(() => logMarketCreated(undefined, baseFields())).to.not.throw();
   });
 });
 

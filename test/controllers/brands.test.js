@@ -1018,10 +1018,12 @@ describe('Brands Controller', () => {
       expect(body).to.have.property('prompts');
     });
 
-    it('createPromptsByBrand honours a SERVICE principal\'s origin: ai (DRS contract, origin-dimension.md §3)', async () => {
-      // A non-ims/non-jwt principal (e.g. DRS via admin x-api-key) is believed:
-      // its asserted `origin` rides through to the store. Deleting or ignoring it
-      // would relabel every DRS-written prompt `human` on its next upsert.
+    it('createPromptsByBrand honours an S2S consumer\'s origin: ai (DRS contract, origin-dimension.md §3)', async () => {
+      // An S2S consumer (e.g. DRS) authenticates with a JWT — authType is `jwt`,
+      // identical to an end-user session — but is a SERVICE principal, identified
+      // by the token's `is_s2s_consumer` claim (authInfo.isS2SConsumer()). Its
+      // asserted `origin` rides through to the store; classifying it as a user by
+      // auth type alone would relabel every DRS-written prompt `human` on write.
       const thenable = (v) => ({ then: (resolve) => resolve(v), catch: () => thenable(v) });
       const insertStub = sandbox.stub()
         .returns({ select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }) });
@@ -1047,7 +1049,14 @@ describe('Brands Controller', () => {
 
       const response = await brandsController.createPromptsByBrand({
         ...context,
-        attributes: { authInfo: { getType: () => 'apikey', profile: { email: 'drs@service' } } },
+        attributes: {
+          authInfo: {
+            getType: () => 'jwt',
+            isS2SConsumer: () => true,
+            isS2SAdmin: () => false,
+            profile: { email: 'drs@service' },
+          },
+        },
         params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
         data: [{ prompt: 'P', regions: ['us'], origin: 'ai' }],
         dataAccess: mockDataAccess,
@@ -1056,6 +1065,101 @@ describe('Brands Controller', () => {
       expect(response.status).to.equal(201);
       const inserted = insertStub.firstCall.args[0];
       expect(inserted[0].origin).to.equal('ai');
+    });
+
+    it('createPromptsByBrand honours an S2S admin\'s origin: ai (is_s2s_admin claim over a JWT)', async () => {
+      // An S2S admin also authenticates with a JWT (authType `jwt`) and is a
+      // SERVICE principal, identified by the `is_s2s_admin` claim
+      // (authInfo.isS2SAdmin()). Its asserted `origin` rides through to the store.
+      const thenable = (v) => ({ then: (resolve) => resolve(v), catch: () => thenable(v) });
+      const insertStub = sandbox.stub()
+        .returns({ select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }) });
+      mockDataAccess.services.postgrestClient.from = sandbox.stub().callsFake((table) => {
+        if (table === 'prompts') {
+          return {
+            select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+            insert: insertStub,
+            update: () => ({ eq: () => thenable({ error: null }) }),
+          };
+        }
+        const chain = {
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          maybeSingle: sandbox.stub().resolves({ data: { id: BRAND_UUID }, error: null }),
+        };
+        if (table === 'llmo_customer_config') {
+          chain.maybeSingle = sandbox.stub()
+            .resolves({ data: { config: { customer: { brands: [] } } }, error: null });
+        }
+        return chain;
+      });
+
+      const response = await brandsController.createPromptsByBrand({
+        ...context,
+        attributes: {
+          authInfo: {
+            getType: () => 'jwt',
+            isS2SConsumer: () => false,
+            isS2SAdmin: () => true,
+            profile: { email: 'svc-admin@service' },
+          },
+        },
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: [{ prompt: 'P', regions: ['us'], origin: 'ai' }],
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(201);
+      const inserted = insertStub.firstCall.args[0];
+      expect(inserted[0].origin).to.equal('ai');
+    });
+
+    it('createPromptsByBrand coerces a plain end-user JWT\'s origin: ai to human (no S2S claim)', async () => {
+      // Regression for the S2S-vs-user fix: a real end-user session JWT also has
+      // authType `jwt`, but WITHOUT an `is_s2s_consumer`/`is_s2s_admin` claim it is
+      // a user principal and its body `origin` is ignored — proving the fix keys
+      // off the S2S claim, not merely off the auth type.
+      const thenable = (v) => ({ then: (resolve) => resolve(v), catch: () => thenable(v) });
+      const insertStub = sandbox.stub()
+        .returns({ select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }) });
+      mockDataAccess.services.postgrestClient.from = sandbox.stub().callsFake((table) => {
+        if (table === 'prompts') {
+          return {
+            select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+            insert: insertStub,
+            update: () => ({ eq: () => thenable({ error: null }) }),
+          };
+        }
+        const chain = {
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          maybeSingle: sandbox.stub().resolves({ data: { id: BRAND_UUID }, error: null }),
+        };
+        if (table === 'llmo_customer_config') {
+          chain.maybeSingle = sandbox.stub()
+            .resolves({ data: { config: { customer: { brands: [] } } }, error: null });
+        }
+        return chain;
+      });
+
+      const response = await brandsController.createPromptsByBrand({
+        ...context,
+        attributes: {
+          authInfo: {
+            getType: () => 'jwt',
+            isS2SConsumer: () => false,
+            isS2SAdmin: () => false,
+            profile: { email: 'user@test.com' },
+          },
+        },
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: [{ prompt: 'P', regions: ['us'], origin: 'ai' }],
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(201);
+      const inserted = insertStub.firstCall.args[0];
+      expect(inserted[0].origin).to.equal('human');
     });
 
     it('createPromptsByBrand coerces a USER principal\'s origin: ai to human (body ignored, never rejected)', async () => {
@@ -3131,6 +3235,202 @@ describe('Brands Controller', () => {
         dataAccess: mockDataAccess,
       });
       expect(response.status).to.equal(500);
+    });
+  });
+
+  describe('listBrandMarketsForOrg', () => {
+    const BRAND_UUID = 'a1111111-1111-4111-b111-111111111111';
+
+    function makeMarketRow({
+      geoTargetId, languageCode, deletedAt = null,
+    }) {
+      return {
+        getGeoTargetId: () => geoTargetId,
+        getLanguageCode: () => languageCode,
+        getDeletedAt: () => deletedAt,
+        getBrandId: () => BRAND_UUID,
+      };
+    }
+
+    beforeEach(() => {
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake(() => ({
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          ilike: sandbox.stub().returnsThis(),
+          maybeSingle: sandbox.stub().resolves({ data: { id: BRAND_UUID }, error: null }),
+        })),
+      };
+      mockDataAccess.BrandSemrushProject = {
+        allByBrandId: sandbox.stub().resolves([]),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+    });
+
+    it('returns 200 with the brand markets for a valid scope', async () => {
+      mockDataAccess.BrandSemrushProject.allByBrandId
+        .resolves([makeMarketRow({ geoTargetId: 2356, languageCode: 'en' })]);
+
+      const response = await brandsController.listBrandMarketsForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body).to.deep.equal({
+        markets: [{ region: 'IN', languageCode: 'en', geoTargetId: 2356 }],
+      });
+      expect(mockDataAccess.BrandSemrushProject.allByBrandId).to.have.been.calledWith(BRAND_UUID);
+    });
+
+    it('returns 200 with an empty list when the brand has no market rows', async () => {
+      mockDataAccess.BrandSemrushProject.allByBrandId.resolves([]);
+
+      const response = await brandsController.listBrandMarketsForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body).to.deep.equal({ markets: [] });
+    });
+
+    it('excludes a soft-deleted market row from markets', async () => {
+      mockDataAccess.BrandSemrushProject.allByBrandId.resolves([
+        makeMarketRow({ geoTargetId: 2356, languageCode: 'en' }),
+        makeMarketRow({
+          geoTargetId: 2276, languageCode: 'de', deletedAt: '2026-01-01T00:00:00Z',
+        }),
+      ]);
+
+      const response = await brandsController.listBrandMarketsForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body).to.deep.equal({
+        markets: [{ region: 'IN', languageCode: 'en', geoTargetId: 2356 }],
+      });
+    });
+
+    it('returns 400 when params is undefined', async () => {
+      const response = await brandsController.listBrandMarketsForOrg({
+        ...context,
+        params: undefined,
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when spaceCatId is not a valid UUID', async () => {
+      const response = await brandsController.listBrandMarketsForOrg({
+        ...context,
+        params: { spaceCatId: 'not-a-uuid', brandId: BRAND_UUID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when brandId is missing', async () => {
+      const response = await brandsController.listBrandMarketsForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 404 when organization is not found', async () => {
+      mockDataAccess.Organization.findById.resolves(null);
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.listBrandMarketsForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns 503 when postgrestClient is unavailable', async () => {
+      mockDataAccess.services.postgrestClient = null;
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.listBrandMarketsForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(503);
+    });
+
+    it('returns 404 when brand is not found during resolve', async () => {
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake(() => ({
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          neq: sandbox.stub().returnsThis(),
+          order: sandbox.stub().returnsThis(),
+          ilike: sandbox.stub().returnsThis(),
+          maybeSingle: sandbox.stub().resolves({ data: null, error: null }),
+        })),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.listBrandMarketsForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(404);
+    });
+
+    it('returns 403 when user lacks access', async () => {
+      const authContextUser = {
+        attributes: {
+          authInfo: new AuthInfo()
+            .withType('jwt')
+            .withScopes([{ name: 'user' }])
+            .withProfile({ is_admin: false })
+            .withAuthenticated(true),
+        },
+      };
+      const unauthorizedController = BrandsController({
+        dataAccess: mockDataAccess,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        ...authContextUser,
+      }, loggerStub, mockEnv);
+
+      const response = await unauthorizedController.listBrandMarketsForOrg({
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(403);
+    });
+
+    it('returns 500 when storage throws', async () => {
+      loggerStub.error.resetHistory();
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().throws(new Error('DB connection lost')),
+      };
+      brandsController = BrandsController(context, loggerStub, mockEnv);
+
+      const response = await brandsController.listBrandMarketsForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(500);
+      expect(loggerStub.error).to.have.been.called;
     });
   });
 
@@ -6443,6 +6743,10 @@ describe('Brands Controller', () => {
         { urls: [{ value: 'https://acme.com' }], socialAccounts: [], earnedContent: [] },
         'ws-9',
       );
+      const body = await response.json();
+      expect(body.urls).to.deep.equal(updated.urls);
+      expect(body.socialAccounts).to.deep.equal(updated.socialAccounts);
+      expect(body.earnedContent).to.deep.equal(updated.earnedContent);
     });
 
     it('resolves the IMS token via resolveSemrushImsToken and forwards it to createSerenityTransport (promise-token path)', async () => {
@@ -6605,6 +6909,8 @@ describe('Brands Controller', () => {
         'Updated Brand',
         'ws-9',
       );
+      const body = await response.json();
+      expect(body.brandAliases).to.deep.equal(updated.brandAliases);
     });
 
     it('surfaces semrushRejectedAliases on the response when Semrush refuses some aliases', async () => {
@@ -7001,7 +7307,12 @@ describe('Brands Controller', () => {
         id: BRAND_UUID,
         name: 'Updated Brand',
         semrushSubWorkspaceId: 'ws-9',
-        competitors: [{ name: 'Rival', url: 'https://rival.com', regions: ['us'] }],
+        competitors: [{
+          name: 'Rival',
+          url: 'https://rival.com',
+          aliases: ['Canonical Rival'],
+          regions: ['us'],
+        }],
       };
       const updateBrandStub = sinon.stub().resolves(updated);
       const ciSyncStub = sinon.stub().resolves({ markets: 1, changed: 1 });
@@ -7041,6 +7352,13 @@ describe('Brands Controller', () => {
         [{ name: 'gone.com', key: 'gone.com', domain: 'gone.com' }],
         'ws-9',
       );
+      const body = await response.json();
+      expect(body.competitors).to.deep.equal([{
+        name: 'Rival',
+        url: 'https://rival.com',
+        aliases: ['Canonical Rival'],
+        regions: ['us'],
+      }]);
     });
 
     it('does NOT re-sync competitors when the edit leaves them untouched', async () => {
@@ -8626,11 +8944,52 @@ describe('Brands Controller', () => {
       expect(submitArg.siteId).to.equal(SITE_ID);
       expect(submitArg.imsOrgId).to.equal(IMS_ORG_ID);
 
-      // createBrandPresenceSchedule must be called with correct ids
+      // createBrandPresenceSchedule must be called with correct ids, and tier:
+      // 'FREE_TRIAL' (this route has no paid gate on activation itself — LLMO-6634 —
+      // so the tier must be resolved from the org's real LLMO entitlement rather than
+      // hardcoded; isPayingLlmoSiteStub defaults to resolving false).
       expect(scheduleStub).to.have.been.calledOnceWith({
         siteId: SITE_ID,
         brandId: BRAND_UUID,
         orgId: ORGANIZATION_ID,
+        tier: 'FREE_TRIAL',
+      });
+    });
+
+    it('passes tier: PAID through to createBrandPresenceSchedule for a paying site', async () => {
+      // Regression test for LLMO-7366 x LLMO-6634: activation has no paid gate, so a
+      // hardcoded tier: 'PAID' would wrongly restrict a genuinely paying org, and a
+      // hardcoded tier: 'FREE_TRIAL' would wrongly restrict a genuinely paying org too.
+      // The tier must track the real per-org LLMO entitlement either way.
+      const scheduleStub = sinon.stub().resolves({ scheduleId: 'sch-paid' });
+      const fakeDrs = {
+        isConfigured: () => true,
+        listJobs: sinon.stub().resolves([]),
+        submitPromptGenerationJob: sinon.stub().resolves({ job_id: 'pg-1' }),
+        createBrandPresenceSchedule: scheduleStub,
+      };
+      const { controller } = await buildActivateController({
+        getBrandByIdResult: {
+          id: BRAND_UUID,
+          name: 'Acme',
+          baseSiteId: SITE_ID,
+          baseUrl: 'https://site1.com',
+          region: ['us'],
+          status: 'pending',
+          urls: [],
+        },
+        updateBrandResult: { id: BRAND_UUID },
+        fakeDrsClient: fakeDrs,
+        isPayingLlmoSiteStub: sinon.stub().resolves(true),
+      });
+
+      await controller.activateBrandForOrg(buildActivateRequest({ generatePrompts: true }));
+
+      expect(scheduleStub).to.have.been.calledOnceWith({
+        siteId: SITE_ID,
+        brandId: BRAND_UUID,
+        orgId: ORGANIZATION_ID,
+        tier: 'PAID',
       });
     });
 

@@ -19,11 +19,11 @@ import {
   OwnedSourcesTotalRequestSchema,
   OwnedSourcesTotalResponseSchema,
 } from '@quazar/ai-seo-ts/v2/source/messages_pb.js';
-import { SEARCH_TYPE_ENUM } from '@quazar/ai-seo-ts/v2/source/enums_pb.js';
 import {
   resolveCountry,
   engineToLlm,
   responseFromGrpcError,
+  resolveSearchType,
   PROTO_FROM_JSON,
   PROTO_TO_JSON,
 } from '../../../grpc-utils.js';
@@ -35,6 +35,7 @@ export async function handleCitedPagesTotals(sp, clients) {
   const engine = engineToLlm(sp.get('engine')) || LLM_ENUM.ALL;
   const country = resolveCountry(sp) || COUNTRY_ENUM.WORLDWIDE;
   const date = sp.get('date');
+  const searchType = resolveSearchType(domain);
 
   let totalsRequest;
   try {
@@ -46,7 +47,7 @@ export async function handleCitedPagesTotals(sp, clients) {
         target: { domain, name: domain },
         filter_ql: buildCitedPagesFilterQl(sp),
         target_date: date,
-        search_type: SEARCH_TYPE_ENUM.DOMAIN,
+        search_type: searchType,
       },
       PROTO_FROM_JSON,
     );

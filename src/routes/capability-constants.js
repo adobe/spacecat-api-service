@@ -27,6 +27,8 @@ export const CAP_CONFIGURATION_WRITE = 'configuration:write';
 
 export const CAP_SITE_CREATE = 'site:create';
 
+export const CAP_ENTITLEMENT_CREATE = 'entitlement:create';
+
 export const CAP_FIX_ENTITY_CREATE = 'fixEntity:create';
 
 export const CAP_SUGGESTION_WRITE = 'suggestion:write';

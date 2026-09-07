@@ -33,11 +33,12 @@ import { TAG_IDS, dimensionTreeLevels, makeListProjectTagsStub } from '../fixtur
 use(chaiAsPromised);
 use(sinonChai);
 
-// Every generated prompt carries the two standard values (origin=ai,
-// intent=Informational) plus the producing `source/semrush` value; the last tag
-// is the per-prompt computed `type`. Order matches the write site:
-// [...standardIds, sourceId, typeId].
-const STANDARD_IDS = [TAG_IDS.originAi, TAG_IDS.intentInformational];
+// Every generated prompt carries the seeded default intent (Informational —
+// `origin` is retired, tag-display-names.md §3: STANDARD_PROMPT_TAG_VALUES no
+// longer contributes an `origin/ai` id here) plus the producing
+// `source/semrush` value; the last tag is the per-prompt computed `type`.
+// Order matches the write site: [intentId, sourceId, typeId].
+const STANDARD_IDS = [TAG_IDS.intentInformational];
 const GENERATED_IDS = [...STANDARD_IDS, TAG_IDS.sourceSemrush];
 
 // Matches one v3 create item `{ name, metadata }` (LLMO-6289). These handlers
@@ -103,6 +104,7 @@ function makeTransport(overrides = {}) {
     listBenchmarks: sinon.stub().resolves({ aio_benchmarks: [{ id: 'bench-1', main_brand: true }] }),
     createBrandUrls: sinon.stub().resolves({ ids: [], existing_count: 0 }),
     createBenchmarks: sinon.stub().resolves({ ids: ['bm-new'], existing_count: 0 }),
+    updateBenchmark: sinon.stub().resolves(null),
     deleteBenchmarks: sinon.stub().resolves(null),
     ...overrides,
   };
@@ -636,11 +638,68 @@ describe('markets-subworkspace handlers', () => {
       expect(transport.publishProject).to.have.been.called;
     });
 
-    it('does not touch the brand-URL API when there are no sources', async () => {
+    it('resolves the own-brand benchmark without writing brand URLs when there are no sources', async () => {
       const transport = makeTransport();
       await handleCreateMarketSubworkspace(transport, makeBrand(), PARENT, createBody, log);
-      expect(transport.listBenchmarks).to.not.have.been.called;
+      expect(transport.listBenchmarks).to.have.been.calledOnceWith(WS, 'new-proj');
       expect(transport.createBrandUrls).to.not.have.been.called;
+    });
+
+    it('repairs auto-created mixed-case aliases before publishing without URL sources', async () => {
+      const transport = makeTransport({
+        listBenchmarks: sinon.stub().resolves({
+          aio_benchmarks: [{
+            id: 'bench-1',
+            main_brand: true,
+            brand_name: 'Adobe Express',
+            brand_aliases: ['Adobe Express', 'Firefly', 'vendor-added'],
+            domain: 'example.com',
+            primary_url: 'example.com/products/express',
+          }],
+        }),
+      });
+
+      await handleCreateMarketSubworkspace(transport, makeBrand(), PARENT, createBody, log);
+
+      expect(transport.updateBenchmark).to.have.been.calledTwice;
+      expect(transport.updateBenchmark.firstCall.args[3]).to.deep.equal({
+        brand_name: 'Adobe Express',
+        brand_aliases: ['vendor-added'],
+        domain: 'example.com/products/express',
+        primary_url: 'example.com/products/express',
+      });
+      expect(transport.updateBenchmark.secondCall.args[3]).to.deep.equal({
+        brand_name: 'Adobe Express',
+        brand_aliases: ['adobe express', 'firefly', 'vendor-added'],
+        domain: 'example.com/products/express',
+        primary_url: 'example.com/products/express',
+      });
+      expect(transport.updateBenchmark).to.have.been.calledBefore(transport.publishProject);
+      expect(transport.createBrandUrls).to.not.have.been.called;
+    });
+
+    it('does not publish when auto-created alias repair leaves the draft dirty', async () => {
+      const updateBenchmark = sinon.stub();
+      updateBenchmark.onFirstCall().resolves(null);
+      updateBenchmark.onSecondCall().rejects(new SerenityTransportError(500, 'recase failed'));
+      const transport = makeTransport({
+        listBenchmarks: sinon.stub().resolves({
+          aio_benchmarks: [{
+            id: 'bench-1',
+            main_brand: true,
+            brand_name: 'Adobe Express',
+            brand_aliases: ['Adobe Express'],
+            domain: 'example.com',
+          }],
+        }),
+        updateBenchmark,
+      });
+
+      await expect(
+        handleCreateMarketSubworkspace(transport, makeBrand(), PARENT, createBody, log),
+      ).to.be.rejectedWith(/recase failed/);
+      expect(transport.updateBenchmark).to.have.been.calledThrice;
+      expect(transport.publishProject).to.not.have.been.called;
     });
 
     it('does NOT fail the create when the brand-URL push fails (best-effort)', async () => {
@@ -1176,6 +1235,7 @@ describe('markets-subworkspace handlers', () => {
         name: 'category:Sneakers',
         parentId: 'root-1',
         childrenCount: 0,
+        promptsCount: 0,
         path: [{ id: 'root-1', name: 'category:Footwear' }],
       }]);
       expect(transport.listPromptsByTags).to.not.have.been.called;
@@ -1748,7 +1808,6 @@ describe('markets-subworkspace — defensive branch coverage', () => {
   // the Informational default. Prompts are partitioned by their (type, intent)
   // id pair, one upstream call per distinct pair.
   it('generateAndAttachPrompts: applies the classified intent per prompt and defaults an unclassified one', async () => {
-    const SOURCE_AI_ID = TAG_IDS.originAi;
     const handler = await esmock(
       '../../../../src/support/serenity/handlers/markets-subworkspace.js',
       {
@@ -1777,8 +1836,8 @@ describe('markets-subworkspace — defensive branch coverage', () => {
     );
     expect(res.status).to.equal(201);
     // Both are non-branded ('Trail' not mentioned); intent differs, so two calls.
-    expect(transport.createPromptsWithMetadata).to.have.been.calledWithExactly(WS, 'new-proj', [genItemMatch('buy now')], [SOURCE_AI_ID, TAG_IDS.intentTransactional, TAG_IDS.sourceSemrush, TAG_IDS.typeNonBranded]);
-    expect(transport.createPromptsWithMetadata).to.have.been.calledWithExactly(WS, 'new-proj', [genItemMatch('about it')], [SOURCE_AI_ID, TAG_IDS.intentInformational, TAG_IDS.sourceSemrush, TAG_IDS.typeNonBranded]);
+    expect(transport.createPromptsWithMetadata).to.have.been.calledWithExactly(WS, 'new-proj', [genItemMatch('buy now')], [TAG_IDS.intentTransactional, TAG_IDS.sourceSemrush, TAG_IDS.typeNonBranded]);
+    expect(transport.createPromptsWithMetadata).to.have.been.calledWithExactly(WS, 'new-proj', [genItemMatch('about it')], [TAG_IDS.intentInformational, TAG_IDS.sourceSemrush, TAG_IDS.typeNonBranded]);
   });
 
   // Boundary: at exactly AI_GEN_CLASSIFY_MAX + 1 texts, only the first MAX are
@@ -1818,8 +1877,8 @@ describe('markets-subworkspace — defensive branch coverage', () => {
     expect(classifySpy).to.have.been.calledOnce;
     expect(classifySpy.firstCall.args[0]).to.deep.equal(['p1', 'p2']);
     // p1/p2 classified Transactional; p3 (beyond the cap) defaults Informational.
-    expect(transport.createPromptsWithMetadata).to.have.been.calledWithExactly(WS, 'new-proj', [genItemMatch('p1'), genItemMatch('p2')], [...STANDARD_IDS.slice(0, 1), TAG_IDS.intentTransactional, TAG_IDS.sourceSemrush, TAG_IDS.typeNonBranded]);
-    expect(transport.createPromptsWithMetadata).to.have.been.calledWithExactly(WS, 'new-proj', [genItemMatch('p3')], [...STANDARD_IDS.slice(0, 1), TAG_IDS.intentInformational, TAG_IDS.sourceSemrush, TAG_IDS.typeNonBranded]);
+    expect(transport.createPromptsWithMetadata).to.have.been.calledWithExactly(WS, 'new-proj', [genItemMatch('p1'), genItemMatch('p2')], [TAG_IDS.intentTransactional, TAG_IDS.sourceSemrush, TAG_IDS.typeNonBranded]);
+    expect(transport.createPromptsWithMetadata).to.have.been.calledWithExactly(WS, 'new-proj', [genItemMatch('p3')], [TAG_IDS.intentInformational, TAG_IDS.sourceSemrush, TAG_IDS.typeNonBranded]);
     // The cap-hit is observable, not silent.
     expect(capLog.info).to.have.been.calledWithMatch(
       'generateAndAttachPrompts: AI-gen classify cap hit — tail defaults to Informational',

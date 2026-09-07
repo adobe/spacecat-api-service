@@ -33,8 +33,20 @@ export {
 export {
   buildCitedDomainsPayload, transformCitedDomainsResponse, transformCitedDomainsResponses,
 } from './cited-domains.js';
+export {
+  buildPromptResponsesPayload,
+  transformPromptResponsesResponse,
+  clampLimit,
+  DEFAULT_RESPONSE_PAGE_SIZE,
+  MAX_RESPONSE_PAGE_SIZE,
+} from './prompt-responses.js';
+export {
+  buildResponseSourcesPayload, transformResponseSourcesResponse,
+} from './response-sources.js';
+export { joinResponsesToSources, diffDayExecutions } from './response-feed.js';
 export { buildSubredditsPayload, transformSubredditsResponse } from './subreddits.js';
 export { buildRedditThreadsPayload, transformRedditThreadsResponse } from './reddit-threads.js';
+export { buildYoutubeVideosPayload, transformYoutubeVideosResponse } from './youtube-videos.js';
 export { buildTopicPromptsPayload, transformTopicPromptsResponse } from './topic-prompts.js';
 export { aggregateTopicsFromPrompts } from './topics-insights.js';
 export {

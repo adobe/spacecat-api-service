@@ -76,8 +76,9 @@ describe('kpi-headlines definitions', () => {
 
     it('omits the project filter when no projectIds are given', () => {
       const payload = buildKpiHeadlinePayload({
-        brandName: 'Lovesac', startDate: '2026-06-25', endDate: '2026-07-24',
+        brandName: 'Lovesac', model: 'chatgpt', startDate: '2026-06-25', endDate: '2026-07-24',
       });
+      // brand-name + model blocks only (no project block)
       expect(payload.filters.advanced.filters).to.have.lengthOf(2);
     });
 
@@ -95,6 +96,34 @@ describe('kpi-headlines definitions', () => {
         brandName: 'Lovesac', startDate: '2026-06-25', endDate: '2026-07-24',
       });
       expect(payload.filters.advanced.filters.some((f) => f.col === 'CBF_tags')).to.equal(false);
+    });
+
+    it('omits the CBF_model filter when the model/platform is absent (All Platforms aggregate)', () => {
+      const payload = buildKpiHeadlinePayload({
+        brandName: 'Lovesac', startDate: '2026-06-25', endDate: '2026-07-24',
+      });
+      const hasModel = payload.filters.advanced.filters.some(
+        (f) => f.filters?.some((sub) => sub.col === 'CBF_model'),
+      );
+      expect(hasModel).to.equal(false);
+      // only the brand-name filter remains (no model, no project, no category)
+      expect(payload.filters.advanced.filters).to.deep.equal([
+        { op: 'eq', val: 'Lovesac', col: 'CBF_ws_brand' },
+      ]);
+    });
+
+    it("omits the CBF_model filter for the explicit 'all' sentinel but keeps project scoping", () => {
+      const payload = buildKpiHeadlinePayload({
+        brandName: 'Lovesac', platform: 'all', startDate: '2026-06-25', endDate: '2026-07-24', projectIds: ['proj-1'],
+      });
+      const hasModel = payload.filters.advanced.filters.some(
+        (f) => f.filters?.some((sub) => sub.col === 'CBF_model'),
+      );
+      expect(hasModel).to.equal(false);
+      expect(payload.filters.advanced.filters).to.deep.equal([
+        { op: 'eq', val: 'Lovesac', col: 'CBF_ws_brand' },
+        { op: 'or', filters: [{ op: 'eq', val: 'proj-1', col: 'CBF_project' }] },
+      ]);
     });
   });
 
@@ -188,6 +217,22 @@ describe('kpi-headlines definitions', () => {
         brandUrls: ['lovesac.com'], startDate: '2026-06-25', endDate: '2026-07-24',
       });
       expect(payload.filters.advanced.filters.some((f) => f.col === 'CBF_tags')).to.equal(false);
+    });
+
+    it('omits the CBF_model filter when the model/platform is absent (All Platforms aggregate), keeping the brand-URL block', () => {
+      const payload = buildSourceVisibilityPayload({
+        brandUrls: ['lovesac.com'], startDate: '2026-06-25', endDate: '2026-07-24',
+      });
+      const hasModel = payload.filters.advanced.filters.some(
+        (f) => f.filters?.some((sub) => sub.col === 'CBF_model'),
+      );
+      expect(hasModel).to.equal(false);
+      expect(payload.filters.advanced.filters).to.deep.equal([
+        {
+          op: 'or',
+          filters: [{ op: 'url_match', val: 'lovesac.com', col: 'CBF_brand_urls' }],
+        },
+      ]);
     });
   });
 
