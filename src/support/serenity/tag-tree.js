@@ -556,117 +556,6 @@ export async function findTagsInTree(transport, semrushWorkspaceId, projectId, t
         kind: 'root', parentId: null, rootName: dimensionOfRootName(root.name), ancestorIds: [],
       });
     }
-
-    /**
-     * Reads the complete draft taxonomy once and derives stable path and
-     * compatibility metadata without modifying non-canonical Project Engine data.
-     */
-    export async function readTagTreeSnapshot(
-      transport,
-      semrushWorkspaceId,
-      projectId,
-      log,
-    ) {
-      const roots = await listProjectTagTree(transport, semrushWorkspaceId, projectId, '', log);
-      const nodes = roots.items.map((root) => ({
-        ...root,
-        rootName: root.name,
-        rootId: root.id,
-        depth: 1,
-        fullPath: [{ id: root.id, name: root.name }],
-      }));
-      const visited = new Set();
-      let frontier = nodes.filter((node) => node.childrenCount > 0);
-      let reads = 1;
-      while (frontier.length > 0) {
-        const next = [];
-        for (const parent of frontier) {
-          if (visited.has(parent.id)) {
-            // eslint-disable-next-line no-continue
-            continue;
-          }
-          visited.add(parent.id);
-          reads += 1;
-          if (reads > MAX_TREE_READS) {
-            const error = new ErrorWithStatusCode('Unable to read the complete tag tree', 503);
-            error.code = ERROR_CODES.TAG_TREE_READ_INCOMPLETE;
-            throw error;
-          }
-          // eslint-disable-next-line no-await-in-loop
-          const children = await listProjectTagTree(
-            transport,
-            semrushWorkspaceId,
-            projectId,
-            parent.id,
-            log,
-          );
-          for (const child of children.items) {
-            const fullPath = Array.isArray(child.path) && child.path.length > 0
-              ? [...child.path, { id: child.id, name: child.name }]
-              : [...parent.fullPath, { id: child.id, name: child.name }];
-            const node = {
-              ...child,
-              rootName: fullPath[0]?.name ?? parent.rootName,
-              rootId: fullPath[0]?.id ?? parent.rootId,
-              depth: fullPath.length,
-              fullPath,
-            };
-            nodes.push(node);
-            if (node.childrenCount > 0) {
-              next.push(node);
-            }
-          }
-        }
-        frontier = next;
-      }
-
-      const pathCounts = new Map();
-      for (const node of nodes) {
-        const key = node.fullPath
-          .map((part) => part.name.normalize('NFKC').toLocaleLowerCase())
-          .join('__');
-        pathCounts.set(key, (pathCounts.get(key) ?? 0) + 1);
-      }
-      const items = nodes.map((node) => {
-        const key = node.fullPath
-          .map((part) => part.name.normalize('NFKC').toLocaleLowerCase())
-          .join('__');
-        let reason = null;
-        if (node.rootName.toLocaleLowerCase() === DIMENSION.TAG && node.rootName !== DIMENSION.TAG) {
-          reason = 'caseVariantRoot';
-        } else if (node.fullPath.some((part) => part.name.includes(':') || part.name.includes('__'))) {
-          reason = 'separatorInName';
-        } else if (node.rootName === DIMENSION.TAG && node.depth > 3) {
-          reason = 'unsupportedDepth';
-        } else if ((pathCounts.get(key) ?? 0) > 1) {
-          reason = 'ambiguousPath';
-        }
-        return {
-          ...node,
-          compatibility: { state: reason ? 'readOnly' : 'canonical', reason },
-        };
-      });
-      return {
-        items,
-        byId: new Map(items.map((item) => [item.id, item])),
-      };
-    }
-
-    export function incompatibleTaxonomyError(items) {
-      const error = new ErrorWithStatusCode(
-        'The requested tag belongs to an incompatible read-only taxonomy branch',
-        409,
-      );
-      error.code = ERROR_CODES.INCOMPATIBLE_TAG_TAXONOMY;
-      /** @type {any} */ (error).details = {
-        tags: items.map((item) => ({
-          id: item.id,
-          path: item.fullPath?.map((part) => part.name) ?? [],
-          reason: item.compatibility?.reason ?? 'ambiguousPath',
-        })),
-      };
-      return error;
-    }
   }
   const visited = new Set();
   let reads = 1;
@@ -705,6 +594,7 @@ export async function findTagsInTree(transport, semrushWorkspaceId, projectId, t
         if (found.size === wanted.size) {
           return found;
         }
+
         next.push(...children.items
           .filter((t) => t.childrenCount > 0)
           .map((child) => ({ node: child, rootName, ancestorIds: [...ancestorIds, child.id] })));
@@ -720,6 +610,117 @@ export async function findTagsInTree(transport, semrushWorkspaceId, projectId, t
     }
   }
   return found;
+}
+
+/**
+ * Reads the complete draft taxonomy once and derives stable path and
+ * compatibility metadata without modifying non-canonical Project Engine data.
+ */
+export async function readTagTreeSnapshot(
+  transport,
+  semrushWorkspaceId,
+  projectId,
+  log,
+) {
+  const roots = await listProjectTagTree(transport, semrushWorkspaceId, projectId, '', log);
+  const nodes = roots.items.map((root) => ({
+    ...root,
+    rootName: root.name,
+    rootId: root.id,
+    depth: 1,
+    fullPath: [{ id: root.id, name: root.name }],
+  }));
+  const visited = new Set();
+  let frontier = nodes.filter((node) => node.childrenCount > 0);
+  let reads = 1;
+  while (frontier.length > 0) {
+    const next = [];
+    for (const parent of frontier) {
+      if (visited.has(parent.id)) {
+        // eslint-disable-next-line no-continue
+        continue;
+      }
+      visited.add(parent.id);
+      reads += 1;
+      if (reads > MAX_TREE_READS) {
+        const error = new ErrorWithStatusCode('Unable to read the complete tag tree', 503);
+        error.code = ERROR_CODES.TAG_TREE_READ_INCOMPLETE;
+        throw error;
+      }
+      // eslint-disable-next-line no-await-in-loop
+      const children = await listProjectTagTree(
+        transport,
+        semrushWorkspaceId,
+        projectId,
+        parent.id,
+        log,
+      );
+      for (const child of children.items) {
+        const fullPath = Array.isArray(child.path) && child.path.length > 0
+          ? [...child.path, { id: child.id, name: child.name }]
+          : [...parent.fullPath, { id: child.id, name: child.name }];
+        const node = {
+          ...child,
+          rootName: fullPath[0]?.name ?? parent.rootName,
+          rootId: fullPath[0]?.id ?? parent.rootId,
+          depth: fullPath.length,
+          fullPath,
+        };
+        nodes.push(node);
+        if (node.childrenCount > 0) {
+          next.push(node);
+        }
+      }
+    }
+    frontier = next;
+  }
+
+  const pathCounts = new Map();
+  for (const node of nodes) {
+    const key = node.fullPath
+      .map((part) => part.name.normalize('NFKC').toLocaleLowerCase())
+      .join('__');
+    pathCounts.set(key, (pathCounts.get(key) ?? 0) + 1);
+  }
+  const items = nodes.map((node) => {
+    const key = node.fullPath
+      .map((part) => part.name.normalize('NFKC').toLocaleLowerCase())
+      .join('__');
+    let reason = null;
+    if (node.rootName.toLocaleLowerCase() === DIMENSION.TAG && node.rootName !== DIMENSION.TAG) {
+      reason = 'caseVariantRoot';
+    } else if (node.fullPath.some((part) => part.name.includes(':') || part.name.includes('__'))) {
+      reason = 'separatorInName';
+    } else if (node.rootName === DIMENSION.TAG && node.depth > 3) {
+      reason = 'unsupportedDepth';
+    } else if ((pathCounts.get(key) ?? 0) > 1) {
+      reason = 'ambiguousPath';
+    }
+    return {
+      ...node,
+      compatibility: { state: reason ? 'readOnly' : 'canonical', reason },
+    };
+  });
+  return {
+    items,
+    byId: new Map(items.map((item) => [item.id, item])),
+  };
+}
+
+export function incompatibleTaxonomyError(items) {
+  const error = new ErrorWithStatusCode(
+    'The requested tag belongs to an incompatible read-only taxonomy branch',
+    409,
+  );
+  error.code = ERROR_CODES.INCOMPATIBLE_TAG_TAXONOMY;
+  /** @type {any} */ (error).details = {
+    tags: items.map((item) => ({
+      id: item.id,
+      path: item.fullPath?.map((part) => part.name) ?? [],
+      reason: item.compatibility?.reason ?? 'ambiguousPath',
+    })),
+  };
+  return error;
 }
 
 /**
