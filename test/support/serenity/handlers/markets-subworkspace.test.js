@@ -33,12 +33,11 @@ import { TAG_IDS, dimensionTreeLevels, makeListProjectTagsStub } from '../fixtur
 use(chaiAsPromised);
 use(sinonChai);
 
-// Every generated prompt carries the seeded default intent (Informational —
-// `origin` is retired, tag-display-names.md §3: STANDARD_PROMPT_TAG_VALUES no
-// longer contributes an `origin/ai` id here) plus the producing
+// Every generated prompt carries origin/ai and the seeded default intent
+// (Informational) plus the producing
 // `source/semrush` value; the last tag is the per-prompt computed `type`.
-// Order matches the write site: [intentId, sourceId, typeId].
-const STANDARD_IDS = [TAG_IDS.intentInformational];
+// Order matches the write site: [originId, intentId, sourceId, typeId].
+const STANDARD_IDS = [TAG_IDS.originAi, TAG_IDS.intentInformational];
 const GENERATED_IDS = [...STANDARD_IDS, TAG_IDS.sourceSemrush];
 
 // Matches one v3 create item `{ name, metadata }` (LLMO-6289). These handlers
@@ -817,7 +816,7 @@ describe('markets-subworkspace handlers', () => {
       );
       expect(res.status).to.equal(201);
       // The taxonomy is provisioned by resolving the tree; this project already
-      // carries all four roots and every closed value, so nothing is created.
+      // carries all five roots and every closed value, so nothing is created.
       expect(transport.createProjectTags).to.not.have.been.called;
       // models attached
       expect(transport.addAiModel).to.have.been.calledWith(WS, 'new-proj', 'm-1');
@@ -1836,8 +1835,8 @@ describe('markets-subworkspace — defensive branch coverage', () => {
     );
     expect(res.status).to.equal(201);
     // Both are non-branded ('Trail' not mentioned); intent differs, so two calls.
-    expect(transport.createPromptsWithMetadata).to.have.been.calledWithExactly(WS, 'new-proj', [genItemMatch('buy now')], [TAG_IDS.intentTransactional, TAG_IDS.sourceSemrush, TAG_IDS.typeNonBranded]);
-    expect(transport.createPromptsWithMetadata).to.have.been.calledWithExactly(WS, 'new-proj', [genItemMatch('about it')], [TAG_IDS.intentInformational, TAG_IDS.sourceSemrush, TAG_IDS.typeNonBranded]);
+    expect(transport.createPromptsWithMetadata).to.have.been.calledWithExactly(WS, 'new-proj', [genItemMatch('buy now')], [TAG_IDS.originAi, TAG_IDS.intentTransactional, TAG_IDS.sourceSemrush, TAG_IDS.typeNonBranded]);
+    expect(transport.createPromptsWithMetadata).to.have.been.calledWithExactly(WS, 'new-proj', [genItemMatch('about it')], [TAG_IDS.originAi, TAG_IDS.intentInformational, TAG_IDS.sourceSemrush, TAG_IDS.typeNonBranded]);
   });
 
   // Boundary: at exactly AI_GEN_CLASSIFY_MAX + 1 texts, only the first MAX are
@@ -1877,8 +1876,8 @@ describe('markets-subworkspace — defensive branch coverage', () => {
     expect(classifySpy).to.have.been.calledOnce;
     expect(classifySpy.firstCall.args[0]).to.deep.equal(['p1', 'p2']);
     // p1/p2 classified Transactional; p3 (beyond the cap) defaults Informational.
-    expect(transport.createPromptsWithMetadata).to.have.been.calledWithExactly(WS, 'new-proj', [genItemMatch('p1'), genItemMatch('p2')], [TAG_IDS.intentTransactional, TAG_IDS.sourceSemrush, TAG_IDS.typeNonBranded]);
-    expect(transport.createPromptsWithMetadata).to.have.been.calledWithExactly(WS, 'new-proj', [genItemMatch('p3')], [TAG_IDS.intentInformational, TAG_IDS.sourceSemrush, TAG_IDS.typeNonBranded]);
+    expect(transport.createPromptsWithMetadata).to.have.been.calledWithExactly(WS, 'new-proj', [genItemMatch('p1'), genItemMatch('p2')], [TAG_IDS.originAi, TAG_IDS.intentTransactional, TAG_IDS.sourceSemrush, TAG_IDS.typeNonBranded]);
+    expect(transport.createPromptsWithMetadata).to.have.been.calledWithExactly(WS, 'new-proj', [genItemMatch('p3')], [TAG_IDS.originAi, TAG_IDS.intentInformational, TAG_IDS.sourceSemrush, TAG_IDS.typeNonBranded]);
     // The cap-hit is observable, not silent.
     expect(capLog.info).to.have.been.calledWithMatch(
       'generateAndAttachPrompts: AI-gen classify cap hit — tail defaults to Informational',
@@ -1897,7 +1896,7 @@ describe('markets-subworkspace — defensive branch coverage', () => {
   // `createPromptsWithMetadata` is ATOMIC on an unresolvable id — it 500s and writes
   // nothing — so the handler must fail before it builds the call, not after.
   it('generateAndAttachPrompts: 502s when the standard prompt tag ids cannot be resolved', async () => {
-    // The four roots exist; no closed value under any of them does, and the
+    // The five roots exist; no closed value under any of them does, and the
     // create echoes nothing back. `provisionDimensionTree` fails closed, so the
     // handler never reaches a prompt write holding an unresolved id.
     const transport = makeTransport({
