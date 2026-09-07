@@ -1153,6 +1153,7 @@ describe('getRouteHandlers', () => {
       'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/auto-fix',
       'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-deploy',
       'POST /sites/:siteId/opportunities/:opportunityId/suggestions/aem-apply',
+      'POST /sites/:siteId/opportunities/:opportunityId/suggestions/aem-apply-mcp',
       'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-rollback',
       'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-preview',
       'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-live-preview',
