@@ -3504,8 +3504,7 @@ function SuggestionsController(ctx, sqs, env) {
       });
     } catch (error) {
       const elapsedMs = Date.now() - fetchStartedAt;
-      const errorCode = error.cause?.code || error.code || error.name;
-      context.log.error(`[edge-live-preview] Error fetching URL siteId=${siteId} opportunityId=${opportunityId} url=${url} elapsedMs=${elapsedMs} errorCode=${errorCode}: ${error.message}`, error);
+      context.log.error(`[edge-live-preview] Error fetching URL siteId=${siteId} opportunityId=${opportunityId} url=${url} elapsedMs=${elapsedMs}: ${error.stack || error.message}`, error);
       return ok({
         status: 'error',
         statusCode: 500,
