@@ -36,7 +36,9 @@ describe('detectAuthWall', () => {
       const r = routes[url] || routes.default || {};
       const location = r.location ?? null;
       const contentType = r.contentType ?? 'text/html';
-      const headers = { location, 'content-type': contentType };
+      const headers = {
+        location, 'content-type': contentType, 'www-authenticate': r.wwwAuthenticate ?? null,
+      };
       return {
         status: r.status ?? 200,
         url,
@@ -57,11 +59,24 @@ describe('detectAuthWall', () => {
     sandbox.restore();
   });
 
-  it('flags a 401 response as authenticated', async () => {
-    const fetch = routedFetch(sandbox, { 'https://example.com': { status: 401 } });
+  it('flags a 401 with a WWW-Authenticate header (genuine HTTP auth) as authenticated', async () => {
+    const fetch = routedFetch(sandbox, {
+      'https://example.com': { status: 401, wwwAuthenticate: 'Basic realm="Restricted"' },
+    });
     const result = await detectAuthWall({ baseUrl: 'https://example.com', log }, { fetch });
     expect(result.authenticated).to.equal(true);
     expect(result.signal).to.equal('status-401');
+  });
+
+  it('does NOT flag a 401 without WWW-Authenticate (WAF/bot block, e.g. Akamai)', async () => {
+    // Akamai and similar WAFs return 401 to non-browser clients with NO WWW-Authenticate header
+    // and a tiny "unauthorized" block page. That is a bot block, not an auth wall — real users
+    // pass. Only a 401 carrying WWW-Authenticate (RFC 7235) is genuine HTTP authentication.
+    const body = '<html><head><title>unauthorized</title></head><body></body></html>';
+    const fetch = routedFetch(sandbox, { 'https://example.com': { status: 401, body } });
+    const result = await detectAuthWall({ baseUrl: 'https://example.com', log }, { fetch });
+    expect(result.authenticated).to.equal(false);
+    expect(result.signal).to.equal(null);
   });
 
   it('flags a front door that redirects to a login URL as authenticated', async () => {
