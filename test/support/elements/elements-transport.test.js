@@ -17,7 +17,9 @@ import sinon from 'sinon';
 import {
   createElementsTransport,
   createElementsTransportForPurpose,
+  ELEMENTS_CREDENTIAL_PROFILE_ABV_SHARED_ELEMENTS,
   ELEMENTS_PURPOSE_BRAND_CLAIMS,
+  ELEMENTS_PURPOSE_HALLUCINATION_DETECTION,
 } from '../../../src/support/elements/elements-transport.js';
 import { ElementsTransportError } from '../../../src/support/elements/errors.js';
 
@@ -34,8 +36,8 @@ const EXTERNAL_BASE_URL = 'https://api.semrush.com';
 const TECHNICAL_API_KEY = 'technical-api-key';
 const TECHNICAL_ENV = {
   ...ENV,
-  SEMRUSH_BRAND_CLAIMS_TECHNICAL_AUTH_ENABLED: 'true',
-  SEMRUSH_BRAND_CLAIMS_API_KEY: TECHNICAL_API_KEY,
+  SEMRUSH_ABV_SHARED_ELEMENTS_TECHNICAL_AUTH_ENABLED: 'true',
+  SEMRUSH_ABV_SHARED_ELEMENTS_API_KEY: TECHNICAL_API_KEY,
 };
 const EXPECTED_EXTERNAL_URL = `${EXTERNAL_BASE_URL}/apis/v4-raw/external-api/v1/workspaces/`
   + `${WORKSPACE_ID}/products/ai/elements/${ELEMENT_ID}`;
@@ -108,26 +110,34 @@ describe('createElementsTransport', () => {
   describe('purpose-aware technical authentication', () => {
     const makePurposeTransport = (extra = {}) => createElementsTransportForPurpose({
       env: TECHNICAL_ENV,
-      purpose: ELEMENTS_PURPOSE_BRAND_CLAIMS,
+      purpose: 'brand_claims',
       resolveImsToken: sinon.stub().resolves(IMS_TOKEN),
       ...extra,
     });
 
-    it('uses the external route, Apikey header, and render_data envelope for brand claims', async () => {
-      fetchStub.resolves(makeResponse(200, { blocks: { value: [] } }));
-      const resolveImsToken = sinon.stub().resolves(IMS_TOKEN);
-      const payload = { comparison_data_formatting: 'union' };
-      const transport = await makePurposeTransport({ resolveImsToken });
+    it('exports stable literal purpose and profile identifiers', () => {
+      expect(ELEMENTS_PURPOSE_BRAND_CLAIMS).to.equal('brand_claims');
+      expect(ELEMENTS_PURPOSE_HALLUCINATION_DETECTION).to.equal('hallucination_detection');
+      expect(ELEMENTS_CREDENTIAL_PROFILE_ABV_SHARED_ELEMENTS).to.equal('abv_shared_elements');
+    });
 
-      await transport.fetchElement(WORKSPACE_ID, ELEMENT_ID, payload);
+    ['brand_claims', 'hallucination_detection'].forEach((purpose) => {
+      it(`uses the same shared profile wire contract for ${purpose}`, async () => {
+        fetchStub.resolves(makeResponse(200, { blocks: { value: [] } }));
+        const resolveImsToken = sinon.stub().resolves(IMS_TOKEN);
+        const payload = { comparison_data_formatting: 'union' };
+        const transport = await makePurposeTransport({ purpose, resolveImsToken });
 
-      const [url, init] = fetchStub.firstCall.args;
-      expect(url).to.equal(EXPECTED_EXTERNAL_URL);
-      expect(url).to.not.match(/\/data$/);
-      expect(init.headers.Authorization).to.equal(`Apikey ${TECHNICAL_API_KEY}`);
-      expect(init.headers.Authorization).to.not.contain('Bearer');
-      expect(init.body).to.equal(JSON.stringify({ render_data: payload }));
-      expect(resolveImsToken).to.not.have.been.called;
+        await transport.fetchElement(WORKSPACE_ID, ELEMENT_ID, payload);
+
+        const [url, init] = fetchStub.firstCall.args;
+        expect(url).to.equal(EXPECTED_EXTERNAL_URL);
+        expect(url).to.not.match(/\/data$/);
+        expect(init.headers.Authorization).to.equal(`Apikey ${TECHNICAL_API_KEY}`);
+        expect(init.headers.Authorization).to.not.contain('Bearer');
+        expect(init.body).to.equal(JSON.stringify({ render_data: payload }));
+        expect(resolveImsToken).to.not.have.been.called;
+      });
     });
 
     ['TRUE', '1', 'false', true, undefined].forEach((flag) => {
@@ -135,7 +145,10 @@ describe('createElementsTransport', () => {
         fetchStub.resolves(makeResponse(200, {}));
         const resolveImsToken = sinon.stub().resolves(IMS_TOKEN);
         const transport = await makePurposeTransport({
-          env: { ...TECHNICAL_ENV, SEMRUSH_BRAND_CLAIMS_TECHNICAL_AUTH_ENABLED: flag },
+          env: {
+            ...TECHNICAL_ENV,
+            SEMRUSH_ABV_SHARED_ELEMENTS_TECHNICAL_AUTH_ENABLED: flag,
+          },
           resolveImsToken,
         });
 
@@ -148,15 +161,22 @@ describe('createElementsTransport', () => {
       });
     });
 
-    it('ignores generic Elements credential variables owned by no ABV purpose', async () => {
+    it('ignores broad and legacy Brand Claims variables that are not owned by the profile', async () => {
       fetchStub.resolves(makeResponse(200, {}));
       const resolveImsToken = sinon.stub().resolves(IMS_TOKEN);
       const transport = await makePurposeTransport({
         env: {
           SEMRUSH_PROJECTS_BASE_URL: BASE_URL,
-          // These deliberately broad names must never activate or supply this purpose-bound key.
           SEMRUSH_ELEMENTS_TECHNICAL_AUTH_ENABLED: 'true',
-          SEMRUSH_ELEMENTS_TECHNICAL_API_KEY: 'another-abv-key',
+          SEMRUSH_ELEMENTS_TECHNICAL_API_KEY: 'broad-key',
+          SEMRUSH_BRAND_CLAIMS_TECHNICAL_AUTH_ENABLED: 'true',
+          SEMRUSH_BRAND_CLAIMS_API_KEY: 'prior-brand-claims-key',
+          SEMRUSH_BRAND_CLAIMS_BASE_URL: 'https://prior-brand-claims.example.test',
+          SEMRUSH_BRAND_CLAIMS_HALLUCINATION_DETECTION_ELEMENTS_STOPGAP_ENABLED: 'true',
+          SEMRUSH_BRAND_CLAIMS_HALLUCINATION_DETECTION_ELEMENTS_API_KEY:
+            'legacy-brand-claims-key',
+          SEMRUSH_BRAND_CLAIMS_HALLUCINATION_DETECTION_ELEMENTS_BASE_URL:
+            'https://legacy.example.test',
         },
         resolveImsToken,
       });
@@ -168,15 +188,29 @@ describe('createElementsTransport', () => {
       expect(fetchStub.firstCall.args[1].headers.Authorization).to.equal(`Bearer ${IMS_TOKEN}`);
     });
 
-    it('fails closed rather than consuming a generic key when the purpose flag is enabled', async () => {
+    it('fails closed rather than consuming a broad, legacy, or other-purpose key', async () => {
       const resolveImsToken = sinon.stub().resolves(IMS_TOKEN);
+      const unrelatedKeys = [
+        'broad-key',
+        'prior-brand-claims-key',
+        'legacy-brand-claims-key',
+        'other-abv-key',
+      ];
       let err;
       try {
         await makePurposeTransport({
           env: {
             SEMRUSH_PROJECTS_BASE_URL: BASE_URL,
+            SEMRUSH_ABV_SHARED_ELEMENTS_TECHNICAL_AUTH_ENABLED: 'true',
+            SEMRUSH_ELEMENTS_TECHNICAL_API_KEY: unrelatedKeys[0],
             SEMRUSH_BRAND_CLAIMS_TECHNICAL_AUTH_ENABLED: 'true',
-            SEMRUSH_ELEMENTS_TECHNICAL_API_KEY: 'another-abv-key',
+            SEMRUSH_BRAND_CLAIMS_API_KEY: unrelatedKeys[1],
+            SEMRUSH_BRAND_CLAIMS_BASE_URL: 'https://prior-brand-claims.example.test',
+            SEMRUSH_BRAND_CLAIMS_HALLUCINATION_DETECTION_ELEMENTS_STOPGAP_ENABLED: 'true',
+            SEMRUSH_BRAND_CLAIMS_HALLUCINATION_DETECTION_ELEMENTS_API_KEY: unrelatedKeys[2],
+            SEMRUSH_BRAND_CLAIMS_HALLUCINATION_DETECTION_ELEMENTS_BASE_URL:
+              'https://legacy.example.test',
+            SEMRUSH_OTHER_ABV_API_KEY: unrelatedKeys[3],
           },
           resolveImsToken,
         });
@@ -185,9 +219,8 @@ describe('createElementsTransport', () => {
       }
 
       expect(err.status).to.equal(503);
-      expect(err.message)
-        .to.contain('SEMRUSH_BRAND_CLAIMS_API_KEY');
-      expect(err.message).to.not.contain('another-abv-key');
+      expect(err.message).to.contain('SEMRUSH_ABV_SHARED_ELEMENTS_API_KEY');
+      unrelatedKeys.forEach((key) => expect(err.message).to.not.contain(key));
       expect(resolveImsToken).to.not.have.been.called;
       expect(fetchStub).to.not.have.been.called;
     });
@@ -205,9 +238,33 @@ describe('createElementsTransport', () => {
       });
     });
 
+    it('preserves IMS 429 retries when a mapped profile is disabled', async () => {
+      fetchStub.onCall(0).resolves(makeResponse(429, { error: 'rate limited' }));
+      fetchStub.onCall(1).resolves(makeResponse(200, { ok: true }));
+      const resolveImsToken = sinon.stub().resolves(IMS_TOKEN);
+      const transport = await makePurposeTransport({
+        env: {
+          ...TECHNICAL_ENV,
+          SEMRUSH_ABV_SHARED_ELEMENTS_TECHNICAL_AUTH_ENABLED: 'false',
+        },
+        resolveImsToken,
+        maxRetries: 1,
+        retryBaseDelayMs: 0,
+      });
+
+      const result = await transport.fetchElement(WORKSPACE_ID, ELEMENT_ID, { original: true });
+
+      expect(result).to.deep.equal({ ok: true });
+      expect(resolveImsToken).to.have.been.calledOnce;
+      expect(fetchStub).to.have.been.calledTwice;
+      expect(fetchStub.firstCall.args[0]).to.equal(EXPECTED_URL);
+      expect(fetchStub.firstCall.args[1].headers.Authorization).to.equal(`Bearer ${IMS_TOKEN}`);
+      expect(fetchStub.firstCall.args[1].body).to.equal(JSON.stringify({ original: true }));
+    });
+
     [
-      [{ SEMRUSH_BRAND_CLAIMS_API_KEY: undefined }, 'SEMRUSH_BRAND_CLAIMS_API_KEY'],
-      [{ SEMRUSH_BRAND_CLAIMS_API_KEY: '   ' }, 'SEMRUSH_BRAND_CLAIMS_API_KEY'],
+      [{ SEMRUSH_ABV_SHARED_ELEMENTS_API_KEY: undefined }, 'SEMRUSH_ABV_SHARED_ELEMENTS_API_KEY'],
+      [{ SEMRUSH_ABV_SHARED_ELEMENTS_API_KEY: '   ' }, 'SEMRUSH_ABV_SHARED_ELEMENTS_API_KEY'],
     ].forEach(([envOverride, variable]) => {
       it(`fails closed with 503 for invalid ${variable} configuration`, async () => {
         const resolveImsToken = sinon.stub().resolves(IMS_TOKEN);
@@ -229,9 +286,16 @@ describe('createElementsTransport', () => {
       });
     });
 
-    it('uses the fixed Semrush external origin and URL-encodes ids', async () => {
+    it('uses the fixed Semrush external origin and ignores the legacy base URL', async () => {
       fetchStub.resolves(makeResponse(200, {}));
-      const transport = await makePurposeTransport();
+      const transport = await makePurposeTransport({
+        env: {
+          ...TECHNICAL_ENV,
+          SEMRUSH_BRAND_CLAIMS_BASE_URL: 'https://prior-brand-claims.example.test',
+          SEMRUSH_BRAND_CLAIMS_HALLUCINATION_DETECTION_ELEMENTS_BASE_URL:
+            'https://legacy.example.test',
+        },
+      });
 
       await transport.fetchElement('ws/special', 'el/special', {});
 

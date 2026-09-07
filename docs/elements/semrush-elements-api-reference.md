@@ -62,8 +62,10 @@ Content-Type: application/json
 { ...element-specific payload }
 ```
 
-The temporary technical-account exception is limited to the code-owned `brand_claims` purpose.
-The response-feed handler is statically bound to that purpose.
+The temporary technical-account exception uses a code-owned purpose-to-credential-profile map.
+The `brand_claims` and reserved `hallucination_detection` purposes map to the same
+`abv_shared_elements` profile. Only the response-feed handler currently has a purpose-aware call
+site, statically bound to `brand_claims`; no hallucination-detection call site is introduced here.
 
 ```
 POST https://api.semrush.com/apis/v4-raw/external-api/v1/workspaces/{workspaceId}/products/ai/elements/{elementId}
@@ -152,7 +154,7 @@ Single method: `fetchElement(workspaceId, elementId, payload)`.
 - Reads base URL from `env.SEMRUSH_PROJECTS_BASE_URL` (same secret used by the Serenity transport)
 - Enforces HTTPS — throws `ErrorWithStatusCode(503)` if misconfigured
 - Authenticates with the caller's IMS bearer token forwarded unchanged
-- `AbortController` timeout at 15 seconds — throws `ElementsTransportError(504)` on timeout
+- `AbortController` timeout at 30 seconds — throws `ElementsTransportError(504)` on timeout
 - Parses response body as JSON (falls back to raw text)
 - Throws `ElementsTransportError(status, message, body)` for non-2xx responses
 
@@ -268,12 +270,18 @@ Generic Semrush Elements APIs authenticate via the caller's **IMS access token**
 `requireImsBearer` throws `ErrorWithStatusCode(401)` if the header is missing or if the caller used a
 non-IMS auth method (e.g. scoped API key).
 
-There is one temporary exception: when `SEMRUSH_BRAND_CLAIMS_TECHNICAL_AUTH_ENABLED` is exactly `true`,
-the code-owned `brand_claims` purpose uses the external API with a Vault-injected technical-account
-API key. Generic Elements handlers cannot select this mode, and request query, header, and body
-values cannot choose the purpose. Enabled technical mode fails closed with HTTP 503 if its base URL
-or key is missing or invalid, without falling back to IMS. Technical-account 429 responses are not
-retried because Brand Claims owns one credential rate pool.
+There is one temporary credential profile, `abv_shared_elements`, shared by exactly the code-owned
+`brand_claims` and `hallucination_detection` purposes. When
+`SEMRUSH_ABV_SHARED_ELEMENTS_TECHNICAL_AUTH_ENABLED` is exactly `true`, either mapped purpose uses
+the external REST API with the Vault-injected `SEMRUSH_ABV_SHARED_ELEMENTS_API_KEY`. Unknown or
+unmapped purposes remain IMS-only; there is no default technical profile. Generic Elements handlers
+cannot select this mode, and request query, header, and body values cannot choose the purpose,
+profile, or key.
+
+Enabled technical mode fails closed with HTTP 503 when its shared API key is missing or blank,
+without falling back to IMS or another ABV key. The external host is fixed at
+`https://api.semrush.com`; there is no base-URL configuration for this route. Technical-account 429
+responses are not retried because both mapped purposes share one credential rate pool.
 
 ---
 
@@ -481,18 +489,28 @@ Upstream error bodies are **never forwarded to clients** — they are logged ser
 | Variable | Source | Used by |
 |---|---|---|
 | `SEMRUSH_PROJECTS_BASE_URL` | Vault `dx_mysticat/<env>/api-service` | Internal IMS Elements API base host (e.g. `https://www.semrush.com`) |
-| `SEMRUSH_BRAND_CLAIMS_TECHNICAL_AUTH_ENABLED` | Environment configuration | Exact string `true` enables the temporary technical-account route for the code-owned `brand_claims` purpose only |
-| `SEMRUSH_BRAND_CLAIMS_API_KEY` | Vault `dx_mysticat/<env>/api-service` | Temporary technical-account API key; never store it in source or local documentation |
+| `SEMRUSH_ABV_SHARED_ELEMENTS_TECHNICAL_AUTH_ENABLED` | Environment configuration | Exact string `true` enables the temporary external route for purposes mapped to `abv_shared_elements` |
+| `SEMRUSH_ABV_SHARED_ELEMENTS_API_KEY` | Vault `dx_mysticat/<env>/api-service` | Temporary shared Elements REST `Apikey` credential; never store it in source or local documentation |
 
-The purpose namespace is intentional: this credential is owned by **Brand Claims**, not by Elements
-or ABV generally. Other ABV capabilities may hold their own Semrush API keys and must use distinct
-purpose-owned names. Broad names such as `SEMRUSH_ELEMENTS_TECHNICAL_API_KEY` are deliberately
-ignored and must never be introduced as aliases.
+The profile namespace is intentional. Only `brand_claims` and `hallucination_detection` map to
+`abv_shared_elements`, and both consume the same key. Unknown purposes have no default profile and
+remain IMS-only. Other ABV capabilities may hold their own Semrush API keys, but they require a
+separately declared code-owned profile and purpose mapping before they can use technical auth.
+Broad names such as `SEMRUSH_ELEMENTS_TECHNICAL_API_KEY`, the earlier Brand Claims-only names
+`SEMRUSH_BRAND_CLAIMS_TECHNICAL_AUTH_ENABLED`, `SEMRUSH_BRAND_CLAIMS_API_KEY`, and
+`SEMRUSH_BRAND_CLAIMS_BASE_URL`, and the earlier combined-purpose stopgap names
+`SEMRUSH_BRAND_CLAIMS_HALLUCINATION_DETECTION_ELEMENTS_STOPGAP_ENABLED`,
+`SEMRUSH_BRAND_CLAIMS_HALLUCINATION_DETECTION_ELEMENTS_API_KEY`, and
+`SEMRUSH_BRAND_CLAIMS_HALLUCINATION_DETECTION_ELEMENTS_BASE_URL` are deliberately ignored and are
+not aliases.
 
 The external origin is the fixed Semrush gateway `https://api.semrush.com`; it is not a secret or an
-environment-dependent deployment target, so the stopgap does not add a configurable base URL.
+environment-dependent deployment target, so this stopgap does not add a configurable base URL.
 
-The technical-account branch is a temporary stopgap until S2S authentication is available. Configure
-the key before setting the enable flag. An enabled allowed purpose fails closed with HTTP 503 when
-the key is missing; it never falls back to caller IMS or another key. Generic Elements endpoints
-remain IMS-only.
+This temporary Elements REST `Apikey` seam is related to, but distinct from, the Semrush AI
+Visibility gRPC OAuth/Bearer provider in #3064/#3099. It intentionally has no code dependency on or
+credential reuse with that provider. Configure the shared key before setting the enable flag. An
+enabled mapped purpose fails closed with HTTP 503 when the key is missing; it never falls back to
+caller IMS or another key. Generic Elements endpoints remain IMS-only. When proper Elements S2S is
+available, replace the technical branch behind `createElementsTransportForPurpose`; callers retain
+the generic `fetchElement(workspaceId, elementId, payload)` contract.

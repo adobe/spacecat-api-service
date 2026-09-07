@@ -20,10 +20,20 @@ const EXTERNAL_ELEMENTS_BASE_URL = 'https://api.semrush.com';
 const EXTERNAL_ELEMENTS_API_PATH = '/apis/v4-raw/external-api/v1/workspaces';
 
 export const ELEMENTS_PURPOSE_BRAND_CLAIMS = 'brand_claims';
+export const ELEMENTS_PURPOSE_HALLUCINATION_DETECTION = 'hallucination_detection';
+export const ELEMENTS_CREDENTIAL_PROFILE_ABV_SHARED_ELEMENTS = 'abv_shared_elements';
 
-const TECHNICAL_AUTH_PURPOSES = new Set([
-  ELEMENTS_PURPOSE_BRAND_CLAIMS,
-]);
+const ABV_SHARED_ELEMENTS_CREDENTIAL_PROFILE = Object.freeze({
+  id: ELEMENTS_CREDENTIAL_PROFILE_ABV_SHARED_ELEMENTS,
+  enabledEnvVar: 'SEMRUSH_ABV_SHARED_ELEMENTS_TECHNICAL_AUTH_ENABLED',
+  apiKeyEnvVar: 'SEMRUSH_ABV_SHARED_ELEMENTS_API_KEY',
+});
+
+// Purpose ownership is code-controlled: callers cannot select a credential profile or key.
+const CREDENTIAL_PROFILE_BY_PURPOSE = Object.freeze({
+  [ELEMENTS_PURPOSE_BRAND_CLAIMS]: ABV_SHARED_ELEMENTS_CREDENTIAL_PROFILE,
+  [ELEMENTS_PURPOSE_HALLUCINATION_DETECTION]: ABV_SHARED_ELEMENTS_CREDENTIAL_PROFILE,
+});
 // Verified against a real Semrush-provisioned brand: individual Stats-per-URL
 // calls were timing out at 15s roughly half the time; 30s was needed for them
 // to reliably complete (and even then, some calls come in close to that
@@ -90,13 +100,12 @@ function buildHeaders(imsToken) {
   };
 }
 
-function technicalApiKey(env) {
-  const key = typeof env?.SEMRUSH_BRAND_CLAIMS_API_KEY === 'string'
-    ? env.SEMRUSH_BRAND_CLAIMS_API_KEY.trim()
-    : env?.SEMRUSH_BRAND_CLAIMS_API_KEY;
+function technicalApiKey(env, credentialProfile) {
+  const raw = env?.[credentialProfile.apiKeyEnvVar];
+  const key = typeof raw === 'string' ? raw.trim() : raw;
   if (!hasText(key)) {
     throw new ErrorWithStatusCode(
-      'SEMRUSH_BRAND_CLAIMS_API_KEY is not configured',
+      `${credentialProfile.apiKeyEnvVar} is not configured`,
       503,
     );
   }
@@ -319,15 +328,15 @@ export function createElementsTransport({
   };
 }
 
-function createTechnicalElementsTransport({ env }) {
-  const apiKey = technicalApiKey(env);
+function createTechnicalElementsTransport({ env, credentialProfile }) {
+  const apiKey = technicalApiKey(env, credentialProfile);
 
   return {
     async fetchElement(workspaceId, elementId, payload, callOpts = {}) {
       const url = `${EXTERNAL_ELEMENTS_BASE_URL}${EXTERNAL_ELEMENTS_API_PATH}/${enc(workspaceId)}/products/ai/elements/${enc(elementId)}`;
       return request(url, buildTechnicalHeaders(apiKey), { render_data: payload }, {
-        // Brand Claims owns this stopgap credential and its small per-credential pool. Never
-        // replay technical-account requests: retries would amplify concurrent background traffic.
+        // This shared profile has a small per-credential pool. Never replay technical-account
+        // requests: retries would amplify concurrent background traffic across its purposes.
         maxRetries: 0,
         timeoutMs: callOpts.timeoutMs,
         workspaceId,
@@ -338,11 +347,13 @@ function createTechnicalElementsTransport({ env }) {
 }
 
 /**
- * Selects the temporary technical-account transport only for an explicitly allowed ABV purpose.
- * All other calls lazily resolve caller IMS credentials and retain the existing transport.
+ * Selects a temporary technical-account transport only through the code-owned ABV
+ * purpose-to-credential-profile mapping. All unmapped or disabled purposes lazily resolve caller
+ * IMS credentials and retain the existing transport.
  *
- * This is the single replacement boundary for the temporary credential. Future S2S auth should
- * replace only the allowed-purpose branch without changing the service or its callers.
+ * This is the single replacement boundary for the temporary REST Apikey credential. Proper
+ * Elements S2S should replace only the mapped-purpose branch without changing services or callers.
+ * It is deliberately distinct from the AI Visibility gRPC OAuth provider (#3064/#3099).
  *
  * @param {object} args
  * @param {object} args.env
@@ -359,11 +370,14 @@ export async function createElementsTransportForPurpose({
   maxRetries = DEFAULT_MAX_RETRIES,
   retryBaseDelayMs = DEFAULT_RETRY_BASE_DELAY_MS,
 }) {
-  const useTechnicalAuth = env?.SEMRUSH_BRAND_CLAIMS_TECHNICAL_AUTH_ENABLED === 'true'
-    && TECHNICAL_AUTH_PURPOSES.has(purpose);
+  const credentialProfile = Object.hasOwn(CREDENTIAL_PROFILE_BY_PURPOSE, purpose)
+    ? CREDENTIAL_PROFILE_BY_PURPOSE[purpose]
+    : undefined;
+  const useTechnicalAuth = credentialProfile
+    && env?.[credentialProfile.enabledEnvVar] === 'true';
 
   if (useTechnicalAuth) {
-    return createTechnicalElementsTransport({ env });
+    return createTechnicalElementsTransport({ env, credentialProfile });
   }
 
   const imsToken = await resolveImsToken();
