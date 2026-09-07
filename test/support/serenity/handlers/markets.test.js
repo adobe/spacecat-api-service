@@ -608,10 +608,10 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     expect(result.body.error).to.equal('unknownLanguage');
   });
 
-  // Branch coverage: ICU DisplayNames returns the input verbatim for unknown
-  // tags. The handler guards against that and returns null from
-  // isoToEnglishName, which surfaces as 400 unknownLanguage.
-  it('400s when the language tag is not a real language (ICU returns it unchanged)', async () => {
+  // Branch coverage: a syntactically valid but unresolvable code (not a key in
+  // the catalog's byCode map) surfaces as 400 unknownLanguage — no fallback
+  // heuristic catches it (LLMO-7420: exact code match only).
+  it('400s when the language code is not in the Semrush catalog', async () => {
     const dataAccess = makeDataAccess([]);
     dataAccess.BrandSemrushProject.findBySlice.resolves(null);
     const transport = {
