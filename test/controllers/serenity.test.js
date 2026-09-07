@@ -96,6 +96,7 @@ function fakeContext({
   brand = makeBrandModel(),
   env = {},
   promiseToken = undefined,
+  promiseAudience = undefined,
 } = {}) {
   return {
     env,
@@ -103,6 +104,7 @@ function fakeContext({
       headers: {
         ...(bearer ? { authorization: `Bearer ${bearer}` } : {}),
         ...(promiseToken ? { 'x-promise-token': promiseToken } : {}),
+        ...(promiseAudience ? { 'x-promise-audience': promiseAudience } : {}),
       },
     },
     attributes: {
@@ -2909,6 +2911,8 @@ describe('SerenityController', () => {
         }];
         const response = await controller.createPrompts(fakeContext({
           data: { async: true, prompts },
+          promiseToken: 'promise-token-xyz',
+          promiseAudience: 'semrush',
         }));
 
         expect(response.status).to.equal(202);
@@ -2917,6 +2921,11 @@ describe('SerenityController', () => {
         expect(createAndEnqueueJobStub).to.have.been.calledOnce;
         const [, enqueueArgs] = createAndEnqueueJobStub.firstCall.args;
         expect(enqueueArgs.jobType).to.equal('serenity-classify-prompts');
+        // Regression guard for the async-500 bug: the controller forwards the
+        // caller's raw promise token + SEMRUSH pair to the worker instead of
+        // minting a new one via the (unprovisioned) EMITTER pair.
+        expect(enqueueArgs.promiseToken).to.deep.equal({ promise_token: 'promise-token-xyz' });
+        expect(enqueueArgs.promisePair).to.equal('SEMRUSH');
         expect(enqueueArgs.metadata).to.deep.equal({
           // callerId captured at enqueue time (LLMO-6289) — no auth profile on the
           // test context, so it resolves to the `unknown` sentinel. The default
@@ -2945,6 +2954,8 @@ describe('SerenityController', () => {
         }];
         const response = await controller.createPrompts(fakeContext({
           data: { async: true, prompts },
+          promiseToken: 'promise-token-xyz',
+          promiseAudience: 'semrush',
         }));
 
         expect(response.status).to.equal(202);
@@ -2953,6 +2964,8 @@ describe('SerenityController', () => {
         expect(createAndEnqueueJobStub).to.have.been.calledOnce;
         const [, enqueueArgs] = createAndEnqueueJobStub.firstCall.args;
         expect(enqueueArgs.jobType).to.equal('serenity-classify-prompts');
+        expect(enqueueArgs.promiseToken).to.deep.equal({ promise_token: 'promise-token-xyz' });
+        expect(enqueueArgs.promisePair).to.equal('SEMRUSH');
         expect(enqueueArgs.metadata).to.deep.equal({
           mode: 'create',
           brandId: BRAND,
@@ -2970,6 +2983,51 @@ describe('SerenityController', () => {
         // Neither synchronous create handler runs.
         expect(handlers.handleCreatePromptsSubworkspace).to.not.have.been.called;
         expect(handlers.handleCreatePrompts).to.not.have.been.called;
+      });
+
+      // Async classify writes to Semrush on the caller's behalf after the request
+      // returns, so it REQUIRES the caller's promise token + semrush audience to
+      // carry forward. These two guards are defense-in-depth (the UI always sends
+      // both) and, critically, prevent the async branch from falling through to the
+      // token-MINT path that shipped broken (unprovisioned EMITTER pair → 500).
+      it('400s without enqueueing when async is true but the x-promise-token header is absent', async () => {
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const response = await controller.createPrompts(fakeContext({
+          data: { async: true, prompts: [{ text: 'x', geoTargetId: 2840, languageCode: 'en' }] },
+          promiseAudience: 'semrush',
+        }));
+
+        expect(response.status).to.equal(400);
+        const body = await readBody(response);
+        expect(body.error).to.equal('invalidRequest');
+        expect(body.message).to.match(/requires a promise token/i);
+        expect(createAndEnqueueJobStub).to.not.have.been.called;
+      });
+
+      it('400s without enqueueing when async is true but the x-promise-audience: semrush header is absent', async () => {
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const response = await controller.createPrompts(fakeContext({
+          data: { async: true, prompts: [{ text: 'x', geoTargetId: 2840, languageCode: 'en' }] },
+          promiseToken: 'promise-token-xyz',
+        }));
+
+        expect(response.status).to.equal(400);
+        const body = await readBody(response);
+        expect(body.error).to.equal('invalidRequest');
+        expect(body.message).to.match(/x-promise-audience: semrush/);
+        expect(createAndEnqueueJobStub).to.not.have.been.called;
+      });
+
+      it('400s without enqueueing when async is true and the x-promise-audience is an unknown value', async () => {
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const response = await controller.createPrompts(fakeContext({
+          data: { async: true, prompts: [{ text: 'x', geoTargetId: 2840, languageCode: 'en' }] },
+          promiseToken: 'promise-token-xyz',
+          promiseAudience: 'bogus',
+        }));
+
+        expect(response.status).to.equal(400);
+        expect(createAndEnqueueJobStub).to.not.have.been.called;
       });
 
       // Regression guard for the #2 collision (the whole point of this fix):

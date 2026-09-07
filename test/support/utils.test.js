@@ -39,6 +39,7 @@ import {
   isViewAsTrialRequest,
   isViewFullExperienceRequest,
   getImsUserTokenStrict,
+  getRawPromiseToken,
   resolveCallerImsUserId,
   sendGlobalImportRunMessage,
   triggerGlobalImportRun,
@@ -2112,6 +2113,36 @@ describe('utils', () => {
       expect(err.status).to.equal(400);
       expect(err.message).to.not.contain('\n');
       expect(err.message).to.not.contain('\r');
+    });
+  });
+
+  describe('getRawPromiseToken', () => {
+    const ctx = (token) => ({
+      pathInfo: { headers: token === undefined ? {} : { 'x-promise-token': token } },
+    });
+
+    it('decodes and returns the promise token when the header is present', () => {
+      expect(getRawPromiseToken(ctx('promise%20token%20xyz'))).to.equal('promise token xyz');
+    });
+
+    it('returns an already-decoded token unchanged', () => {
+      expect(getRawPromiseToken(ctx('raw-promise-token'))).to.equal('raw-promise-token');
+    });
+
+    it('returns the raw header value when it is not valid percent-encoding', () => {
+      expect(getRawPromiseToken(ctx('promise%zztoken'))).to.equal('promise%zztoken');
+    });
+
+    it('returns undefined when the header is absent', () => {
+      expect(getRawPromiseToken(ctx())).to.equal(undefined);
+    });
+
+    it('returns undefined when the header is empty', () => {
+      expect(getRawPromiseToken(ctx(''))).to.equal(undefined);
+    });
+
+    it('returns undefined when the context is nullish', () => {
+      expect(getRawPromiseToken(undefined)).to.equal(undefined);
     });
   });
 

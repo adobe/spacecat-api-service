@@ -83,7 +83,12 @@ import { resolveBrandUuid } from '../support/prompts-storage.js';
 import {
   getBrandAliases, getBrandUrlSources, getBrandCompetitors, updateBrand, getBrandBaseSiteId,
 } from '../support/brands-storage.js';
-import { ErrorWithStatusCode, resolveSemrushImsToken as resolveImsTokenViaPromise } from '../support/utils.js';
+import {
+  ErrorWithStatusCode,
+  resolveSemrushImsToken as resolveImsTokenViaPromise,
+  resolvePromisePair,
+  getRawPromiseToken,
+} from '../support/utils.js';
 import {
   ensureMarketSite,
   resolveSiteIdentity,
@@ -563,7 +568,6 @@ function SerenityController(context, log, env) {
   const createPrompts = async (ctx) => {
     let auth;
     try {
-      const imsToken = await resolveSemrushImsToken(ctx);
       auth = await authorize(ctx);
       if (auth.error) {
         return auth.error;
@@ -595,8 +599,35 @@ function SerenityController(context, log, env) {
             400,
           );
         }
+        // Async classification writes to Semrush in the background on the caller's
+        // behalf, so it REQUIRES the caller's promise token + semrush audience — there
+        // is no other way to carry the caller's auth forward to a job that outlives
+        // the request. Forward it as-is (do NOT exchange it here): the worker's own
+        // exchangeAndPersistPromiseToken does the first real exchange when it picks
+        // up the job. Minting a NEW token via the EMITTER pair here was the bug this
+        // fixes — it required IMS_PROMISE_SEMRUSH_EMITTER_* config that was never
+        // provisioned since no other path ever needed it (every other serenity path
+        // only EXCHANGES the caller's token via the CONSUMER pair, which is provisioned).
+        const rawPromiseToken = getRawPromiseToken(ctx);
+        if (!rawPromiseToken) {
+          return createResponse(
+            { error: 'invalidRequest', message: `Async prompt classification requires a promise token; send the ${X_PROMISE_TOKEN_HEADER} header` },
+            400,
+          );
+        }
+        // resolvePromisePair throws ErrorWithStatusCode(400) on an unknown audience —
+        // let it propagate to the outer catch/mapError, which maps it to the same 400.
+        const promisePair = resolvePromisePair(ctx);
+        if (promisePair !== 'SEMRUSH') {
+          return createResponse(
+            { error: 'invalidRequest', message: 'Async prompt classification requires the x-promise-audience: semrush header' },
+            400,
+          );
+        }
         const job = await createAndEnqueueJob(ctx, {
           jobType: CLASSIFY_PROMPTS_JOB_TYPE,
+          promiseToken: { promise_token: rawPromiseToken },
+          promisePair,
           metadata: {
             mode: 'create',
             brandId: auth.brandUuid,
@@ -621,6 +652,11 @@ function SerenityController(context, log, env) {
         });
         return accepted({ jobId: job.getId(), status: job.getStatus() });
       }
+      // Sync branch only: resolve (and thereby EXCHANGE) the caller's promise token
+      // into an IMS access token for the immediate upstream write. The async branch
+      // above never reaches here — it forwards the raw token to the worker instead,
+      // so the token is exchanged at most once (avoiding a wasted first exchange).
+      const imsToken = await resolveSemrushImsToken(ctx);
       const transport = buildTransport(ctx, imsToken);
       const classifyPromptType = await buildPromptTypeClassifier(ctx, auth.brandUuid);
       // serenity-docs#32: one shared write-budget deadline for classify + create

@@ -1035,6 +1035,27 @@ export function resolveCallerImsUserId(context) {
 }
 
 /**
+ * Reads and decodes the caller's `x-promise-token` header, if present, WITHOUT
+ * exchanging it. Used by callers that need to hand the caller's promise token
+ * onward (e.g. the async job runner enqueue path) rather than exchange it for
+ * an access token themselves.
+ * @param {object} context
+ * @returns {string|undefined} The decoded promise token, or undefined if absent.
+ */
+export function getRawPromiseToken(context) {
+  const header = context?.pathInfo?.headers?.[X_PROMISE_TOKEN_HEADER];
+  if (!hasText(header)) {
+    return undefined;
+  }
+  try {
+    return decodeURIComponent(header);
+  } catch {
+    // Bearer-style tokens may contain literal %; use as-is.
+    return header;
+  }
+}
+
+/**
  * Resolves the IMS access token to forward to the Semrush gateway for a request.
  *
  * Preferred path: the caller sends `x-promise-token` (minted by POST /auth/v2/promise).
@@ -1067,14 +1088,8 @@ export async function resolveSemrushImsToken(
   fallback = getImsUserTokenStrict,
 ) {
   const pair = resolvePromisePair(context);
-  const promiseTokenHeader = context?.pathInfo?.headers?.[X_PROMISE_TOKEN_HEADER];
-  if (hasText(promiseTokenHeader)) {
-    let decoded = promiseTokenHeader;
-    try {
-      decoded = decodeURIComponent(promiseTokenHeader);
-    } catch {
-      // Bearer-style tokens may contain literal %; use as-is.
-    }
+  const decoded = getRawPromiseToken(context);
+  if (decoded !== undefined) {
     try {
       return await exchangePromiseToken(context, decoded, pair);
     } catch (e) {
