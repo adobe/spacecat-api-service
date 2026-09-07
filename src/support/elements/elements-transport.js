@@ -328,6 +328,11 @@ export function createElementsTransport({
   };
 }
 
+/**
+ * Creates one request-scoped technical transport. The API key is captured at construction time,
+ * so callers must not cache this transport across requests or credential rotations. The external
+ * gateway contract differs from IMS: element payloads are wrapped in `render_data`.
+ */
 function createTechnicalElementsTransport({ env, credentialProfile }) {
   const apiKey = technicalApiKey(env, credentialProfile);
 
@@ -374,8 +379,9 @@ export async function createElementsTransportForPurpose({
   const credentialProfile = Object.hasOwn(CREDENTIAL_PROFILE_BY_PURPOSE, purpose)
     ? CREDENTIAL_PROFILE_BY_PURPOSE[purpose]
     : undefined;
-  const useTechnicalAuth = credentialProfile
-    && env?.[credentialProfile.enabledEnvVar] === 'true';
+  const rawEnabled = credentialProfile && env?.[credentialProfile.enabledEnvVar];
+  const useTechnicalAuth = typeof rawEnabled === 'string'
+    && rawEnabled.trim() === 'true';
 
   if (useTechnicalAuth) {
     return createTechnicalElementsTransport({ env, credentialProfile });

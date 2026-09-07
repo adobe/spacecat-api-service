@@ -161,6 +161,27 @@ describe('createElementsTransport', () => {
       });
     });
 
+    [' true ', 'true\n'].forEach((flag) => {
+      it(`trims surrounding whitespace from the enabled flag ${JSON.stringify(flag)}`, async () => {
+        fetchStub.resolves(makeResponse(200, {}));
+        const resolveImsToken = sinon.stub().resolves(IMS_TOKEN);
+        const transport = await makePurposeTransport({
+          env: {
+            ...TECHNICAL_ENV,
+            SEMRUSH_ABV_SHARED_ELEMENTS_TECHNICAL_AUTH_ENABLED: flag,
+          },
+          resolveImsToken,
+        });
+
+        await transport.fetchElement(WORKSPACE_ID, ELEMENT_ID, {});
+
+        expect(resolveImsToken).to.not.have.been.called;
+        expect(fetchStub.firstCall.args[0]).to.equal(EXPECTED_EXTERNAL_URL);
+        expect(fetchStub.firstCall.args[1].headers.Authorization)
+          .to.equal(`Apikey ${TECHNICAL_API_KEY}`);
+      });
+    });
+
     it('ignores broad and legacy Brand Claims variables that are not owned by the profile', async () => {
       fetchStub.resolves(makeResponse(200, {}));
       const resolveImsToken = sinon.stub().resolves(IMS_TOKEN);
