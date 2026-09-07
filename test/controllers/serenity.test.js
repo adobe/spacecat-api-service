@@ -303,6 +303,12 @@ describe('SerenityController', () => {
       },
       '../../src/support/access-control-util.js': MockAccessControlUtil,
       '../../src/support/prompts-storage.js': {
+        // isServicePrincipal is NOT mocked -- the real predicate's fail-safe
+        // shape (isS2SConsumer()/isS2SAdmin() absent -> false, falls through
+        // to a non-jwt/non-ims authType) is exactly what the fake context's
+        // authInfo ({ getType: () => authType }, no S2S methods) exercises,
+        // so the controller-level assertions cover the real function rather
+        // than a stand-in that could silently drift from it.
         resolveBrandUuid: resolveBrandUuidStub,
       },
       '../../src/support/brands-storage.js': {
@@ -1911,6 +1917,11 @@ describe('SerenityController', () => {
       const response = await controller.createPrompts(fakeContext({ data: { prompts: [] } }));
       expect(response.status).to.equal(200);
       expect(handlers.handleCreatePromptsSubworkspace).to.have.been.calledOnce;
+      // .lastArg (the options object) rather than a positional index: the
+      // assertion then survives a signature change that adds/removes an
+      // earlier positional param, instead of silently checking the wrong arg.
+      expect(handlers.handleCreatePromptsSubworkspace.firstCall.lastArg)
+        .to.include({ originValue: 'human' });
       expect(handlers.handleCreatePrompts).to.not.have.been.called;
     });
 
@@ -2905,7 +2916,25 @@ describe('SerenityController', () => {
       }));
       expect(response.status).to.equal(200);
       expect(handlers.handleCreatePrompts).to.have.been.calledOnce;
+      // .lastArg, not a positional index -- signature-independent (see the
+      // sibling assertion above).
+      expect(handlers.handleCreatePrompts.firstCall.lastArg)
+        .to.include({ originValue: 'human' });
       expect(handlers.handleCreatePromptsSubworkspace).not.to.have.been.called;
+    });
+
+    it('passes ai origin to synchronous creates from a service principal', async () => {
+      handlers.handleCreatePrompts.resolves({ created: 1, failed: [] });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.createPrompts(fakeContext({
+        authType: 'api-key',
+        promiseToken: 'promise-token',
+        data: { prompts: [{ text: 'generated prompt', region: 'us' }] },
+      }));
+
+      expect(response.status).to.equal(200);
+      expect(handlers.handleCreatePrompts.firstCall.lastArg)
+        .to.include({ originValue: 'ai' });
     });
 
     // serenity-docs#33 (+#2/#3): bulk import routes to the async job runner via a
@@ -2943,6 +2972,7 @@ describe('SerenityController', () => {
           workspaceId: WORKSPACE,
           parentWorkspaceId: WORKSPACE,
           prompts,
+          originValue: 'human',
           callerId: 'unknown',
         });
         // The synchronous path never runs.
@@ -2981,6 +3011,7 @@ describe('SerenityController', () => {
           workspaceId: SUBWS,
           parentWorkspaceId: WORKSPACE,
           prompts,
+          originValue: 'human',
           callerId: 'unknown',
         });
         // Neither synchronous create handler runs.
@@ -3002,6 +3033,21 @@ describe('SerenityController', () => {
         expect(response.status).to.equal(200);
         expect(createAndEnqueueJobStub).to.not.have.been.called;
         expect(handlers.handleCreatePrompts).to.have.been.calledOnce;
+      });
+
+      it('records ai origin in async job metadata for a service principal', async () => {
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        await controller.createPrompts(fakeContext({
+          authType: 'api-key',
+          promiseToken: 'promise-token',
+          data: {
+            async: true,
+            prompts: [{ text: 'generated prompt', geoTargetId: 2840, languageCode: 'en' }],
+          },
+        }));
+
+        const [, enqueueArgs] = createAndEnqueueJobStub.firstCall.args;
+        expect(enqueueArgs.metadata.originValue).to.equal('ai');
       });
 
       it('stays synchronous (no enqueue) when async is absent, even for a large batch', async () => {

@@ -29,10 +29,11 @@ import {
   resolveIntentValueInjection,
   resolveServerOwnedValueInjection,
   readTagTreeSnapshot,
+  indexLevelByName,
 } from '../tag-tree.js';
 import {
   DIMENSION, ORIGIN_VALUE, INTENT_VALUE, PROXY_CREATE_SOURCE_VALUE,
-  canonicalizeSource, SOURCE_VALUES,
+  canonicalizeSource, SOURCE_VALUES, rootNameOfDimension,
 } from '../prompt-tags.js';
 import { classifyPromptIntents } from '../intent-classification.js';
 import { logPromptDeleteEvent } from '../prompt-delete-log.js';
@@ -57,6 +58,9 @@ import { logPromptDeleteEvent } from '../prompt-delete-log.js';
 export const DEFAULT_PAGE_LIMIT = 50;
 export const MAX_PAGE_LIMIT = 1000;
 export const MAX_TAG_IDS = MAX_PROMPT_TAG_IDS;
+// PATCH's raw-input ceiling bounds capUpdateTagIds' taxonomy reads while
+// preserving server-managed ids echoed by clients.
+export const MAX_UPDATE_TAG_IDS_INPUT = 500;
 // Caps the inflight upstream calls when fanning out a bulk create.
 // 8 keeps per-call wall time reasonable without overwhelming upstream rate
 // limits — the prior `serenity` testing exhausted Semrush's shared limit
@@ -1008,26 +1012,146 @@ export async function reconcilePublishErrors(
  * @param {unknown} raw
  * @returns {string[]}
  */
-function sanitizeTagIds(raw) {
+function validTagIds(raw) {
   if (!Array.isArray(raw)) {
     return [];
   }
-  const valid = [...new Set(raw
-    .map((value) => String(value ?? '').trim())
-    .filter((value) => isValidTagIdFormat(value)))];
-  if (valid.length > MAX_PROMPT_TAG_IDS) {
-    const error = new ErrorWithStatusCode(
-      'Prompt tag limit would be exceeded; no changes were applied',
-      409,
-    );
-    error.code = ERROR_CODES.TAG_LIMIT_EXCEEDED;
-    /** @type {any} */ (error).details = {
-      attemptedCount: valid.length,
-      maxPromptTagIds: MAX_PROMPT_TAG_IDS,
-    };
-    throw error;
+  return raw
+    .map((t) => String(t || '').trim())
+    .filter((t) => isValidTagIdFormat(t));
+}
+
+/**
+ * {@link validTagIds} plus a flat cap at {@link MAX_TAG_IDS} -- the same cap the
+ * tagIds *query* filter already enforces above, so a bulk write can't fan out
+ * further than a bulk read is allowed to. Used by {@link normalizePromptInput}
+ * (CREATE) only: {@link parseUpdatePromptBody} (UPDATE) uses {@link validTagIds}
+ * directly and applies {@link capUpdateTagIds} afterward instead, because a flat
+ * positional slice is only safe when the server-derived ids are added AFTER it.
+ *
+ * This cap bounds the CALLER-supplied tags only. The server-derived dimension
+ * tags (`type`, `origin`, `source`, `intent`) are injected downstream by
+ * {@link makePromptTagInjector} and the intent injector AFTER this sanitize,
+ * and are intentionally EXEMPT from the user-facing cap — a write may
+ * therefore carry up to `MAX_TAG_IDS` + 4 ids. They must never be dropped to
+ * fit the cap: a prompt missing its `type`/`origin`/`source`/`intent` tag is
+ * invisible to that dimension's filter. On CREATE this holds trivially, since
+ * the computed ids are appended by the injector after this slice runs, never
+ * supplied by the caller pre-slice.
+ *
+ * @param {unknown} raw
+ * @returns {string[]}
+ */
+function sanitizeTagIds(raw) {
+  return validTagIds(raw).slice(0, MAX_TAG_IDS);
+}
+
+/**
+ * The closed, server-owned dimensions whose ids {@link capUpdateTagIds} exempts
+ * from the caller cap on UPDATE.
+ */
+const CLOSED_DIMENSIONS_FOR_UPDATE_CAP = [
+  DIMENSION.TYPE, DIMENSION.INTENT, DIMENSION.ORIGIN, DIMENSION.SOURCE,
+];
+
+/**
+ * Reads every id currently under one of {@link CLOSED_DIMENSIONS_FOR_UPDATE_CAP}'s
+ * roots, by root NAME rather than a generic tree walk. `findTagsInTree`'s walk
+ * only descends a root whose OWN `childrenCount` is reported nonzero, and the
+ * open `source` root reports `childrenCount: 0` (tag-tree.js fixture comment;
+ * matches upstream, since `source` values are minted on demand rather than
+ * eagerly counted) — a walk-based resolver would therefore never find a
+ * `source` id and misclassify every one of them as open. Reading each of the
+ * four roots' children directly, by the name each is provisioned under, has no
+ * such blind spot.
+ *
+ * A dimension whose root does not exist yet (a legacy project mid-provisioning)
+ * contributes nothing — there is nothing to protect on that project.
+ *
+ * @param {SerenityTransport} transport
+ * @param {string} semrushWorkspaceId
+ * @param {string} projectId
+ * @param {object} [log]
+ * @returns {Promise<Set<string>>}
+ */
+async function collectClosedDimensionTagIds(transport, semrushWorkspaceId, projectId, log) {
+  const rootsByName = await indexLevelByName(transport, semrushWorkspaceId, projectId, '', log);
+  const ids = new Set();
+  const rootIds = /** @type {string[]} */ (
+    CLOSED_DIMENSIONS_FOR_UPDATE_CAP
+      .map((dimension) => rootsByName.get(rootNameOfDimension(dimension)))
+      .filter((rootId) => Boolean(rootId))
+  );
+  // The four CLOSED-dimension roots' (type/intent/origin/source) children
+  // reads are independent of each other -- run them concurrently rather than
+  // one dimension at a time. Four, not five: `category` is the one OPEN
+  // dimension and is never exempted from the update cap.
+  const childrenByRoot = await Promise.all(
+    rootIds.map(
+      (rootId) => indexLevelByName(transport, semrushWorkspaceId, projectId, rootId, log),
+    ),
+  );
+  rootIds.forEach((rootId, i) => {
+    ids.add(rootId);
+    for (const childId of childrenByRoot[i].values()) {
+      ids.add(childId);
+    }
+  });
+  return ids;
+}
+
+/**
+ * Re-applies {@link MAX_TAG_IDS} to an UPDATE's format-validated `tagIds`, but
+ * ONLY to the ids that do NOT sit under a closed, server-owned dimension root
+ * (`type`/`intent`/`origin`/`source`).
+ *
+ * On CREATE, {@link sanitizeTagIds}'s flat positional slice is safe because the
+ * server-derived ids are appended by {@link makePromptTagInjector} strictly
+ * AFTER the slice runs — a caller can never supply one pre-slice. On UPDATE
+ * there is no such ordering guarantee: the body is the full next state (see
+ * {@link handleUpdatePrompt}'s docblock), so a client that echoes its prompt's
+ * own previously-returned tag list — the documented edit-form pattern, since
+ * clients always have the existing tagIds available locally — is submitting
+ * ALREADY-INJECTED closed-dimension ids as ordinary caller-supplied ids. A flat
+ * slice at {@link MAX_TAG_IDS} would then silently drop whichever one landed
+ * past index 50. `type`/`intent` self-heal because {@link makePromptTagInjector}
+ * and the intent injector always strip-and-reinject them regardless of what
+ * survived the slice, but `origin`/`source` are NOT re-derived on UPDATE
+ * (origin-dimension.md §3 item 3: the stored value rides through untouched) --
+ * once truncated away, nothing puts them back, and the prompt becomes invisible
+ * to that dimension's filter with no error.
+ *
+ * Resolves the closed-dimension id set in {@link collectClosedDimensionTagIds},
+ * then caps only the ids NOT in it. Skips that resolve entirely when `tagIds`
+ * is already at or under the cap — the overwhelmingly common case — so this
+ * adds no cost to a typical edit.
+ *
+ * @param {SerenityTransport} transport
+ * @param {string} semrushWorkspaceId
+ * @param {string} projectId
+ * @param {string[]} tagIds - already {@link validTagIds}-validated.
+ * @param {object} [log]
+ * @returns {Promise<string[]>}
+ */
+export async function capUpdateTagIds(transport, semrushWorkspaceId, projectId, tagIds, log) {
+  if (tagIds.length <= MAX_TAG_IDS) {
+    return tagIds;
   }
-  return valid;
+  const closedIds = await collectClosedDimensionTagIds(
+    transport,
+    semrushWorkspaceId,
+    projectId,
+    log,
+  );
+  const managed = [];
+  const open = [];
+  for (const id of tagIds) {
+    (closedIds.has(id) ? managed : open).push(id);
+  }
+  // Reorders managed ids ahead of open ids relative to the caller's original
+  // array -- harmless today since the upstream replace-mode write treats
+  // `references` as an unordered set, never a caller-meaningful sequence.
+  return [...managed, ...open.slice(0, MAX_TAG_IDS)];
 }
 
 /**
@@ -1117,7 +1241,6 @@ export function normalizePromptInput(input) {
  *   response carried none.
  */
 export async function createOnePrompt(transport, semrushWorkspaceId, projectId, input, callerId) {
-  assertPromptTagLimit(input.tagIds);
   const resp = await transport.createPromptsWithMetadata(
     semrushWorkspaceId,
     projectId,
@@ -1293,7 +1416,6 @@ export function makePromptTagInjector(
       tagIds = [...tagIds.filter((id) => !valueTagIds.includes(id)), computedId];
     }
 
-    assertPromptTagLimit(tagIds);
     return { ...input, tagIds };
   };
 }
@@ -1363,7 +1485,6 @@ export function makeIntentInjector(transport, semrushWorkspaceId, intentByText, 
     const { computedId, intentTagIds } = await pending;
     const stripped = input.tagIds.filter((id) => !intentTagIds.includes(id));
     const tagIds = computedId === null ? stripped : [...stripped, computedId];
-    assertPromptTagLimit(tagIds);
     return { ...input, tagIds };
   };
 }
@@ -1417,7 +1538,17 @@ export function parseUpdatePromptBody(body) {
       body: { error: 'invalidRequest', message: 'text must be a non-empty string' },
     };
   }
-  const tagIds = sanitizeTagIds(body.tagIds);
+  if (Array.isArray(body.tagIds) && body.tagIds.length > MAX_UPDATE_TAG_IDS_INPUT) {
+    return {
+      ok: false,
+      status: 400,
+      body: {
+        error: 'invalidRequest',
+        message: `tagIds array exceeds maxItems=${MAX_UPDATE_TAG_IDS_INPUT}`,
+      },
+    };
+  }
+  const tagIds = validTagIds(body.tagIds);
   if (tagIds.length === 0) {
     return {
       ok: false,
@@ -1527,7 +1658,7 @@ export async function handleCreatePrompts(
     classifyPromptType,
     log,
     {
-      originValue: ORIGIN_VALUE.HUMAN,
+      originValue,
       sourceValue: PROXY_CREATE_SOURCE_VALUE,
       normalizeCustomerTags: true,
     },
@@ -1811,6 +1942,9 @@ export async function handleUpdatePrompt(
   // to run first for failure-safety. Skipping the reclassification would require
   // the client to send the old text — a contract change deliberately out of
   // scope here (keep the edit path a single straight line).
+  const cappedTagIds = await capUpdateTagIds(
+    transport, semrushWorkspaceId, projectId, nextTagIds, log,
+  );
   const injectComputedTags = makePromptTagInjector(
     transport,
     semrushWorkspaceId,
@@ -1826,7 +1960,7 @@ export async function handleUpdatePrompt(
   );
   const injectComputedIntent = makeIntentInjector(transport, semrushWorkspaceId, intentByText, log);
   let typed = await injectComputedTags(projectId, {
-    text: nextText, geoTargetId, tagIds: nextTagIds,
+    text: nextText, geoTargetId, tagIds: cappedTagIds,
   });
   typed = await injectComputedIntent(projectId, typed);
 

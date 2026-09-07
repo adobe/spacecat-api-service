@@ -208,7 +208,7 @@ export async function handleCreatePromptsSubworkspace(
     classifyPromptType,
     log,
     {
-      originValue: ORIGIN_VALUE.HUMAN,
+      originValue,
       sourceValue: PROXY_CREATE_SOURCE_VALUE,
       normalizeCustomerTags: true,
     },

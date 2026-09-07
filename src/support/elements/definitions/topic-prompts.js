@@ -113,6 +113,7 @@ export function buildTopicPromptsPayload({
  *     sentiment, volume, project_title, days, model, model_project_cbf }
  * where `citations`/`mentions` may be null, `position === -1` means unranked, and
  * `sentiment === null` means no sentiment. `config.data` is null (no column metadata).
+ * `days` (the per-window execution count) is surfaced in the clean contract as `executions`.
  *
  * @param {object} raw - Raw element response.
  * @returns {Array<object>} One row per prompt.
@@ -133,6 +134,12 @@ export function transformTopicPromptsResponse(raw) {
       position: position === NO_POSITION ? null : position,
       sentiment: toNumberOrNull(row?.sentiment),
       volume: Number(row?.volume) || 0,
+      // `days` = the number of executions in the window (Semrush runs a prompt at most once
+      // per model/date/project), surfaced as `executions` so consumers can compute a true
+      // per-execution citation rate (citations / executions) rather than citations / mentions.
+      // VERIFIED live 2026-09-07 (Lovesac, one topic, 30-day window, 100 rows): days <= window
+      // with 0 violations, and mentions <= days universally.
+      executions: Number(row?.days) || 0,
     };
   });
 }

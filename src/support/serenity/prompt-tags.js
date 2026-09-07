@@ -493,13 +493,14 @@ export function valueSlugOfDisplayName(dimension, displayName) {
  * default `Informational` intent (the most common intent for brand-topic
  * prompts; re-classification can refine it later). The `type` value is
  * classified per prompt at generation time (branded vs non-branded — see the
- * handler), so it is NOT seeded here. Origin is assigned explicitly by
- * authoring flows rather than as a single standard value.
+ * handler), so it is NOT seeded here. AI-generated prompts carry `origin/ai`
+ * independently from their producing-system `source`.
  *
  * Each entry names a dimension and the bare value beneath it; the caller resolves
  * the pair to an upstream tag id against the project's tree.
  */
 export const STANDARD_PROMPT_TAG_VALUES = Object.freeze([
+  Object.freeze({ dimension: DIMENSION.ORIGIN, name: ORIGIN_VALUE.AI }),
   Object.freeze({ dimension: DIMENSION.INTENT, name: INTENT_VALUE.INFORMATIONAL }),
 ]);
 

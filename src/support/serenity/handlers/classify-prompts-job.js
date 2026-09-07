@@ -153,6 +153,8 @@ async function createAndClassify(context, job, transport, metadata) {
   // stamped with the human/service that submitted them, not the job runner.
   const {
     brandId, semrushWorkspaceId, callerId = 'unknown', authMode,
+    // Jobs enqueued before origin propagation default to human authorship.
+    originValue = ORIGIN_VALUE.HUMAN,
   } = metadata;
   const inputs = Array.isArray(metadata.prompts) ? metadata.prompts : [];
 
@@ -191,7 +193,7 @@ async function createAndClassify(context, job, transport, metadata) {
     classifyPromptType,
     log,
     {
-      originValue: ORIGIN_VALUE.HUMAN,
+      originValue,
       sourceValue: PROXY_CREATE_SOURCE_VALUE,
       normalizeCustomerTags: true,
     },

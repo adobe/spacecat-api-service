@@ -8944,11 +8944,52 @@ describe('Brands Controller', () => {
       expect(submitArg.siteId).to.equal(SITE_ID);
       expect(submitArg.imsOrgId).to.equal(IMS_ORG_ID);
 
-      // createBrandPresenceSchedule must be called with correct ids
+      // createBrandPresenceSchedule must be called with correct ids, and tier:
+      // 'FREE_TRIAL' (this route has no paid gate on activation itself — LLMO-6634 —
+      // so the tier must be resolved from the org's real LLMO entitlement rather than
+      // hardcoded; isPayingLlmoSiteStub defaults to resolving false).
       expect(scheduleStub).to.have.been.calledOnceWith({
         siteId: SITE_ID,
         brandId: BRAND_UUID,
         orgId: ORGANIZATION_ID,
+        tier: 'FREE_TRIAL',
+      });
+    });
+
+    it('passes tier: PAID through to createBrandPresenceSchedule for a paying site', async () => {
+      // Regression test for LLMO-7366 x LLMO-6634: activation has no paid gate, so a
+      // hardcoded tier: 'PAID' would wrongly restrict a genuinely paying org, and a
+      // hardcoded tier: 'FREE_TRIAL' would wrongly restrict a genuinely paying org too.
+      // The tier must track the real per-org LLMO entitlement either way.
+      const scheduleStub = sinon.stub().resolves({ scheduleId: 'sch-paid' });
+      const fakeDrs = {
+        isConfigured: () => true,
+        listJobs: sinon.stub().resolves([]),
+        submitPromptGenerationJob: sinon.stub().resolves({ job_id: 'pg-1' }),
+        createBrandPresenceSchedule: scheduleStub,
+      };
+      const { controller } = await buildActivateController({
+        getBrandByIdResult: {
+          id: BRAND_UUID,
+          name: 'Acme',
+          baseSiteId: SITE_ID,
+          baseUrl: 'https://site1.com',
+          region: ['us'],
+          status: 'pending',
+          urls: [],
+        },
+        updateBrandResult: { id: BRAND_UUID },
+        fakeDrsClient: fakeDrs,
+        isPayingLlmoSiteStub: sinon.stub().resolves(true),
+      });
+
+      await controller.activateBrandForOrg(buildActivateRequest({ generatePrompts: true }));
+
+      expect(scheduleStub).to.have.been.calledOnceWith({
+        siteId: SITE_ID,
+        brandId: BRAND_UUID,
+        orgId: ORGANIZATION_ID,
+        tier: 'PAID',
       });
     });
 
