@@ -262,7 +262,7 @@ describe('serenity tag-tree', () => {
   });
 
   describe('ensureDimensionRoots', () => {
-    it('resolves all five roots without creating them when they exist', async () => {
+    it('resolves all registered roots without creating them when they exist', async () => {
       const transport = {
         listProjectTags: makeListProjectTagsStub(),
         createProjectTags: sinon.stub(),
@@ -287,7 +287,7 @@ describe('serenity tag-tree', () => {
       // Provisioned under the UPSTREAM root names, so a fresh project starts out
       // with the renamed intent root rather than one the migration must revisit.
       expect(createProjectTags.firstCall.args[2])
-        .to.deep.equal(['category', INTENT_ROOT_NAME, 'origin', 'type', 'source']);
+        .to.deep.equal(['category', 'tag', INTENT_ROOT_NAME, 'origin', 'type', 'source']);
       // …and the map a caller reads is keyed by DIMENSION, not by that name.
       expect(roots.get('intent')).to.equal(`created::${INTENT_ROOT_NAME}`);
       expect(roots.get('type')).to.equal('created::type');

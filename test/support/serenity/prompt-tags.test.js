@@ -47,24 +47,27 @@ import {
 
 describe('serenity prompt-tags taxonomy', () => {
   describe('dimension roots', () => {
-    it('includes the five roots, all bare-named (membership, never a count)', () => {
+    it('includes the registered roots, all bare-named (membership, never a count)', () => {
       // Membership, not set-equality — a further open root is contemplated
       // (source-dimension.md header), so nothing may key on the root count.
       expect([...DIMENSION_PROVISION_ORDER]).to.include.members([
-        'category', 'intent', 'origin', 'type', 'source',
+        'category', 'tag', 'intent', 'origin', 'type', 'source',
       ]);
       DIMENSION_PROVISION_ORDER.forEach((n) => expect(n).to.not.include(':'));
     });
 
-    it('splits the roots into open (category, source) and closed (intent, origin, type)', () => {
-      expect([...OPEN_DIMENSIONS]).to.deep.equal([DIMENSION.CATEGORY, DIMENSION.SOURCE]);
+    it('splits the roots into open and closed dimensions', () => {
+      expect([...OPEN_DIMENSIONS]).to.deep.equal([
+        DIMENSION.CATEGORY, DIMENSION.TAG, DIMENSION.SOURCE,
+      ]);
       expect([...CLOSED_DIMENSIONS]).to.deep.equal(['intent', 'origin', 'type']);
       expect([...ALL_DIMENSIONS].sort()).to.deep.equal([...DIMENSION_PROVISION_ORDER].sort());
     });
 
-    it('is server-owned for everything except category (write-guard / create-semantics axis)', () => {
+    it('keeps category and tag customer-owned', () => {
       expect([...SERVER_OWNED_DIMENSIONS]).to.deep.equal(['intent', 'origin', 'type', 'source']);
       expect(isServerOwnedDimension(DIMENSION.CATEGORY)).to.equal(false);
+      expect(isServerOwnedDimension(DIMENSION.TAG)).to.equal(false);
       expect(isServerOwnedDimension(DIMENSION.SOURCE)).to.equal(true);
       expect(isServerOwnedDimension(DIMENSION.INTENT)).to.equal(true);
       // `source` is server-owned yet OPEN — a separate axis from vocabulary.
@@ -326,8 +329,8 @@ describe('serenity prompt-tags taxonomy', () => {
         expect(RESERVED_ROOT_NAMES).to.include(rootNameOfDimension(d));
       });
       // Deduped: today display === slug for category/type/source, so the set
-      // is still exactly 6 entries (5 dimensions + the one intent divergence).
-      expect(RESERVED_ROOT_NAMES.length).to.equal(6);
+      // is still exactly 7 entries (6 dimensions + the one intent divergence).
+      expect(RESERVED_ROOT_NAMES.length).to.equal(7);
     });
   });
 

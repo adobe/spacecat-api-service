@@ -1285,12 +1285,12 @@ describe('handlers/markets.js — handleListTags / handleListModels', () => {
     expect(transport.listPromptsByTags).to.have.callCount(1);
   });
 
-  // Regression guard for the truncation warn log: when every one of the 50
+  // Regression guard for fail-closed reads: when every one of the 50
   // pages we read comes back full (200 items), there's at least one more page
   // upstream we never saw and the tag set is incomplete. We surface this to
   // operators via a `warn` log so the symptom (missing tag in the UI) is
   // diagnosable from log search.
-  it('listTags emits a warn log when the pagination ceiling is hit with full pages', async () => {
+  it('listTags fails closed when the pagination ceiling is hit with full pages', async () => {
     const project = makeProject({
       semrushProjectId: 'proj-big', geoTargetId: 2840, languageCode: 'en',
     });
@@ -1306,13 +1306,15 @@ describe('handlers/markets.js — handleListTags / handleListModels', () => {
     };
     const log = fakeLog();
 
-    await handleListTags(transport, dataAccess, BRAND, WORKSPACE, {
+    await expect(handleListTags(transport, dataAccess, BRAND, WORKSPACE, {
       geoTargetId: 2840, languageCode: 'en',
-    }, log);
+    }, log)).to.be.rejected.then((error) => {
+      expect(error.code).to.equal('tagTreeReadIncomplete');
+    });
 
     expect(transport.listPromptsByTags).to.have.callCount(50);
     expect(log.warn).to.have.been.calledWithMatch(
-      'handleListTags: tag pagination ceiling reached, tag set is truncated',
+      'handleListTags: tag pagination ceiling reached',
       sinon.match({
         projectId: 'proj-big',
         pagesWalked: 50,
@@ -1352,6 +1354,7 @@ describe('handlers/markets.js — handleListTags / handleListModels', () => {
       childrenCount: 2,
       promptsCount: 0,
       path: null,
+      compatibility: { state: 'readOnly', reason: 'separatorInName' },
     }]);
     // Tree read, not the prompt-derived path.
     expect(transport.listPromptsByTags).to.not.have.been.called;
@@ -1396,6 +1399,7 @@ describe('handlers/markets.js — handleListTags / handleListModels', () => {
       childrenCount: 0,
       promptsCount: 0,
       path: [{ id: 'root-1', name: 'category:Footwear' }],
+      compatibility: { state: 'readOnly', reason: 'separatorInName' },
     }]);
     expect(transport.listProjectTags.firstCall.args[2]).to.include({ parentId: 'root-1', draft: true });
   });
@@ -1433,6 +1437,7 @@ describe('handlers/markets.js — handleListTags / handleListModels', () => {
       childrenCount: 0,
       promptsCount: 7,
       path: [{ id: 'root-1', name: 'category:Footwear' }],
+      compatibility: { state: 'readOnly', reason: 'separatorInName' },
     }]);
   });
 
@@ -1464,23 +1469,24 @@ describe('handlers/markets.js — handleListTags / handleListModels', () => {
     expect(transport.listProjectTags).to.not.have.been.called;
   });
 
-  it('listProjectTagTree warns and stops at the page ceiling when the last page is still full', async () => {
+  it('listProjectTagTree fails closed at the page ceiling', async () => {
     const fullPage = Array.from({ length: 100 }, (_, i) => ({
       id: `tag-${i}`, name: `Tag ${i}`, parent_id: null, children_count: 0,
     }));
     const listProjectTags = sinon.stub().resolves({ page: 1, total: 5000, items: fullPage });
     const log = fakeLog();
 
-    const result = await listProjectTagTree(
+    await expect(listProjectTagTree(
       { listProjectTags },
       WORKSPACE,
       'proj-tree',
       '',
       log,
-    );
+    )).to.be.rejected.then((error) => {
+      expect(error.status).to.equal(503);
+      expect(error.code).to.equal('tagTreeReadIncomplete');
+    });
 
-    // 50 pages x 100 items, stopped by the ceiling rather than running forever.
-    expect(result.items).to.have.lengthOf(5000);
     expect(listProjectTags.callCount).to.equal(50);
     expect(log.warn).to.have.been.calledOnceWith(
       'listProjectTagTree: page ceiling hit; tag level may be truncated',

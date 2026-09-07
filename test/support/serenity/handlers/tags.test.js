@@ -131,6 +131,45 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
       expect(transport.publishProject).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-1');
     });
 
+    it('resolves an exact customer-owned duplicate without creating or publishing', async () => {
+      const transport = makeTransport();
+      const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
+      const res = await handler.handleCreateTag(
+        transport,
+        dataAccess,
+        BRAND,
+        WORKSPACE,
+        {
+          type: 'category',
+          name: 'Running Shoes',
+          geoTargetId: 2840,
+          languageCode: 'en',
+        },
+        fakeLog(),
+      );
+      expect(res.status).to.equal(200);
+      expect(res.body).to.include({
+        id: TAG_IDS.categoryRunningShoes,
+        created: false,
+      });
+      expect(transport.createProjectTags).to.not.have.been.called;
+      expect(transport.publishProject).to.not.have.been.called;
+    });
+
+    it('rejects the Elements path separator in authored names', async () => {
+      const transport = makeTransport();
+      const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
+      await expect(handler.handleCreateTag(
+        transport,
+        dataAccess,
+        BRAND,
+        WORKSPACE,
+        { ...validBody, name: 'Campaign__Q1' },
+        fakeLog(),
+      )).to.be.rejectedWith('name must not contain "__"');
+      expect(transport.createProjectTags).to.not.have.been.called;
+    });
+
     it('propagates a quotaExceeded 409 when the post-create republish 405s on quota (SITES-49206)', async () => {
       // Pinned disguised-405 shape (LLMO-6190, live-verified): a bare string/HTML body, never
       // JSON — isMeteredQuota keys on this SHAPE, not the bare status.
@@ -172,10 +211,11 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
       )).to.be.rejectedWith('boom');
     });
 
-    it('provisions the five dimension roots on a project that predates the taxonomy', async () => {
+    it('provisions the registered dimension roots on a project that predates the taxonomy', async () => {
       const createProjectTags = sinon.stub();
       createProjectTags.onFirstCall().resolves([
         { id: 'r-category', name: 'category' },
+        { id: 'r-tag', name: 'tag' },
         { id: 'r-intent', name: INTENT_ROOT_NAME },
         { id: 'r-origin', name: 'origin' },
         { id: 'r-type', name: 'type' },
@@ -198,7 +238,7 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
 
       expect(res.status).to.equal(201);
       expect(createProjectTags.firstCall.args[2])
-        .to.deep.equal(['category', INTENT_ROOT_NAME, 'origin', 'type', 'source']);
+        .to.deep.equal(['category', 'tag', INTENT_ROOT_NAME, 'origin', 'type', 'source']);
       expect(createProjectTags.secondCall.args[2]).to.deep.equal(['Footwear']);
       expect(createProjectTags.secondCall.args[3]).to.deep.equal({ parentId: 'r-category' });
       expect(res.body).to.include({ id: 'new-cat', parentId: 'r-category' });
@@ -226,7 +266,7 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
       // The roots were attempted; the category itself never was.
       expect(transport.createProjectTags).to.have.been.calledOnce;
       expect(transport.createProjectTags.firstCall.args[2])
-        .to.deep.equal(['category', INTENT_ROOT_NAME, 'origin', 'type', 'source']);
+        .to.deep.equal(['category', 'tag', INTENT_ROOT_NAME, 'origin', 'type', 'source']);
     });
 
     it('502s when the upstream create response carries no usable id', async () => {

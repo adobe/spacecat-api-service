@@ -165,6 +165,8 @@ describe('SerenityController', () => {
     handleUpdateTagSubworkspace: sinon.stub(),
     handleDeleteTag: sinon.stub(),
     handleDeleteTagSubworkspace: sinon.stub(),
+    handleTagImpact: sinon.stub(),
+    handleTagImpactSubworkspace: sinon.stub(),
   };
   let decommissionStub;
   let ensureSubworkspaceStub;
@@ -288,6 +290,8 @@ describe('SerenityController', () => {
         handleUpdateTagSubworkspace: handlers.handleUpdateTagSubworkspace,
         handleDeleteTag: handlers.handleDeleteTag,
         handleDeleteTagSubworkspace: handlers.handleDeleteTagSubworkspace,
+        handleTagImpact: handlers.handleTagImpact,
+        handleTagImpactSubworkspace: handlers.handleTagImpactSubworkspace,
       },
       '../../src/support/serenity/workspace-lifecycle.js': {
         ensureSubworkspace: ensureSubworkspaceStub,
@@ -327,6 +331,13 @@ describe('SerenityController', () => {
       },
       '../../src/support/serenity/handlers/classify-prompts-job.js': {
         CLASSIFY_PROMPTS_JOB_TYPE: 'serenity-classify-prompts',
+      },
+      '../../src/support/serenity/handlers/bulk-tags-job.js': {
+        BULK_TAGS_JOB_TYPE: 'serenity-bulk-tags',
+        BULK_TAGS_PUBLIC_JOB_TYPE: 'bulkTags',
+        handleBulkTags: sinon.stub(),
+        handleBulkTagsSubworkspace: sinon.stub(),
+        pageBulkFailures: (result) => result,
       },
     })).default;
   });
@@ -2913,7 +2924,9 @@ describe('SerenityController', () => {
 
         expect(response.status).to.equal(202);
         const body = await readBody(response);
-        expect(body).to.deep.equal({ jobId: 'job-abc', status: 'IN_PROGRESS' });
+        expect(body).to.deep.equal({
+          jobId: 'job-abc', jobType: 'classifyPrompts', status: 'IN_PROGRESS',
+        });
         expect(createAndEnqueueJobStub).to.have.been.calledOnce;
         const [, enqueueArgs] = createAndEnqueueJobStub.firstCall.args;
         expect(enqueueArgs.jobType).to.equal('serenity-classify-prompts');
@@ -2949,7 +2962,9 @@ describe('SerenityController', () => {
 
         expect(response.status).to.equal(202);
         const body = await readBody(response);
-        expect(body).to.deep.equal({ jobId: 'job-abc', status: 'IN_PROGRESS' });
+        expect(body).to.deep.equal({
+          jobId: 'job-abc', jobType: 'classifyPrompts', status: 'IN_PROGRESS',
+        });
         expect(createAndEnqueueJobStub).to.have.been.calledOnce;
         const [, enqueueArgs] = createAndEnqueueJobStub.firstCall.args;
         expect(enqueueArgs.jobType).to.equal('serenity-classify-prompts');
@@ -3079,7 +3094,7 @@ describe('SerenityController', () => {
         expect(response.status).to.equal(200);
         const body = await readBody(response);
         expect(body).to.deep.equal({
-          jobId: JOB, status: 'COMPLETED', result, error: null,
+          jobId: JOB, jobType: 'classifyPrompts', status: 'COMPLETED', result, error: null,
         });
         // Secrets on the job metadata are never exposed.
         expect(body).to.not.have.property('metadata');
@@ -3094,7 +3109,7 @@ describe('SerenityController', () => {
         expect(response.status).to.equal(200);
         const body = await readBody(response);
         expect(body).to.deep.equal({
-          jobId: JOB, status: 'FAILED', result: null, error,
+          jobId: JOB, jobType: 'classifyPrompts', status: 'FAILED', result: null, error,
         });
       });
 

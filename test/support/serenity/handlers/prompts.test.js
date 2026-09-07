@@ -31,6 +31,7 @@ import {
   buildCreateMetadata,
   buildUpdateMetadata,
   resolveSort,
+  validateTagIds,
 } from '../../../../src/support/serenity/handlers/prompts.js';
 import { ErrorWithStatusCode } from '../../../../src/support/utils.js';
 import { SerenityTransportError } from '../../../../src/support/serenity/rest-transport.js';
@@ -51,6 +52,19 @@ use(sinonChai);
 
 const BRAND = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
 const WORKSPACE = 'workspace-1';
+
+describe('plain tag limits', () => {
+  it('rejects rather than truncates an over-limit tag selection', () => {
+    let thrown;
+    try {
+      validateTagIds(Array.from({ length: 51 }, (_, index) => `tag-${index}`));
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).to.be.instanceOf(ErrorWithStatusCode);
+    expect(thrown.code).to.equal(ERROR_CODES.TAG_LIMIT_EXCEEDED);
+  });
+});
 
 // Matches one v3 create item `{ name, metadata }` (LLMO-6289): the create stamp
 // carries all four keys with created_* === updated_*. `by` is the expected
@@ -210,6 +224,7 @@ describe('handlers/prompts.js — handleListPrompts', () => {
     expect(result.items[0].semrushPromptId).to.equal('');
     expect(result.items[0].tags).to.deep.equal([{
       id: '', name: 'consideration', parentId: null, path: null,
+      compatibility: { state: 'canonical', reason: null },
     }]);
   });
 
@@ -284,6 +299,7 @@ describe('handlers/prompts.js — handleListPrompts', () => {
       // its own name is its dimension.
       tags: [{
         id: 't-1', name: 'awareness', parentId: null, path: null,
+        compatibility: { state: 'canonical', reason: null },
       }],
       createdAt: null,
       createdBy: null,
@@ -424,17 +440,20 @@ describe('handlers/prompts.js — handleListPrompts', () => {
     expect(result.items[0].tags).to.deep.equal([
       {
         id: '', name: 'name-only', parentId: null, path: null,
+        compatibility: { state: 'canonical', reason: null },
       },
       {
         id: '42', name: 'valid', parentId: null, path: null,
+        compatibility: { state: 'canonical', reason: null },
       },
       {
         id: '', name: 'string-tag', parentId: null, path: null,
+        compatibility: { state: 'canonical', reason: null },
       },
     ]);
   });
 
-  it('slices tagIds to MAX_TAG_IDS (50) before forwarding', async () => {
+  it('rejects tagIds over MAX_TAG_IDS instead of truncating', async () => {
     const project = makeProject({
       semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
     });
@@ -446,14 +465,12 @@ describe('handlers/prompts.js — handleListPrompts', () => {
     };
     const tooMany = Array.from({ length: 55 }, (_, i) => `tag-${i}`);
 
-    await handleListPrompts(transport, dataAccess, BRAND, WORKSPACE, {
+    await expect(handleListPrompts(transport, dataAccess, BRAND, WORKSPACE, {
       geoTargetId: 2840, languageCode: 'en', tagIds: tooMany,
+    })).to.be.rejected.then((error) => {
+      expect(error.code).to.equal(ERROR_CODES.INVALID_TAG_FILTER);
     });
-
-    const [, , body] = transport.listPromptsByTags.firstCall.args;
-    expect(body.tag_ids).to.have.lengthOf(50);
-    expect(body.tag_ids[0]).to.equal('tag-0');
-    expect(body.tag_ids[49]).to.equal('tag-49');
+    expect(transport.listPromptsByTags).to.not.have.been.called;
   });
 
   it('uses resp.total when returned item count equals the page limit', async () => {
@@ -776,7 +793,7 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
     expect(result.created[0].semrushPromptId).to.equal('');
   });
 
-  it('drops malformed tagIds entries (too long / whitespace / control char) like validateParentIdFormat does for parentId', async () => {
+  it('rejects malformed tagIds entries instead of silently dropping them', async () => {
     const project = makeProject({
       semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
     });
@@ -790,20 +807,18 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
     };
     const tooLong = 'x'.repeat(201);
 
-    const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+    await expect(handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
       prompts: [{
         text: 'hello',
         geoTargetId: 2840,
         languageCode: 'en',
         tagIds: ['keep', 'has space', `control${String.fromCharCode(1)}char`, tooLong],
       }],
-    }, fakeLog());
-
-    expect(result.created[0].tagIds).to.deep.equal(['keep', TAG_IDS.sourceConfig, TAG_IDS.intentInformational]);
-    expect(transport.createPromptsWithMetadata).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', [createItemMatch('hello', undefined)], ['keep', TAG_IDS.sourceConfig, TAG_IDS.intentInformational]);
+    }, fakeLog())).to.be.rejected;
+    expect(transport.createPromptsWithMetadata).to.not.have.been.called;
   });
 
-  it('caps a bulk-create tagIds array at MAX_TAG_IDS (50), mirroring the list-read query cap', async () => {
+  it('rejects a bulk-create tagIds array over MAX_TAG_IDS before mutation', async () => {
     const project = makeProject({
       semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
     });
@@ -817,24 +832,14 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
     };
     const tooMany = Array.from({ length: 55 }, (_, i) => `tag-${i}`);
 
-    const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+    await expect(handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
       prompts: [{
         text: 'hello', geoTargetId: 2840, languageCode: 'en', tagIds: tooMany,
       }],
-    }, fakeLog());
-
-    // The MAX_TAG_IDS cap bounds the CALLER's tags (50); the server-derived
-    // producing `source` (config) and classified `intent` (Informational) are
-    // injected on top (`origin` no longer gets its own tag,
-    // tag-display-names.md §3), so the stored set is the 50 capped tags plus
-    // those two computed ids.
-    expect(result.created[0].tagIds).to.have.lengthOf(52);
-    expect(result.created[0].tagIds).to.deep.equal(
-      [
-        ...tooMany.slice(0, 50),
-        TAG_IDS.sourceConfig, TAG_IDS.intentInformational,
-      ],
-    );
+    }, fakeLog())).to.be.rejected.then((error) => {
+      expect(error.code).to.equal(ERROR_CODES.TAG_LIMIT_EXCEEDED);
+    });
+    expect(transport.createPromptsWithMetadata).to.not.have.been.called;
   });
 
   it('skips a create row when tagIds sanitizes to empty (every entry malformed)', async () => {
@@ -1328,7 +1333,7 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
     expect(transport.publishProject).to.have.been.called;
   });
 
-  it('drops falsy tagIds entries on PATCH before the tag write', async () => {
+  it('rejects falsy tagIds entries on PATCH before mutation', async () => {
     const project = makeProject({
       semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
     });
@@ -1342,7 +1347,7 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
       publishProject: sinon.stub().resolves(),
     };
 
-    const result = await handleUpdatePrompt(
+    await expect(handleUpdatePrompt(
       transport,
       dataAccess,
       BRAND,
@@ -1352,17 +1357,11 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
         geoTargetId: 2840, languageCode: 'en', text: 'next', tagIds: ['keep', '', undefined],
       },
       fakeLog(),
-    );
-
-    expect(result.body.tagIds).to.deep.equal(['keep', TAG_IDS.intentInformational]);
-    expect(transport.updatePromptTagsByIds).to.have.been.calledOnceWithExactly(
-      WORKSPACE,
-      'proj-us-en',
-      [{ id: 'sem-1', references: ['keep', TAG_IDS.intentInformational], replace: true }],
-    );
+    )).to.be.rejected;
+    expect(transport.patchPrompt).to.not.have.been.called;
   });
 
-  it('drops malformed tagIds entries on PATCH like validateParentIdFormat does for parentId', async () => {
+  it('rejects malformed tagIds entries on PATCH before mutation', async () => {
     const project = makeProject({
       semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
     });
@@ -1377,7 +1376,7 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
     };
     const tooLong = 'x'.repeat(201);
 
-    const result = await handleUpdatePrompt(
+    await expect(handleUpdatePrompt(
       transport,
       dataAccess,
       BRAND,
@@ -1390,20 +1389,14 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
         tagIds: ['keep', 'has space', tooLong],
       },
       fakeLog(),
-    );
-
-    expect(result.body.tagIds).to.deep.equal(['keep', TAG_IDS.intentInformational]);
-    expect(transport.updatePromptTagsByIds).to.have.been.calledOnceWithExactly(
-      WORKSPACE,
-      'proj-us-en',
-      [{ id: 'sem-1', references: ['keep', TAG_IDS.intentInformational], replace: true }],
-    );
+    )).to.be.rejected;
+    expect(transport.patchPrompt).to.not.have.been.called;
   });
 
   it('400s when tagIds sanitizes to empty (every entry malformed)', async () => {
     const dataAccess = makeDataAccess([]);
 
-    const result = await handleUpdatePrompt(
+    await expect(handleUpdatePrompt(
       {},
       dataAccess,
       BRAND,
@@ -1413,10 +1406,7 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
         geoTargetId: 2840, languageCode: 'en', text: 'next', tagIds: ['has space', ''],
       },
       fakeLog(),
-    );
-
-    expect(result.status).to.equal(400);
-    expect(result.body.error).to.equal('invalidRequest');
+    )).to.be.rejected;
   });
 
   it('400s when geoTargetId or languageCode missing from body', async () => {
@@ -2452,15 +2442,14 @@ describe('handlers/prompts.js — unified type classification (serenity-docs#31)
         }],
       }, fakeLog(), classifyByBrandMention);
 
-      // The five roots are created at the root level (`origin` is still
-      // provisioned as a root — its retirement is a later, per-project fleet
-      // pass, tag-display-names.md §3 — but nothing is ever minted beneath it
+      // The registered roots are created at the root level (`origin` remains
+      // an independent live dimension, though nothing is minted beneath it
       // by this write path any more), then `branded` beneath the
       // freshly-minted `type` root, then `config` beneath the `source` root —
       // the create path stamps the derived SOURCE (via `deriveSource`, not a
       // separate `origin` tag) as well as the computed type.
       expect(createProjectTags.firstCall.args[2]).to.deep.equal([
-        'category', INTENT_ROOT_NAME, 'origin', 'type', 'source',
+        'category', 'tag', INTENT_ROOT_NAME, 'origin', 'type', 'source',
       ]);
       expect(createProjectTags.firstCall.args[3]).to.deep.equal({});
       expect(createProjectTags.secondCall.args[2]).to.deep.equal(['branded']);

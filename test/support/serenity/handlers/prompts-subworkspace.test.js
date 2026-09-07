@@ -125,6 +125,7 @@ describe('prompts-subworkspace handlers', () => {
           name: 'Running Shoes',
           parentId: TAG_IDS.categoryRoot,
           path: [{ id: TAG_IDS.categoryRoot, name: 'category' }],
+          compatibility: { state: 'canonical', reason: null },
         }],
         createdAt: null,
         createdBy: null,

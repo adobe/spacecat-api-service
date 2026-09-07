@@ -1237,6 +1237,7 @@ describe('markets-subworkspace handlers', () => {
         childrenCount: 0,
         promptsCount: 0,
         path: [{ id: 'root-1', name: 'category:Footwear' }],
+        compatibility: { state: 'readOnly', reason: 'separatorInName' },
       }]);
       expect(transport.listPromptsByTags).to.not.have.been.called;
       expect(transport.listProjectTags).to.have.been.calledOnceWithExactly(WS, 'p-tag', {
@@ -1295,7 +1296,7 @@ describe('markets-subworkspace handlers', () => {
       expect(transport.listProjectTags).to.have.been.calledWith(WS, 'p-tag');
     });
 
-    it('keeps prompt-derived tags when the standalone tag list call fails (best-effort)', async () => {
+    it('fails closed when the standalone tag list cannot be completed', async () => {
       const transport = makeTransport({
         listProjects: sinon.stub().resolves({ items: [proj({ id: 'p-tag' })] }),
         listPromptsByTags: sinon.stub().resolves({
@@ -1303,8 +1304,12 @@ describe('markets-subworkspace handlers', () => {
         }),
         listProjectTags: sinon.stub().rejects(new Error('boom')),
       });
-      const result = await handleListTagsSubworkspace(transport, WS, { geoTargetId: 2840, languageCode: 'en' }, log);
-      expect(result.items).to.deep.equal([{ id: 't-1', name: 'category:Running Shoes' }]);
+      await expect(handleListTagsSubworkspace(
+        transport,
+        WS,
+        { geoTargetId: 2840, languageCode: 'en' },
+        log,
+      )).to.be.rejectedWith('boom');
     });
 
     it('upgrades a synthetic prompt-derived id to the canonical standalone id (no shadowing)', async () => {
@@ -1361,7 +1366,7 @@ describe('markets-subworkspace handlers', () => {
       expect(result.items).to.deep.equal([{ id: 'human', name: 'human' }]);
     });
 
-    it('warns when the standalone tag page ceiling is hit (possible truncation)', async () => {
+    it('fails closed when the standalone tag page ceiling is hit', async () => {
       const fullPage = Array.from({ length: 100 }, (_, i) => ({ id: `t${i}`, name: `category:C${i}` }));
       const warnLog = { info: () => {}, error: () => {}, warn: sinon.stub() };
       const transport = makeTransport({
@@ -1370,7 +1375,14 @@ describe('markets-subworkspace handlers', () => {
         // Every page is full → the walk never short-circuits and runs to the ceiling.
         listProjectTags: sinon.stub().resolves({ items: fullPage }),
       });
-      await handleListTagsSubworkspace(transport, WS, { geoTargetId: 2840, languageCode: 'en' }, warnLog);
+      await expect(handleListTagsSubworkspace(
+        transport,
+        WS,
+        { geoTargetId: 2840, languageCode: 'en' },
+        warnLog,
+      )).to.be.rejected.then((error) => {
+        expect(error.code).to.equal('tagTreeReadIncomplete');
+      });
       expect(warnLog.warn).to.have.been.calledWithMatch(/page ceiling hit/);
       expect(transport.listProjectTags.callCount).to.equal(50);
     });

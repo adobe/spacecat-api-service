@@ -36,6 +36,7 @@ import {
 
 export const TAG_IDS = Object.freeze({
   categoryRoot: 'root-category',
+  tagRoot: 'root-tag',
   intentRoot: 'root-intent',
   originRoot: 'root-origin',
   typeRoot: 'root-type',
@@ -67,6 +68,7 @@ export const TAG_IDS = Object.freeze({
 
 const ROOT_IDS = Object.freeze({
   category: TAG_IDS.categoryRoot,
+  tag: TAG_IDS.tagRoot,
   intent: TAG_IDS.intentRoot,
   origin: TAG_IDS.originRoot,
   type: TAG_IDS.typeRoot,
