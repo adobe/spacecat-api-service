@@ -910,9 +910,11 @@ export function createSerenityTransport({ env, imsToken }) {
      * ids, and every delete this proxy composes is project-wide (a whole tag
      * subtree), never scoped to one prompt. The generated operation type still
      * declares `prompt_id` required (the CR25 "corrected optional" half also
-     * hasn't shipped), so the init below is cast past that stale requirement —
-     * the cast changes what TYPESCRIPT accepts, not what is SENT: there is no
-     * `query` key on the object, so nothing is added to the request URL.
+     * hasn't shipped), so `query` below is cast past that stale requirement —
+     * narrowly, on the `query` value alone, so `params.path` and `body` stay
+     * checked against the real generated types. The cast changes what
+     * TYPESCRIPT accepts, not what is SENT: `query` is `undefined`, so nothing
+     * is added to the request URL.
      *
      * @param {string} semrushWorkspaceId
      * @param {string} projectId
@@ -922,12 +924,13 @@ export function createSerenityTransport({ env, imsToken }) {
     async deleteProjectTags(semrushWorkspaceId, projectId, tagIds) {
       return unwrap('DELETE', await projectsRaw.DELETE(
         '/v2/workspaces/{id}/projects/{project_id}/aio/tags',
-        /** @type {any} */ ({
+        {
           params: {
             path: { id: semrushWorkspaceId, project_id: projectId },
+            query: /** @type {any} */ (undefined),
           },
           body: { ids: tagIds },
-        }),
+        },
       ));
     },
 

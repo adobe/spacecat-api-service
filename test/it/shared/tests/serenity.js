@@ -809,6 +809,13 @@ export default function serenityTests(
       // principal regardless of `authType` being `jwt` — so this create carries
       // `origin:ai`, not `origin:human`. So the created prompt carries the two
       // supplied tags plus the four computed ones.
+      //
+      // COUPLING (review nit): this test's expected origin value depends on
+      // `test/it/shared/auth.js`'s `admin` persona carrying `is_s2s_admin: true`.
+      // If that fixture ever changes to represent a true end-user admin instead
+      // (isS2SAdmin: false), this assertion needs to flip from `ai` to `human`
+      // — grep `is_s2s_admin` in auth.js if this test starts failing after an
+      // auth-fixture change.
       expect(created.body.created[0].tagIds).to.include.members([category.body.id, child.body.id]);
       expect(created.body.created[0].tagIds).to.have.lengthOf(6);
       expect(created.body.failed).to.deep.equal([]);

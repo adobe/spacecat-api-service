@@ -751,23 +751,24 @@ const CLOSED_DIMENSIONS_FOR_UPDATE_CAP = [
 async function collectClosedDimensionTagIds(transport, semrushWorkspaceId, projectId, log) {
   const rootsByName = await indexLevelByName(transport, semrushWorkspaceId, projectId, '', log);
   const ids = new Set();
-  for (const dimension of CLOSED_DIMENSIONS_FOR_UPDATE_CAP) {
-    const rootId = rootsByName.get(rootNameOfDimension(dimension));
-    if (rootId) {
-      ids.add(rootId);
-      // eslint-disable-next-line no-await-in-loop -- four dimensions, sequential is fine.
-      const children = await indexLevelByName(
-        transport,
-        semrushWorkspaceId,
-        projectId,
-        rootId,
-        log,
-      );
-      for (const childId of children.values()) {
-        ids.add(childId);
-      }
+  const rootIds = /** @type {string[]} */ (
+    CLOSED_DIMENSIONS_FOR_UPDATE_CAP
+      .map((dimension) => rootsByName.get(rootNameOfDimension(dimension)))
+      .filter((rootId) => Boolean(rootId))
+  );
+  // The four roots' children reads are independent of each other -- run them
+  // concurrently rather than one dimension at a time.
+  const childrenByRoot = await Promise.all(
+    rootIds.map(
+      (rootId) => indexLevelByName(transport, semrushWorkspaceId, projectId, rootId, log),
+    ),
+  );
+  rootIds.forEach((rootId, i) => {
+    ids.add(rootId);
+    for (const childId of childrenByRoot[i].values()) {
+      ids.add(childId);
     }
-  }
+  });
   return ids;
 }
 
@@ -819,6 +820,9 @@ export async function capUpdateTagIds(transport, semrushWorkspaceId, projectId, 
   for (const id of tagIds) {
     (closedIds.has(id) ? managed : open).push(id);
   }
+  // Reorders managed ids ahead of open ids relative to the caller's original
+  // array -- harmless today since the upstream replace-mode write treats
+  // `references` as an unordered set, never a caller-meaningful sequence.
   return [...managed, ...open.slice(0, MAX_TAG_IDS)];
 }
 

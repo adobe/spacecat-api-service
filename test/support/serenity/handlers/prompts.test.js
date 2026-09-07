@@ -1494,6 +1494,46 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
       expect(result).to.have.lengthOf(50);
       expect(result).to.not.include('stale-deleted-id');
     });
+
+    it('contributes nothing for a dimension whose root does not exist yet (legacy mid-provisioning project)', async () => {
+      const levels = dimensionTreeLevels();
+      // Drop the `source` root entirely -- a legacy project that predates the
+      // source dimension. capUpdateTagIds must not throw; it simply has
+      // nothing to exempt for that one dimension.
+      const rootsWithoutSource = levels[''].filter((r) => r.name !== 'source');
+      const transport = {
+        listProjectTags: makeListProjectTagsStub({ ...levels, '': rootsWithoutSource }),
+      };
+      const open = Array.from({ length: 51 }, (_, i) => `open-${i}`);
+      const tagIds = [...open, TAG_IDS.originHuman, TAG_IDS.sourceConfig];
+
+      const result = await capUpdateTagIds(transport, WORKSPACE, 'proj-1', tagIds, fakeLog());
+
+      // origin/human is still exempted (its root exists); sourceConfig is not
+      // (no source root to resolve it against), so it's treated as open and
+      // capped away along with the rest of the open ids.
+      expect(result).to.include(TAG_IDS.originHuman);
+      expect(result).to.not.include(TAG_IDS.sourceConfig);
+    });
+
+    it('propagates a transport error from a children read rather than swallowing it', async () => {
+      const levels = dimensionTreeLevels();
+      const listProjectTags = sinon.stub().callsFake((_workspaceId, _projectId, options) => {
+        if (options?.parentId === TAG_IDS.originRoot) {
+          return Promise.reject(new Error('upstream unavailable'));
+        }
+        return Promise.resolve({
+          page: 1,
+          total: (levels[options?.parentId ?? ''] || []).length,
+          items: levels[options?.parentId ?? ''] || [],
+        });
+      });
+      const open = Array.from({ length: 51 }, (_, i) => `open-${i}`);
+
+      await expect(
+        capUpdateTagIds({ listProjectTags }, WORKSPACE, 'proj-1', open, fakeLog()),
+      ).to.be.rejectedWith('upstream unavailable');
+    });
   });
 
   // Guards the documented always-reclassify invariant: an unchanged-text edit
