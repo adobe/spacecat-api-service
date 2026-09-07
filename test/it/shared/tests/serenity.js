@@ -268,9 +268,10 @@ export default function serenityTests(
     it('GET /serenity/prompts/jobs/:jobId returns the secret-free status contract for an owned COMPLETED job', async () => {
       const res = await getHttpClient().admin.get(`${base}/prompts/jobs/${SERENITY_CLASSIFY_JOB_ID}`);
       expect(res.status).to.equal(200);
-      // Exactly the four camelCase fields the UI is built against — nothing else.
-      expect(Object.keys(res.body).sort()).to.deep.equal(['error', 'jobId', 'result', 'status']);
+      // Exactly the five camelCase fields the UI is built against — nothing else.
+      expect(Object.keys(res.body).sort()).to.deep.equal(['error', 'jobId', 'jobType', 'result', 'status']);
       expect(res.body.jobId).to.equal(SERENITY_CLASSIFY_JOB_ID);
+      expect(res.body.jobType).to.equal('classifyPrompts');
       expect(res.body.status).to.equal('COMPLETED');
       expect(res.body.result).to.deep.include({ published: true, pendingClassificationCount: 0 });
       expect(res.body.error).to.equal(null);
@@ -280,22 +281,22 @@ export default function serenityTests(
     });
 
     describe('Serenity API — bulk tag and impact route contracts', () => {
-      const base = `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/serenity`;
+      const routeBase = `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/serenity`;
 
       it('POST /serenity/prompts/bulk-tags reaches bulk validation', async () => {
-        const res = await getHttpClient().admin.post(`${base}/prompts/bulk-tags`, {});
+        const res = await getHttpClient().admin.post(`${routeBase}/prompts/bulk-tags`, {});
         expect(res.status).to.equal(400);
         expect(res.body.error).to.equal('invalidRequest');
       });
 
       it('GET /serenity/tags/:tagId/impact validates the market slice', async () => {
-        const res = await getHttpClient().admin.get(`${base}/tags/not-a-tag/impact`);
+        const res = await getHttpClient().admin.get(`${routeBase}/tags/not-a-tag/impact`);
         expect(res.status).to.equal(400);
       });
 
       it('GET /serenity/prompts/jobs/:jobId accepts bulk failure pagination params', async () => {
         const res = await getHttpClient().admin.get(
-          `${base}/prompts/jobs/${SERENITY_CLASSIFY_JOB_ID}?failureCursor=MA&failureLimit=1`,
+          `${routeBase}/prompts/jobs/${SERENITY_CLASSIFY_JOB_ID}?failureCursor=MA&failureLimit=1`,
         );
         expect(res.status).to.equal(200);
         expect(res.body).to.have.property('result');
@@ -416,7 +417,7 @@ export default function serenityTests(
       // The create echoes the upstream tag id (needed to nest / re-parent).
       expect(res.body.id).to.be.a('string').that.is.not.empty;
 
-      // The five dimension roots are provisioned on first touch (the server-owned
+      // The six dimension roots are provisioned on first touch (the server-owned
       // `source` producing-system root joined category/intent/origin/type — WP-S2,
       // LLMO-6282), and the new category is a CHILD of the `category` root, not a
       // root itself.
@@ -429,7 +430,7 @@ export default function serenityTests(
       // filter, and a project provisioned here must not need the rename sweep
       // (LLMO-6985) to come back for it.
       expect(roots.body.items.map((t) => t.name))
-        .to.have.members(['category', INTENT_ROOT_NAME, 'origin', 'type', 'source']);
+        .to.have.members(['category', 'tag', INTENT_ROOT_NAME, 'origin', 'type', 'source']);
       const categoryRoot = roots.body.items.find((t) => t.name === 'category');
       expect(res.body.parentId).to.equal(categoryRoot.id);
     });

@@ -20,9 +20,15 @@ import {
 
 const snapshot = {
   byId: new Map([
-    ['family', { id: 'family', rootName: 'tag', depth: 2, fullPath: [{ id: 'tag', name: 'tag' }, { id: 'family', name: 'Family' }] }],
-    ['child', { id: 'child', rootName: 'tag', depth: 3, fullPath: [{ id: 'tag', name: 'tag' }, { id: 'family', name: 'Family' }, { id: 'child', name: 'Child' }] }],
-    ['other', { id: 'other', rootName: 'tag', depth: 2, fullPath: [{ id: 'tag', name: 'tag' }, { id: 'other', name: 'Other' }] }],
+    ['family', {
+      id: 'family', rootName: 'tag', depth: 2, fullPath: [{ id: 'tag', name: 'tag' }, { id: 'family', name: 'Family' }],
+    }],
+    ['child', {
+      id: 'child', rootName: 'tag', depth: 3, fullPath: [{ id: 'tag', name: 'tag' }, { id: 'family', name: 'Family' }, { id: 'child', name: 'Child' }],
+    }],
+    ['other', {
+      id: 'other', rootName: 'tag', depth: 2, fullPath: [{ id: 'tag', name: 'tag' }, { id: 'other', name: 'Other' }],
+    }],
   ]),
   items: [],
 };
@@ -32,15 +38,24 @@ describe('bulk tags job request and tree semantics', () => {
   it('validates the target slice, operation, mutation ids, and faceted filter mode', () => {
     expect(() => parseBulkTagsBody({})).to.throw(/geoTargetId and languageCode/);
     expect(() => parseBulkTagsBody({
-      geoTargetId: 1, languageCode: 'en', operation: 'replace', tagIds: ['child'],
+      geoTargetId: 1,
+      languageCode: 'en',
+      operation: 'replace',
+      tagIds: ['child'],
       filter: { tagFilterMode: 'faceted-v1' },
     })).to.throw(/operation must be assign or remove/);
     expect(() => parseBulkTagsBody({
-      geoTargetId: 1, languageCode: 'en', operation: 'assign', tagIds: [],
+      geoTargetId: 1,
+      languageCode: 'en',
+      operation: 'assign',
+      tagIds: [],
       filter: { tagFilterMode: 'faceted-v1' },
     })).to.throw(/tagIds must be a non-empty array/);
     expect(parseBulkTagsBody({
-      geoTargetId: 1, languageCode: 'en', operation: 'assign', tagIds: ['child'],
+      geoTargetId: 1,
+      languageCode: 'en',
+      operation: 'assign',
+      tagIds: ['child'],
       filter: { tagFilterMode: 'faceted-v1', search: ' shoes ' },
     }).filter).to.deep.equal({ tagIds: [], tagFilterMode: 'faceted-v1', search: 'shoes' });
   });

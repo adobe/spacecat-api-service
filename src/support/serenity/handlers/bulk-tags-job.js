@@ -402,10 +402,10 @@ export async function bulkTagsHandler(context, job, accessToken) {
     if (!prompt) {
       return {
         failure: {
-        semrushPromptId: promptId,
-        code: 'promptNotFound',
-        message: 'The prompt no longer exists',
-        retryable: false,
+          semrushPromptId: promptId,
+          code: 'promptNotFound',
+          message: 'The prompt no longer exists',
+          retryable: false,
         },
       };
     }

@@ -746,7 +746,8 @@ export async function listTagsForProject(transport, semrushWorkspaceId, projectI
         tagsFound: seen.size,
       },
     );
-    return { items: Array.from(seen.values()).sort((a, b) => a.name.localeCompare(b.name)), complete: false };
+    const items = Array.from(seen.values()).sort((a, b) => a.name.localeCompare(b.name));
+    return { items, complete: false };
   }
 
   const sorted = Array.from(seen.values()).sort((a, b) => a.name.localeCompare(b.name));

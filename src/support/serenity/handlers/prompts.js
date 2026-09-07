@@ -548,11 +548,12 @@ export async function listAllProjectPrompts(
   transport,
   semrushWorkspaceId,
   projectId,
-  {
-    tagIds = [], search, sort, order,
-  } = {},
+  options,
   log,
 ) {
+  const {
+    tagIds = [], search, sort, order,
+  } = options ?? {};
   const items = [];
   const limit = 200;
   let page = 1;

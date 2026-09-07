@@ -156,7 +156,9 @@ describe('serenity-prompt-classification worker entry', () => {
     await run({ jobId: 'job-123', type: 'serenity-classify-prompts' }, context);
 
     expect(job.getStatus()).to.equal('FAILED');
-    expect(job.getError()).to.deep.equal({ code: 'JOB_FAILED', message: 'classification blew up' });
+    expect(job.getError()).to.deep.equal({
+      code: 'JOB_FAILED', message: 'classification blew up', retryable: true,
+    });
     expect(invalidateStub).to.have.been.called;
     expect(job.save).to.have.been.called;
   });
