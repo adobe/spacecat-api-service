@@ -29,6 +29,9 @@ import { alertQuotaRejection } from '../quota-alerts.js';
 
 const LANGUAGE_CACHE_TTL_MS = 60 * 60 * 1000;
 export const MAX_MODEL_IDS = 50;
+export const MAX_PROMPT_TAG_IDS = 50;
+export const MAX_TAG_FILTER_VALUES = 50;
+export const BULK_IDEMPOTENCY_TTL_SECONDS = 24 * 60 * 60;
 const MAX_PARENT_ID_QUERY_LEN = 200;
 
 /**
@@ -732,7 +735,7 @@ export async function listTagsForProject(transport, semrushWorkspaceId, projectI
 
   if (truncated) {
     log?.warn?.(
-      'handleListTags: tag pagination ceiling reached, tag set is truncated',
+      'handleListTags: tag pagination ceiling reached',
       {
         ...(logCtx || {}),
         semrushWorkspaceId,
@@ -743,6 +746,9 @@ export async function listTagsForProject(transport, semrushWorkspaceId, projectI
         tagsFound: seen.size,
       },
     );
+    const error = new ErrorWithStatusCode('Unable to read the complete tag set', 503);
+    error.code = ERROR_CODES.TAG_TREE_READ_INCOMPLETE;
+    throw error;
   }
 
   const sorted = Array.from(seen.values()).sort((a, b) => a.name.localeCompare(b.name));
@@ -792,7 +798,32 @@ export async function listProjectTagTree(
   parentId,
   log,
   stopWhen,
+  paging,
 ) {
+  const requestedPage = Number.isInteger(paging?.page) && paging.page > 0 ? paging.page : 1;
+  const requestedLimit = Number.isInteger(paging?.limit) && paging.limit > 0
+    ? Math.min(paging.limit, 100)
+    : 100;
+  if (paging?.explicit) {
+    const resp = await transport.listProjectTags(semrushWorkspaceId, projectId, {
+      parentId, page: requestedPage, limit: requestedLimit, draft: true,
+    });
+    const batch = Array.isArray(resp?.items) ? resp.items : [];
+    const items = normalizeTreeItems(batch);
+    const hasTotal = Number.isFinite(resp?.total);
+    const total = hasTotal
+      ? Number(resp.total)
+      : ((requestedPage - 1) * requestedLimit) + items.length;
+    return {
+      items: decorateTagTreeItems(items),
+      page: requestedPage,
+      limit: requestedLimit,
+      total,
+      complete: hasTotal
+        ? requestedPage * requestedLimit >= total
+        : batch.length < requestedLimit,
+    };
+  }
   const items = [];
   const LIMIT = 100;
   const PAGE_LIMIT = 50;
@@ -807,19 +838,7 @@ export async function listProjectTagTree(
     for (const t of batch) {
       // AIOTag.id is required upstream; guard defensively and skip a malformed row.
       if (t && typeof t.id === 'string' && t.id) {
-        const item = {
-          id: t.id,
-          name: typeof t.name === 'string' ? t.name : '',
-          parentId: typeof t.parent_id === 'string' && t.parent_id ? t.parent_id : null,
-          childrenCount: typeof t.children_count === 'number' ? t.children_count : 0,
-          promptsCount: typeof t.prompts_count === 'number' ? t.prompts_count : 0,
-          path: Array.isArray(t.path)
-            ? t.path.map((p) => ({
-              id: typeof p?.id === 'string' ? p.id : '',
-              name: typeof p?.name === 'string' ? p.name : '',
-            }))
-            : null,
-        };
+        const [item] = normalizeTreeItems([t]);
         items.push(item);
         if (stopWhen && stopWhen(item)) {
           matched = true;
@@ -839,11 +858,76 @@ export async function listProjectTagTree(
       log?.warn?.('listProjectTagTree: page ceiling hit; tag level may be truncated', {
         semrushWorkspaceId, projectId, parentId, pages: PAGE_LIMIT, limit: LIMIT,
       });
-      break;
+      const error = new ErrorWithStatusCode('Unable to read the complete tag tree level', 503);
+      error.code = ERROR_CODES.TAG_TREE_READ_INCOMPLETE;
+      throw error;
     }
     page += 1;
   }
-  return { items };
+  return {
+    items: decorateTagTreeItems(items),
+    page: 1,
+    limit: LIMIT,
+    total: items.length,
+    complete: true,
+  };
+}
+
+function normalizeTreeItems(batch) {
+  return batch
+    .filter((t) => t && typeof t.id === 'string' && t.id)
+    .map((t) => ({
+      id: t.id,
+      name: typeof t.name === 'string' ? t.name : '',
+      parentId: typeof t.parent_id === 'string' && t.parent_id ? t.parent_id : null,
+      childrenCount: typeof t.children_count === 'number' ? t.children_count : 0,
+      promptsCount: typeof t.prompts_count === 'number' ? t.prompts_count : 0,
+      path: Array.isArray(t.path)
+        ? t.path.map((p) => ({
+          id: typeof p?.id === 'string' ? p.id : '',
+          name: typeof p?.name === 'string' ? p.name : '',
+        }))
+        : null,
+    }));
+}
+
+export function decorateTagTreeItems(items) {
+  const normalizedPaths = new Map();
+  for (const item of items) {
+    const names = [...(item.path ?? []).map((part) => part.name), item.name];
+    const key = names.map((name) => name.normalize('NFKC').toLocaleLowerCase()).join('__');
+    normalizedPaths.set(key, (normalizedPaths.get(key) ?? 0) + 1);
+  }
+  return items.map((item) => {
+    const names = [...(item.path ?? []).map((part) => part.name), item.name];
+    const rootName = item.path?.[0]?.name ?? item.name;
+    const key = names.map((name) => name.normalize('NFKC').toLocaleLowerCase()).join('__');
+    let reason = null;
+    if (rootName.toLocaleLowerCase() === 'tag' && rootName !== 'tag') {
+      reason = 'caseVariantRoot';
+    } else if (names.some((name) => name.includes(':') || name.includes('__'))) {
+      reason = 'separatorInName';
+    } else if ((item.path?.length ?? 0) + 1 > 3 && rootName === 'tag') {
+      reason = 'unsupportedDepth';
+    } else if ((normalizedPaths.get(key) ?? 0) > 1) {
+      reason = 'ambiguousPath';
+    }
+    return {
+      ...item,
+      compatibility: {
+        state: reason ? 'readOnly' : 'canonical',
+        reason,
+      },
+    };
+  });
+}
+
+export function tagConstraints() {
+  return {
+    maxPromptTagIds: MAX_PROMPT_TAG_IDS,
+    maxTagFilterValues: MAX_TAG_FILTER_VALUES,
+    bulkIdempotencyTtlSeconds: BULK_IDEMPOTENCY_TTL_SECONDS,
+  };
 }
 
 /**
@@ -896,13 +980,21 @@ export async function handleListTags(
   }
   const projectId = row.getSemrushProjectId();
   if (query?.parentId !== undefined) {
-    return listProjectTagTree(
+    const explicitPaging = query.page !== undefined || query.limit !== undefined;
+    const result = await listProjectTagTree(
       transport,
       semrushWorkspaceId,
       projectId,
       validateParentIdQuery(String(query.parentId)),
       log,
+      undefined,
+      {
+        explicit: explicitPaging,
+        page: query.page,
+        limit: query.limit,
+      },
     );
+    return { ...result, constraints: tagConstraints() };
   }
   return listTagsForProject(
     transport,

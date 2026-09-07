@@ -26,10 +26,12 @@ import {
   makeIntentInjector,
   mapLimit,
   publishAffected,
+  listAllProjectPrompts,
+  assertPromptTagLimit,
   BULK_CREATE_CONCURRENCY,
 } from './prompts.js';
-import { ORIGIN_VALUE } from '../prompt-tags.js';
-import { resolveIntentValueInjection } from '../tag-tree.js';
+import { DIMENSION, ORIGIN_VALUE } from '../prompt-tags.js';
+import { readTagTreeSnapshot, resolveIntentValueInjection } from '../tag-tree.js';
 import { buildSliceProjectMap, sliceKey } from '../subworkspace-projects.js';
 
 /** @typedef {import('../rest-transport.js').SerenityTransport} SerenityTransport */
@@ -345,6 +347,11 @@ async function reclassifyExisting(context, job, transport, metadata) {
   }
 
   await Promise.all([...itemsByProject.entries()].map(async ([projectId, projectItems]) => {
+    const [snapshot, currentPrompts] = await Promise.all([
+      readTagTreeSnapshot(transport, semrushWorkspaceId, projectId, log),
+      listAllProjectPrompts(transport, semrushWorkspaceId, projectId),
+    ]);
+    const currentById = new Map(currentPrompts.map((prompt) => [String(prompt.id), prompt]));
     const patchItems = [];
     for (const item of projectItems) {
       const trimmedText = String(item.text || '').trim();
@@ -361,9 +368,16 @@ async function reclassifyExisting(context, job, transport, metadata) {
           intentValue,
           log,
         );
-        patchItems.push({
-          id: item.promptId, references: [...baseTagIds, computedId], replace: true,
-        });
+        const current = currentById.get(String(item.promptId));
+        const preservedCustomerIds = (Array.isArray(current?.tags) ? current.tags : [])
+          .map((tag) => (typeof tag === 'string' ? tag : String(tag?.id ?? '')))
+          .filter((id) => {
+            const node = snapshot.byId.get(id);
+            return node?.rootName === DIMENSION.CATEGORY || node?.rootName === DIMENSION.TAG;
+          });
+        const references = [...new Set([...baseTagIds, ...preservedCustomerIds, computedId])];
+        assertPromptTagLimit(references);
+        patchItems.push({ id: item.promptId, references, replace: true });
         patched.push({ semrushPromptId: item.promptId, projectId, intent: intentValue });
       }
     }

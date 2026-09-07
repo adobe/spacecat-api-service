@@ -30,6 +30,10 @@ import {
   classifyPromptsHandler,
   CLASSIFY_PROMPTS_JOB_TYPE,
 } from '../support/serenity/handlers/classify-prompts-job.js';
+import {
+  bulkTagsHandler,
+  BULK_TAGS_JOB_TYPE,
+} from '../support/serenity/handlers/bulk-tags-job.js';
 
 // `wrap`'s runtime default export and `imsClientWrapper`'s runtime named export
 // both exist (`@adobe/helix-shared-wrap/src/wrap.js`,
@@ -101,6 +105,7 @@ export const vaultOpts = {
  */
 const HANDLERS = {
   [CLASSIFY_PROMPTS_JOB_TYPE]: classifyPromptsHandler,
+  [BULK_TAGS_JOB_TYPE]: bulkTagsHandler,
 };
 
 /**
@@ -137,7 +142,7 @@ export async function run(message, context) {
     if (error instanceof NeedsReauthError) {
       log.warn(`[serenity-job-runner] Job ${jobId} needs re-authentication: ${error.message}`);
       job.setStatus('FAILED');
-      job.setError({ code: error.code, message: error.message });
+      job.setError({ code: error.code, message: error.message, retryable: false });
       await job.save();
       return ok();
     }
@@ -148,7 +153,11 @@ export async function run(message, context) {
   if (!handler) {
     log.warn(`[serenity-job-runner] No handler registered for job type: ${type}`);
     job.setStatus('FAILED');
-    job.setError({ code: 'UNKNOWN_JOB_TYPE', message: `No handler for job type: ${type}` });
+    job.setError({
+      code: 'UNKNOWN_JOB_TYPE',
+      message: `No handler for job type: ${type}`,
+      retryable: false,
+    });
     await invalidateJobPromiseToken(context, job);
     await job.save();
     return ok();
@@ -168,7 +177,11 @@ export async function run(message, context) {
   } catch (error) {
     log.error(`[serenity-job-runner] Job ${jobId} failed: ${error.message}`);
     job.setStatus('FAILED');
-    job.setError({ code: 'JOB_FAILED', message: error.message });
+    job.setError({
+      code: error.code ?? 'JOB_FAILED',
+      message: error.message,
+      retryable: !(Number.isInteger(error.status) && error.status < 500),
+    });
   }
 
   if (!tokenOwnershipTransferred) {

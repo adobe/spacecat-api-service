@@ -27,6 +27,7 @@ import {
   defaultMarketName,
   listTagsForProject,
   listProjectTagTree,
+  tagConstraints,
   listSliceModels,
   listUnionModels,
   syncModelsForProject,
@@ -1009,7 +1010,9 @@ async function listStandaloneProjectTags(transport, workspaceId, projectId, log)
       log?.warn?.('listStandaloneProjectTags: page ceiling hit; standalone tag set may be truncated', {
         workspaceId, projectId, pages: PAGE_LIMIT, limit: LIMIT,
       });
-      break;
+      const error = new ErrorWithStatusCode('Unable to read the complete tag set', 503);
+      error.code = ERROR_CODES.TAG_TREE_READ_INCOMPLETE;
+      throw error;
     }
     page += 1;
   }
@@ -1040,30 +1043,29 @@ export async function handleListTagsSubworkspace(transport, workspaceId, query, 
   // NESTED-TREE MODE (parity with flat handleListTags): a `parentId` query param
   // drills the standalone AIO tag tree instead of the prompt-derived merge below.
   if (query?.parentId !== undefined) {
-    return listProjectTagTree(
+    const explicitPaging = query.page !== undefined || query.limit !== undefined;
+    const result = await listProjectTagTree(
       transport,
       workspaceId,
       projectId,
       validateParentIdQuery(String(query.parentId)),
       log,
+      undefined,
+      {
+        explicit: explicitPaging,
+        page: query.page,
+        limit: query.limit,
+      },
     );
+    return { ...result, constraints: tagConstraints() };
   }
   // A tag exists in two forms: attached to ≥1 prompt (listTagsForProject scans the
   // prompt vocabulary) OR standalone (registered via createProjectTags but not yet
   // carried by any prompt — e.g. a just-created, still-empty category).
-  // The Categories surface must round-trip BOTH, so merge them by tag name. The
-  // standalone list is best-effort: a hiccup there must not regress the
-  // prompt-derived behavior that already worked.
+  // The Categories surface must round-trip BOTH, so merge them by tag name.
   const [fromPrompts, standalone] = await Promise.all([
     listTagsForProject(transport, workspaceId, projectId, { geoTargetId, languageCode }, log),
-    Promise.resolve()
-      .then(() => listStandaloneProjectTags(transport, workspaceId, projectId, log))
-      .catch((e) => {
-        log?.warn?.('handleListTagsSubworkspace: standalone tag list failed (non-fatal)', {
-          workspaceId, projectId, error: e?.message,
-        });
-        return { items: [] };
-      }),
+    listStandaloneProjectTags(transport, workspaceId, projectId, log),
   ]);
   // Merge by ID, not by name. Names are unique only per (project, parent), so a
   // sub-category `human` and the `origin` value `human` are two distinct tags —

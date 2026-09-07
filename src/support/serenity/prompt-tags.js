@@ -19,8 +19,8 @@
  * serenity flow.
  *
  * A tag's DIMENSION is its root ancestor, not a prefix on its name. Every
- * project's tag tree has exactly four roots — `category`, `intent`, `origin`,
- * `type` — and every tag value is a bare-named descendant of one of them. No
+ * project's tag tree has registered roots for `category`, `tag`, `intent`,
+ * `origin`, `type`, and `source`, and every tag value is a bare-named descendant. No
  * tag name contains a `:`. A tag's dimension is therefore `path[0]` of the
  * upstream breadcrumb (verified against the live Semrush API: `path[]` is a
  * full root-first ancestry at any depth), never something parsed out of a name.
@@ -39,7 +39,7 @@
  */
 
 /**
- * The five dimension roots. Each is a bare-named ROOT tag on every project.
+ * The registered dimension roots. Each is a bare-named ROOT tag on every project.
  *
  * `source` (source-dimension.md) is the producing-system dimension — the system
  * that produced a prompt (`config`, `gsc`, `drs`, …), read from `prompts.source`
@@ -47,6 +47,7 @@
  */
 export const DIMENSION = Object.freeze({
   CATEGORY: 'category',
+  TAG: 'tag',
   INTENT: 'intent',
   ORIGIN: 'origin',
   TYPE: 'type',
@@ -59,9 +60,10 @@ export const DIMENSION = Object.freeze({
  * {@link canonicalizeSource} refuses a derived value longer than it.
  */
 export const MAX_TAG_NAME_LEN = 100;
-/** The five dimensions, in the order their roots are provisioned on a project. */
+/** The dimensions, in the order their roots are provisioned on a project. */
 export const DIMENSION_PROVISION_ORDER = Object.freeze([
   DIMENSION.CATEGORY,
+  DIMENSION.TAG,
   DIMENSION.INTENT,
   DIMENSION.ORIGIN,
   DIMENSION.TYPE,
@@ -104,6 +106,7 @@ export const INTENT_ROOT_NAME = `${HIDDEN_TAG_MARKER}intent`;
  */
 export const ROOT_DISPLAY_NAME = Object.freeze({
   [DIMENSION.CATEGORY]: DIMENSION.CATEGORY,
+  [DIMENSION.TAG]: DIMENSION.TAG,
   [DIMENSION.TYPE]: DIMENSION.TYPE,
   [DIMENSION.SOURCE]: DIMENSION.SOURCE,
 });
@@ -280,7 +283,11 @@ export const CLOSED_DIMENSIONS = Object.freeze([
  * fixed vocabulary"; it does NOT answer "may a client write it" — that is
  * {@link SERVER_OWNED_DIMENSIONS}.
  */
-export const OPEN_DIMENSIONS = Object.freeze([DIMENSION.CATEGORY, DIMENSION.SOURCE]);
+export const OPEN_DIMENSIONS = Object.freeze([
+  DIMENSION.CATEGORY,
+  DIMENSION.TAG,
+  DIMENSION.SOURCE,
+]);
 
 /**
  * The SERVER-OWNED dimensions — everything except `category`. No client may mint

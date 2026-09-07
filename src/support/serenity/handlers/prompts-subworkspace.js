@@ -34,6 +34,8 @@ import {
   DEFAULT_PAGE_LIMIT,
   MAX_PAGE_LIMIT,
   MAX_TAG_IDS,
+  validateTagIds,
+  listFacetedPrompts,
   BULK_CREATE_CONCURRENCY,
   BULK_PROMPTS_MAX_ITEMS,
   deleteProjectBatches,
@@ -87,9 +89,12 @@ export async function handleListPromptsSubworkspace(transport, workspaceId, quer
     ? query.limit : DEFAULT_PAGE_LIMIT;
   const limit = Math.min(requestedLimit, MAX_PAGE_LIMIT);
   const search = hasText(query?.search) ? String(query.search).trim() : undefined;
-  const tagIds = Array.isArray(query?.tagIds)
-    ? query.tagIds.slice(0, MAX_TAG_IDS).map(String).filter(Boolean)
-    : [];
+  const tagIds = validateTagIds(query?.tagIds, {
+    maximum: MAX_TAG_IDS,
+    tooLargeCode: query?.tagFilterMode === 'faceted-v1'
+      ? ERROR_CODES.TAG_FILTER_TOO_LARGE
+      : ERROR_CODES.INVALID_TAG_FILTER,
+  });
   // sort/order (LLMO-6289): validated against the metadata allow-list and
   // forwarded upstream — kept in lockstep with the flat-mode twin.
   const { sort, order } = resolveSort(query);
@@ -102,6 +107,24 @@ export async function handleListPromptsSubworkspace(transport, workspaceId, quer
     );
     err.code = ERROR_CODES.MARKET_NOT_FOUND;
     throw err;
+  }
+  if (query?.tagFilterMode === 'faceted-v1') {
+    return listFacetedPrompts(
+      transport,
+      workspaceId,
+      String(project.id),
+      {
+        geoTargetId,
+        languageCode,
+        page,
+        limit,
+        search,
+        sort,
+        order,
+        tagIds,
+      },
+      log,
+    );
   }
 
   // Each prompt's tags already carry their own parentage (see buildTagsOf), so

@@ -99,7 +99,7 @@ const REAUTH_STATUS_PATTERN = /status: (401|403)\b/;
 export async function createAndEnqueueJob(
   context,
   {
-    jobType, metadata = {}, promiseToken, promisePair,
+    jobType, metadata = {}, promiseToken, promisePair, jobId,
   },
 ) {
   const {
@@ -113,6 +113,7 @@ export async function createAndEnqueueJob(
   const promiseTokenResponse = promiseToken ?? await getIMSPromiseToken(context, pair);
 
   const job = await dataAccess.AsyncJob.create({
+    ...(jobId ? { id: jobId } : {}),
     status: 'IN_PROGRESS',
     metadata: {
       ...metadata,
@@ -233,3 +234,5 @@ export async function invalidateJobPromiseToken(context, job) {
   delete metadata.promiseToken;
   job.setMetadata(metadata);
 }
+ * @param {string} [params.jobId] - Optional deterministic UUID used by callers
+ *   that require durable idempotency across Lambda containers.

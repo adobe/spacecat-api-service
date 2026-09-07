@@ -38,6 +38,13 @@ import {
 import { createAndEnqueueJob } from '../support/serenity/async-job-runner.js';
 import { CLASSIFY_PROMPTS_JOB_TYPE } from '../support/serenity/handlers/classify-prompts-job.js';
 import {
+  BULK_TAGS_JOB_TYPE,
+  BULK_TAGS_PUBLIC_JOB_TYPE,
+  handleBulkTags,
+  handleBulkTagsSubworkspace,
+  pageBulkFailures,
+} from '../support/serenity/handlers/bulk-tags-job.js';
+import {
   handleListMarkets,
   handleGetMarket,
   handleCreateMarket,
@@ -70,6 +77,8 @@ import {
   handleUpdateTagSubworkspace,
   handleDeleteTag,
   handleDeleteTagSubworkspace,
+  handleTagImpact,
+  handleTagImpactSubworkspace,
 } from '../support/serenity/handlers/tags.js';
 import { ensureSubworkspace, decommissionBrandWorkspace } from '../support/serenity/workspace-lifecycle.js';
 import { isSerenityActiveForBrand } from '../support/serenity/serenity-active.js';
@@ -158,6 +167,10 @@ function parsedQuery(context) {
     const n = parseInt(raw.limit, 10);
     out.limit = Number.isFinite(n) ? n : null;
   }
+  if (raw.failureLimit !== undefined) {
+    const n = parseInt(raw.failureLimit, 10);
+    out.failureLimit = Number.isFinite(n) ? n : null;
+  }
   return out;
 }
 
@@ -200,7 +213,14 @@ function mapError(e, log, reqCtx = {}) {
     // default for plain throws.
     const errorToken = e.code && hasText(e.code) ? e.code : errorTokenForStatus(status);
     return createResponse(
-      { error: errorToken, message: safeError(e.message) },
+      {
+        error: errorToken,
+        message: safeError(e.message),
+        ...(/** @type {any} */ (e).details
+          && typeof /** @type {any} */ (e).details === 'object'
+          ? { details: /** @type {any} */ (e).details }
+          : {}),
+      },
       status,
     );
   }
@@ -619,7 +639,9 @@ function SerenityController(context, log, env) {
             callerId: resolveCallerId(ctx),
           },
         });
-        return accepted({ jobId: job.getId(), status: job.getStatus() });
+        return accepted({
+          jobId: job.getId(), jobType: 'classifyPrompts', status: job.getStatus(),
+        });
       }
       const transport = buildTransport(ctx, imsToken);
       const classifyPromptType = await buildPromptTypeClassifier(ctx, auth.brandUuid);
@@ -749,6 +771,48 @@ function SerenityController(context, log, env) {
           { orgId: ctx?.params?.spaceCatId, env: ctx.env || env, callerId },
         );
       return createResponse(result, 200);
+    } catch (e) {
+      return mapError(e, log, reqCtxOf(ctx, auth));
+    }
+  };
+
+  const bulkTagPrompts = async (ctx) => {
+    let auth;
+    try {
+      const imsToken = await resolveSemrushImsToken(ctx);
+      auth = await authorize(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const transport = buildTransport(ctx, imsToken);
+      const callerId = resolveCallerId(ctx);
+      const idempotencyKey = ctx?.pathInfo?.headers?.['idempotency-key']
+        ?? ctx?.pathInfo?.headers?.['Idempotency-Key'];
+      const result = auth.mode === 'subworkspace'
+        ? await handleBulkTagsSubworkspace(
+          ctx,
+          transport,
+          auth.brandUuid,
+          ctx?.params?.spaceCatId,
+          /** @type {string} */ (auth.workspaceId),
+          ctx.data || {},
+          callerId,
+          idempotencyKey,
+          log,
+        )
+        : await handleBulkTags(
+          ctx,
+          transport,
+          ctx.dataAccess,
+          auth.brandUuid,
+          ctx?.params?.spaceCatId,
+          /** @type {string} */ (auth.workspaceId),
+          ctx.data || {},
+          callerId,
+          idempotencyKey,
+          log,
+        );
+      return createResponse(result.body, result.status);
     } catch (e) {
       return mapError(e, log, reqCtxOf(ctx, auth));
     }
@@ -1280,6 +1344,8 @@ function SerenityController(context, log, env) {
         return auth.error;
       }
       const transport = buildTransport(ctx, imsToken);
+      const ifMatch = ctx?.pathInfo?.headers?.['if-match']
+        ?? ctx?.pathInfo?.headers?.['If-Match'];
       if (auth.mode === 'subworkspace') {
         await handleDeleteTagSubworkspace(
           transport,
@@ -1287,6 +1353,7 @@ function SerenityController(context, log, env) {
           tagId,
           parsedQuery(ctx),
           log,
+          ifMatch,
         );
       } else {
         await handleDeleteTag(
@@ -1297,9 +1364,46 @@ function SerenityController(context, log, env) {
           tagId,
           parsedQuery(ctx),
           log,
+          ifMatch,
         );
       }
       return noContent();
+    } catch (e) {
+      return mapError(e, log, reqCtxOf(ctx, auth));
+    }
+  };
+
+  const getTagImpact = async (ctx) => {
+    let auth;
+    try {
+      const imsToken = await resolveSemrushImsToken(ctx);
+      const { tagId } = ctx?.params || {};
+      if (!hasText(tagId)) {
+        throw new ErrorWithStatusCode('Missing tagId', 400);
+      }
+      auth = await authorize(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const transport = buildTransport(ctx, imsToken);
+      const result = auth.mode === 'subworkspace'
+        ? await handleTagImpactSubworkspace(
+          transport,
+          /** @type {string} */ (auth.workspaceId),
+          tagId,
+          parsedQuery(ctx),
+          log,
+        )
+        : await handleTagImpact(
+          transport,
+          ctx.dataAccess,
+          /** @type {string} */ (auth.brandUuid),
+          /** @type {string} */ (auth.workspaceId),
+          tagId,
+          parsedQuery(ctx),
+          log,
+        );
+      return createResponse(result.body, result.status, { ETag: result.body.revision });
     } catch (e) {
       return mapError(e, log, reqCtxOf(ctx, auth));
     }
@@ -2053,12 +2157,24 @@ function SerenityController(context, log, env) {
       if (!job || jobBrandId !== auth.brandUuid) {
         return notFound(`Job not found: ${jobId}`);
       }
+      const metadata = job.getMetadata?.() ?? {};
+      const publicJobType = metadata.jobType === BULK_TAGS_JOB_TYPE
+        ? BULK_TAGS_PUBLIC_JOB_TYPE
+        : (metadata.jobType === 'serenity-tag-impact' ? 'tagImpact' : 'classifyPrompts');
+      const query = parsedQuery(ctx);
+      const status = job.getStatus();
+      const rawResult = status === 'COMPLETED' ? job.getResult?.() ?? null : null;
+      const result = publicJobType === BULK_TAGS_PUBLIC_JOB_TYPE && rawResult
+        ? pageBulkFailures(rawResult, query.failureCursor, query.failureLimit)
+        : rawResult;
+      const error = status === 'FAILED' ? job.getError?.() ?? null : null;
       return createResponse(
         {
           jobId: job.getId(),
-          status: job.getStatus(),
-          result: job.getResult?.() ?? null,
-          error: job.getError?.() ?? null,
+          jobType: publicJobType,
+          status,
+          result,
+          error,
         },
         200,
       );
@@ -2072,6 +2188,7 @@ function SerenityController(context, log, env) {
     createPrompts,
     getPromptsJobStatus,
     updatePrompt,
+    bulkTagPrompts,
     bulkDeletePrompts,
     listMarkets,
     getMarket,
@@ -2080,6 +2197,7 @@ function SerenityController(context, log, env) {
     listTags,
     createTag,
     updateTag,
+    getTagImpact,
     deleteTag,
     listModels,
     listOrgModels,

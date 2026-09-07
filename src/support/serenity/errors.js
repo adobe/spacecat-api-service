@@ -139,6 +139,15 @@ export function isRateLimited(e) {
  */
 export const ERROR_CODES = Object.freeze({
   MARKET_NOT_FOUND: 'marketNotFound',
+  INVALID_TAG_FILTER: 'invalidTagFilter',
+  TAG_FILTER_TOO_LARGE: 'tagFilterTooLarge',
+  TAG_LIMIT_EXCEEDED: 'tagLimitExceeded',
+  IMPACT_UNAVAILABLE: 'impactUnavailable',
+  IMPACT_STALE: 'impactStale',
+  TAG_TREE_READ_INCOMPLETE: 'tagTreeReadIncomplete',
+  UNSUPPORTED_TAG_FILTER: 'unsupportedTagFilter',
+  IDEMPOTENCY_CONFLICT: 'idempotencyConflict',
+  INCOMPATIBLE_TAG_TAXONOMY: 'incompatibleTagTaxonomy',
   // A PATCH target that is not present anywhere in the project's tag tree. The
   // upstream has no "get tag by id" read, and a PATCH cannot omit `parent_id`
   // without promoting the tag to a root, so an unresolvable id is refused here

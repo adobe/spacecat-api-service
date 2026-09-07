@@ -19,8 +19,17 @@ import { redactUpstreamMessage } from '../rest-transport.js';
 import { ERROR_CODES, isMeteredQuota, isUpstreamGone } from '../errors.js';
 import { alertQuotaRejection, alertRollbackFailure } from '../quota-alerts.js';
 import { normalizeGeoTargetId, normalizeLanguageCode, isValidTagIdFormat } from '../validation.js';
-import { invalidateTagCacheForProject } from './markets.js';
-import { resolveTypeValueInjection, resolveIntentValueInjection, resolveServerOwnedValueInjection } from '../tag-tree.js';
+import {
+  invalidateTagCacheForProject,
+  MAX_PROMPT_TAG_IDS,
+  MAX_TAG_FILTER_VALUES,
+} from './markets.js';
+import {
+  resolveTypeValueInjection,
+  resolveIntentValueInjection,
+  resolveServerOwnedValueInjection,
+  readTagTreeSnapshot,
+} from '../tag-tree.js';
 import {
   DIMENSION, ORIGIN_VALUE, INTENT_VALUE, PROXY_CREATE_SOURCE_VALUE,
   canonicalizeSource, SOURCE_VALUES, deriveSource,
@@ -42,7 +51,7 @@ import { logPromptDeleteEvent } from '../prompt-delete-log.js';
 // is slice→project resolution (DB row vs live listing), never the contract.
 export const DEFAULT_PAGE_LIMIT = 50;
 export const MAX_PAGE_LIMIT = 1000;
-export const MAX_TAG_IDS = 50;
+export const MAX_TAG_IDS = MAX_PROMPT_TAG_IDS;
 // Caps the inflight upstream calls when fanning out a bulk create.
 // 8 keeps per-call wall time reasonable without overwhelming upstream rate
 // limits — the prior `serenity` testing exhausted Semrush's shared limit
@@ -251,7 +260,7 @@ export function validateAsync(body) {
  * @returns {Array<{ id: string, name: string, parentId: string | null,
  *   path: Array<{ id: string, name: string }> | null }>}
  */
-function buildTagsOf(item) {
+function buildTagsOf(item, compatibilityById) {
   if (!Array.isArray(item?.tags)) {
     return [];
   }
@@ -259,18 +268,32 @@ function buildTagsOf(item) {
     if (typeof t === 'string' && t) {
       acc.push({
         id: '', name: t, parentId: null, path: null,
+        compatibility: { state: 'canonical', reason: null },
       });
     } else if (typeof t === 'object' && t?.name) {
+      const path = Array.isArray(t.path)
+        ? t.path.map((p) => ({
+          id: typeof p?.id === 'string' ? p.id : '',
+          name: typeof p?.name === 'string' ? p.name : '',
+        }))
+        : null;
+      const names = [...(path ?? []).map((part) => part.name), String(t.name)];
+      const rootName = path?.[0]?.name ?? String(t.name);
+      let reason = null;
+      if (rootName.toLocaleLowerCase() === DIMENSION.TAG && rootName !== DIMENSION.TAG) {
+        reason = 'caseVariantRoot';
+      } else if (names.some((name) => name.includes(':') || name.includes('__'))) {
+        reason = 'separatorInName';
+      } else if (rootName === DIMENSION.TAG && names.length > 3) {
+        reason = 'unsupportedDepth';
+      }
       acc.push({
         id: t.id ? String(t.id) : '',
         name: String(t.name),
         parentId: typeof t.parent_id === 'string' && t.parent_id ? t.parent_id : null,
-        path: Array.isArray(t.path)
-          ? t.path.map((p) => ({
-            id: typeof p?.id === 'string' ? p.id : '',
-            name: typeof p?.name === 'string' ? p.name : '',
-          }))
-          : null,
+        path,
+        compatibility: compatibilityById?.get(String(t.id ?? ''))
+          ?? { state: reason ? 'readOnly' : 'canonical', reason },
       });
     }
     return acc;
@@ -282,7 +305,7 @@ function buildTagsOf(item) {
  * @param {string} languageCode
  * @param {any} item - the upstream prompt item.
  */
-export function buildPromptDto(geoTargetId, languageCode, item) {
+export function buildPromptDto(geoTargetId, languageCode, item, compatibilityById) {
   const text = item?.name || '';
   if (!text) {
     return null;
@@ -297,7 +320,7 @@ export function buildPromptDto(geoTargetId, languageCode, item) {
     geoTargetId,
     languageCode,
     text,
-    tags: buildTagsOf(item),
+    tags: buildTagsOf(item, compatibilityById),
     createdAt: metadata?.created_at ?? null,
     createdBy: metadata?.created_by ?? null,
     updatedAt: metadata?.updated_at ?? null,
@@ -341,9 +364,12 @@ export async function handleListPrompts(
     ? query.limit : DEFAULT_PAGE_LIMIT;
   const limit = Math.min(requestedLimit, MAX_PAGE_LIMIT);
   const search = hasText(query?.search) ? String(query.search).trim() : undefined;
-  const tagIds = Array.isArray(query?.tagIds)
-    ? query.tagIds.slice(0, MAX_TAG_IDS).map(String).filter(Boolean)
-    : [];
+  const tagIds = validateTagIds(query?.tagIds, {
+    maximum: query?.tagFilterMode === 'faceted-v1' ? MAX_TAG_FILTER_VALUES : MAX_TAG_IDS,
+    tooLargeCode: query?.tagFilterMode === 'faceted-v1'
+      ? ERROR_CODES.TAG_FILTER_TOO_LARGE
+      : ERROR_CODES.INVALID_TAG_FILTER,
+  });
   // sort/order (LLMO-6289): validated against the metadata allow-list and
   // forwarded upstream on the (now metadata-carrying) by_tags read. `{}` when
   // unspecified — byte-for-byte the legacy unsorted call.
@@ -372,6 +398,23 @@ export async function handleListPrompts(
   }
 
   const projectId = row.getSemrushProjectId();
+  if (query?.tagFilterMode === 'faceted-v1') {
+    return listFacetedPrompts(
+      transport,
+      semrushWorkspaceId,
+      projectId,
+      {
+        geoTargetId,
+        languageCode,
+        page,
+        limit,
+        search,
+        sort,
+        order,
+        tagIds,
+      },
+    );
+  }
   // Each prompt's tags already carry their own parentage (see buildTagsOf), so
   // one upstream call answers the whole page — no tag-tree walk to join against.
   const resp = await transport.listPromptsByTags(
@@ -401,6 +444,235 @@ export async function handleListPrompts(
       .map((item) => buildPromptDto(geoTargetId, languageCode, item))
       .filter(Boolean),
     total,
+    page,
+    limit,
+  };
+}
+
+export function validateTagIds(raw, {
+  maximum = MAX_PROMPT_TAG_IDS,
+  tooLargeCode = ERROR_CODES.TAG_LIMIT_EXCEEDED,
+  required = false,
+} = {}) {
+  if (!Array.isArray(raw)) {
+    if (required) {
+      throw new ErrorWithStatusCode('tagIds must be a non-empty array', 400);
+    }
+    return [];
+  }
+  if (raw.length > maximum) {
+    const error = new ErrorWithStatusCode(
+      `Tag selection exceeds the maximum of ${maximum}`,
+      tooLargeCode === ERROR_CODES.TAG_LIMIT_EXCEEDED ? 409 : 400,
+    );
+    error.code = tooLargeCode;
+    /** @type {any} */ (error).details = {
+      attemptedCount: raw.length,
+      ...(tooLargeCode === ERROR_CODES.TAG_LIMIT_EXCEEDED
+        ? { maxPromptTagIds: maximum }
+        : { maxTagFilterValues: maximum }),
+    };
+    throw error;
+  }
+  const values = raw.map((value) => String(value ?? '').trim());
+  if (values.some((value) => !isValidTagIdFormat(value))) {
+    const error = new ErrorWithStatusCode('tagIds contains an invalid tag id', 400);
+    error.code = ERROR_CODES.INVALID_TAG_FILTER;
+    throw error;
+  }
+  const deduped = [...new Set(values)];
+  if (required && deduped.length === 0) {
+    throw new ErrorWithStatusCode('tagIds must be a non-empty array', 400);
+  }
+  return deduped;
+}
+
+export function assertPromptTagLimit(tagIds) {
+  if (tagIds.length > MAX_PROMPT_TAG_IDS) {
+    const error = new ErrorWithStatusCode(
+      'Prompt tag limit would be exceeded; no changes were applied',
+      409,
+    );
+    error.code = ERROR_CODES.TAG_LIMIT_EXCEEDED;
+    /** @type {any} */ (error).details = {
+      attemptedCount: tagIds.length,
+      maxPromptTagIds: MAX_PROMPT_TAG_IDS,
+    };
+    throw error;
+  }
+}
+
+export async function listAllProjectPrompts(
+  transport,
+  semrushWorkspaceId,
+  projectId,
+  {
+    tagIds = [], search, sort, order,
+  } = {},
+) {
+  const items = [];
+  const limit = 200;
+  let page = 1;
+  const maxPages = 100;
+  while (page <= maxPages) {
+    // eslint-disable-next-line no-await-in-loop
+    const response = await transport.listPromptsByTags(semrushWorkspaceId, projectId, {
+      tag_ids: tagIds,
+      page,
+      limit,
+      search,
+      ...(sort ? { sort, order } : {}),
+    });
+    const batch = Array.isArray(response?.items) ? response.items : [];
+    items.push(...batch);
+    if (batch.length < limit) {
+      return items;
+    }
+    page += 1;
+  }
+  const error = new ErrorWithStatusCode('Unable to read the complete prompt cohort', 503);
+  error.code = ERROR_CODES.TAG_TREE_READ_INCOMPLETE;
+  throw error;
+}
+
+export async function resolveFacetedTagFilter(
+  transport,
+  semrushWorkspaceId,
+  projectId,
+  tagIds,
+  log,
+) {
+  if (tagIds.length === 0) {
+    return { groups: [], candidateIds: [], compatibilityById: new Map() };
+  }
+  const snapshot = await readTagTreeSnapshot(transport, semrushWorkspaceId, projectId, log);
+  const selected = tagIds.map((id) => snapshot.byId.get(id));
+  if (selected.some((item) => !item
+    || item.depth === 1
+    || item.compatibility?.state !== 'canonical'
+    || (item.rootName === DIMENSION.TAG && item.depth > 3))) {
+    const error = new ErrorWithStatusCode(
+      'One or more selected tag ids are unknown or incompatible with faceted-v1',
+      400,
+    );
+    error.code = ERROR_CODES.INVALID_TAG_FILTER;
+    throw error;
+  }
+  const groups = new Map();
+  for (const item of selected) {
+    const familyId = item.fullPath[1]?.id ?? item.id;
+    if (!groups.has(familyId)) {
+      groups.set(familyId, new Set());
+    }
+    const accepted = groups.get(familyId);
+    accepted.add(item.id);
+    if (item.depth === 2) {
+      for (const descendant of snapshot.items) {
+        if (descendant.fullPath.some((part) => part.id === item.id)) {
+          accepted.add(descendant.id);
+        }
+      }
+    }
+  }
+  return {
+    groups: [...groups.values()],
+    candidateIds: [...new Set([...groups.values()].flatMap((group) => [...group]))],
+    compatibilityById: new Map(
+      snapshot.items.map((item) => [item.id, item.compatibility]),
+    ),
+  };
+}
+
+export async function normalizePromptTagSelection(
+  transport,
+  semrushWorkspaceId,
+  projectId,
+  tagIds,
+  log,
+  snapshot,
+) {
+  const tree = snapshot
+    ?? await readTagTreeSnapshot(transport, semrushWorkspaceId, projectId, log);
+  const normalized = new Set();
+  for (const id of tagIds) {
+    const item = tree.byId.get(id);
+    if (!item) {
+      normalized.add(id);
+      // eslint-disable-next-line no-continue
+      continue;
+    }
+    if (item.depth === 1) {
+      const error = new ErrorWithStatusCode(
+        'A dimension root cannot be assigned to a prompt',
+        400,
+      );
+      error.code = ERROR_CODES.INVALID_TAG_FILTER;
+      throw error;
+    }
+    if (item.compatibility?.state === 'readOnly') {
+      normalized.add(id);
+      // Read-only ids are retained verbatim. Bulk mutation rejects them as
+      // mutation targets, while replacement writers must not erase them.
+      // eslint-disable-next-line no-continue
+      continue;
+    }
+    normalized.add(id);
+    if (item.rootName === DIMENSION.TAG && item.depth === 3) {
+      normalized.add(item.fullPath[1].id);
+    }
+  }
+  const result = [...normalized];
+  assertPromptTagLimit(result);
+  return result;
+}
+
+export async function listFacetedPrompts(
+  transport,
+  semrushWorkspaceId,
+  projectId,
+  {
+    geoTargetId,
+    languageCode,
+    page,
+    limit,
+    search,
+    sort,
+    order,
+    tagIds,
+  },
+  log,
+) {
+  const resolved = await resolveFacetedTagFilter(
+    transport,
+    semrushWorkspaceId,
+    projectId,
+    tagIds,
+    log,
+  );
+  const all = await listAllProjectPrompts(transport, semrushWorkspaceId, projectId, {
+    tagIds: resolved.candidateIds,
+    search,
+    sort,
+    order,
+  });
+  const filtered = resolved.groups.length === 0 ? all : all.filter((prompt) => {
+    const promptTagIds = new Set((Array.isArray(prompt?.tags) ? prompt.tags : [])
+      .map((tag) => (typeof tag === 'string' ? tag : String(tag?.id ?? '')))
+      .filter(Boolean));
+    return resolved.groups.every((group) => [...group].some((id) => promptTagIds.has(id)));
+  });
+  const start = (page - 1) * limit;
+  return {
+    items: filtered
+      .slice(start, start + limit)
+      .map((item) => buildPromptDto(
+        geoTargetId,
+        languageCode,
+        item,
+        resolved.compatibilityById,
+      ))
+      .filter(Boolean),
+    total: filtered.length,
     page,
     limit,
   };
@@ -684,13 +956,10 @@ export async function reconcilePublishErrors(
  * @returns {string[]}
  */
 function sanitizeTagIds(raw) {
-  if (!Array.isArray(raw)) {
-    return [];
-  }
-  return raw
-    .map((t) => String(t || '').trim())
-    .filter((t) => isValidTagIdFormat(t))
-    .slice(0, MAX_TAG_IDS);
+  return validateTagIds(raw, {
+    maximum: MAX_PROMPT_TAG_IDS,
+    tooLargeCode: ERROR_CODES.TAG_LIMIT_EXCEEDED,
+  });
 }
 
 /**
@@ -780,6 +1049,7 @@ export function normalizePromptInput(input) {
  *   response carried none.
  */
 export async function createOnePrompt(transport, semrushWorkspaceId, projectId, input, callerId) {
+  assertPromptTagLimit(input.tagIds);
   const resp = await transport.createPromptsWithMetadata(
     semrushWorkspaceId,
     projectId,
@@ -873,8 +1143,26 @@ export function makePromptTagInjector(
   const typeCache = new Map();
   /** @type {Map<string, Promise<{ computedId: string, valueTagIds: string[] }>>} */
   const sourceCache = new Map();
+  const taxonomyCache = new Map();
   return async function injectComputedTags(projectId, input) {
-    let { tagIds } = input;
+    let snapshotPromise = taxonomyCache.get(projectId);
+    if (!snapshotPromise) {
+      snapshotPromise = readTagTreeSnapshot(
+        transport,
+        semrushWorkspaceId,
+        projectId,
+        log,
+      );
+      taxonomyCache.set(projectId, snapshotPromise);
+    }
+    let tagIds = await normalizePromptTagSelection(
+      transport,
+      semrushWorkspaceId,
+      projectId,
+      input.tagIds,
+      log,
+      await snapshotPromise,
+    );
 
     // type — every write (safe to recompute from the text).
     if (typeof classifyPromptType === 'function') {
@@ -936,6 +1224,7 @@ export function makePromptTagInjector(
       tagIds = [...tagIds.filter((id) => !valueTagIds.includes(id)), computedId];
     }
 
+    assertPromptTagLimit(tagIds);
     return { ...input, tagIds };
   };
 }
@@ -1004,7 +1293,9 @@ export function makeIntentInjector(transport, semrushWorkspaceId, intentByText, 
     }
     const { computedId, intentTagIds } = await pending;
     const stripped = input.tagIds.filter((id) => !intentTagIds.includes(id));
-    return { ...input, tagIds: computedId === null ? stripped : [...stripped, computedId] };
+    const tagIds = computedId === null ? stripped : [...stripped, computedId];
+    assertPromptTagLimit(tagIds);
+    return { ...input, tagIds };
   };
 }
 
