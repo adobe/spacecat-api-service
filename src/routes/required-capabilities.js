@@ -346,6 +346,7 @@ const routeRequiredCapabilities = {
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/prompts': ['organization:read', CAP_ORG_READ_ALL],
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/cited-domains': ['brand:read', CAP_ORG_READ_ALL],
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/sentiment-overview': ['brand:read', CAP_ORG_READ_ALL],
+  'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/responses': ['brand:read', CAP_ORG_READ_ALL],
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/subreddits': ['brand:read', CAP_ORG_READ_ALL],
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/reddit-threads': ['brand:read', CAP_ORG_READ_ALL],
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/youtube-videos': ['brand:read', CAP_ORG_READ_ALL],
