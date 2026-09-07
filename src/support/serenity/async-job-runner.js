@@ -93,6 +93,8 @@ const REAUTH_STATUS_PATTERN = /status: (401|403)\b/;
  *   path (the worker has no request headers); from a request it defaults to the
  *   `x-promise-audience` header. Persisted so the worker exchanges/invalidates on the
  *   same pair.
+ * @param {string} [params.jobId] - Optional deterministic UUID used by callers
+ *   that require durable idempotency across Lambda containers.
  * @returns {Promise<object>} The created job (an AsyncJob instance).
  * @throws On SQS send failure, after rolling back the created job record.
  */
@@ -234,5 +236,3 @@ export async function invalidateJobPromiseToken(context, job) {
   delete metadata.promiseToken;
   job.setMetadata(metadata);
 }
- * @param {string} [params.jobId] - Optional deterministic UUID used by callers
- *   that require durable idempotency across Lambda containers.
