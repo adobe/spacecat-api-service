@@ -785,14 +785,6 @@ export default function serenityTests(
       await createUsMarket();
       const category = await createTag('Photography');
       const child = await createTag('Cameras', category.body.id);
-      // Resolve (never create twice — closed-dimension POST is idempotent
-      // resolve-or-create) the origin/human id up front, so the assertion
-      // below can check for it BY ID rather than by a bare count that a
-      // double-stamped intent (or any other tag) would also satisfy.
-      const originHuman = await getHttpClient().admin.post(`${base}/tags`, {
-        type: 'origin', name: 'human', geoTargetId: US_GEO, languageCode: 'en',
-      });
-      expect(originHuman.status).to.equal(200);
 
       const created = await getHttpClient().admin.post(`${base}/prompts`, {
         prompts: [{
@@ -814,11 +806,30 @@ export default function serenityTests(
       // — see the fallback ladder). The human-authored create also carries
       // `origin:human`. So the created prompt carries the two supplied tags plus
       // the four computed ones.
-      expect(created.body.created[0].tagIds).to.include.members([
-        category.body.id, child.body.id, originHuman.body.id,
-      ]);
+      expect(created.body.created[0].tagIds).to.include.members([category.body.id, child.body.id]);
       expect(created.body.created[0].tagIds).to.have.lengthOf(6);
       expect(created.body.failed).to.deep.equal([]);
+
+      // Resolve the origin root's `human` child BY READING the tree the create
+      // just wrote to (never by a separate resolve-or-create call, which races
+      // the create's own tag-tree provisioning and can land a second,
+      // differently-id'd node) — then confirm ONE of the created prompt's own
+      // tagIds actually IS that id, not just that the count is right (a
+      // double-stamped intent, or any other tag, would also satisfy a bare
+      // lengthOf(6)).
+      const roots = await getHttpClient().admin.get(
+        `${base}/tags?geoTargetId=${US_GEO}&languageCode=en&parentId=`,
+      );
+      expect(roots.status).to.equal(200);
+      const originRoot = roots.body.items.find((t) => t.name === 'origin');
+      expect(originRoot, 'the origin root should list among the roots').to.exist;
+      const originChildren = await getHttpClient().admin.get(
+        `${base}/tags?geoTargetId=${US_GEO}&languageCode=en&parentId=${originRoot.id}`,
+      );
+      expect(originChildren.status).to.equal(200);
+      const originHuman = originChildren.body.items.find((t) => t.name === 'human');
+      expect(originHuman, 'origin/human should exist under the origin root').to.exist;
+      expect(created.body.created[0].tagIds).to.include(originHuman.id);
 
       // by_tags correlation: the id-based create embeds the tag ids, so filtering the prompt list
       // by the child's id surfaces the new prompt.
