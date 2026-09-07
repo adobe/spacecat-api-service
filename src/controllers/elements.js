@@ -30,6 +30,7 @@ import { createSerenityTransport } from '../support/serenity/rest-transport.js';
 import { SerenityTransportError } from '../support/serenity/serenity-transport-error.js';
 import { logUpstreamError } from '../support/serenity/upstream-log.js';
 import { cachedOk } from '../support/cached-response.js';
+import { ResponseFeedDto } from '../dto/response-feed.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { ErrorWithStatusCode, resolveSemrushImsToken } from '../support/utils.js';
 import { X_PROMISE_TOKEN_HEADER, PROMISE_TOKEN_REQUIRED_ERROR_CODE } from '../utils/constants.js';
@@ -39,6 +40,19 @@ const BEARER_PREFIX = 'Bearer ';
 // Caps concurrent DB queries / upstream POSTs when fanning out across brands or projects.
 // mapWithConcurrency itself lives in support/elements/concurrency.js (shared with the service).
 const FANOUT_CONCURRENCY = 8;
+
+/** Milliseconds in a day, for span arithmetic on `YYYY-MM-DD` bounds. */
+const MS_PER_DAY = 86400000;
+
+/**
+ * Maximum span the response feed will serve, in days.
+ *
+ * The upstream window is ROLLING and about 74 days wide (measured 2026-09-04). Beyond it a
+ * day is UNRECOVERABLE rather than expensive, and the failure is silent: the upstream
+ * returns nothing for an out-of-window day, which is indistinguishable from "no model ran".
+ * Rejecting at the edge keeps that ambiguity out of the response.
+ */
+const RESPONSE_FEED_MAX_SPAN_DAYS = 74;
 
 /**
  * Maps a BrandSemrushProject model instance to the plain object shape the
@@ -2173,12 +2187,98 @@ export default function ElementsController(context, log, env) {
   };
   /* c8 ignore stop */
 
+  /**
+   * GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/responses
+   *
+   * The Brand Claims RESPONSE FEED: each AI answer for the requested days, paired with the
+   * sources cited in that same execution. Brand Claims sits under Brand Presence within the
+   * ABV product, hence the path segment.
+   *
+   * Assembled from two elements that each hold half the record — 141adc88 has the answer but
+   * no date, 404fb017 has the date and citations but no answer — joined on
+   * `(project_id, prompt, model, date)`. See `elements-service.js#getResponseFeed`.
+   *
+   * RANGE-BASED BY DESIGN. Consecutive days share a window boundary, so N days cost N+1
+   * upstream pulls rather than 2N. A per-day endpoint would forfeit that and pay double.
+   */
+  const listResponseFeed = async (ctx) => {
+    try {
+      const auth = await authorizeOrg(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      // authorizeOrg validated `:brandId`, confirmed the brand belongs to the org, and
+      // resolved the brand's Semrush sub-workspace. The caller never supplies a workspace
+      // id and never holds a Semrush credential (design of record §10).
+      const { workspaceId, brand } = auth;
+      const query = extractQuery(ctx);
+
+      // Default to the last 7 days ending yesterday. Yesterday, not today: the upstream
+      // window is bounded by `CBF_date__end` and today's executions are still landing, so
+      // ending on today would report a partial day as though it were complete. Seven days
+      // is a working week of context at 8 boundary pulls per market — small enough to stay
+      // responsive, wide enough to be useful without a caller computing dates.
+      const defaultEnd = addDaysToDate(new Date().toISOString().slice(0, 10), -1);
+      const startDate = query.from || query.startDate || addDaysToDate(defaultEnd, -6);
+      const endDate = query.to || query.endDate || defaultEnd;
+
+      if (!isYmdDate(startDate) || !isYmdDate(endDate)) {
+        return badRequest('from and to must be valid YYYY-MM-DD dates');
+      }
+      if (startDate > endDate) {
+        return badRequest('from must not be after to');
+      }
+
+      // The upstream window is ROLLING and about 74 days wide (measured 2026-09-04). A day
+      // older than that is UNRECOVERABLE, not merely expensive — the data is gone upstream.
+      // Rejecting is essential: serving such a request would return an empty result that is
+      // indistinguishable from "nothing ran", i.e. silent data loss presented as fact.
+      const spanDays = (Date.parse(`${endDate}T00:00:00Z`)
+        - Date.parse(`${startDate}T00:00:00Z`)) / MS_PER_DAY;
+      if (spanDays >= RESPONSE_FEED_MAX_SPAN_DAYS) {
+        return badRequest(
+          `Date range must not exceed ${RESPONSE_FEED_MAX_SPAN_DAYS} days: the upstream window `
+          + 'is rolling and older executions are unrecoverable',
+        );
+      }
+
+      const service = await buildService(ctx);
+
+      // Project scoping: caller-supplied projectId(s) (CSV) scope to those Semrush projects;
+      // absent → all of the brand's markets. LOAD-BEARING: the technical account is broadly
+      // entitled, so a caller who guessed another brand's project UUID could otherwise read
+      // that tenant's answers. Ownership is checked against this brand's own rows.
+      const projectIds = extractProjectIds(query);
+      // `dataAccess` is guaranteed present here — `authorizeOrg` above already read
+      // `Organization` from it — so this is a plain destructure rather than the optional
+      // form the sibling handlers use, whose fallback branch is unreachable in practice.
+      const { BrandSemrushProject } = ctx.dataAccess;
+      const brandSemrushProjects = await fetchBrandSemrushProjects(BrandSemrushProject, [brand]);
+      const ownershipError = checkProjectIdsOwnership(projectIds, brandSemrushProjects);
+      if (ownershipError) {
+        return ownershipError;
+      }
+
+      const result = await service.getResponseFeed(workspaceId, {
+        projectIds,
+        startDate,
+        endDate,
+        model: query.model || query.platform,
+        limit: query.limit,
+      });
+      return ok(ResponseFeedDto.toEnvelopeJSON(result));
+    } catch (e) {
+      return mapError(e, log, reqCtxOf(ctx));
+    }
+  };
+
   return {
     listUrlInspectorFilterDimensions,
     listWeeks,
     checkAccess,
     listPrompts,
     listCitedDomains,
+    listResponseFeed,
     listSubreddits,
     listRedditThreads,
     listYoutubeVideos,
