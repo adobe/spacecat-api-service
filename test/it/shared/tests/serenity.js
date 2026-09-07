@@ -803,20 +803,22 @@ export default function serenityTests(
       // §1 / WP-S2, LLMO-6282), AND an `intent:<Value>` tag (serenity-docs#31,
       // #32). Azure OpenAI is not configured in this IT environment, so intent
       // deterministically defaults to `intent:Informational` (never null/omitted
-      // — see the fallback ladder). The human-authored create also carries
-      // `origin:human`. So the created prompt carries the two supplied tags plus
-      // the four computed ones.
+      // — see the fallback ladder). The `admin` persona's JWT carries
+      // `isS2SAdmin: true` (see FACS bypass logging: "bypass: internal-identity"),
+      // which `isServicePrincipal` (prompts-storage.js) classifies as a SERVICE
+      // principal regardless of `authType` being `jwt` — so this create carries
+      // `origin:ai`, not `origin:human`. So the created prompt carries the two
+      // supplied tags plus the four computed ones.
       expect(created.body.created[0].tagIds).to.include.members([category.body.id, child.body.id]);
       expect(created.body.created[0].tagIds).to.have.lengthOf(6);
       expect(created.body.failed).to.deep.equal([]);
 
-      // Resolve the origin root's `human` child BY READING the tree the create
-      // just wrote to (never by a separate resolve-or-create call, which races
-      // the create's own tag-tree provisioning and can land a second,
-      // differently-id'd node) — then confirm ONE of the created prompt's own
-      // tagIds actually IS that id, not just that the count is right (a
-      // double-stamped intent, or any other tag, would also satisfy a bare
-      // lengthOf(6)).
+      // Resolve the origin root's `ai` child BY READING the tree the create just
+      // wrote to (never by a separate resolve-or-create call, which could land a
+      // second, differently-id'd node if it ever raced the create's own tag-tree
+      // provisioning) — then confirm ONE of the created prompt's own tagIds
+      // actually IS that id, not just that the count is right (a double-stamped
+      // intent, or any other tag, would also satisfy a bare lengthOf(6)).
       const roots = await getHttpClient().admin.get(
         `${base}/tags?geoTargetId=${US_GEO}&languageCode=en&parentId=`,
       );
@@ -827,9 +829,9 @@ export default function serenityTests(
         `${base}/tags?geoTargetId=${US_GEO}&languageCode=en&parentId=${originRoot.id}`,
       );
       expect(originChildren.status).to.equal(200);
-      const originHuman = originChildren.body.items.find((t) => t.name === 'human');
-      expect(originHuman, 'origin/human should exist under the origin root').to.exist;
-      expect(created.body.created[0].tagIds).to.include(originHuman.id);
+      const originAi = originChildren.body.items.find((t) => t.name === 'ai');
+      expect(originAi, 'origin/ai should exist under the origin root').to.exist;
+      expect(created.body.created[0].tagIds).to.include(originAi.id);
 
       // by_tags correlation: the id-based create embeds the tag ids, so filtering the prompt list
       // by the child's id surfaces the new prompt.
