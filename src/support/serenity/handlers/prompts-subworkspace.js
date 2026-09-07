@@ -171,6 +171,7 @@ export async function handleListPromptsSubworkspace(transport, workspaceId, quer
  * @param {object} [options]
  * @param {string | null} [options.orgId] - serenity-docs#72 §5 alert payload only.
  * @param {string | null} [options.brandId] - serenity-docs#72 §5 alert payload only.
+ * @param {string} [options.originValue=human] - trusted caller-principal origin.
  */
 export async function handleCreatePromptsSubworkspace(
   transport,
@@ -184,6 +185,7 @@ export async function handleCreatePromptsSubworkspace(
   {
     orgId = null,
     brandId = null,
+    originValue = ORIGIN_VALUE.HUMAN,
   } = {},
 ) {
   const inputs = Array.isArray(body?.prompts) ? body.prompts : [];

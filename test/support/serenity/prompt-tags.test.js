@@ -147,8 +147,9 @@ describe('serenity prompt-tags taxonomy', () => {
   });
 
   describe('STANDARD_PROMPT_TAG_VALUES', () => {
-    it('seeds intent=Informational only (origin is assigned from authorship)', () => {
+    it('seeds origin=ai and intent=Informational (type is classified per prompt)', () => {
       expect(STANDARD_PROMPT_TAG_VALUES.map((t) => [t.dimension, t.name])).to.deep.equal([
+        ['origin', 'ai'],
         ['intent', 'Informational'],
       ]);
     });

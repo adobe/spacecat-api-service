@@ -1616,6 +1616,7 @@ export async function mapLimit(items, limit, mapper) {
  * @param {object} [options]
  * @param {boolean} [options.publish] - see above.
  * @param {string | null} [options.orgId] - serenity-docs#72 §5 alert payload only.
+ * @param {string} [options.originValue=human] - trusted caller-principal origin.
  */
 export async function handleCreatePrompts(
   transport,
@@ -1628,7 +1629,7 @@ export async function handleCreatePrompts(
   env,
   writeDeadline,
   callerId,
-  { publish = true, orgId = null } = {},
+  { publish = true, orgId = null, originValue = ORIGIN_VALUE.HUMAN } = {},
 ) {
   const inputs = Array.isArray(body?.prompts) ? body.prompts : [];
   if (inputs.length === 0) {
@@ -1943,7 +1944,11 @@ export async function handleUpdatePrompt(
   // the client to send the old text — a contract change deliberately out of
   // scope here (keep the edit path a single straight line).
   const cappedTagIds = await capUpdateTagIds(
-    transport, semrushWorkspaceId, projectId, nextTagIds, log,
+    transport,
+    semrushWorkspaceId,
+    projectId,
+    nextTagIds,
+    log,
   );
   const injectComputedTags = makePromptTagInjector(
     transport,
