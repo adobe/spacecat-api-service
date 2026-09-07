@@ -61,7 +61,6 @@ import {
   bypassAemSiteCheck,
   bypassDomainAlreadyAssigned,
   bypassNonProdDomain,
-  bypassAuthenticatedSite,
 } from './plg-onboarding/bypass-handlers.js';
 import { getReviewerIdentity, isInternalOrg, isInternalOrgDemoSite } from './plg-onboarding/internal-org.js';
 
@@ -552,8 +551,6 @@ function PlgOnboardingController(ctx) {
           );
         case REVIEW_REASONS.NON_PROD_DOMAIN:
           return await bypassNonProdDomain({ onboarding }, flowContext);
-        case REVIEW_REASONS.AUTHENTICATED_SITE:
-          return await bypassAuthenticatedSite({ onboarding }, flowContext);
         /* c8 ignore next 2 */
         default:
           return badRequest('Unknown review reason');

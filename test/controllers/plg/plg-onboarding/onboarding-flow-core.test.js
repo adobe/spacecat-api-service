@@ -1151,7 +1151,7 @@ describe('PlgOnboardingController (onboarding-flow-core)', function describePlgO
       controller = PlgOnboardingControllerFactory({ log: mockLog });
     });
 
-    it('waitlists with an authentication reason when the front door requires login', async () => {
+    it('rejects with an authentication reason when the front door requires login', async () => {
       detectAuthWallStub.resolves({
         authenticated: true,
         signal: 'login-url',
@@ -1162,7 +1162,8 @@ describe('PlgOnboardingController (onboarding-flow-core)', function describePlgO
       const res = await controller.onboard(context);
 
       expect(res.status).to.equal(200);
-      expect(mockOnboarding.setStatus).to.have.been.calledWith('WAITLISTED');
+      expect(mockOnboarding.setStatus).to.have.been.calledWith('REJECTED');
+      expect(mockOnboarding.setStatus).to.not.have.been.calledWith('WAITLISTED');
       expect(mockOnboarding.setWaitlistReason).to.have.been.calledWithMatch(/requires authentication/);
       expect(mockOnboarding.save).to.have.been.called;
       expect(mockDataAccess.Site.create).to.not.have.been.called;
@@ -1175,7 +1176,7 @@ describe('PlgOnboardingController (onboarding-flow-core)', function describePlgO
       expect(detectAuthWallStub).to.have.been.calledWithMatch({ baseUrl: TEST_BASE_URL });
     });
 
-    it('includes the detected signal and resolved URL in the waitlist reason', async () => {
+    it('includes the detected signal and resolved URL in the rejection reason', async () => {
       detectAuthWallStub.resolves({
         authenticated: true,
         signal: 'idp-host',
@@ -1197,19 +1198,6 @@ describe('PlgOnboardingController (onboarding-flow-core)', function describePlgO
 
       expect(mockOnboarding.setWaitlistReason).to.have.been.calledWithMatch(/detected: status-401\)/);
       expect(mockOnboarding.setWaitlistReason).to.not.have.been.calledWithMatch(/resolved to/);
-    });
-
-    it('skips the auth-wall check when steps.authWallCheckBypassed is already true', async () => {
-      mockOnboarding.getSteps.returns({ authWallCheckBypassed: true });
-      detectAuthWallStub.resolves({ authenticated: true, signal: 'login-url' });
-
-      const context = buildContext({ domain: TEST_DOMAIN });
-      const res = await controller.onboard(context);
-
-      expect(res.status).to.equal(200);
-      expect(detectAuthWallStub).to.not.have.been.called;
-      expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
-      expect(mockDataAccess.Site.create).to.have.been.called;
     });
   });
 
