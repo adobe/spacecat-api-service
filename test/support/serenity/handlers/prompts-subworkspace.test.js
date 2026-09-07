@@ -280,6 +280,33 @@ describe('prompts-subworkspace handlers', () => {
       expect(items[0].references).to.not.include(TAG_IDS.sourceConfig);
     });
 
+    // Lockstep coverage for the flat twin's "moves updates into `failed` when the
+    // batched tag write throws". The twin resolves its workspace id differently
+    // (`workspaceId` vs `semrushWorkspaceId`), so a copy-paste divergence in this
+    // catch block would otherwise go undetected.
+    it('moves updates into `failed` when the batched tag write throws', async () => {
+      const transport = makeTransport({
+        listPromptsByTags: sinon.stub().resolves({
+          items: [{ id: 'sem-existing', name: 'p', tags: [] }],
+        }),
+        updatePromptTagsByIds: sinon.stub().rejects(new Error('upstream 500')),
+        patchPromptsMetadataBatch: sinon.stub().resolves(),
+      });
+
+      const result = await handleCreatePromptsSubworkspace(transport, WS, {
+        prompts: [{
+          text: 'p', tagIds: ['tag-new'], geoTargetId: 2840, languageCode: 'en',
+        }],
+      }, log);
+
+      // Never report an update that did not land.
+      expect(result.updated).to.be.an('array').that.is.empty;
+      expect(result.failed).to.have.length(1);
+      expect(result.failed[0]).to.include({
+        text: 'p', geoTargetId: 2840, languageCode: 'en', status: 500,
+      });
+    });
+
     it('creates prompts by id on the resolved project and publishes once', async () => {
       const transport = makeTransport();
       const result = await handleCreatePromptsSubworkspace(transport, WS, {
