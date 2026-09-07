@@ -135,6 +135,8 @@ export function transformTopicPromptsResponse(raw) {
       // `days` = the number of executions in the window (Semrush runs a prompt at most once
       // per model/date/project), surfaced as `executions` so consumers can compute a true
       // per-execution citation rate (citations / executions) rather than citations / mentions.
+      // VERIFIED live 2026-09-07 (Lovesac, one topic, 30-day window, 100 rows): days <= window
+      // with 0 violations, and mentions <= days universally.
       executions: Number(row?.days) || 0,
     };
   });
