@@ -3214,20 +3214,20 @@ function SuggestionsController(ctx, sqs, env) {
     if (!isNonEmptyObject(context.data)) {
       return badRequest('No data provided');
     }
-    const { suggestionIds: rawSuggestionIds } = context.data;
+    const { suggestionIds: rawSuggestionIds, imsToken } = context.data;
     if (!isArray(rawSuggestionIds) || rawSuggestionIds.length === 0) {
       return badRequest('Request body must contain a non-empty array of suggestionIds');
     }
 
     // The AEM Content MCP (and the pageId resolve) authenticate with the caller's IMS
     // user access token. That is distinct from the SpaceCat session token this service
-    // uses for its own caller-auth (the `Authorization` header), so the UI sends the IMS
-    // token in a dedicated `x-aem-ims-token` header to avoid colliding with caller-auth.
-    const imsHeader = context.pathInfo?.headers?.['x-aem-ims-token'];
-    if (!hasText(imsHeader)) {
-      return badRequest('Missing x-aem-ims-token header (IMS user access token required for the AEM MCP)');
+    // uses for its own caller-auth (the `Authorization` header). The UI passes the IMS
+    // token in the request body (not a custom header) so it needs no CORS-preflight
+    // allowlisting — a new header would be blocked by the edge CORS policy.
+    if (!hasText(imsToken)) {
+      return badRequest('Missing imsToken in request body (IMS user access token required for the AEM MCP)');
     }
-    const authorization = imsHeader.startsWith('Bearer ') ? imsHeader : `Bearer ${imsHeader}`;
+    const authorization = imsToken.startsWith('Bearer ') ? imsToken : `Bearer ${imsToken}`;
 
     const deliveryConfig = site.getDeliveryConfig();
     const configuredAuthorURL = deliveryConfig?.authorURL;
