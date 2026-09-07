@@ -781,6 +781,9 @@ describe('markets-subworkspace handlers', () => {
         expect(res.status).to.equal(201);
         expect(res.body.published).to.equal(false);
         expect(transport.publishProject).to.not.have.been.called;
+        // The benchmark invariant is not conditional on publishMode — it still
+        // runs (ensure + assert) even when publish itself is deferred.
+        expect(transport.listBenchmarks).to.have.callCount(2);
       });
     });
 

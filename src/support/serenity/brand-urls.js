@@ -555,7 +555,13 @@ export async function ensureOwnBrandBenchmark(
     try {
       await transport.deleteBenchmarks(workspaceId, projectId, [String(domainMatch.id)]);
     } catch (e) {
-      log?.warn?.('brand-urls: could not delete unflagged own-domain benchmark before recreate', {
+      // Non-fatal and deliberately swallowed: falling through to create still
+      // establishes the flagged benchmark the invariant requires (it only
+      // counts main_brand:true), so provisioning succeeds either way. The
+      // stale unflagged benchmark this leaves behind is data pollution, not a
+      // correctness problem — greppable token so it's alertable rather than
+      // silently accumulating.
+      log?.warn?.('brand-urls: SERENITY_BENCHMARK_DELETE_DIVERGENCE — could not delete unflagged own-domain benchmark before recreate; stale benchmark left behind', {
         workspaceId, projectId, benchmarkId: domainMatch.id, error: e?.message,
       });
     }

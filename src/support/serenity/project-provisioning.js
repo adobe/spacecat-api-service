@@ -168,6 +168,10 @@ export async function createProvisionAndPublishProject(
   // (the pre-publish benchmark invariant, and publish itself) so a
   // half-provisioned project is never left for a caller to mistakenly persist
   // as complete.
+  /**
+   * @param {Error} e - the original failure; always rethrown after cleanup.
+   * @returns {Promise<never>}
+   */
   const cleanupAndRethrow = async (e) => {
     let cleanedUp = false;
     try {
