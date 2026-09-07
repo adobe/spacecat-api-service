@@ -756,8 +756,10 @@ async function collectClosedDimensionTagIds(transport, semrushWorkspaceId, proje
       .map((dimension) => rootsByName.get(rootNameOfDimension(dimension)))
       .filter((rootId) => Boolean(rootId))
   );
-  // The four roots' children reads are independent of each other -- run them
-  // concurrently rather than one dimension at a time.
+  // The four CLOSED-dimension roots' (type/intent/origin/source) children
+  // reads are independent of each other -- run them concurrently rather than
+  // one dimension at a time. Four, not five: `category` is the one OPEN
+  // dimension and is never exempted from the update cap.
   const childrenByRoot = await Promise.all(
     rootIds.map(
       (rootId) => indexLevelByName(transport, semrushWorkspaceId, projectId, rootId, log),
