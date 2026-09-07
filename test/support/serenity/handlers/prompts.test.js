@@ -3849,6 +3849,23 @@ describe('handlers/prompts.js — create is an upsert (existing text replaces ta
     expect(references.filter((id) => String(id).startsWith('source-'))).to.deep.equal(['source-ai']);
   });
 
+  it('drops a per-item `source` override on the update path, so the dimension keeps one value', async () => {
+    // `source` is a per-item CREATE override (LLMO-6556). Left on the input it would
+    // make the injector resolve and append ITS source id beside the carried-over
+    // stored one — two values in a dimension that must hold exactly one.
+    const { transport, dataAccess } = setup([
+      storedPrompt({ tags: [sourceTag('source-stored', 'semrush')] }),
+    ]);
+
+    await runImport(transport, dataAccess, [
+      { ...importRow('best shoes', ['cat-new']), source: 'config' },
+    ]);
+
+    const references = referencesOf(transport);
+    expect(references).to.include('source-stored');
+    expect(references).to.not.include(TAG_IDS.sourceConfig);
+  });
+
   it('still CREATES a text the project does not hold', async () => {
     const { transport, dataAccess } = setup([storedPrompt({ name: 'something else' })]);
 

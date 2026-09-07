@@ -585,8 +585,11 @@ export function createSerenityTransport({ env, imsToken }) {
      * batch is ATOMIC upstream: a CHECK violation on ANY item (e.g. a `created_by`
      * / `updated_by` longer than 100 chars) rolls the WHOLE batch back and answers
      * 400 — so callers must isolate a deterministic offender rather than retry the
-     * batch whole. No caller yet; it exposes the batch write surface the ADR pins
-     * for bulk stampers.
+     * batch whole. Called by the create endpoint's upsert path to stamp the rows it
+     * replaced; that caller logs rather than isolating, and treats a failure as
+     * non-fatal, because the tag write it follows has already landed and `callerId`
+     * — the only field that could trip the CHECK — is length-capped by
+     * `resolveCallerId`.
      *
      * @param {string} semrushWorkspaceId
      * @param {string} projectId

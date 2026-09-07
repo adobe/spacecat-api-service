@@ -1578,8 +1578,14 @@ export async function handleCreatePrompts(
         // REPLACE the existing prompt's tags. The stored authorship rides along so
         // the full replace cannot strip it; deduped because a caller that supplied
         // one of those ids itself would otherwise write it twice.
+        //
+        // `source` is dropped from the input: it is a per-item CREATE override
+        // (LLMO-6556), and leaving it on would make the injector resolve-and-append
+        // ITS source id next to the carried-over stored one — two values in a
+        // dimension that must hold exactly one. PATCH never carries it either.
+        const { source: _, ...editable } = input;
         let typed = await injectStoredTags(projectId, {
-          ...input,
+          ...editable,
           tagIds: [...new Set([...input.tagIds, ...stored.carryOverTagIds])],
         });
         typed = await injectComputedIntent(projectId, typed);

@@ -271,8 +271,11 @@ export async function handleCreatePromptsSubworkspace(
     try {
       if (stored) {
         // REPLACE the existing prompt's tags; stored authorship rides along.
+        // `source` is dropped for the same reason as the flat twin: a per-item
+        // CREATE override would resolve a second value into a one-value dimension.
+        const { source: _, ...editable } = input;
         let typed = await injectStoredTags(projectId, {
-          ...input,
+          ...editable,
           tagIds: [...new Set([...input.tagIds, ...stored.carryOverTagIds])],
         });
         typed = await injectComputedIntent(projectId, typed);
