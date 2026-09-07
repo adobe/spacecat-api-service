@@ -425,6 +425,19 @@ function StateAccessMappingsController(context) {
       if (!orgImsOrgId) {
         return { error: notFound('Organization has no IMS org') };
       }
+      // Cross-tenant admin read: no emitAuditEvent equivalent exists for reads
+      // (only mutations are audited), so log it explicitly — otherwise an
+      // admin browsing another org's FACS bindings leaves no trace at all.
+      log.info(
+        {
+          tag: 'state-access-mappings',
+          actorId: resolveCallerUserIdent(ctx),
+          callerImsOrgId,
+          targetImsOrgId: orgImsOrgId,
+          organizationId,
+        },
+        'Admin cross-org scope override for FACS access-mapping read',
+      );
       return { imsOrgId: orgImsOrgId };
     } catch (error) {
       log.error(
@@ -1395,6 +1408,12 @@ function StateAccessMappingsController(context) {
    *
    * Provenance is reported per capability with tags from
    * {`jwt`, `state:user`, `state:org`}.
+   *
+   * No `?organizationId` admin-preview override here (unlike `listMappings` /
+   * `listHistory`): this endpoint reports the CALLER's own effective grants,
+   * not a preview of someone else's. An admin's real identity holds no
+   * personal state binding on a customer's resource regardless of preview
+   * context, so there is nothing to override.
    */
   async function getUserCapabilities(ctx) {
     const guard = requirePostgrestForFacsMappings(ctx);

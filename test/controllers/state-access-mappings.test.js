@@ -425,6 +425,16 @@ describe('StateAccessMappingsController', () => {
       expect(res.status).to.equal(200);
       expect(histStub.firstCall.args[1].imsOrgId).to.equal(PREVIEW_ORG_CANONICAL);
     });
+
+    it('listHistory returns 400 for an invalid organizationId (error-guard wiring)', async () => {
+      const { Controller } = await loadController();
+      const ctx = makeContext({
+        isAdmin: true,
+        queryParams: { resourceType: 'brand', resourceId: VALID_UUID_RES, organizationId: 'not-a-uuid' },
+      });
+      const res = await Controller(ctx).listHistory(ctx);
+      expect(res.status).to.equal(400);
+    });
   });
 
   describe('GET /state/access-mappings/history (listHistory)', () => {
