@@ -373,9 +373,10 @@ export async function handleBulkTagsSubworkspace(
   });
 }
 
-export async function bulkTagsHandler(context, job, accessToken) {
+export async function bulkTagsHandler(context, job, accessToken, injectedTransport) {
   const metadata = job.getMetadata() ?? {};
-  const transport = createSerenityTransport({ env: context.env, imsToken: accessToken });
+  const transport = injectedTransport
+    ?? createSerenityTransport({ env: context.env, imsToken: accessToken });
   const snapshot = await readTagTreeSnapshot(
     transport,
     metadata.workspaceId,

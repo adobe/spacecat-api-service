@@ -11,12 +11,46 @@
  */
 
 import { expect } from 'chai';
+import sinon from 'sinon';
 import {
   applyBulkTagOperation,
+  bulkTagsHandler,
   matchesBulkTagFacets,
   pageBulkFailures,
   parseBulkTagsBody,
 } from '../../../../src/support/serenity/handlers/bulk-tags-job.js';
+
+function workerTransport(prompts, update = sinon.stub().resolves()) {
+  const roots = [{ id: 'tag-root', name: 'tag', children_count: 1 }];
+  const children = [{
+    id: 'family',
+    name: 'Family',
+    parent_id: 'tag-root',
+    children_count: 0,
+    path: [{ id: 'tag-root', name: 'tag' }],
+  }];
+  return {
+    listProjectTags: sinon.stub().callsFake((_, __, options = {}) => Promise.resolve({
+      items: options.parentId === 'tag-root' ? children : roots,
+    })),
+    listPromptsByTags: sinon.stub().resolves({ items: prompts }),
+    updatePromptTagsByIds: update,
+    publishProject: sinon.stub().resolves(),
+  };
+}
+
+function workerJob(promptIds) {
+  return {
+    getMetadata: () => ({
+      workspaceId: 'ws',
+      projectId: 'project',
+      tagIds: ['family'],
+      operation: 'assign',
+      promptIds,
+      matchedCount: promptIds.length,
+    }),
+  };
+}
 
 const snapshot = {
   byId: new Map([
@@ -93,8 +127,44 @@ describe('bulk tags job result paging', () => {
       })),
       publish: { state: 'SUCCEEDED', error: null },
     });
+
     expect(result.failuresPage.items).to.have.lengthOf(100);
     expect(result.failuresPage.nextCursor).to.be.a('string');
     expect(result).not.to.have.property('failures');
+  });
+});
+
+describe('bulkTagsHandler worker accounting', () => {
+  it('publishes once and reports successful updates', async () => {
+    const transport = workerTransport([{ id: 'one', tags: [] }]);
+    const result = await bulkTagsHandler({ env: {}, log: {} }, workerJob(['one']), 'token', transport);
+    expect(result).to.deep.include({
+      matchedCount: 1, processedCount: 1, updatedCount: 1, unchangedCount: 0, failureCount: 0,
+    });
+    expect(transport.updatePromptTagsByIds).to.have.been.calledOnce;
+    expect(transport.publishProject).to.have.been.calledOnceWith('ws', 'project');
+    expect(result.publish).to.deep.equal({ state: 'SUCCEEDED', error: null });
+  });
+
+  it('continues after an individual prompt update fails', async () => {
+    const update = sinon.stub()
+      .onFirstCall().rejects(Object.assign(new Error('upstream'), { status: 500 }))
+      .onSecondCall()
+      .resolves();
+    const transport = workerTransport([{ id: 'one', tags: [] }, { id: 'two', tags: [] }], update);
+    const result = await bulkTagsHandler({ env: {}, log: {} }, workerJob(['one', 'two', 'gone']), 'token', transport);
+    expect(result).to.deep.include({
+      processedCount: 3, updatedCount: 1, unchangedCount: 0, failureCount: 2,
+    });
+    expect(result.failures.map((failure) => failure.semrushPromptId)).to.deep.equal(['one', 'gone']);
+    expect(transport.updatePromptTagsByIds).to.have.been.calledTwice;
+  });
+
+  it('accounts for an unchanged assignment without publishing', async () => {
+    const transport = workerTransport([{ id: 'one', tags: [{ id: 'family' }] }]);
+    const result = await bulkTagsHandler({ env: {}, log: {} }, workerJob(['one']), 'token', transport);
+    expect(result).to.deep.include({ updatedCount: 0, unchangedCount: 1, failureCount: 0 });
+    expect(transport.updatePromptTagsByIds).not.to.have.been.called;
+    expect(transport.publishProject).not.to.have.been.called;
   });
 });
