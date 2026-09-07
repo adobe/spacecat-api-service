@@ -643,6 +643,7 @@ describe('markets-subworkspace handlers', () => {
       await handleCreateMarketSubworkspace(transport, makeBrand(), PARENT, createBody, log);
       // listBenchmarks IS still called — the LLMO-7421 benchmark invariant is
       // blocking regardless of whether there are brand URLs to push.
+      expect(transport.listBenchmarks).to.have.been.calledWith(WS, 'new-proj', { draft: true });
       expect(transport.createBrandUrls).to.not.have.been.called;
     });
 
