@@ -80,6 +80,7 @@ import { getImsTokenFromPromiseToken } from '../support/edge-routing-auth.js';
 import { isImsGroupMember } from '../support/ims-group.js';
 import { postSlackMessage } from '../utils/slack/base.js';
 import { createAtomicStrategy, deleteAtomicStrategy } from '../support/atomic-strategy-helper.js';
+import { PLG_OPPORTUNITY_TYPES } from './plg/plg-onboarding/displacement.js';
 
 const VALIDATION_ERROR_NAME = 'ValidationError';
 
@@ -228,13 +229,17 @@ async function postPlgSuggestionSkipAlert(site, opportunity, suggestion, context
   }
 
   try {
+    const opportunityType = opportunity.getType?.() ?? 'unknown';
+    if (!PLG_OPPORTUNITY_TYPES.includes(opportunityType)) {
+      return;
+    }
+
     const plg = isPlgTier !== undefined ? isPlgTier : await isSitePlgTier(site, log);
     if (!plg) {
       return;
     }
 
     const siteBaseURL = site.getBaseURL?.() ?? site.getId();
-    const opportunityType = opportunity.getType?.() ?? 'unknown';
     const opportunityId = opportunity.getId?.() ?? 'unknown';
     const suggestionId = suggestion.getId?.() ?? 'unknown';
     const skipReason = suggestion.getSkipReason?.() ?? null;
@@ -261,14 +266,9 @@ async function postPlgSuggestionSkipAlert(site, opportunity, suggestion, context
 
     message += `\n• *Opportunity Type:* \`${opportunityType}\`\n`
       + `• *Opportunity ID:* \`${opportunityId}\`\n`
-      + `• *Suggestion ID:* \`${suggestionId}\``;
-
-    if (skipReason) {
-      message += `\n• *Skip Reason:* \`${skipReason}\``;
-    }
-    if (skipDetail) {
-      message += `\n• *Skip Detail:* \`${skipDetail}\``;
-    }
+      + `• *Suggestion ID:* \`${suggestionId}\`\n`
+      + `• *Skip Reason:* \`${skipReason ?? ''}\`\n`
+      + `• *Skip Detail:* \`${skipDetail ?? ''}\``;
 
     if (organizationId) {
       const experienceUrl = env.EXPERIENCE_URL || 'https://experience.adobe.com';

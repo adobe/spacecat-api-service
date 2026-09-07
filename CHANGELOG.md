@@ -1,3 +1,29 @@
+## [1.794.1](https://github.com/adobe/spacecat-api-service/compare/v1.794.0...v1.794.1) (2026-09-07)
+
+
+### Bug Fixes
+
+* honor admin organizationId override on FACS access-mapping reads ([#3195](https://github.com/adobe/spacecat-api-service/issues/3195)) ([5b0e66f](https://github.com/adobe/spacecat-api-service/commit/5b0e66f581829261b20297957286289c2ce433a9))
+
+# [1.794.0](https://github.com/adobe/spacecat-api-service/compare/v1.793.4...v1.794.0) (2026-09-07)
+
+
+### Bug Fixes
+
+* restrict PLG skip Slack alert to cwv, alt-text, broken-backlinks ([#3212](https://github.com/adobe/spacecat-api-service/issues/3212)) ([551f4ef](https://github.com/adobe/spacecat-api-service/commit/551f4ef35613262061231c3fa0c1ae74071ecd11))
+
+
+### Features
+
+* include review state in webhook jobs ([#3162](https://github.com/adobe/spacecat-api-service/issues/3162)) ([eda2f84](https://github.com/adobe/spacecat-api-service/commit/eda2f84980485b7cd0cf7489854ddde29e4be37b)), closes [Hi#level](https://github.com/Hi/issues/level)
+
+## [1.793.4](https://github.com/adobe/spacecat-api-service/compare/v1.793.3...v1.793.4) (2026-09-04)
+
+
+### Bug Fixes
+
+* **brands:** resolve real LLMO entitlement tier for activate-brand's schedule (LLMO-7366) ([#3206](https://github.com/adobe/spacecat-api-service/issues/3206)) ([9e2cd03](https://github.com/adobe/spacecat-api-service/commit/9e2cd033453399737a6ce5e55b6e3164950457a4)), closes [#2952](https://github.com/adobe/spacecat-api-service/issues/2952) [#1915](https://github.com/adobe/spacecat-api-service/issues/1915) [#1915](https://github.com/adobe/spacecat-api-service/issues/1915) [#2942](https://github.com/adobe/spacecat-api-service/issues/2942) [#3178](https://github.com/adobe/spacecat-api-service/issues/3178)
+
 ## [1.793.3](https://github.com/adobe/spacecat-api-service/compare/v1.793.2...v1.793.3) (2026-09-04)
 
 
