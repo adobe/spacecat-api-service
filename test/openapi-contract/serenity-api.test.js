@@ -372,7 +372,7 @@ const FIXTURES = {
     controllerMethod: 'listOrgLanguages',
     handlerName: 'listLanguageCatalog',
     handlerResult: {
-      items: [{ id: 'lang-en', name: 'English' }],
+      items: [{ id: 'lang-en', name: 'English', code: 'en' }],
     },
   },
   // Unlike the rest of this file's fixtures, this operation is served by
