@@ -499,7 +499,10 @@ describe('handlers/prompts.js — handleListPrompts', () => {
 
 describe('handlers/prompts.js — handleCreatePrompts', () => {
   it('400s on empty prompts array (no upstream call)', async () => {
-    const transport = { createPromptsWithMetadata: sinon.stub() };
+    const transport = {
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
+      createPromptsWithMetadata: sinon.stub(),
+    };
     const dataAccess = makeDataAccess([]);
 
     await expect(handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
@@ -512,7 +515,10 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
   // prevents an authenticated caller from submitting 10k+ items inside API
   // Gateway's request envelope. Defense-in-depth, not a correctness gate.
   it('400s when the prompts array exceeds maxItems=500', async () => {
-    const transport = { createPromptsWithMetadata: sinon.stub() };
+    const transport = {
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
+      createPromptsWithMetadata: sinon.stub(),
+    };
     const dataAccess = makeDataAccess([]);
     const tooMany = Array.from({ length: 501 }, (_, i) => ({
       text: `prompt ${i}`,
@@ -539,7 +545,10 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
   // `projects || []` fallback kicks in and every input is skipped.
   it('skips every input when allByBrandId returns null', async () => {
     const dataAccess = makeDataAccess(null);
-    const transport = { createPromptsWithMetadata: sinon.stub() };
+    const transport = {
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
+      createPromptsWithMetadata: sinon.stub(),
+    };
 
     const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
       prompts: [{
@@ -557,7 +566,10 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
   // returns null and the row lands in `skipped` with `text: ''`.
   it('skips inputs with no text field (raw.text undefined → empty string)', async () => {
     const dataAccess = makeDataAccess([]);
-    const transport = { createPromptsWithMetadata: sinon.stub() };
+    const transport = {
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
+      createPromptsWithMetadata: sinon.stub(),
+    };
 
     const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
       prompts: [{ geoTargetId: 2840, languageCode: 'en', tagIds: ['tag-1'] }],
@@ -576,6 +588,7 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
     const dataAccess = makeDataAccess([project]);
     const transport = {
       listProjectTags: makeListProjectTagsStub(),
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
       createPromptsWithMetadata: sinon.stub().rejects(new Error('opaque failure')),
       publishProject: sinon.stub().resolves(),
     };
@@ -590,7 +603,10 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
   });
 
   it('skips inputs missing required fields', async () => {
-    const transport = { createPromptsWithMetadata: sinon.stub() };
+    const transport = {
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
+      createPromptsWithMetadata: sinon.stub(),
+    };
     const dataAccess = makeDataAccess([]);
 
     const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
@@ -608,6 +624,7 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
     const dataAccess = makeDataAccess([project]);
     const transport = {
       listProjectTags: makeListProjectTagsStub(),
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
       createPromptsWithMetadata: sinon.stub().resolves({
         page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'hello' }], existing_count: 0,
       }),
@@ -653,6 +670,7 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
     const dataAccess = makeDataAccess([project]);
     const transport = {
       listProjectTags: makeListProjectTagsStub(),
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
       createPromptsWithMetadata: sinon.stub().resolves({
         items: [{ id: 'new-sem-id', name: 'hello' }],
       }),
@@ -679,7 +697,10 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
       semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
     });
     const dataAccess = makeDataAccess([project]);
-    const transport = { createPromptsWithMetadata: sinon.stub() };
+    const transport = {
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
+      createPromptsWithMetadata: sinon.stub(),
+    };
 
     const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
       prompts: [{
@@ -696,7 +717,10 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
       semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
     });
     const dataAccess = makeDataAccess([project]);
-    const transport = { createPromptsWithMetadata: sinon.stub() };
+    const transport = {
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
+      createPromptsWithMetadata: sinon.stub(),
+    };
 
     const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
       prompts: [{
@@ -718,7 +742,10 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
       semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
     });
     const dataAccess = makeDataAccess([project]);
-    const transport = { createPromptsWithMetadata: sinon.stub() };
+    const transport = {
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
+      createPromptsWithMetadata: sinon.stub(),
+    };
 
     const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
       prompts: [{
@@ -737,6 +764,7 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
     const dataAccess = makeDataAccess([project]);
     const transport = {
       listProjectTags: makeListProjectTagsStub(),
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
       createPromptsWithMetadata: sinon.stub().resolves({
         page: 1, total: 0, items: [], existing_count: 1,
       }),
@@ -761,6 +789,7 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
     const dataAccess = makeDataAccess([project]);
     const transport = {
       listProjectTags: makeListProjectTagsStub(),
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
       createPromptsWithMetadata: sinon.stub().resolves({
         page: 1, total: 1, items: [{ name: 'hello' }],
       }),
@@ -783,6 +812,7 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
     const dataAccess = makeDataAccess([project]);
     const transport = {
       listProjectTags: makeListProjectTagsStub(),
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
       createPromptsWithMetadata: sinon.stub().resolves({
         page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'hello' }],
       }),
@@ -810,6 +840,7 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
     const dataAccess = makeDataAccess([project]);
     const transport = {
       listProjectTags: makeListProjectTagsStub(),
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
       createPromptsWithMetadata: sinon.stub().resolves({
         page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'hello' }],
       }),
@@ -842,7 +873,10 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
       semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
     });
     const dataAccess = makeDataAccess([project]);
-    const transport = { createPromptsWithMetadata: sinon.stub() };
+    const transport = {
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
+      createPromptsWithMetadata: sinon.stub(),
+    };
 
     const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
       prompts: [{
@@ -861,6 +895,7 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
     const dataAccess = makeDataAccess([usEn]);
     const transport = {
       listProjectTags: makeListProjectTagsStub(),
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
       createPromptsWithMetadata: sinon.stub().resolves({
         page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'good' }],
       }),
@@ -899,6 +934,7 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
     const err = Object.assign(new Error('rate limited'), { status: 429 });
     const transport = {
       listProjectTags: makeListProjectTagsStub(),
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
       createPromptsWithMetadata: sinon.stub().rejects(err),
       publishProject: sinon.stub().resolves(),
     };
@@ -932,6 +968,7 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
     const dataAccess = makeDataAccess([project]);
     const transport = {
       listProjectTags: makeListProjectTagsStub(),
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
       createPromptsWithMetadata: sinon.stub().resolves({
         page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'ok' }],
       }),
@@ -964,6 +1001,7 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
     const dataAccess = makeDataAccess([project]);
     const transport = {
       listProjectTags: makeListProjectTagsStub(),
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
       createPromptsWithMetadata: sinon.stub().resolves({
         page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'ok' }],
       }),
@@ -997,6 +1035,7 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
     const log = fakeLog();
     const transport = {
       listProjectTags: makeListProjectTagsStub(),
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
       createPromptsWithMetadata: sinon.stub().resolves({
         page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'ok' }],
       }),
@@ -1250,6 +1289,7 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
       patchPrompt: sinon.stub().resolves({ id: 'sem-1', name: 'next', is_updated: true }),
       updatePromptTagsByIds: sinon.stub().resolves(null),
       deletePromptsByIds: sinon.stub(),
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
       createPromptsWithMetadata: sinon.stub(),
       publishProject: sinon.stub().resolves(),
     };
@@ -2189,7 +2229,14 @@ describe('handlers/prompts.js — tag cache invalidation (Important #6)', () => 
     listPromptsByTags.onFirstCall().resolves({
       items: initialTags.map((t, i) => ({ id: `p${i}`, name: `q${i}`, tags: [t] })),
     });
-    listPromptsByTags.onSecondCall().resolves({
+    // EVERY later call answers with the mutated set, rather than pinning call 2.
+    // handleCreatePrompts now lists the project once more of its own accord (the
+    // upsert index that decides create-vs-replace), so a positional `onSecondCall`
+    // would mean the create test and its PATCH/bulk-delete siblings — which share
+    // this setup but make no such call — disagree about which call is the
+    // post-invalidation re-fetch. Neither set contains the text the create test
+    // writes, so the index build takes the create path under either answer.
+    listPromptsByTags.resolves({
       items: mutatedTags.map((t, i) => ({ id: `m${i}`, name: `q${i}`, tags: [t] })),
     });
 
@@ -2234,8 +2281,9 @@ describe('handlers/prompts.js — tag cache invalidation (Important #6)', () => 
     }, fakeLog());
 
     expect(refetched.items.map((t) => t.name)).to.deep.equal(['new-tag']);
-    // Two upstream walks: the initial cache populate + the post-invalidation re-fetch.
-    expect(transport.listPromptsByTags).to.have.callCount(2);
+    // Three upstream walks: the initial cache populate, handleCreatePrompts'
+    // upsert index build, and the post-invalidation re-fetch.
+    expect(transport.listPromptsByTags).to.have.callCount(3);
   });
 
   it('PATCH /prompts/:id invalidates the cached tag set', async () => {
@@ -2334,6 +2382,7 @@ describe('handlers/prompts.js — unified type classification (serenity-docs#31)
       const transport = {
         listProjectTags: makeListProjectTagsStub(),
         createProjectTags: sinon.stub(),
+        listPromptsByTags: sinon.stub().resolves({ items: [] }),
         createPromptsWithMetadata: sinon.stub().resolves({
           page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'is Acme good?' }],
         }),
@@ -2371,6 +2420,7 @@ describe('handlers/prompts.js — unified type classification (serenity-docs#31)
       const dataAccess = makeDataAccess([project()]);
       const transport = {
         listProjectTags: makeListProjectTagsStub(),
+        listPromptsByTags: sinon.stub().resolves({ items: [] }),
         createPromptsWithMetadata: sinon.stub().resolves({
           page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'best running shoes' }],
         }),
@@ -2411,6 +2461,7 @@ describe('handlers/prompts.js — unified type classification (serenity-docs#31)
       ];
       const transport = {
         listProjectTags: makeListProjectTagsStub(levels),
+        listPromptsByTags: sinon.stub().resolves({ items: [] }),
         createPromptsWithMetadata: sinon.stub().resolves({
           page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'is Acme good?' }],
         }),
@@ -2440,6 +2491,7 @@ describe('handlers/prompts.js — unified type classification (serenity-docs#31)
       const transport = {
         listProjectTags,
         createProjectTags,
+        listPromptsByTags: sinon.stub().resolves({ items: [] }),
         createPromptsWithMetadata: sinon.stub().resolves({
           page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'is Acme good?' }],
         }),
@@ -2745,6 +2797,7 @@ describe('handlers/prompts.js — deferPublish (serenity-docs#32 CSV-chunking)',
     const dataAccess = makeDataAccess([project()]);
     const transport = {
       listProjectTags: makeListProjectTagsStub(),
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
       createPromptsWithMetadata: sinon.stub().resolves({
         page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'hi' }],
       }),
@@ -2767,6 +2820,7 @@ describe('handlers/prompts.js — deferPublish (serenity-docs#32 CSV-chunking)',
     const dataAccess = makeDataAccess([project()]);
     const transport = {
       listProjectTags: makeListProjectTagsStub(),
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
       createPromptsWithMetadata: sinon.stub().resolves({
         page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'hi' }],
       }),
@@ -2800,6 +2854,7 @@ describe('handlers/prompts.js — deferPublish (serenity-docs#32 CSV-chunking)',
     // neither the success nor the failure triggers a publish.
     const transport = {
       listProjectTags: makeListProjectTagsStub(),
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
       createPromptsWithMetadata: sinon.stub().callsFake(async (_ws, _pid, items) => {
         const { name } = items[0];
         if (name === 'boom') {
@@ -2852,6 +2907,7 @@ describe('handlers/prompts.js — origin retirement (tag-display-names.md §3)',
     const dataAccess = makeDataAccess([project()]);
     const transport = {
       listProjectTags: makeListProjectTagsStub(),
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
       createPromptsWithMetadata: sinon.stub().resolves({
         page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'best shoes' }],
       }),
@@ -2929,6 +2985,7 @@ describe('handlers/prompts.js — origin retirement (tag-display-names.md §3)',
         ],
       }),
       createProjectTags,
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
       createPromptsByIds: sinon.stub().resolves({ page: 1, total: 1, items: [{ id: 's', name: 'x' }] }),
       publishProject: sinon.stub().resolves(),
     };
@@ -3182,6 +3239,7 @@ describe('handlers/prompts.js — intent classify/lookup key alignment (serenity
     const dataAccess = makeDataAccess([project()]);
     const transport = {
       listProjectTags: makeListProjectTagsStub(),
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
       createPromptsWithMetadata: sinon.stub().resolves({
         page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'buy now' }],
       }),
@@ -3403,6 +3461,7 @@ describe('handlers/prompts.js — authorship metadata (LLMO-6289)', () => {
       const dataAccess = makeDataAccess([project]);
       const transport = {
         listProjectTags: makeListProjectTagsStub(),
+        listPromptsByTags: sinon.stub().resolves({ items: [] }),
         createPromptsWithMetadata: sinon.stub().resolves({ items: [{ id: 'new-id', name: 'hi' }] }),
         publishProject: sinon.stub().resolves(),
       };
@@ -3458,5 +3517,277 @@ describe('handlers/prompts.js — authorship metadata (LLMO-6289)', () => {
       const tagArgs = transport.updatePromptTagsByIds.firstCall.args;
       expect(tagArgs[2][0]).to.not.have.property('metadata');
     });
+  });
+});
+
+// LLMO CSV re-import: POST /prompts is an UPSERT, not a create-only write.
+//
+// The bug these lock: the upstream create folds a repeated text into
+// `existing_count` but still ATTACHES the tag_ids it was handed, so re-importing
+// a CSV with a changed category left the prompt carrying BOTH categories. The UI
+// renders the first category tag upstream returns, so the first import appeared
+// to work and the change could never be reverted — a customer-reported dead end
+// (Sony, Brand-A / CH-de: 42 of 910 prompts had accumulated 2-4 categories).
+describe('handlers/prompts.js — create is an upsert (existing text replaces tags)', () => {
+  const PROMPT_ID = 'sem-existing-1';
+
+  // A stored prompt as the upstream listing returns it: `name` is the text, and
+  // `tags` carry the root breadcrumb in `path` that identifies their dimension.
+  function storedPrompt({ id = PROMPT_ID, name = 'best shoes', tags = [] } = {}) {
+    return { id, name, tags };
+  }
+
+  const sourceTag = (id, name) => ({
+    id, name, parent_id: TAG_IDS.sourceRoot, path: [{ id: TAG_IDS.sourceRoot, name: 'source' }],
+  });
+  const categoryTag = (id, name) => ({
+    id, name, parent_id: TAG_IDS.categoryRoot, path: [{ id: TAG_IDS.categoryRoot, name: 'category' }],
+  });
+
+  function setup(items, overrides = {}) {
+    const project = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([project]);
+    const transport = {
+      listProjectTags: makeListProjectTagsStub(),
+      listPromptsByTags: sinon.stub().resolves({ items }),
+      createPromptsWithMetadata: sinon.stub().resolves({
+        page: 1, total: 1, items: [{ id: 'sem-new', name: 'new' }],
+      }),
+      updatePromptTagsByIds: sinon.stub().resolves(),
+      patchPromptsMetadataBatch: sinon.stub().resolves(),
+      deletePromptsByIds: sinon.stub().resolves(),
+      publishProject: sinon.stub().resolves(),
+      ...overrides,
+    };
+    return { transport, dataAccess };
+  }
+
+  const importRow = (text, tagIds) => ({
+    text, geoTargetId: 2840, languageCode: 'en', tagIds,
+  });
+
+  it('REPLACES an existing prompt\'s tags instead of creating it again', async () => {
+    const { transport, dataAccess } = setup([
+      storedPrompt({ tags: [categoryTag('cat-old', 'Old Category')] }),
+    ]);
+
+    const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      prompts: [importRow('best shoes', ['cat-new'])],
+    }, fakeLog());
+
+    // The create path must NOT run — that is the additive attach being removed.
+    expect(transport.createPromptsWithMetadata).to.not.have.been.called;
+    expect(result.created).to.be.an('array').that.is.empty;
+    expect(result.updated).to.have.lengthOf(1);
+    expect(result.updated[0].semrushPromptId).to.equal(PROMPT_ID);
+
+    // replace:true is the whole fix: a full replace collapses the accumulated
+    // categories, where an additive write would add yet another.
+    expect(transport.updatePromptTagsByIds).to.have.been.calledOnce;
+    const [ws, pid, items] = transport.updatePromptTagsByIds.firstCall.args;
+    expect(ws).to.equal(WORKSPACE);
+    expect(pid).to.equal('proj-us-en');
+    expect(items).to.have.lengthOf(1);
+    expect(items[0].id).to.equal(PROMPT_ID);
+    expect(items[0].replace).to.equal(true);
+    expect(items[0].references).to.include('cat-new');
+    // The stale category is GONE, not merely outnumbered.
+    expect(items[0].references).to.not.include('cat-old');
+  });
+
+  it('carries the stored `source` over, rather than restamping the row as `config`', async () => {
+    // An AI-onboarded prompt: `source` is a fact about its CREATION and an edit
+    // must never re-derive it (origin-dimension.md §3 item 3). A CSV row carries
+    // only category ids, so without an explicit carry-over the full replace would
+    // strip the producer or relabel it as this dialog's `config`.
+    const { transport, dataAccess } = setup([
+      storedPrompt({ tags: [sourceTag('source-ai', 'ai')] }),
+    ]);
+
+    await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      prompts: [importRow('best shoes', ['cat-new'])],
+    }, fakeLog());
+
+    const { references } = transport.updatePromptTagsByIds.firstCall.args[2][0];
+    expect(references).to.include('source-ai');
+    expect(references).to.not.include(TAG_IDS.sourceConfig);
+  });
+
+  it('collapses a prompt that had accumulated TWO source tags down to one', async () => {
+    // 888 of Brand-A's 910 prompts were in this state — the same additive attach,
+    // applied to the server-owned `source` dimension.
+    const { transport, dataAccess } = setup([
+      storedPrompt({ tags: [sourceTag('source-ai', 'ai'), sourceTag('source-config', 'config')] }),
+    ]);
+
+    await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      prompts: [importRow('best shoes', ['cat-new'])],
+    }, fakeLog());
+
+    const { references } = transport.updatePromptTagsByIds.firstCall.args[2][0];
+    const sourceIds = references.filter((id) => String(id).startsWith('source-'));
+    expect(sourceIds).to.deep.equal(['source-ai']);
+  });
+
+  it('stamps updated_* authorship on the replaced prompt', async () => {
+    const { transport, dataAccess } = setup([storedPrompt()]);
+
+    await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      prompts: [importRow('best shoes', ['cat-new'])],
+    }, fakeLog(), undefined, null, undefined, 'importer@adobe.com');
+
+    expect(transport.patchPromptsMetadataBatch).to.have.been.calledOnce;
+    const [, , items] = transport.patchPromptsMetadataBatch.firstCall.args;
+    expect(items[0].promptId).to.equal(PROMPT_ID);
+    expect(items[0].metadata.updated_by).to.equal('importer@adobe.com');
+    // A create stamp would also carry created_*; an edit stamps only updated_*.
+    expect(items[0].metadata).to.not.have.property('created_by');
+  });
+
+  it('keeps the tag replace when only the authorship stamp fails', async () => {
+    // Ordering contract: the tag write is the point of the operation, so a failed
+    // cosmetic stamp must not discard it or report the update as failed.
+    const { transport, dataAccess } = setup([storedPrompt()], {
+      patchPromptsMetadataBatch: sinon.stub().rejects(new Error('metadata 400')),
+    });
+
+    const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      prompts: [importRow('best shoes', ['cat-new'])],
+    }, fakeLog());
+
+    expect(result.updated).to.have.lengthOf(1);
+    expect(result.failed).to.be.an('array').that.is.empty;
+  });
+
+  it('batches every existing prompt in a project into ONE tag write', async () => {
+    const { transport, dataAccess } = setup([
+      storedPrompt({ id: 'sem-a', name: 'prompt a' }),
+      storedPrompt({ id: 'sem-b', name: 'prompt b' }),
+    ]);
+
+    const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      prompts: [importRow('prompt a', ['cat-1']), importRow('prompt b', ['cat-2'])],
+    }, fakeLog());
+
+    expect(result.updated).to.have.lengthOf(2);
+    expect(transport.updatePromptTagsByIds).to.have.been.calledOnce;
+    expect(transport.updatePromptTagsByIds.firstCall.args[2]).to.have.lengthOf(2);
+  });
+
+  it('moves updates into `failed` when the batched tag write throws', async () => {
+    const { transport, dataAccess } = setup([storedPrompt()], {
+      updatePromptTagsByIds: sinon.stub().rejects(new Error('upstream 500')),
+    });
+
+    const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      prompts: [importRow('best shoes', ['cat-new'])],
+    }, fakeLog());
+
+    // Never report an update that did not land.
+    expect(result.updated).to.be.an('array').that.is.empty;
+    expect(result.failed).to.have.lengthOf(1);
+    expect(result.failed[0].text).to.equal('best shoes');
+  });
+
+  it('never rolls an updated prompt back — a quota-rejected publish must not DELETE pre-existing data', async () => {
+    // reconcilePublishErrors undoes a quota-rejected project by deleting what the
+    // request staged. An updated prompt pre-existed the request, so deleting it
+    // would destroy customer data rather than undo our work — hence updates carry
+    // no `rollbackProjectId`.
+    const quota = new SerenityTransportError('quota', 405, 'text/html', '<html>quota</html>');
+    const { transport, dataAccess } = setup([storedPrompt()], {
+      publishProject: sinon.stub().rejects(quota),
+    });
+
+    const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      prompts: [importRow('best shoes', ['cat-new'])],
+    }, fakeLog());
+
+    expect(transport.deletePromptsByIds).to.not.have.been.called;
+    expect(result.updated).to.have.lengthOf(1);
+  });
+
+  it('still CREATES a text the project does not hold', async () => {
+    const { transport, dataAccess } = setup([storedPrompt({ name: 'something else' })]);
+
+    const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      prompts: [importRow('brand new prompt', ['cat-new'])],
+    }, fakeLog());
+
+    expect(result.created).to.have.lengthOf(1);
+    expect(result.updated).to.be.an('array').that.is.empty;
+    expect(transport.updatePromptTagsByIds).to.not.have.been.called;
+  });
+
+  it('matches an exact text in preference to a case variant', async () => {
+    const { transport, dataAccess } = setup([
+      storedPrompt({ id: 'sem-lower', name: 'best shoes' }),
+      storedPrompt({ id: 'sem-upper', name: 'Best Shoes' }),
+    ]);
+
+    const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      prompts: [importRow('Best Shoes', ['cat-new'])],
+    }, fakeLog());
+
+    expect(result.updated[0].semrushPromptId).to.equal('sem-upper');
+  });
+
+  it('falls back to a case-insensitive match so a retyped row still replaces', async () => {
+    // Upstream's own dedupe folding is not pinned by the vendor contract. Being
+    // case-SENSITIVE where upstream is not would send the row down the create
+    // path and straight back into the additive attach.
+    const { transport, dataAccess } = setup([storedPrompt({ name: 'Best Shoes' })]);
+
+    const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      prompts: [importRow('best shoes', ['cat-new'])],
+    }, fakeLog());
+
+    expect(result.updated).to.have.lengthOf(1);
+    expect(transport.createPromptsWithMetadata).to.not.have.been.called;
+  });
+
+  it('pages the index so a prompt past the first page is still recognised', async () => {
+    const firstPage = Array.from({ length: 1000 }, (_, i) => storedPrompt({ id: `p${i}`, name: `q${i}` }));
+    const listPromptsByTags = sinon.stub();
+    listPromptsByTags.onFirstCall().resolves({ items: firstPage });
+    listPromptsByTags.onSecondCall().resolves({ items: [storedPrompt({ id: 'sem-page2', name: 'on page two' })] });
+    const { transport, dataAccess } = setup([], { listPromptsByTags });
+
+    const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      prompts: [importRow('on page two', ['cat-new'])],
+    }, fakeLog());
+
+    expect(result.updated[0].semrushPromptId).to.equal('sem-page2');
+  });
+
+  it('does not write a duplicate id when the caller re-sends the stored source tag', async () => {
+    // The caller's `tagIds` are opaque ids. No current client sends a `source` id,
+    // but one that did would otherwise put the same id in `references` twice —
+    // exactly the duplicate-tag state this change removes.
+    const { transport, dataAccess } = setup([
+      storedPrompt({ tags: [sourceTag('source-ai', 'ai')] }),
+    ]);
+
+    await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      prompts: [importRow('best shoes', ['cat-new', 'source-ai'])],
+    }, fakeLog());
+
+    const { references } = transport.updatePromptTagsByIds.firstCall.args[2][0];
+    expect(references.filter((id) => id === 'source-ai')).to.have.lengthOf(1);
+  });
+
+  it('lists each affected project ONCE, not once per row', async () => {
+    const { transport, dataAccess } = setup([
+      storedPrompt({ id: 'sem-a', name: 'prompt a' }),
+      storedPrompt({ id: 'sem-b', name: 'prompt b' }),
+    ]);
+
+    await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      prompts: [importRow('prompt a', ['cat-1']), importRow('prompt b', ['cat-2'])],
+    }, fakeLog());
+
+    expect(transport.listPromptsByTags).to.have.been.calledOnce;
   });
 });
