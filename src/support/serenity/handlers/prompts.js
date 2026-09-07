@@ -1223,11 +1223,9 @@ export function parseUpdatePromptBody(body) {
 }
 
 /**
- * The dimension a built tag belongs to. A ROOT carries no `path`, so its own
- * name names the dimension; a descendant's dimension is its FIRST path entry
- * (the root breadcrumb). Folded through {@link dimensionOfRootName} because a
- * root's name is not always the bare dimension key (the intent root is named
- * `$abv_tags$intent`).
+ * The dimension a built tag belongs to: its root breadcrumb (`path[0]`), or its
+ * own name when it IS a root. Folded through {@link dimensionOfRootName} because
+ * a root's name is not always the bare dimension key (`$abv_tags$intent`).
  *
  * @param {{ name: string, path: Array<{ id: string, name: string }> | null }} tag
  * @returns {string}
@@ -1240,32 +1238,18 @@ function tagDimensionOf(tag) {
 }
 
 /**
- * The tag ids an UPSERT must carry over from the prompt it is about to rewrite.
+ * The tag ids an UPSERT must carry over from the prompt it rewrites.
  *
- * A CSV row supplies only `category` ids and the tag write is a FULL replace, so
- * anything not re-supplied is dropped. `type` and `intent` are recomputed from
- * the text by the injectors and `category` is the caller's to own — but `origin`
- * (who authored the prompt) and `source` (the producing system) are facts about
- * the row's CREATION and are never re-derived on an edit, which is why
- * {@link makePromptTagInjector} injects them on CREATE only and
- * {@link handleUpdatePrompt} builds its injector with neither value. The PATCH
- * endpoint gets both echoed back by the client; an upsert has no such echo, so
- * they are read off the stored prompt here — otherwise a CSV import would
- * silently strip every prompt's authorship, or relabel an AI-onboarded prompt as
- * this dialog's `human`/`config`.
+ * The tag write is a FULL replace and a CSV row supplies only `category` ids.
+ * `type` and `intent` are recomputed from the text, but `origin` and `source` are
+ * CREATE-only facts an edit never re-derives — the PATCH endpoint gets them
+ * echoed back by the client, and an upsert has no such echo. Without this a CSV
+ * import would strip every prompt's authorship, or relabel an AI-onboarded prompt
+ * as this dialog's `human`/`config`.
  *
- * Exactly ONE tag per dimension is carried over even when the stored prompt holds
- * several. A prompt can only have accumulated a second one through the additive
- * create this upsert replaces, so collapsing to the first — the one the UI
- * already displays, since `findPromptTag` takes the first match in upstream
- * order — heals the duplicate without changing what anyone currently sees.
- *
- * `origin` and `source` are looked up as separate dimensions even though a
- * pre-rename project spells authorship's root `source`
- * ({@link LEGACY_ORIGIN_ROOT_NAME}). On such a project the one `source`-rooted
- * tag is authorship and is carried over under the `source` key — the same
- * ambiguity the read path documents, and harmless here because the tag is
- * preserved verbatim either way rather than being interpreted.
+ * One tag per dimension: a second can only have come from the additive create
+ * this replaces, so collapsing to the first — the one the UI already shows —
+ * heals the duplicate without changing what anyone sees.
  *
  * @param {any} item - the upstream prompt item.
  * @returns {string[]}
@@ -1278,38 +1262,23 @@ function carryOverTagIdsOf(item) {
     .map((t) => /** @type {{ id: string }} */ (t).id);
 }
 
-/**
- * Hard cap on {@link buildExistingPromptIndex} paging, so a mis-paging upstream
- * cannot spin a Lambda. At {@link MAX_PAGE_LIMIT} per page this covers 20k
- * prompts in a project — far above any real one.
- */
+/** Paging cap, so a mis-paging upstream cannot spin a Lambda. 20k prompts. */
 export const MAX_PROMPT_INDEX_PAGES = 20;
 
 /**
- * Builds the `text -> stored prompt` index an upsert resolves against, by
- * paging the project's prompt listing.
+ * Builds the `text -> stored prompt` index an upsert resolves against.
  *
- * WHY A FULL LISTING rather than the upstream `search` filter: `search`'s
- * matching semantics (fuzzy? prefix? case-folded?) are not pinned by the vendor
- * contract, and an upsert that mis-identifies a prompt would rewrite the WRONG
- * row's tags. Listing and matching locally is exact by construction, and it is
- * one call for a project of up to {@link MAX_PAGE_LIMIT} prompts.
+ * Lists and matches locally rather than using the upstream `search` filter,
+ * whose matching semantics are not pinned by the vendor contract — an upsert that
+ * mis-identifies a prompt would rewrite the WRONG row's tags.
  *
- * LIVE-LAYER READ, same as every other `listPromptsByTags` caller (see
- * `listTagsForProject` in markets.js): a prompt staged in an UNPUBLISHED draft is
- * not visible here. That is the right trade for the case this exists to fix —
- * the prompts a customer re-imports over are published ones, and it is the same
- * layer the UI's own listing reads, so the index sees exactly what the user saw
- * when they edited the CSV. A draft-only prompt simply falls through to the
- * create path, i.e. the pre-existing behavior, never a wrong-row rewrite.
+ * LIVE-LAYER READ, like every other `listPromptsByTags` caller: a prompt staged
+ * in an unpublished draft is invisible here and falls through to the create path
+ * (the pre-existing behavior), never a wrong-row rewrite.
  *
- * Two indexes are returned. `byText` is exact and is consulted first. `byLower`
- * is the case-insensitive fallback: upstream's own dedupe folding is not pinned
- * either, and being case-SENSITIVE where upstream is not would send a
- * case-variant row back down the create path — straight into the additive
- * attach this whole change exists to remove. Preferring the exact hit keeps a
- * genuinely distinct-cased prompt reachable; the fallback only decides rows that
- * have no exact match at all.
+ * `byText` is exact and wins; `byLower` is the fallback, because being
+ * case-sensitive where upstream's own dedupe is not would send a case variant
+ * back down the create path and straight into the additive attach.
  *
  * @param {SerenityTransport} transport
  * @param {string} semrushWorkspaceId
@@ -1336,9 +1305,6 @@ export async function buildExistingPromptIndex(transport, semrushWorkspaceId, pr
       const id = item?.id ? String(item.id) : '';
       if (text && id) {
         const entry = { semrushPromptId: id, carryOverTagIds: carryOverTagIdsOf(item) };
-        // First occurrence wins in both maps: upstream holds one prompt per text
-        // per project, so a second hit can only be a casing variant, and the
-        // exact map must not be clobbered by one.
         if (!byText.has(text)) {
           byText.set(text, entry);
         }
@@ -1351,9 +1317,8 @@ export async function buildExistingPromptIndex(transport, semrushWorkspaceId, pr
       return { byText, byLower };
     }
   }
-  // Past the cap the index is INCOMPLETE: rows beyond it resolve as "new" and go
-  // down the create path, which is the pre-existing (additive) behavior — degraded,
-  // not broken, but worth a signal.
+  // Past the cap the index is incomplete: later rows resolve as "new" and take the
+  // create path — the pre-existing behavior. Degraded, not broken, but worth a signal.
   log?.warn?.('serenity upsert: prompt index hit the page cap — later prompts may be treated as new', {
     projectId, pages: MAX_PROMPT_INDEX_PAGES,
   });
@@ -1375,19 +1340,12 @@ export function findStoredPrompt(index, text) {
 }
 
 /**
- * Applies one project's batched UPSERT tag writes: a single replace-mode tag
- * write for every prompt being updated in that project, then a best-effort
- * authorship stamp.
+ * One project's batched UPSERT tag writes: a single replace-mode tag write, then
+ * a best-effort authorship stamp.
  *
- * ORDER IS DELIBERATE. The tag write is the point of the operation, so it goes
- * first; the metadata stamp follows and its failure is logged, never fatal. The
- * reverse order would let a stamp failure abandon the write the caller asked
- * for. A stamp failure leaves "Last modified" stale on a prompt whose tags are
- * correct — visibly cosmetic, unlike the alternative.
- *
- * The stamp is one BATCH call, which is atomic upstream: a CHECK violation on
- * any item rolls the whole batch back. `callerId` is already capped by
- * {@link resolveCallerId}, which is the only field that could violate one.
+ * Order matters — the tag write is the point of the operation, so a failed stamp
+ * is logged rather than fatal. The reverse would let a cosmetic failure discard
+ * the write the caller asked for.
  *
  * @param {SerenityTransport} transport
  * @param {string} semrushWorkspaceId
@@ -1395,8 +1353,7 @@ export function findStoredPrompt(index, text) {
  * @param {Array<{ semrushPromptId: string, tagIds: string[] }>} updates
  * @param {string} callerId
  * @param {any} [log]
- * @returns {Promise<void>} resolves on a successful tag write; rejects with the
- *   upstream error when the tag write itself fails.
+ * @returns {Promise<void>} rejects when the tag write itself fails.
  */
 export async function applyUpsertTagWrites(
   transport,
@@ -1454,18 +1411,12 @@ export async function mapLimit(items, limit, mapper) {
  * are grouped by slice; the matching BrandSemrushProject row resolves the
  * upstream project; publish runs once per affected project at the end.
  *
- * UPSERT, not create-only. An input whose text ALREADY exists in the resolved
+ * UPSERT, not create-only: an input whose text already exists in the resolved
  * project has its tags REPLACED (reported in `updated`) instead of being posted
- * again. This is not an optimization — the upstream create folds a repeated text
- * into `existing_count` but still ATTACHES the tag_ids it was given, so the
- * previous create-only behavior silently accumulated a second (then third)
- * category on the prompt. The UI renders the first category tag upstream happens
- * to return, so an import appeared to change a category once and could then never
- * change it back. Replacing means each dimension carries exactly one tag again.
- *
- * The upsert costs ONE extra listing per affected project ({@link
- * buildExistingPromptIndex}), and the tag writes are batched to one call per
- * project.
+ * again. The upstream create folds a repeated text into `existing_count` but
+ * still ATTACHES the tag_ids it is given, so posting again silently stacked a
+ * second category onto the prompt and the change could never be undone. Costs one
+ * listing per affected project; the tag writes are batched per project.
  *
  * Two independent switches suppress that end-of-call publish:
  *   - `body.deferPublish` (serenity-docs#32 CSV-chunking): a draft-only write;
@@ -1570,12 +1521,8 @@ export async function handleCreatePrompts(
   );
   const injectComputedIntent = makeIntentInjector(transport, semrushWorkspaceId, intentByText, log);
 
-  // UPSERT (LLMO CSV re-import): normalize ONCE up front so the owning project of
-  // every input is known before the fan-out, then index each affected project's
-  // stored prompts a single time. Without this, a row whose text already exists
-  // went down the create path, where upstream folds it into `existing_count` but
-  // still ATTACHES its tag_ids — so a re-import piled a second category onto the
-  // prompt instead of changing it, and the change could never be undone.
+  // UPSERT: normalize once up front so every input's owning project is known
+  // before the fan-out, then index each affected project's prompts a single time.
   const normalizedInputs = inputs.map((raw) => {
     const { value, reason } = normalizePromptInput(raw);
     const project = value
@@ -1628,13 +1575,9 @@ export async function handleCreatePrompts(
     const stored = findStoredPrompt(promptIndexByProject.get(projectId), input.text);
     try {
       if (stored) {
-        // The text already exists: REPLACE its tags rather than creating again.
-        // The stored authorship rides along so the full replace below cannot strip
-        // it; `type` and `intent` are recomputed from the text as on any write.
-        // Deduped because the caller's `tagIds` are opaque ids: no current client
-        // sends an `origin`/`source` id (the CSV importer builds category +
-        // subcategory only), but one that did would otherwise put the SAME id in
-        // twice — the duplicate-tag state this whole change exists to remove.
+        // REPLACE the existing prompt's tags. The stored authorship rides along so
+        // the full replace cannot strip it; deduped because a caller that supplied
+        // one of those ids itself would otherwise write it twice.
         let typed = await injectStoredTags(projectId, {
           ...input,
           tagIds: [...new Set([...input.tagIds, ...stored.carryOverTagIds])],
@@ -1713,9 +1656,9 @@ export async function handleCreatePrompts(
       created.push({ ...r.created, rollbackProjectId: r.affectedProjectId });
       affectedProjectIds.push(r.affectedProjectId);
     } else if (r.updated) {
-      // NO `rollbackProjectId`: reconcilePublishErrors rolls a quota-rejected project
-      // back by DELETING what this request staged. An updated prompt pre-existed the
-      // request, so deleting it would destroy customer data rather than undo our work.
+      // NO `rollbackProjectId`: reconcilePublishErrors rolls a quota-rejected
+      // project back by DELETING what this request staged, and an updated prompt
+      // pre-existed the request.
       updated.push(r.updated);
       affectedProjectIds.push(r.affectedProjectId);
       const pending = updatesByProject.get(r.affectedProjectId) ?? [];
@@ -1728,9 +1671,8 @@ export async function handleCreatePrompts(
     }
   }
 
-  // One batched replace-mode tag write per project. Batched rather than per-item
-  // because the upstream write already takes an array, so a CSV chunk touching N
-  // existing prompts costs ONE call, not N.
+  // One batched replace-mode tag write per project — the upstream write takes an
+  // array, so a chunk touching N existing prompts costs one call, not N.
   await Promise.all([...updatesByProject].map(async ([projectId, pending]) => {
     try {
       await applyUpsertTagWrites(
@@ -1742,9 +1684,8 @@ export async function handleCreatePrompts(
         log,
       );
     } catch (e) {
-      // The whole project's batch failed, so none of its tags moved. Move every
-      // prompt in it out of `updated` and into `failed`, so the caller is never
-      // told an update landed when it did not.
+      // The project's batch failed whole, so none of its tags moved — never report
+      // an update that did not land.
       const quota = isMeteredQuota(e);
       if (quota) {
         await alertQuotaRejection({
@@ -1770,8 +1711,7 @@ export async function handleCreatePrompts(
   // Tag cache invalidation: a new prompt may introduce a new tag (or
   // resurrect a tag whose last prompt was previously deleted), so any
   // project that received a successful create must drop its cached
-  // tag set on this container. An upsert can do the same — it resolves-or-creates
-  // the row's category exactly like a create does.
+  // tag set on this container. An upsert resolves-or-creates a category too.
   for (const pid of new Set(affectedProjectIds)) {
     invalidateTagCacheForProject(semrushWorkspaceId, pid);
   }

@@ -191,8 +191,8 @@ export async function handleCreatePromptsSubworkspace(
     log,
     { originValue, sourceValue: PROXY_CREATE_SOURCE_VALUE },
   );
-  // UPSERT: the EDIT-shaped injector (no originValue/sourceValue → `source` left
-  // untouched). Lockstep with the flat twin handleCreatePrompts.
+  // UPSERT: the EDIT-shaped injector (no originValue/sourceValue). Lockstep with
+  // the flat twin handleCreatePrompts.
   const injectStoredTags = makePromptTagInjector(
     transport,
     workspaceId,
@@ -219,10 +219,8 @@ export async function handleCreatePromptsSubworkspace(
   );
   const injectComputedIntent = makeIntentInjector(transport, workspaceId, intentByText, log);
 
-  // UPSERT (lockstep with the flat twin handleCreatePrompts — see its docblock for
-  // why a repeated text must REPLACE tags rather than be posted again). Normalize
-  // once up front so every input's owning project is known, then index each
-  // affected project's stored prompts a single time.
+  // UPSERT — lockstep with the flat twin handleCreatePrompts; see its docblock for
+  // why a repeated text must REPLACE tags rather than be posted again.
   const normalizedInputs = inputs.map((raw) => {
     const { value, reason } = normalizePromptInput(raw);
     const project = value
@@ -272,10 +270,7 @@ export async function handleCreatePromptsSubworkspace(
     const stored = findStoredPrompt(promptIndexByProject.get(projectId), input.text);
     try {
       if (stored) {
-        // Existing text: REPLACE its tags. The stored authorship rides along so the
-        // full replace cannot strip it; type + intent are recomputed from the text.
-        // Deduped for the same reason as the flat twin — an opaque caller-supplied
-        // id that happened to match a carried-over one must not land twice.
+        // REPLACE the existing prompt's tags; stored authorship rides along.
         let typed = await injectStoredTags(projectId, {
           ...input,
           tagIds: [...new Set([...input.tagIds, ...stored.carryOverTagIds])],
@@ -358,8 +353,8 @@ export async function handleCreatePromptsSubworkspace(
       created.push({ ...r.created, rollbackProjectId: r.affectedProjectId });
       affectedProjectIds.push(r.affectedProjectId);
     } else if (r.updated) {
-      // NO `rollbackProjectId` — an updated prompt pre-existed this request, so the
-      // quota rollback (a DELETE) must never reach it. Lockstep with the flat twin.
+      // NO `rollbackProjectId` — the quota rollback DELETEs, and an updated prompt
+      // pre-existed this request.
       updated.push(r.updated);
       affectedProjectIds.push(r.affectedProjectId);
       const pending = updatesByProject.get(r.affectedProjectId) ?? [];
@@ -372,7 +367,7 @@ export async function handleCreatePromptsSubworkspace(
     }
   }
 
-  // One batched replace-mode tag write per project (lockstep with the flat twin).
+  // One batched replace-mode tag write per project.
   await Promise.all([...updatesByProject].map(async ([projectId, pending]) => {
     try {
       await applyUpsertTagWrites(transport, workspaceId, projectId, pending, callerId, log);

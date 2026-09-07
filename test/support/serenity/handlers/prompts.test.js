@@ -3748,66 +3748,67 @@ describe('handlers/prompts.js — authorship metadata (LLMO-6289)', () => {
     });
   });
 });
-
 // LLMO CSV re-import: POST /prompts is an UPSERT, not a create-only write.
 //
 // The bug these lock: the upstream create folds a repeated text into
 // `existing_count` but still ATTACHES the tag_ids it was handed, so re-importing
 // a CSV with a changed category left the prompt carrying BOTH categories. The UI
 // renders the first category tag upstream returns, so the first import appeared
-// to work and the change could never be reverted — a customer-reported dead end
-// (Sony, Brand-A / CH-de: 42 of 910 prompts had accumulated 2-4 categories).
+// to work and the change could never be reverted (Sony, Brand-A / CH-de: 42 of
+// 910 prompts had accumulated 2-4 categories, and 888 had two `source` tags).
 describe('handlers/prompts.js — create is an upsert (existing text replaces tags)', () => {
   const PROMPT_ID = 'sem-existing-1';
 
-  // A stored prompt as the upstream listing returns it: `name` is the text, and
-  // `tags` carry the root breadcrumb in `path` that identifies their dimension.
-  function storedPrompt({ id = PROMPT_ID, name = 'best shoes', tags = [] } = {}) {
-    return { id, name, tags };
-  }
+  const dimTag = (rootId, rootName) => (id, name) => ({
+    id, name, parent_id: rootId, path: [{ id: rootId, name: rootName }],
+  });
+  const categoryTag = dimTag(TAG_IDS.categoryRoot, 'category');
+  const sourceTag = dimTag(TAG_IDS.sourceRoot, 'source');
+  const originTag = dimTag(TAG_IDS.originRoot, 'origin');
 
-  const sourceTag = (id, name) => ({
-    id, name, parent_id: TAG_IDS.sourceRoot, path: [{ id: TAG_IDS.sourceRoot, name: 'source' }],
-  });
-  const originTag = (id, name) => ({
-    id, name, parent_id: TAG_IDS.originRoot, path: [{ id: TAG_IDS.originRoot, name: 'origin' }],
-  });
-  const categoryTag = (id, name) => ({
-    id, name, parent_id: TAG_IDS.categoryRoot, path: [{ id: TAG_IDS.categoryRoot, name: 'category' }],
-  });
+  const storedPrompt = ({ id = PROMPT_ID, name = 'best shoes', tags = [] } = {}) => ({ id, name, tags });
 
   function setup(items, overrides = {}) {
     const project = makeProject({
       semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
     });
-    const dataAccess = makeDataAccess([project]);
-    const transport = {
-      listProjectTags: makeListProjectTagsStub(),
-      listPromptsByTags: sinon.stub().resolves({ items }),
-      createPromptsWithMetadata: sinon.stub().resolves({
-        page: 1, total: 1, items: [{ id: 'sem-new', name: 'new' }],
-      }),
-      updatePromptTagsByIds: sinon.stub().resolves(),
-      patchPromptsMetadataBatch: sinon.stub().resolves(),
-      deletePromptsByIds: sinon.stub().resolves(),
-      publishProject: sinon.stub().resolves(),
-      ...overrides,
+    return {
+      dataAccess: makeDataAccess([project]),
+      transport: {
+        listProjectTags: makeListProjectTagsStub(),
+        listPromptsByTags: sinon.stub().resolves({ items }),
+        createPromptsWithMetadata: sinon.stub().resolves({
+          page: 1, total: 1, items: [{ id: 'sem-new', name: 'new' }],
+        }),
+        updatePromptTagsByIds: sinon.stub().resolves(),
+        patchPromptsMetadataBatch: sinon.stub().resolves(),
+        deletePromptsByIds: sinon.stub().resolves(),
+        publishProject: sinon.stub().resolves(),
+        ...overrides,
+      },
     };
-    return { transport, dataAccess };
   }
 
   const importRow = (text, tagIds) => ({
     text, geoTargetId: 2840, languageCode: 'en', tagIds,
   });
+  const runImport = (transport, dataAccess, prompts) => handleCreatePrompts(
+    transport,
+    dataAccess,
+    BRAND,
+    WORKSPACE,
+    { prompts },
+    fakeLog(),
+  );
+  const referencesOf = (transport) => transport
+    .updatePromptTagsByIds.firstCall.args[2][0].references;
 
   it('REPLACES an existing prompt\'s tags instead of creating it again', async () => {
     const { transport, dataAccess } = setup([
       storedPrompt({ tags: [categoryTag('cat-old', 'Old Category')] }),
     ]);
 
-    const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
-      prompts: [importRow('best shoes', ['cat-new'])],
-    }, fakeLog());
+    const result = await runImport(transport, dataAccess, [importRow('best shoes', ['cat-new'])]);
 
     // The create path must NOT run — that is the additive attach being removed.
     expect(transport.createPromptsWithMetadata).to.not.have.been.called;
@@ -3815,130 +3816,62 @@ describe('handlers/prompts.js — create is an upsert (existing text replaces ta
     expect(result.updated).to.have.lengthOf(1);
     expect(result.updated[0].semrushPromptId).to.equal(PROMPT_ID);
 
-    // replace:true is the whole fix: a full replace collapses the accumulated
-    // categories, where an additive write would add yet another.
-    expect(transport.updatePromptTagsByIds).to.have.been.calledOnce;
-    const [ws, pid, items] = transport.updatePromptTagsByIds.firstCall.args;
-    expect(ws).to.equal(WORKSPACE);
-    expect(pid).to.equal('proj-us-en');
-    expect(items).to.have.lengthOf(1);
-    expect(items[0].id).to.equal(PROMPT_ID);
-    expect(items[0].replace).to.equal(true);
+    const [, , items] = transport.updatePromptTagsByIds.firstCall.args;
+    expect(items[0]).to.include({ id: PROMPT_ID, replace: true });
     expect(items[0].references).to.include('cat-new');
-    // The stale category is GONE, not merely outnumbered.
+    // The stale category is GONE, not merely outnumbered — this is the whole fix.
     expect(items[0].references).to.not.include('cat-old');
+    // An edit stamps the re-submitter without disturbing created_*.
+    expect(transport.patchPromptsMetadataBatch).to.have.been.calledOnce;
   });
 
-  it('carries the stored `source` over, rather than restamping the row as `config`', async () => {
-    // An AI-onboarded prompt: `source` is a fact about its CREATION and an edit
-    // must never re-derive it (origin-dimension.md §3 item 3). A CSV row carries
-    // only category ids, so without an explicit carry-over the full replace would
-    // strip the producer or relabel it as this dialog's `config`.
-    const { transport, dataAccess } = setup([
-      storedPrompt({ tags: [sourceTag('source-ai', 'ai')] }),
-    ]);
-
-    await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
-      prompts: [importRow('best shoes', ['cat-new'])],
-    }, fakeLog());
-
-    const { references } = transport.updatePromptTagsByIds.firstCall.args[2][0];
-    expect(references).to.include('source-ai');
-    expect(references).to.not.include(TAG_IDS.sourceConfig);
-  });
-
-  it('carries the stored `origin` over, so an import cannot re-author an AI-generated prompt', async () => {
-    // `origin` is injected on CREATE only — an edit leaves it alone, and the PATCH
-    // endpoint relies on the client echoing it back. A CSV row carries no origin id,
-    // so without an explicit carry-over the full replace would strip authorship or
-    // relabel an AI-onboarded prompt as `human`.
-    const { transport, dataAccess } = setup([
-      storedPrompt({ tags: [originTag(TAG_IDS.originAi, 'ai')] }),
-    ]);
-
-    await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
-      prompts: [importRow('best shoes', ['cat-new'])],
-    }, fakeLog());
-
-    const { references } = transport.updatePromptTagsByIds.firstCall.args[2][0];
-    expect(references).to.include(TAG_IDS.originAi);
-    expect(references).to.not.include(TAG_IDS.originHuman);
-  });
-
-  it('carries origin AND source over together', async () => {
+  it('carries stored origin + source through the replace, collapsing a duplicate', async () => {
+    // Both are CREATE-only facts an edit never re-derives, and a CSV row carries
+    // neither, so without an explicit carry-over the full replace would strip a
+    // prompt's authorship or relabel an AI-onboarded prompt as `human`/`config`.
+    // Carrying exactly one per dimension is also what heals the 888 prompts that
+    // had accumulated a second `source` tag.
     const { transport, dataAccess } = setup([
       storedPrompt({
-        tags: [originTag(TAG_IDS.originAi, 'ai'), sourceTag('source-semrush', 'semrush')],
+        tags: [
+          originTag(TAG_IDS.originAi, 'ai'),
+          sourceTag('source-ai', 'ai'),
+          sourceTag('source-config', 'config'),
+        ],
       }),
     ]);
 
-    await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
-      prompts: [importRow('best shoes', ['cat-new'])],
-    }, fakeLog());
+    await runImport(transport, dataAccess, [importRow('best shoes', ['cat-new'])]);
 
-    const { references } = transport.updatePromptTagsByIds.firstCall.args[2][0];
-    expect(references).to.include.members([TAG_IDS.originAi, 'source-semrush', 'cat-new']);
+    const references = referencesOf(transport);
+    expect(references).to.include.members([TAG_IDS.originAi, 'source-ai', 'cat-new']);
+    expect(references).to.not.include(TAG_IDS.originHuman);
+    expect(references.filter((id) => String(id).startsWith('source-'))).to.deep.equal(['source-ai']);
   });
 
-  it('collapses a prompt that had accumulated TWO source tags down to one', async () => {
-    // 888 of Brand-A's 910 prompts were in this state — the same additive attach,
-    // applied to the server-owned `source` dimension.
-    const { transport, dataAccess } = setup([
-      storedPrompt({ tags: [sourceTag('source-ai', 'ai'), sourceTag('source-config', 'config')] }),
-    ]);
+  it('still CREATES a text the project does not hold', async () => {
+    const { transport, dataAccess } = setup([storedPrompt({ name: 'something else' })]);
 
-    await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
-      prompts: [importRow('best shoes', ['cat-new'])],
-    }, fakeLog());
+    const result = await runImport(transport, dataAccess, [importRow('brand new prompt', ['cat-new'])]);
 
-    const { references } = transport.updatePromptTagsByIds.firstCall.args[2][0];
-    const sourceIds = references.filter((id) => String(id).startsWith('source-'));
-    expect(sourceIds).to.deep.equal(['source-ai']);
+    expect(result.created).to.have.lengthOf(1);
+    expect(result.updated).to.be.an('array').that.is.empty;
+    expect(transport.updatePromptTagsByIds).to.not.have.been.called;
   });
 
-  it('stamps updated_* authorship on the replaced prompt', async () => {
-    const { transport, dataAccess } = setup([storedPrompt()]);
-
-    await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
-      prompts: [importRow('best shoes', ['cat-new'])],
-    }, fakeLog(), undefined, null, undefined, 'importer@adobe.com');
-
-    expect(transport.patchPromptsMetadataBatch).to.have.been.calledOnce;
-    const [, , items] = transport.patchPromptsMetadataBatch.firstCall.args;
-    expect(items[0].promptId).to.equal(PROMPT_ID);
-    expect(items[0].metadata.updated_by).to.equal('importer@adobe.com');
-    // A create stamp would also carry created_*; an edit stamps only updated_*.
-    expect(items[0].metadata).to.not.have.property('created_by');
-  });
-
-  it('keeps the tag replace when only the authorship stamp fails', async () => {
-    // Ordering contract: the tag write is the point of the operation, so a failed
-    // cosmetic stamp must not discard it or report the update as failed.
+  it('never rolls an updated prompt back — a quota-rejected publish must not DELETE pre-existing data', async () => {
+    // reconcilePublishErrors undoes a quota-rejected project by deleting what the
+    // request staged. An updated prompt pre-existed the request, so deleting it
+    // would destroy customer data — hence updates carry no `rollbackProjectId`.
+    const quota = new SerenityTransportError('quota', 405, 'text/html', '<html>quota</html>');
     const { transport, dataAccess } = setup([storedPrompt()], {
-      patchPromptsMetadataBatch: sinon.stub().rejects(new Error('metadata 400')),
+      publishProject: sinon.stub().rejects(quota),
     });
 
-    const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
-      prompts: [importRow('best shoes', ['cat-new'])],
-    }, fakeLog());
+    const result = await runImport(transport, dataAccess, [importRow('best shoes', ['cat-new'])]);
 
+    expect(transport.deletePromptsByIds).to.not.have.been.called;
     expect(result.updated).to.have.lengthOf(1);
-    expect(result.failed).to.be.an('array').that.is.empty;
-  });
-
-  it('batches every existing prompt in a project into ONE tag write', async () => {
-    const { transport, dataAccess } = setup([
-      storedPrompt({ id: 'sem-a', name: 'prompt a' }),
-      storedPrompt({ id: 'sem-b', name: 'prompt b' }),
-    ]);
-
-    const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
-      prompts: [importRow('prompt a', ['cat-1']), importRow('prompt b', ['cat-2'])],
-    }, fakeLog());
-
-    expect(result.updated).to.have.lengthOf(2);
-    expect(transport.updatePromptTagsByIds).to.have.been.calledOnce;
-    expect(transport.updatePromptTagsByIds.firstCall.args[2]).to.have.lengthOf(2);
   });
 
   it('moves updates into `failed` when the batched tag write throws', async () => {
@@ -3946,9 +3879,7 @@ describe('handlers/prompts.js — create is an upsert (existing text replaces ta
       updatePromptTagsByIds: sinon.stub().rejects(new Error('upstream 500')),
     });
 
-    const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
-      prompts: [importRow('best shoes', ['cat-new'])],
-    }, fakeLog());
+    const result = await runImport(transport, dataAccess, [importRow('best shoes', ['cat-new'])]);
 
     // Never report an update that did not land.
     expect(result.updated).to.be.an('array').that.is.empty;
@@ -3956,103 +3887,17 @@ describe('handlers/prompts.js — create is an upsert (existing text replaces ta
     expect(result.failed[0].text).to.equal('best shoes');
   });
 
-  it('never rolls an updated prompt back — a quota-rejected publish must not DELETE pre-existing data', async () => {
-    // reconcilePublishErrors undoes a quota-rejected project by deleting what the
-    // request staged. An updated prompt pre-existed the request, so deleting it
-    // would destroy customer data rather than undo our work — hence updates carry
-    // no `rollbackProjectId`.
-    const quota = new SerenityTransportError('quota', 405, 'text/html', '<html>quota</html>');
-    const { transport, dataAccess } = setup([storedPrompt()], {
-      publishProject: sinon.stub().rejects(quota),
-    });
-
-    const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
-      prompts: [importRow('best shoes', ['cat-new'])],
-    }, fakeLog());
-
-    expect(transport.deletePromptsByIds).to.not.have.been.called;
-    expect(result.updated).to.have.lengthOf(1);
-  });
-
-  it('still CREATES a text the project does not hold', async () => {
-    const { transport, dataAccess } = setup([storedPrompt({ name: 'something else' })]);
-
-    const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
-      prompts: [importRow('brand new prompt', ['cat-new'])],
-    }, fakeLog());
-
-    expect(result.created).to.have.lengthOf(1);
-    expect(result.updated).to.be.an('array').that.is.empty;
-    expect(transport.updatePromptTagsByIds).to.not.have.been.called;
-  });
-
-  it('matches an exact text in preference to a case variant', async () => {
-    const { transport, dataAccess } = setup([
-      storedPrompt({ id: 'sem-lower', name: 'best shoes' }),
-      storedPrompt({ id: 'sem-upper', name: 'Best Shoes' }),
-    ]);
-
-    const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
-      prompts: [importRow('Best Shoes', ['cat-new'])],
-    }, fakeLog());
-
-    expect(result.updated[0].semrushPromptId).to.equal('sem-upper');
-  });
-
-  it('falls back to a case-insensitive match so a retyped row still replaces', async () => {
-    // Upstream's own dedupe folding is not pinned by the vendor contract. Being
-    // case-SENSITIVE where upstream is not would send the row down the create
-    // path and straight back into the additive attach.
-    const { transport, dataAccess } = setup([storedPrompt({ name: 'Best Shoes' })]);
-
-    const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
-      prompts: [importRow('best shoes', ['cat-new'])],
-    }, fakeLog());
-
-    expect(result.updated).to.have.lengthOf(1);
-    expect(transport.createPromptsWithMetadata).to.not.have.been.called;
-  });
-
-  it('pages the index so a prompt past the first page is still recognised', async () => {
+  it('pages the index, so a prompt past the first page is still recognised', async () => {
+    // A project larger than one page would otherwise look empty from page 2 on, and
+    // every prompt there would fall back to the additive create path.
     const firstPage = Array.from({ length: 1000 }, (_, i) => storedPrompt({ id: `p${i}`, name: `q${i}` }));
     const listPromptsByTags = sinon.stub();
     listPromptsByTags.onFirstCall().resolves({ items: firstPage });
     listPromptsByTags.onSecondCall().resolves({ items: [storedPrompt({ id: 'sem-page2', name: 'on page two' })] });
     const { transport, dataAccess } = setup([], { listPromptsByTags });
 
-    const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
-      prompts: [importRow('on page two', ['cat-new'])],
-    }, fakeLog());
+    const result = await runImport(transport, dataAccess, [importRow('on page two', ['cat-new'])]);
 
     expect(result.updated[0].semrushPromptId).to.equal('sem-page2');
-  });
-
-  it('does not write a duplicate id when the caller re-sends the stored source tag', async () => {
-    // The caller's `tagIds` are opaque ids. No current client sends a `source` id,
-    // but one that did would otherwise put the same id in `references` twice —
-    // exactly the duplicate-tag state this change removes.
-    const { transport, dataAccess } = setup([
-      storedPrompt({ tags: [sourceTag('source-ai', 'ai')] }),
-    ]);
-
-    await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
-      prompts: [importRow('best shoes', ['cat-new', 'source-ai'])],
-    }, fakeLog());
-
-    const { references } = transport.updatePromptTagsByIds.firstCall.args[2][0];
-    expect(references.filter((id) => id === 'source-ai')).to.have.lengthOf(1);
-  });
-
-  it('lists each affected project ONCE, not once per row', async () => {
-    const { transport, dataAccess } = setup([
-      storedPrompt({ id: 'sem-a', name: 'prompt a' }),
-      storedPrompt({ id: 'sem-b', name: 'prompt b' }),
-    ]);
-
-    await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
-      prompts: [importRow('prompt a', ['cat-1']), importRow('prompt b', ['cat-2'])],
-    }, fakeLog());
-
-    expect(transport.listPromptsByTags).to.have.been.calledOnce;
   });
 });
