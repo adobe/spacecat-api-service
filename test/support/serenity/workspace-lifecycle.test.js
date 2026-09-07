@@ -149,12 +149,12 @@ describe('workspace-lifecycle', () => {
 
       expect(error.status).to.equal(502);
       expect(error.code).to.equal(ERROR_CODES.SUBWORKSPACE_CREATION_FAILED);
-      expect(error.message).to.equal('Subworkspace creation failed');
+      expect(error.message).to.match(/cannot be recovered by waiting/);
       expect(transport.getWorkspaceStatus).to.have.been.calledOnceWithExactly(SUB_WS);
       expect(sleep).to.not.have.been.called;
       expect(localLog.error).to.have.been.calledOnceWithExactly(
-        'pollUntilCreated: SUBWORKSPACE_CREATION_FAILED: terminal status observed',
-        { workspaceId: SUB_WS, status: 'creation failed' },
+        'pollUntilCreated: sub-workspace settled to a terminal failure status',
+        { semrushWorkspaceId: SUB_WS, status: 'creation failed' },
       );
       expect(brand.setSemrushSubWorkspaceId).to.not.have.been.called;
       expect(brand.save).to.not.have.been.called;
@@ -178,12 +178,11 @@ describe('workspace-lifecycle', () => {
 
       expect(error.status).to.equal(502);
       expect(error.code).to.equal(ERROR_CODES.SUBWORKSPACE_CREATION_FAILED);
-      expect(error.message).to.equal('Subworkspace creation failed');
       expect(transport.getWorkspaceStatus).to.have.been.calledOnceWithExactly(SUB_WS);
       expect(sleep).to.not.have.been.called;
       expect(localLog.error).to.have.been.calledOnceWithExactly(
-        'pollUntilCreated: SUBWORKSPACE_CREATION_FAILED: terminal status observed',
-        { workspaceId: SUB_WS, status: 'invalid subscription' },
+        'pollUntilCreated: sub-workspace settled to a terminal failure status',
+        { semrushWorkspaceId: SUB_WS, status: 'invalid subscription' },
       );
       expect(brand.setSemrushSubWorkspaceId).to.not.have.been.called;
       expect(brand.save).to.not.have.been.called;
@@ -211,8 +210,8 @@ describe('workspace-lifecycle', () => {
       expect(transport.getWorkspaceStatus).to.have.been.calledTwice;
       expect(sleep).to.have.been.calledOnceWithExactly(1);
       expect(localLog.error).to.have.been.calledOnceWithExactly(
-        'pollUntilCreated: SUBWORKSPACE_CREATION_FAILED: terminal status observed',
-        { workspaceId: SUB_WS, status: 'creation failed' },
+        'pollUntilCreated: sub-workspace settled to a terminal failure status',
+        { semrushWorkspaceId: SUB_WS, status: 'creation failed' },
       );
     });
 
@@ -679,6 +678,28 @@ describe('workspace-lifecycle', () => {
         expect(brand.save).to.have.been.calledOnce;
       });
 
+      // LLMO-7352: the READY superset must be applied CONSISTENTLY — a family candidate that
+      // settled to 'active'/'ready' (not the literal 'created') is healthy and must be adopted,
+      // NOT swept into the ignored-zombie branch and duplicated. Before the fix, pollUntilCreated
+      // recognized these three ready strings but findAdoptableFamilyMatch still hard-coded
+      // `=== 'created'`, so an 'active' twin got a brand-new duplicate sub-workspace.
+      ['active', 'ready'].forEach((readyStatus) => {
+        it(`adopts a same-title family child in the '${readyStatus}' ready state (no duplicate create)`, async () => {
+          const transport = makeTransport({
+            listWorkspaceFamily: sinon.stub().resolves([
+              { id: 'existing-ws', title: EXPECTED_TITLE, status: readyStatus },
+            ]),
+          });
+          const brand = makeBrand();
+
+          const result = await ensureWithUnclaimedFamily(transport, brand);
+
+          expect(result).to.equal('existing-ws');
+          expect(transport.createSubworkspace).to.not.have.been.called;
+          expect(brand.setSemrushSubWorkspaceId).to.have.been.calledOnceWithExactly('existing-ws');
+        });
+      });
+
       it('does NOT adopt a single not-ready zombie stub; creates a fresh workspace', async () => {
         // Mitigation 1: a failed-provisioning stub (status 'not ready', 0 projects)
         // is invisible to the matcher, so it is never falsely adopted.
@@ -869,12 +890,163 @@ describe('workspace-lifecycle', () => {
       ).catch((e) => e);
 
       expect(error.status).to.equal(504);
-      expect(error.message).to.equal('Subworkspace creation timed out');
+      expect(error.code).to.equal(ERROR_CODES.SUBWORKSPACE_CREATION_TIMEOUT);
       expect(transport.getWorkspaceStatus).to.have.been.calledTwice;
       expect(sleep).to.have.been.calledTwice;
       expect(localLog.error).to.have.been.calledOnceWithExactly(
-        'pollUntilCreated: SUBWORKSPACE_CREATION_TIMEOUT: readiness attempts exhausted',
-        { workspaceId: SUB_WS, status: 'not ready' },
+        'pollUntilCreated: sub-workspace did not settle to a ready status in time',
+        { semrushWorkspaceId: SUB_WS },
+      );
+    });
+
+    // LLMO-7352: a workspace that settles to a terminal failure status never becomes `created`.
+    // Ported from mysticat-data-service/scripts/serenity_migration/semrush_write.py's
+    // wait_workspace_created, which observed this exact superset of terminal statuses in
+    // practice (WORKSPACE_CREATION_FAILED_STATUSES / WORKSPACE_FAILED_STATUSES) rather than the
+    // single `creation failed` string this poller used to recognize.
+    ['creation_failed', 'creation failed', 'failed', 'error'].forEach((terminalStatus) => {
+      it(`fails fast on the FIRST poll (not the timeout) when the fresh create settles to '${terminalStatus}'`, async () => {
+        const getWorkspaceStatus = sinon.stub().resolves({ status: terminalStatus });
+        const transport = makeTransport({ getWorkspaceStatus });
+        const brand = makeBrand();
+        const sleep = sinon.stub().resolves();
+
+        const err = await ensureSubworkspace(
+          transport,
+          brand,
+          PARENT_WS,
+          log,
+          { attempts: 30, intervalMs: 1000, sleep },
+          null,
+          { brandCollection: makeBrandCollection() },
+        ).catch((e) => e);
+
+        expect(err).to.be.instanceOf(Error);
+        expect(err.status).to.equal(502);
+        expect(err.code).to.equal(ERROR_CODES.SUBWORKSPACE_CREATION_FAILED);
+        // Sanitized: never leaks the raw workspace id into the client-facing message (unlike
+        // the generic 'did not settle to created in time' timeout below).
+        expect(err.message).to.not.include(SUB_WS);
+        // Fails on the very FIRST read — proves this is not just "a shorter timeout": with a
+        // 30-attempt/1000ms budget, retrying even once would mean this test's sleep stub was
+        // invoked, and it never was.
+        expect(getWorkspaceStatus).to.have.been.calledOnce;
+        expect(sleep).to.not.have.been.called;
+      });
+
+      it(`fails fast when the EXISTING pointer branch reads '${terminalStatus}' (the repeated-Add-Market-retry case, LLMO-7352 CUHK incident)`, async () => {
+        const getWorkspaceStatus = sinon.stub().resolves({ status: terminalStatus });
+        const transport = makeTransport({ getWorkspaceStatus });
+        const brand = makeBrand({ workspaceId: SUB_WS });
+        const sleep = sinon.stub().resolves();
+
+        const err = await ensureSubworkspace(
+          transport,
+          brand,
+          PARENT_WS,
+          log,
+          { attempts: 30, intervalMs: 1000, sleep },
+        ).catch((e) => e);
+
+        expect(err.status).to.equal(502);
+        expect(err.code).to.equal(ERROR_CODES.SUBWORKSPACE_CREATION_FAILED);
+        expect(getWorkspaceStatus).to.have.been.calledOnce;
+        expect(sleep).to.not.have.been.called;
+      });
+    });
+
+    // The gateway has been observed to settle a successful create to more than one status
+    // string — ported from the same Python reference's WORKSPACE_READY_STATUSES. Before this
+    // fix, only the literal 'created' was recognized, so a workspace that legitimately settled
+    // to 'active' or 'ready' would be misread as still-pending and poll out to a false timeout.
+    ['created', 'active', 'ready'].forEach((readyStatus) => {
+      it(`treats '${readyStatus}' as settled (no false timeout on a legitimately-ready workspace)`, async () => {
+        const transport = makeTransport({
+          getWorkspaceStatus: sinon.stub().resolves({ status: readyStatus }),
+        });
+        const brand = makeBrand({ workspaceId: SUB_WS });
+
+        await expect(
+          ensureSubworkspace(transport, brand, PARENT_WS, log, NOOP_TIMING),
+        ).to.be.fulfilled;
+      });
+    });
+
+    // LLMO-7352: the gateway is not case/whitespace-stable, and the Python reference this is
+    // ported from normalizes (`.lower()`) before comparing. A mixed-case / padded variant of a
+    // status must resolve to the same classification, or the fast-fail silently regresses to the
+    // full poll-then-timeout it exists to prevent.
+    [
+      { raw: 'Creation_Failed', kind: 'terminal' },
+      { raw: 'CREATION FAILED', kind: 'terminal' },
+      { raw: '  failed  ', kind: 'terminal' },
+      { raw: 'Created', kind: 'ready' },
+      { raw: ' ACTIVE ', kind: 'ready' },
+    ].forEach(({ raw, kind }) => {
+      it(`normalizes a mixed-case/padded status '${raw}' as ${kind}`, async () => {
+        const getWorkspaceStatus = sinon.stub().resolves({ status: raw });
+        const transport = makeTransport({ getWorkspaceStatus });
+        const brand = makeBrand({ workspaceId: SUB_WS });
+        const sleep = sinon.stub().resolves();
+
+        const timing = { attempts: 30, intervalMs: 1000, sleep };
+        const promise = ensureSubworkspace(transport, brand, PARENT_WS, log, timing);
+
+        if (kind === 'ready') {
+          await expect(promise).to.be.fulfilled;
+          expect(sleep).to.not.have.been.called;
+        } else {
+          const err = await promise.catch((e) => e);
+          expect(err.status).to.equal(502);
+          expect(err.code).to.equal(ERROR_CODES.SUBWORKSPACE_CREATION_FAILED);
+          // Still fails on the FIRST read — normalization does not cost an extra poll.
+          expect(getWorkspaceStatus).to.have.been.calledOnce;
+          expect(sleep).to.not.have.been.called;
+        }
+      });
+    });
+
+    // LLMO-7352: the failing workspace id must NOT be in the client-facing (thrown) message — it
+    // flows through mapError/safeError, which does not redact ids — but MUST be captured in a log
+    // line so triage can find it. Both the terminal-failure and the timeout paths.
+    it('logs the workspace id (never in the thrown message) on a terminal failure', async () => {
+      const spyLog = { info: sinon.spy(), error: sinon.spy(), warn: sinon.spy() };
+      const transport = makeTransport({
+        getWorkspaceStatus: sinon.stub().resolves({ status: 'creation failed' }),
+      });
+      const brand = makeBrand({ workspaceId: SUB_WS });
+
+      const err = await ensureSubworkspace(transport, brand, PARENT_WS, spyLog, NOOP_TIMING)
+        .catch((e) => e);
+
+      expect(err.code).to.equal(ERROR_CODES.SUBWORKSPACE_CREATION_FAILED);
+      expect(err.message).to.not.include(SUB_WS);
+      // The id (and the raw status) are captured in a structured log line instead.
+      expect(spyLog.error).to.have.been.calledWithMatch(
+        sinon.match.string,
+        sinon.match({ semrushWorkspaceId: SUB_WS, status: 'creation failed' }),
+      );
+    });
+
+    it('logs the workspace id and keeps it out of the timeout (504) message', async () => {
+      const spyLog = { info: sinon.spy(), error: sinon.spy(), warn: sinon.spy() };
+      const transport = makeTransport({
+        getWorkspaceStatus: sinon.stub().resolves({ status: 'not ready' }),
+      });
+      const brand = makeBrand({ workspaceId: SUB_WS });
+
+      const timing = { attempts: 2, intervalMs: 0, sleep: () => Promise.resolve() };
+      const err = await ensureSubworkspace(transport, brand, PARENT_WS, spyLog, timing)
+        .catch((e) => e);
+
+      expect(err.status).to.equal(504);
+      // Regression guard (LLMO-7352): the pre-fix message embedded `${workspaceId}`, leaking the
+      // Semrush UUID to the client through mapError. It must not anymore.
+      expect(err.message).to.not.include(SUB_WS);
+      expect(err.message).to.match(/did not settle to 'created'/);
+      expect(spyLog.error).to.have.been.calledWithMatch(
+        sinon.match.string,
+        sinon.match({ semrushWorkspaceId: SUB_WS }),
       );
     });
 
@@ -888,7 +1060,7 @@ describe('workspace-lifecycle', () => {
       // setTimeout-based sleep once before the bounded poll gives up.
       const timing = { attempts: 1, intervalMs: 0 };
       await expect(ensureSubworkspace(transport, brand, PARENT_WS, log, timing))
-        .to.be.rejectedWith('Subworkspace creation timed out');
+        .to.be.rejectedWith(/did not settle to 'created'/);
     });
 
     it('refuses to re-grant onto a workspace that IS the org parent', async () => {
