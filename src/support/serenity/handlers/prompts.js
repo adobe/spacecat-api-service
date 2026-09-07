@@ -46,6 +46,16 @@ import { logPromptDeleteEvent } from '../prompt-delete-log.js';
 export const DEFAULT_PAGE_LIMIT = 50;
 export const MAX_PAGE_LIMIT = 1000;
 export const MAX_TAG_IDS = 50;
+// PATCH's sanity ceiling on the RAW incoming tagIds array, ahead of any format
+// validation or the MAX_TAG_IDS cap. parseUpdatePromptBody deliberately does
+// NOT slice at MAX_TAG_IDS up front (see validTagIds/capUpdateTagIds) so a
+// closed-dimension id echoed back by the client is never dropped to fit the
+// cap -- but that means an unbounded array would otherwise flow past parsing
+// into capUpdateTagIds' classification work with no cap in front of it at
+// all. Generous relative to any legitimate echoed list (which tops out around
+// MAX_TAG_IDS + a handful of server-derived ids): rejects only a pathological
+// payload, never a real client's.
+export const MAX_UPDATE_TAG_IDS_INPUT = 500;
 // Caps the inflight upstream calls when fanning out a bulk create.
 // 8 keeps per-call wall time reasonable without overwhelming upstream rate
 // limits — the prior `serenity` testing exhausted Semrush's shared limit
@@ -1170,9 +1180,21 @@ export function parseUpdatePromptBody(body) {
       body: { error: 'invalidRequest', message: 'text must be a non-empty string' },
     };
   }
-  // No cap here -- capUpdateTagIds (called by the handler once projectId is
-  // known) applies MAX_TAG_IDS only to the ids that are NOT a closed-dimension
-  // id, so an echoed origin/source/type/intent id is never dropped to fit it.
+  if (Array.isArray(body.tagIds) && body.tagIds.length > MAX_UPDATE_TAG_IDS_INPUT) {
+    return {
+      ok: false,
+      status: 400,
+      body: {
+        error: 'invalidRequest',
+        message: `tagIds array exceeds maxItems=${MAX_UPDATE_TAG_IDS_INPUT}`,
+      },
+    };
+  }
+  // No MAX_TAG_IDS cap here -- capUpdateTagIds (called by the handler once
+  // projectId is known) applies it only to the ids that are NOT a
+  // closed-dimension id, so an echoed origin/source/type/intent id is never
+  // dropped to fit it. MAX_UPDATE_TAG_IDS_INPUT above is the sanity ceiling
+  // that still bounds this function's (and capUpdateTagIds') work.
   const tagIds = validTagIds(body.tagIds);
   if (tagIds.length === 0) {
     return {

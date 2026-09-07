@@ -1278,6 +1278,33 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
     expect(result.body.error).to.equal('invalidRequest');
   });
 
+  // Regression: with the MAX_TAG_IDS cap moved out of parseUpdatePromptBody
+  // (capUpdateTagIds applies it later, once the closed-dimension ids are
+  // known), an oversized array must still be rejected up front rather than
+  // flowing uncapped into capUpdateTagIds' classification work.
+  it('400s when tagIds exceeds the sanity ceiling, before any classification work', async () => {
+    const transport = { listProjectTags: sinon.stub().rejects(new Error('should not be called')) };
+    const dataAccess = makeDataAccess([]);
+    const tooMany = Array.from({ length: 501 }, (_, i) => `tag-${i}`);
+
+    const result = await handleUpdatePrompt(
+      transport,
+      dataAccess,
+      BRAND,
+      WORKSPACE,
+      'sem-1',
+      {
+        geoTargetId: 2840, languageCode: 'en', text: 'next', tagIds: tooMany,
+      },
+      fakeLog(),
+    );
+
+    expect(result.status).to.equal(400);
+    expect(result.body.error).to.equal('invalidRequest');
+    expect(result.body.message).to.match(/maxItems=500/);
+    expect(transport.listProjectTags).to.not.have.been.called;
+  });
+
   it('400s when tagIds is present but empty', async () => {
     const transport = {};
     const dataAccess = makeDataAccess([]);
