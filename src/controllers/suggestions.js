@@ -3294,10 +3294,15 @@ function SuggestionsController(ctx, sqs, env) {
           continue; // eslint-disable-line no-continue
         }
         // eslint-disable-next-line no-await-in-loop
-        const pagesText = await mcp.callTool('get-aem-pages', { authorUrl: authorURL, publishPath, limit: 1 });
+        const pagesText = await mcp.callTool('get-aem-pages', { authorUrl: authorURL, publishPath, limit: 20 });
         let pageId;
         try {
-          pageId = JSON.parse(pagesText.slice(pagesText.indexOf('{')))?.items?.[0]?.id;
+          const items = JSON.parse(pagesText.slice(pagesText.indexOf('{')))?.items || [];
+          // A publishPath is not unique: launch copies live under /content/launches/...
+          // but resolve to the same delivery path, so get-aem-pages returns them too
+          // (often first). Target the live page, never a launch copy.
+          const live = items.find((p) => p?.authorPath && !p.authorPath.includes('/content/launches/'));
+          pageId = (live || items[0])?.id;
         } catch {
           pageId = undefined;
         }
