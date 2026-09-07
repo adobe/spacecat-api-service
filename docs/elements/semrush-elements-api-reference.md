@@ -461,6 +461,22 @@ Upstream error bodies are **never forwarded to clients** — they are logged ser
 
 | Variable | Source | Used by |
 |---|---|---|
-| `SEMRUSH_PROJECTS_BASE_URL` | Vault `dx_mysticat/<env>/api-service` | `elements-transport.js` `baseUrl()` — the Elements API base host (e.g. `https://www.semrush.com`) |
+| `SEMRUSH_PROJECTS_BASE_URL` | Vault `dx_mysticat/<env>/api-service` | `elements-transport.js` `baseUrl()` — the Elements API base host (e.g. `https://www.semrush.com`) for regular (IMS-authenticated) callers |
+| `SEO_API_BASE_URL` | Vault `dx_mysticat/<env>/api-service` | `elements-transport.js` `s2sBaseUrl()` — the v4-raw external-api host (`https://api.semrush.com`) used for S2S-consumer calls |
+| `SEMRUSH_ADMIN_ELEMENT_API_KEY` | Vault `dx_mysticat/<env>/api-service` | `elements-transport.js` `buildS2SHeaders()` — the `Apikey` credential used to authenticate S2S-consumer calls to the Elements API |
 
-No additional secrets are required. The Elements transport reuses the same `SEMRUSH_PROJECTS_BASE_URL` already configured for the Serenity (prompts/markets) transport.
+The Elements transport reuses the same `SEMRUSH_PROJECTS_BASE_URL` already configured for the Serenity (prompts/markets) transport for regular callers. S2S consumers (see [S2S Elements Access](#s2s-elements-access) below) use a different upstream gateway and credential entirely.
+
+### S2S Elements Access
+
+An S2S consumer holding the `organization:readAll` capability can call the same Elements routes as a regular user, but the upstream request shape differs:
+
+| | Regular (IMS bearer) | S2S consumer |
+|---|---|---|
+| Base URL | `SEMRUSH_PROJECTS_BASE_URL` | `SEO_API_BASE_URL` (`https://api.semrush.com`) |
+| Path | `/enterprise/pages/api/v3/workspaces/{workspaceId}/products/ai/elements/{elementId}/data` | `/apis/v4-raw/external-api/v1/workspaces/{workspaceId}/products/ai/elements/{elementId}` (no trailing `/data`) |
+| `Authorization` header | `Bearer <ims-token>` | `Apikey <SEMRUSH_ADMIN_ELEMENT_API_KEY>` |
+| Request body | `payload` | `{ "render_data": payload }` |
+| Response shape | unchanged | unchanged |
+
+`workspaceId` and `elementId` are the same values either way. The S2S vs. regular branch is decided once per request in `ElementsController.buildService()` (`ctx.attributes.authInfo.isS2SConsumer()`) and threaded into `createElementsTransport({ isS2SConsumer })`; `elements-service.js` is unaware of the distinction and calls `transport.fetchElement(...)` identically in both cases.

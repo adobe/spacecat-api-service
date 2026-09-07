@@ -141,6 +141,7 @@ function brandSemrushProjectsFor(ids) {
 function fakeContext({
   bearer = IMS_TOKEN,
   authType = 'ims',
+  isS2SConsumer = false,
   params = {},
   url = `https://api.example.com/v2/orgs/${ORG_ID}/brands/${BRAND_ID}/serenity/brand-presence/url-inspector/filter-dimensions`,
   org = { getId: () => ORG_ID },
@@ -163,7 +164,7 @@ function fakeContext({
       },
     },
     attributes: {
-      authInfo: { getType: () => authType },
+      authInfo: { getType: () => authType, isS2SConsumer: () => isS2SConsumer },
     },
     dataAccess: {
       Organization: { findById: sinon.stub().resolves(org) },
@@ -195,6 +196,8 @@ describe('ElementsController', () => {
   let resolveBrandWorkspaceStub;
   let isSerenityActiveForBrandStub;
   let accessControlHasAccessStub;
+  let accessControlHasAdminAccessStub;
+  let accessControlHasS2SCapabilityStub;
   let serviceStub;
   let createElementsServiceStub;
   let createElementsTransportStub;
@@ -214,6 +217,8 @@ describe('ElementsController', () => {
     // the existing cases exercise the surface rather than the gate.
     isSerenityActiveForBrandStub = sinon.stub().resolves(true);
     accessControlHasAccessStub = sinon.stub().resolves(true);
+    accessControlHasAdminAccessStub = sinon.stub().returns(false);
+    accessControlHasS2SCapabilityStub = sinon.stub().resolves({ allowed: false });
 
     getBrandIdentityStub = sinon.stub().resolves({ id: BRAND_ID, name: 'Adobe Brand' });
     getBrandBySiteStub = sinon.stub().resolves(null);
@@ -248,7 +253,11 @@ describe('ElementsController', () => {
 
     const MockAccessControlUtil = {
       default: {
-        fromContext: () => ({ hasAccess: accessControlHasAccessStub }),
+        fromContext: () => ({
+          hasAccess: accessControlHasAccessStub,
+          hasAdminAccess: accessControlHasAdminAccessStub,
+          hasS2SCapability: accessControlHasS2SCapabilityStub,
+        }),
       },
     };
 
@@ -394,6 +403,61 @@ describe('ElementsController', () => {
       const body = await readBody(res);
       expect(body.error).to.equal('promiseTokenRequired');
       expect(body.message).to.match(/x-promise-token/);
+    });
+  });
+
+  // ─── S2S consumer access ──────────────────────────────────────────────────
+
+  describe('S2S consumer access', () => {
+    it('bypasses org-membership check when the S2S consumer holds organization:readAll', async () => {
+      accessControlHasS2SCapabilityStub.resolves({ allowed: true });
+      accessControlHasAccessStub.resolves(false);
+      const ctx = fakeContext({ isS2SConsumer: true, authType: 'jwt', bearer: null });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
+      expect(res.status).to.equal(200);
+      expect(accessControlHasAccessStub).to.not.have.been.called;
+    });
+
+    it('returns 403 when the S2S consumer lacks organization:readAll and has no org membership', async () => {
+      accessControlHasS2SCapabilityStub.resolves({ allowed: false, reason: 'missing-capability' });
+      accessControlHasAccessStub.resolves(false);
+      const ctx = fakeContext({ isS2SConsumer: true, authType: 'jwt', bearer: null });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
+      expect(res.status).to.equal(403);
+    });
+
+    it('admins bypass without consulting hasS2SCapability', async () => {
+      accessControlHasAdminAccessStub.returns(true);
+      accessControlHasAccessStub.resolves(false);
+      const ctx = fakeContext();
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
+      expect(res.status).to.equal(200);
+      expect(accessControlHasS2SCapabilityStub).to.not.have.been.called;
+    });
+
+    it('skips IMS token resolution and builds an S2S transport for an S2S consumer', async () => {
+      accessControlHasS2SCapabilityStub.resolves({ allowed: true });
+      const ctx = fakeContext({ isS2SConsumer: true, authType: 'jwt', bearer: null });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
+      expect(res.status).to.equal(200);
+      expect(exchangePromiseTokenStub).to.not.have.been.called;
+      expect(createElementsTransportStub).to.have.been.calledWith(
+        sinon.match({ isS2SConsumer: true, imsToken: undefined }),
+      );
+    });
+
+    it('builds a regular (non-S2S) transport for a normal IMS caller', async () => {
+      const ctx = fakeContext();
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
+      expect(res.status).to.equal(200);
+      expect(createElementsTransportStub).to.have.been.calledWith(
+        sinon.match({ isS2SConsumer: false, imsToken: IMS_TOKEN }),
+      );
     });
   });
 

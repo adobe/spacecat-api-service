@@ -16,6 +16,11 @@ import { endpointOf } from '../url-utils.js';
 import { ElementsTransportError } from './errors.js';
 
 const ELEMENTS_API_PATH = '/enterprise/pages/api/v3/workspaces';
+// S2S consumers hit a different Semrush gateway: same workspace/element path segments,
+// but a v4-raw external-api host, no trailing `/data`, Apikey auth instead of an IMS
+// bearer token, and the payload wrapped in `{ render_data: <payload> }`. The response
+// shape is unchanged.
+const S2S_ELEMENTS_API_PATH = '/apis/v4-raw/external-api/v1/workspaces';
 // Verified against a real Semrush-provisioned brand: individual Stats-per-URL
 // calls were timing out at 15s roughly half the time; 30s was needed for them
 // to reliably complete (and even then, some calls come in close to that
@@ -37,17 +42,17 @@ const DEFAULT_RETRY_BASE_DELAY_MS = 200;
 const MAX_RETRY_DELAY_MS = 20_000;
 
 /**
- * Validates and returns the canonical origin of SEMRUSH_PROJECTS_BASE_URL.
- * Enforces HTTPS. Returns `protocol//host` with no trailing path so URL
- * segments injected later cannot be escaped by a misconfigured base URL.
+ * Validates and returns the canonical origin of the given env var. Enforces HTTPS.
+ * Returns `protocol//host` with no trailing path so URL segments injected later
+ * cannot be escaped by a misconfigured base URL.
  */
-function baseUrl(env) {
-  const raw = typeof env?.SEMRUSH_PROJECTS_BASE_URL === 'string'
-    ? env.SEMRUSH_PROJECTS_BASE_URL.trim()
-    : env?.SEMRUSH_PROJECTS_BASE_URL;
+function baseUrlFromEnvVar(env, envVarName) {
+  const raw = typeof env?.[envVarName] === 'string'
+    ? env[envVarName].trim()
+    : env?.[envVarName];
   if (!hasText(raw)) {
     throw new ErrorWithStatusCode(
-      'SEMRUSH_PROJECTS_BASE_URL is not set. Configure it via Vault '
+      `${envVarName} is not set. Configure it via Vault `
       + '(dx_mysticat/<env>/api-service) or .env for local dev.',
       503,
     );
@@ -58,17 +63,25 @@ function baseUrl(env) {
     parsed = new URL(candidate);
   } catch {
     throw new ErrorWithStatusCode(
-      `SEMRUSH_PROJECTS_BASE_URL is not a valid URL: ${candidate}`,
+      `${envVarName} is not a valid URL: ${candidate}`,
       503,
     );
   }
   if (parsed.protocol !== 'https:') {
     throw new ErrorWithStatusCode(
-      `SEMRUSH_PROJECTS_BASE_URL must use https (got ${parsed.protocol})`,
+      `${envVarName} must use https (got ${parsed.protocol})`,
       503,
     );
   }
   return `${parsed.protocol}//${parsed.host}`;
+}
+
+function baseUrl(env) {
+  return baseUrlFromEnvVar(env, 'SEMRUSH_PROJECTS_BASE_URL');
+}
+
+function s2sBaseUrl(env) {
+  return baseUrlFromEnvVar(env, 'SEO_API_BASE_URL');
 }
 
 function buildHeaders(imsToken) {
@@ -77,6 +90,17 @@ function buildHeaders(imsToken) {
   }
   return {
     Authorization: `Bearer ${imsToken}`,
+    Accept: 'application/json',
+    'Content-Type': 'application/json',
+  };
+}
+
+function buildS2SHeaders(apiKey) {
+  if (!hasText(apiKey)) {
+    throw new ElementsTransportError(401, 'Missing SEMRUSH_ADMIN_ELEMENT_API_KEY for S2S Elements transport');
+  }
+  return {
+    Authorization: `Apikey ${apiKey}`,
     Accept: 'application/json',
     'Content-Type': 'application/json',
   };
@@ -160,7 +184,8 @@ function nextRetryDelayMs(completedAttempt, baseDelayMs, response) {
  * budget). The body is a JSON string, so it is safe to re-send unchanged across attempts.
  *
  * @param {string} url
- * @param {string} imsToken
+ * @param {object} headers request headers (built by the caller - Bearer IMS token for
+ *   regular callers, Apikey for S2S consumers)
  * @param {object} body request payload (serialised once, re-sent per attempt)
  * @param {object} [opts]
  * @param {number} [opts.timeoutMs] per-attempt timeout
@@ -171,7 +196,7 @@ function nextRetryDelayMs(completedAttempt, baseDelayMs, response) {
  * @param {string} [opts.elementId] id of the element being called, ditto
  * @returns {Promise<*>} parsed response body on success
  */
-async function request(url, imsToken, body, {
+async function request(url, headers, body, {
   timeoutMs = DEFAULT_TIMEOUT_MS,
   maxRetries = DEFAULT_MAX_RETRIES,
   retryBaseDelayMs = DEFAULT_RETRY_BASE_DELAY_MS,
@@ -195,7 +220,7 @@ async function request(url, imsToken, body, {
       // eslint-disable-next-line no-await-in-loop
       response = await fetch(url, {
         method: 'POST',
-        headers: buildHeaders(imsToken),
+        headers,
         signal: controller.signal,
         body: jsonBody,
       });
@@ -232,11 +257,21 @@ async function request(url, imsToken, body, {
 
 /**
  * Creates the Semrush Elements API HTTP transport.
- * All element calls are POST requests authenticated with the caller's IMS bearer token.
+ *
+ * Regular callers POST to the enterprise Elements API authenticated with the caller's IMS
+ * bearer token. S2S consumers (`isS2SConsumer: true`) instead POST to the v4-raw external
+ * API (`SEO_API_BASE_URL`), authenticated with `SEMRUSH_ADMIN_ELEMENT_API_KEY` via an
+ * `Apikey` header, hitting a URL with no trailing `/data`, with the payload wrapped in
+ * `{ render_data: payload }`. Same workspace/element path segments, same response shape,
+ * same retry/timeout behaviour either way.
  *
  * @param {object} args
- * @param {object} args.env - Environment (reads SEMRUSH_PROJECTS_BASE_URL).
- * @param {string} args.imsToken - IMS user bearer token (without 'Bearer ' prefix).
+ * @param {object} args.env - Environment (reads SEMRUSH_PROJECTS_BASE_URL / SEO_API_BASE_URL
+ *   and SEMRUSH_ADMIN_ELEMENT_API_KEY).
+ * @param {string} [args.imsToken] - IMS user bearer token (without 'Bearer ' prefix).
+ *   Required unless `isS2SConsumer` is true.
+ * @param {boolean} [args.isS2SConsumer] - Use the S2S/Apikey call shape instead of the IMS
+ *   bearer shape (default false).
  * @param {number} [args.maxRetries] - Retries after the first attempt on a 429 (default 2;
  *   <=0 ⇒ single attempt). Defaults match the shared Project Engine client.
  * @param {number} [args.retryBaseDelayMs] - Base delay for the jittered backoff (default 200).
@@ -256,14 +291,16 @@ async function request(url, imsToken, body, {
 export function createElementsTransport({
   env,
   imsToken,
+  isS2SConsumer = false,
   maxRetries = DEFAULT_MAX_RETRIES,
   retryBaseDelayMs = DEFAULT_RETRY_BASE_DELAY_MS,
 }) {
-  const root = baseUrl(env);
+  const root = isS2SConsumer ? s2sBaseUrl(env) : baseUrl(env);
 
   return {
     /**
-     * POST /enterprise/pages/api/v3/workspaces/{workspaceId}/products/ai/elements/{elementId}/data
+     * Regular: POST {ELEMENTS_API_PATH}/{workspaceId}/products/ai/elements/{elementId}/data
+     * S2S: POST {S2S_ELEMENTS_API_PATH}/{workspaceId}/products/ai/elements/{elementId}
      *
      * @param {string} workspaceId
      * @param {string} elementId
@@ -278,8 +315,14 @@ export function createElementsTransport({
      * @param {number} [callOpts.maxRetries]
      */
     async fetchElement(workspaceId, elementId, payload, callOpts = {}) {
-      const url = `${root}${ELEMENTS_API_PATH}/${enc(workspaceId)}/products/ai/elements/${enc(elementId)}/data`;
-      return request(url, imsToken, payload, {
+      const url = isS2SConsumer
+        ? `${root}${S2S_ELEMENTS_API_PATH}/${enc(workspaceId)}/products/ai/elements/${enc(elementId)}`
+        : `${root}${ELEMENTS_API_PATH}/${enc(workspaceId)}/products/ai/elements/${enc(elementId)}/data`;
+      const headers = isS2SConsumer
+        ? buildS2SHeaders(env?.SEMRUSH_ADMIN_ELEMENT_API_KEY)
+        : buildHeaders(imsToken);
+      const body = isS2SConsumer ? { render_data: payload } : payload;
+      return request(url, headers, body, {
         maxRetries: callOpts.maxRetries ?? maxRetries,
         retryBaseDelayMs,
         timeoutMs: callOpts.timeoutMs,

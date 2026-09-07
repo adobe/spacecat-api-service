@@ -33,6 +33,7 @@ import { cachedOk } from '../support/cached-response.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { ErrorWithStatusCode, resolveSemrushImsToken } from '../support/utils.js';
 import { X_PROMISE_TOKEN_HEADER, PROMISE_TOKEN_REQUIRED_ERROR_CODE } from '../utils/constants.js';
+import { CAP_ORG_READ_ALL } from '../routes/capability-constants.js';
 
 const MAX_ERR_MSG_LEN = 500;
 const BEARER_PREFIX = 'Bearer ';
@@ -360,7 +361,15 @@ async function authorizeOrgAccess(ctx) {
     return { error: notFound(`Organization not found: ${spaceCatId}`) };
   }
   const accessControl = AccessControlUtil.fromContext(ctx);
-  if (!await accessControl.hasAccess(organization)) {
+  // S2S consumers holding organization:readAll can read elements data for any
+  // organization/brand, bypassing the per-org membership check below (dual-layer
+  // S2S pattern: Layer 1 in required-capabilities.js gates entry to the route,
+  // this is Layer 2, the controller-level capability check).
+  const isAdmin = accessControl.hasAdminAccess();
+  const s2sResult = isAdmin
+    ? { allowed: false }
+    : await accessControl.hasS2SCapability(CAP_ORG_READ_ALL);
+  if (!isAdmin && !s2sResult.allowed && !await accessControl.hasAccess(organization)) {
     return { error: forbidden('User does not have access to this organization') };
   }
   return { organization };
@@ -520,8 +529,16 @@ export default function ElementsController(context, log, env) {
   }
 
   async function buildService(ctx) {
-    const imsToken = await resolveElementsImsToken(ctx);
-    return createElementsService(createElementsTransport({ env, imsToken }), log);
+    // S2S consumers authenticate to the upstream Semrush gateway with an Apikey
+    // (SEMRUSH_ADMIN_ELEMENT_API_KEY), not a forwarded IMS bearer token, so skip
+    // IMS token resolution entirely for them - requireImsBearer would otherwise
+    // reject the S2S JWT (authInfo.getType() === 'jwt', not 'ims').
+    const isS2SConsumer = ctx?.attributes?.authInfo?.isS2SConsumer?.() ?? false;
+    const imsToken = isS2SConsumer ? undefined : await resolveElementsImsToken(ctx);
+    return createElementsService(
+      createElementsTransport({ env, imsToken, isS2SConsumer }),
+      log,
+    );
   }
 
   /**
