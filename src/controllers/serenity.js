@@ -21,7 +21,9 @@ import {
 import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
 
 import { createSerenityTransport } from '../support/serenity/rest-transport.js';
-import { isSemrushTransportError, unwrapTransportCause } from '../support/serenity/errors.js';
+import {
+  ERROR_CODES, isSemrushTransportError, unwrapTransportCause,
+} from '../support/serenity/errors.js';
 import {
   resolveBrandWorkspace,
   clearBrandWorkspaceCache,
@@ -204,13 +206,32 @@ function errorTokenForStatus(status) {
   }
 }
 
+/** @param {string} code @param {unknown} details @returns {object | undefined} */
+function publicErrorDetails(code, details) {
+  if (!details || typeof details !== 'object') {
+    return undefined;
+  }
+  const value = /** @type {any} */ (details);
+  if (code === ERROR_CODES.TAG_LIMIT_EXCEEDED
+    && Number.isInteger(value.attemptedCount)
+    && Number.isInteger(value.maxPromptTagIds)) {
+    return {
+      attemptedCount: value.attemptedCount,
+      maxPromptTagIds: value.maxPromptTagIds,
+    };
+  }
+  if (code === ERROR_CODES.TAG_FILTER_TOO_LARGE
+    && Number.isInteger(value.attemptedCount)
+    && Number.isInteger(value.maxTagFilterValues)) {
+    return {
+      attemptedCount: value.attemptedCount,
+      maxTagFilterValues: value.maxTagFilterValues,
+    };
+  }
+  return undefined;
+}
+
 /**
- * Request-context ids for the structured upstream-error log line
- * (SITES-49993): the tenant ids from the route plus the resolved Semrush
- * workspace from `authorize` — the latter is what attributes a
- * ProjectEngineApiError (which carries no ids of its own) to a tenant.
- * `auth` is the hoisted `authorize` result and may still be undefined (or its
- * `{error}` variant) when the throw happened before/inside authorization.
  * @param {object} [ctx]
  * @param {{ brandUuid?: string, workspaceId?: string | null }} [auth]
  * @returns {Record<string, unknown>}
@@ -231,14 +252,12 @@ function mapError(e, log, reqCtx = {}) {
     // error token in the response envelope; falls back to the status-based
     // default for plain throws.
     const errorToken = e.code && hasText(e.code) ? e.code : errorTokenForStatus(status);
+    const details = publicErrorDetails(errorToken, /** @type {any} */ (e).details);
     return createResponse(
       {
         error: errorToken,
         message: safeError(e.message),
-        ...(/** @type {any} */ (e).details
-          && typeof /** @type {any} */ (e).details === 'object'
-          ? { details: /** @type {any} */ (e).details }
-          : {}),
+        ...(details ? { details } : {}),
       },
       status,
     );

@@ -592,12 +592,14 @@ export async function resolveFacetedTagFilter(
   projectId,
   tagIds,
   log,
+  snapshot,
 ) {
   if (tagIds.length === 0) {
     return { groups: [], candidateIds: [], compatibilityById: new Map() };
   }
-  const snapshot = await readTagTreeSnapshot(transport, semrushWorkspaceId, projectId, log);
-  const selected = tagIds.map((id) => snapshot.byId.get(id));
+  const tree = snapshot
+    ?? await readTagTreeSnapshot(transport, semrushWorkspaceId, projectId, log);
+  const selected = tagIds.map((id) => tree.byId.get(id));
   if (selected.some((item) => !item
     || item.depth === 1
     || item.compatibility?.state !== 'canonical'
@@ -618,7 +620,7 @@ export async function resolveFacetedTagFilter(
     const accepted = groups.get(familyId);
     accepted.add(item.id);
     if (item.depth === 2) {
-      for (const descendant of snapshot.items) {
+      for (const descendant of tree.items) {
         if (descendant.fullPath.some((part) => part.id === item.id)) {
           accepted.add(descendant.id);
         }
@@ -629,7 +631,7 @@ export async function resolveFacetedTagFilter(
     groups: [...groups.values()],
     candidateIds: [...new Set([...groups.values()].flatMap((group) => [...group]))],
     compatibilityById: new Map(
-      snapshot.items.map((item) => [item.id, item.compatibility]),
+      tree.items.map((item) => [item.id, item.compatibility]),
     ),
   };
 }

@@ -237,6 +237,7 @@ async function acceptBulkTags({
     projectId,
     parsed.filter.tagIds,
     log,
+    snapshot,
   );
   const prompts = (await listAllProjectPrompts(transport, workspaceId, projectId, {
     tagIds: resolvedFilter.candidateIds,

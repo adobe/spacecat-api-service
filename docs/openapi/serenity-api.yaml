@@ -810,7 +810,7 @@ v2-serenity-tag-by-id:
       and RE-SENDING it upstream — an upstream PATCH that omits `parent_id`
       silently PROMOTES the tag to a root, stranding it outside its dimension
       while every carrying prompt stays attached. Explicit JSON `null` is
-      rejected with a 400: the root level is reserved for the four dimension
+      rejected with a 400: the root level is reserved for the six dimension
       roots, so a tag can never legally become one.
 
       A re-parent stays inside the tag's own dimension, and the new parent may
@@ -819,7 +819,7 @@ v2-serenity-tag-by-id:
       the tag and its subtree reachable from no root — and so unreachable and
       unrepairable through this API.
 
-      The four dimension roots themselves cannot be renamed or re-parented
+      The six dimension roots themselves cannot be renamed or re-parented
       (400) — doing so would leave their whole subtree without a dimension. A
       closed dimension's value cannot be renamed or re-parented either: its
       vocabulary is fixed.
