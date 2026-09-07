@@ -13022,6 +13022,7 @@ SerenityBrandPresenceTopicPromptRow:
     - citations
     - visibility
     - volume
+    - executions
   properties:
     prompt:
       type: string
@@ -13037,10 +13038,19 @@ SerenityBrandPresenceTopicPromptRow:
       description: Semrush project title for the prompt's market (e.g. `US-en`).
     mentions:
       type: integer
-      description: Brand mentions for this prompt.
+      description: >-
+        Executions where the brand was mentioned for this prompt (a subset of
+        `executions`, so `mentions <= executions`). Not the total run count.
+        CONTRACT VERIFIED live 2026-09-07 (Lovesac, one topic, 30-day window, 10
+        models = 100 rows): 0 violations of `mentions <= days <= window`.
     citations:
       type: integer
-      description: Citations for this prompt.
+      description: >-
+        Per-execution citation count for this prompt. Not bounded by `mentions`
+        (`citations > mentions` occurs — a prompt can be cited more often than the
+        brand is named), and may even exceed `executions` when a single response
+        cites multiple owned sources — so clamp `citations / executions` to 1 when
+        presenting it as a percentage (the consumer does).
     visibility:
       type: number
       description: Visibility score (0-100).
@@ -13055,6 +13065,17 @@ SerenityBrandPresenceTopicPromptRow:
     volume:
       type: integer
       description: Search volume for the prompt.
+    executions:
+      type: integer
+      description: >-
+        Number of executions (Semrush runs) for this prompt in the window —
+        the denominator for a per-execution citation rate (`citations / executions`).
+        Semrush runs a prompt at most once per model/date/project, so this equals
+        the count of days the prompt ran (days-with-data). Scoped to this element's
+        single model (default `search-gpt`), topic, and any requested project(s)
+        (`CBF_project`) — it is NOT an all-model aggregate and is not comparable to
+        `stats.total_executions` (which OMITS `CBF_model` on the default view, so it
+        is an all-model figure — see `buildModelFilter`, LLMO-7093).
 
 SerenityFilterDimensionItem:
   type: object

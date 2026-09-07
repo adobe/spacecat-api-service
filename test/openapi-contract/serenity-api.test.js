@@ -590,6 +590,7 @@ const FIXTURES = {
         position: 1,
         sentiment: 0.72,
         volume: 5658,
+        executions: 42,
       }],
     }, {
       topic: 'Recliners with USB Charging Ports',
@@ -622,6 +623,7 @@ const FIXTURES = {
       position: 1,
       sentiment: 0.72,
       volume: 5658,
+      executions: 42,
     }],
   },
   // Also served by ElementsController — see the note on
