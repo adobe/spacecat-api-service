@@ -11921,7 +11921,7 @@ AiVisibilitySourceDomainsResponse:
 SerenityPrompt:
   type: object
   description: A single Serenity prompt.
-  required: [semrushPromptId, geoTargetId, languageCode, text]
+  required: [semrushPromptId, geoTargetId, languageCode, text, tags]
   properties:
     semrushPromptId:
       type: string
@@ -12000,7 +12000,7 @@ SerenityPromptTag:
     dimension root and its own `name` names its dimension upstream. Names are
     passed through exactly as upstream holds them, so the intent root reads
     `$abv_tags$intent`. The dimension is `intent`.
-  required: [id, name]
+  required: [id, name, parentId, path, compatibility]
   properties:
     id:
       type: string
@@ -12023,6 +12023,8 @@ SerenityPromptTag:
         properties:
           id: { type: string }
           name: { type: string }
+    compatibility:
+      $ref: '#/SerenityTagCompatibility'
   example:
     id: "uuid-1"
     name: "Trail"
@@ -12056,6 +12058,7 @@ SerenityPromptInput:
       type: array
       items: { type: string }
       minItems: 1
+      maxItems: 50
       description: Upstream tag ids to attach to this prompt.
     geoTargetId:
       type: integer
@@ -12137,11 +12140,14 @@ SerenityPromptsJobAccepted:
     202 body for an async prompt-create (`async: true`). The write runs
     asynchronously on the job runner; poll `jobId` at
     `GET .../serenity/prompts/jobs/{jobId}`.
-  required: [jobId, status]
+  required: [jobId, jobType, status]
   properties:
     jobId:
       type: string
       format: uuid
+    jobType:
+      type: string
+      enum: [classifyPrompts]
     status:
       type: string
       description: The job's initial state (IN_PROGRESS at enqueue time).
@@ -12152,11 +12158,14 @@ SerenityPromptsJobStatus:
   description: |
     Poll response for an async `serenity-classify-prompts` job. Secret-free by
     design — the job's internal metadata (promise token etc.) is never exposed.
-  required: [jobId, status]
+  required: [jobId, jobType, status, result, error]
   properties:
     jobId:
       type: string
       format: uuid
+    jobType:
+      type: string
+      enum: [classifyPrompts, bulkTags, tagImpact]
     status:
       type: string
       enum: [IN_PROGRESS, COMPLETED, FAILED]
@@ -12168,6 +12177,8 @@ SerenityPromptsJobStatus:
         FAILED.
       oneOf:
         - { $ref: '#/SerenityCreatePromptsResponse' }
+        - { $ref: '#/SerenityBulkTagsResult' }
+        - { $ref: '#/SerenityTagImpact' }
         - { type: 'null' }
     error:
       description: The failure envelope once FAILED; null otherwise.
@@ -12176,6 +12187,8 @@ SerenityPromptsJobStatus:
           properties:
             code: { type: string }
             message: { type: string }
+            retryable: { type: boolean }
+            details: { type: object }
         - { type: 'null' }
 
 SerenityUpdatePromptRequest:
@@ -12201,6 +12214,7 @@ SerenityUpdatePromptRequest:
       type: array
       items: { type: string }
       minItems: 1
+      maxItems: 50
       description: Upstream tag ids the prompt carries after the edit (full replacement set).
 
 SerenityBulkDeletePromptsRequest:
@@ -12236,6 +12250,85 @@ SerenityBulkDeletePromptsResponse:
           languageCode: { type: string }
           status: { type: integer }
           message: { type: string }
+
+SerenityBulkTagsRequest:
+  type: object
+  additionalProperties: false
+  required: [geoTargetId, languageCode, operation, tagIds, filter]
+  properties:
+    geoTargetId: { type: integer, minimum: 1 }
+    languageCode: { type: string, pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$' }
+    operation: { type: string, enum: [assign, remove] }
+    tagIds:
+      type: array
+      minItems: 1
+      maxItems: 50
+      uniqueItems: true
+      items: { type: string, maxLength: 128 }
+    filter:
+      type: object
+      additionalProperties: false
+      required: [tagFilterMode]
+      properties:
+        search: { type: string }
+        tagIds:
+          type: array
+          maxItems: 50
+          uniqueItems: true
+          items: { type: string, maxLength: 128 }
+        tagFilterMode: { type: string, enum: [faceted-v1] }
+
+SerenityBulkTagsAccepted:
+  type: object
+  required: [jobId, jobType, status, matchedCount, replayed]
+  properties:
+    jobId: { type: string, format: uuid }
+    jobType: { type: string, enum: [bulkTags] }
+    status: { type: string, enum: [IN_PROGRESS, COMPLETED, FAILED] }
+    matchedCount: { type: integer, minimum: 0 }
+    replayed: { type: boolean }
+
+SerenityBulkTagsResult:
+  type: object
+  required:
+    [matchedCount, processedCount, updatedCount, unchangedCount, failureCount, failuresPage, publish]
+  properties:
+    matchedCount: { type: integer, minimum: 0 }
+    processedCount: { type: integer, minimum: 0 }
+    updatedCount: { type: integer, minimum: 0 }
+    unchangedCount: { type: integer, minimum: 0 }
+    failureCount: { type: integer, minimum: 0 }
+    failuresPage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          items:
+            type: object
+            required: [semrushPromptId, code, message, retryable]
+            properties:
+              semrushPromptId: { type: string }
+              code: { type: string }
+              message: { type: string }
+              retryable: { type: boolean }
+        nextCursor: { type: [string, 'null'] }
+    publish:
+      type: object
+      required: [state, error]
+      properties:
+        state: { type: string, enum: [SUCCEEDED, FAILED] }
+        error:
+          oneOf:
+            - type: object
+              required: [code, message, retryable]
+              properties:
+                code: { type: string }
+                message: { type: string }
+                retryable: { type: boolean }
+                details: { type: object }
+            - { type: 'null' }
 
 SerenityMarketStatus:
   type: string
@@ -12595,6 +12688,25 @@ SerenityTag:
         properties:
           id: { type: string }
           name: { type: string }
+    compatibility:
+      $ref: '#/SerenityTagCompatibility'
+
+SerenityTagCompatibility:
+  type: object
+  required: [state, reason]
+  properties:
+    state: { type: string, enum: [canonical, readOnly] }
+    reason:
+      type: [string, 'null']
+      enum: [unsupportedDepth, caseVariantRoot, ambiguousPath, separatorInName, null]
+
+SerenityTagConstraints:
+  type: object
+  required: [maxPromptTagIds, maxTagFilterValues, bulkIdempotencyTtlSeconds]
+  properties:
+    maxPromptTagIds: { type: integer, example: 50 }
+    maxTagFilterValues: { type: integer, example: 50 }
+    bulkIdempotencyTtlSeconds: { type: integer, example: 86400 }
 
 SerenityTagListResponse:
   type: object
@@ -12603,6 +12715,32 @@ SerenityTagListResponse:
     items:
       type: array
       items: { $ref: '#/SerenityTag' }
+    page: { type: integer, minimum: 1 }
+    limit: { type: integer, minimum: 0, maximum: 100 }
+    total: { type: integer, minimum: 0 }
+    complete: { type: boolean }
+    constraints: { $ref: '#/SerenityTagConstraints' }
+
+SerenityTagImpact:
+  type: object
+  required: [tagId, name, path, descendantCount, affectedPromptCount, complete, revision]
+  properties:
+    tagId: { type: string }
+    name: { type: string }
+    path:
+      type: array
+      items:
+        type: object
+        required: [id, name]
+        properties:
+          id: { type: string }
+          name: { type: string }
+    descendantCount: { type: integer, minimum: 0 }
+    affectedPromptCount: { type: integer, minimum: 0 }
+    complete: { type: boolean, enum: [true] }
+    revision:
+      type: string
+      description: Quoted HTTP entity tag for this exact impact snapshot.
 
 SerenityModel:
   type: object
@@ -12677,6 +12815,10 @@ SerenityErrorResponse:
   properties:
     error: { type: string }
     message: { type: string }
+    requestId: { type: string }
+    retryable: { type: boolean }
+    fieldErrors: { type: object }
+    details: { type: object }
 
 SerenityWorkspaceAccess:
   type: object
