@@ -1,3 +1,10 @@
+# [1.796.0](https://github.com/adobe/spacecat-api-service/compare/v1.795.0...v1.796.0) (2026-09-07)
+
+
+### Features
+
+* **elements:** Brand Claims response-feed join (141adc88 x 404fb017) ([#3200](https://github.com/adobe/spacecat-api-service/issues/3200)) ([58fba15](https://github.com/adobe/spacecat-api-service/commit/58fba15c7c58eb096e7798b7392877c1589c0d4c))
+
 # [1.795.0](https://github.com/adobe/spacecat-api-service/compare/v1.794.1...v1.795.0) (2026-09-07)
 
 
