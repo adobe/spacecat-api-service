@@ -289,15 +289,47 @@ describe('prompts-subworkspace handlers', () => {
       }, log);
       expect(result.created).to.have.length(1);
       expect(result.created[0]).to.include({ semrushPromptId: 'new-prompt', geoTargetId: 2840 });
-      // A create is a user-authenticated write: the producing `source`
-      // (`config`, derived from origin=`human` — tag-display-names.md §3,
-      // `origin` no longer gets its own tag) is stamped, and intent defaults
-      // to Informational (Azure unconfigured, serenity-docs#32), alongside
-      // the caller's tag. The v3 metadata-carrying write stamps
+      // A create is a user-authenticated write: `origin/human` and
+      // `source/config` are stamped independently, and intent defaults to
+      // Informational (Azure unconfigured, serenity-docs#32), alongside the
+      // caller's tag. The v3 metadata-carrying write stamps
       // created_*/updated_* (LLMO-6289).
-      expect(transport.createPromptsWithMetadata).to.have.been.calledOnceWithExactly(WS, 'p-us-en', [createItemMatch('p', undefined)], ['tag-1', TAG_IDS.sourceConfig, TAG_IDS.intentInformational]);
+      expect(transport.createPromptsWithMetadata).to.have.been.calledOnceWithExactly(
+        WS,
+        'p-us-en',
+        [createItemMatch('p', undefined)],
+        ['tag-1', TAG_IDS.originHuman, TAG_IDS.sourceConfig, TAG_IDS.intentInformational],
+      );
       expect(transport.publishProject).to.have.been.calledOnceWith(WS, 'p-us-en');
       expect(result.published).to.equal(true);
+    });
+
+    it('uses a trusted service-principal origin without changing source/config', async () => {
+      const transport = makeTransport();
+      const result = await handleCreatePromptsSubworkspace(
+        transport,
+        WS,
+        {
+          prompts: [{
+            text: 'generated prompt',
+            tagIds: ['customer-tag'],
+            geoTargetId: 2840,
+            languageCode: 'en',
+          }],
+        },
+        log,
+        undefined,
+        undefined,
+        undefined,
+        'service-caller',
+        { originValue: 'ai' },
+      );
+
+      expect(result.created[0].tagIds).to.include.members([
+        TAG_IDS.originAi,
+        TAG_IDS.sourceConfig,
+      ]);
+      expect(result.created[0].tagIds).to.not.include(TAG_IDS.originHuman);
     });
 
     it('skips the trailing publish and reports published:false when deferPublish is true', async () => {
@@ -330,11 +362,15 @@ describe('prompts-subworkspace handlers', () => {
           text: 'p', tagIds: ['tag-1'], geoTargetId: 2840, languageCode: 'en',
         }],
       }, log, undefined, undefined, undefined, 'caller-42');
-      // The create also injects the derived producing-system source (`origin`
-      // no longer gets its own tag, tag-display-names.md §3) and default
+      // The create also injects independent origin/source values and default
       // intent alongside the caller's tag; the metadata carries the resolved
       // caller id (LLMO-6289).
-      expect(transport.createPromptsWithMetadata).to.have.been.calledOnceWithExactly(WS, 'p-us-en', [createItemMatch('p', 'caller-42')], ['tag-1', TAG_IDS.sourceConfig, TAG_IDS.intentInformational]);
+      expect(transport.createPromptsWithMetadata).to.have.been.calledOnceWithExactly(
+        WS,
+        'p-us-en',
+        [createItemMatch('p', 'caller-42')],
+        ['tag-1', TAG_IDS.originHuman, TAG_IDS.sourceConfig, TAG_IDS.intentInformational],
+      );
     });
 
     // A tag NAME cannot address a nested tag, so a `tags` key is rejected
@@ -364,7 +400,7 @@ describe('prompts-subworkspace handlers', () => {
       }, log, classifyByBrandMention);
       expect(result.created[0].tagIds).to.deep.equal([
         TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded,
-        TAG_IDS.sourceConfig, TAG_IDS.intentInformational,
+        TAG_IDS.originHuman, TAG_IDS.sourceConfig, TAG_IDS.intentInformational,
       ]);
       expect(transport.createPromptsWithMetadata).to.have.been.calledOnceWithExactly(
         WS,
@@ -372,7 +408,7 @@ describe('prompts-subworkspace handlers', () => {
         [createItemMatch('is Acme good?', undefined)],
         [
           TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded,
-          TAG_IDS.sourceConfig, TAG_IDS.intentInformational,
+          TAG_IDS.originHuman, TAG_IDS.sourceConfig, TAG_IDS.intentInformational,
         ],
       );
     });
@@ -549,6 +585,28 @@ describe('prompts-subworkspace handlers', () => {
       }, log);
       expect(result.status).to.equal(404);
       expect(result.body.error).to.equal('marketNotFound');
+    });
+
+    // capUpdateTagIds regression (twin of the flat-mode test): echoing a
+    // prompt's full existing tag list back on PATCH must not have a
+    // closed-dimension id (origin/source — never re-derived on UPDATE)
+    // silently dropped by MAX_TAG_IDS when the echoed list is at/beyond it.
+    it('preserves origin/source ids beyond MAX_TAG_IDS when a client echoes its full existing tag list', async () => {
+      const transport = makeTransport();
+      const openIds = Array.from({ length: 52 }, (_, i) => `custom-cat-${i}`);
+      const echoedTagIds = [...openIds, TAG_IDS.originHuman, TAG_IDS.sourceConfig];
+
+      const result = await handleUpdatePromptSubworkspace(transport, WS, 'old-id', {
+        text: 'new', tagIds: echoedTagIds, geoTargetId: 2840, languageCode: 'en',
+      }, log);
+
+      expect(result.status).to.equal(200);
+      const [writtenPrompt] = transport.updatePromptTagsByIds.firstCall.args[2];
+      expect(writtenPrompt.references).to.include.members(
+        [TAG_IDS.originHuman, TAG_IDS.sourceConfig],
+      );
+      expect(writtenPrompt.references.filter((id) => id.startsWith('custom-cat-')))
+        .to.have.lengthOf(50);
     });
 
     it('404s promptNotFound when the upstream patchPrompt 404s (no tag write)', async () => {

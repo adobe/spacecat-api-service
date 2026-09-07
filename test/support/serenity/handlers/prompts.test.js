@@ -21,6 +21,7 @@ import {
   handleCreatePrompts,
   handleUpdatePrompt,
   handleBulkDeletePrompts,
+  capUpdateTagIds,
   makePromptTagInjector,
   normalizePromptInput,
   makeIntentInjector,
@@ -637,25 +638,117 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
       }],
     }, fakeLog());
 
-    // A create is a user-authenticated write: the derived `source` (`config`,
-    // the human-authored default) is stamped alongside the caller's tags
-    // (tag-display-names.md §3 — `origin` no longer gets its own tag). No
-    // classifier is supplied here, so `type` is left untouched.
+    // A create is a user-authenticated write: `origin/human` and
+    // `source/config` are stamped independently alongside the caller's tags.
+    // No classifier is supplied here, so `type` is left untouched.
     expect(result.created).to.have.lengthOf(1);
     expect(result.created[0]).to.deep.equal({
       semrushPromptId: 'new-sem-id',
       geoTargetId: 2840,
       languageCode: 'en',
       text: 'hello',
-      tagIds: ['tag-cat-1', 'tag-child-1', TAG_IDS.sourceConfig, TAG_IDS.intentInformational],
+      tagIds: [
+        'tag-cat-1', 'tag-child-1', TAG_IDS.originHuman,
+        TAG_IDS.sourceConfig, TAG_IDS.intentInformational,
+      ],
     });
     expect(transport.createPromptsWithMetadata).to.have.been.calledOnceWithExactly(
       WORKSPACE,
       'proj-us-en',
       [createItemMatch('hello', undefined)],
-      ['tag-cat-1', 'tag-child-1', TAG_IDS.sourceConfig, TAG_IDS.intentInformational],
+      [
+        'tag-cat-1', 'tag-child-1', TAG_IDS.originHuman,
+        TAG_IDS.sourceConfig, TAG_IDS.intentInformational,
+      ],
     );
     expect(transport.publishProject).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en');
+  });
+
+  it('uses a trusted service-principal origin without changing source/config', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([project]);
+    const transport = {
+      listProjectTags: makeListProjectTagsStub(),
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
+      createPromptsWithMetadata: sinon.stub().resolves({
+        page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'generated prompt' }],
+      }),
+      publishProject: sinon.stub().resolves(),
+    };
+
+    const result = await handleCreatePrompts(
+      transport,
+      dataAccess,
+      BRAND,
+      WORKSPACE,
+      {
+        prompts: [{
+          text: 'generated prompt',
+          geoTargetId: 2840,
+          languageCode: 'en',
+          tagIds: ['customer-tag'],
+        }],
+      },
+      fakeLog(),
+      undefined,
+      undefined,
+      undefined,
+      'service-caller',
+      { originValue: ORIGIN_VALUE.AI },
+    );
+
+    expect(result.created[0].tagIds).to.include.members([
+      TAG_IDS.originAi,
+      TAG_IDS.sourceConfig,
+    ]);
+    expect(result.created[0].tagIds).to.not.include(TAG_IDS.originHuman);
+  });
+
+  // Regression: deleting `deriveSource` didn't just restore `origin` — it also
+  // reverted the `source` dimension's fold, so a Track-flow per-item
+  // `source: 'llm-generated'` override (a valid SOURCE_VALUES entry, accepted
+  // by normalizePromptInput's per-item override validator) now stamps a literal
+  // `llm-generated` source tag instead of the old `ai-onboarding` fold target.
+  // This path had zero coverage before (review finding).
+  it('stamps a literal llm-generated source tag for a per-item override, independent of origin', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([project]);
+    const transport = {
+      listProjectTags: makeListProjectTagsStub(dimensionTreeLevels({
+        [TAG_IDS.sourceRoot]: [
+          {
+            id: 'source-llm-generated',
+            name: 'llm-generated',
+            parent_id: TAG_IDS.sourceRoot,
+            path: [{ id: TAG_IDS.sourceRoot, name: 'source' }],
+          },
+        ],
+      })),
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
+      createPromptsWithMetadata: sinon.stub().resolves({
+        page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'chat prompt' }],
+      }),
+      publishProject: sinon.stub().resolves(),
+    };
+
+    const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      prompts: [{
+        text: 'chat prompt',
+        geoTargetId: 2840,
+        languageCode: 'en',
+        tagIds: ['tag-cat-1'],
+        source: 'llm-generated',
+      }],
+    }, fakeLog());
+
+    expect(result.created[0].tagIds).to.include.members([
+      'source-llm-generated',
+      TAG_IDS.originHuman,
+    ]);
   });
 
   // LLMO-5492 — deferred publish: with { publish: false } the prompt is still
@@ -778,8 +871,15 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
     }, fakeLog());
 
     expect(result.created[0].semrushPromptId).to.equal('');
-    expect(result.created[0].tagIds).to.deep.equal(['keep', TAG_IDS.sourceConfig, TAG_IDS.intentInformational]);
-    expect(transport.createPromptsWithMetadata).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', [createItemMatch('hello', undefined)], ['keep', TAG_IDS.sourceConfig, TAG_IDS.intentInformational]);
+    expect(result.created[0].tagIds).to.deep.equal([
+      'keep', TAG_IDS.originHuman, TAG_IDS.sourceConfig, TAG_IDS.intentInformational,
+    ]);
+    expect(transport.createPromptsWithMetadata).to.have.been.calledOnceWithExactly(
+      WORKSPACE,
+      'proj-us-en',
+      [createItemMatch('hello', undefined)],
+      ['keep', TAG_IDS.originHuman, TAG_IDS.sourceConfig, TAG_IDS.intentInformational],
+    );
   });
 
   it('returns empty semrushPromptId (not the string "undefined") when createPromptsWithMetadata returns an item with no id', async () => {
@@ -829,8 +929,15 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
       }],
     }, fakeLog());
 
-    expect(result.created[0].tagIds).to.deep.equal(['keep', TAG_IDS.sourceConfig, TAG_IDS.intentInformational]);
-    expect(transport.createPromptsWithMetadata).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', [createItemMatch('hello', undefined)], ['keep', TAG_IDS.sourceConfig, TAG_IDS.intentInformational]);
+    expect(result.created[0].tagIds).to.deep.equal([
+      'keep', TAG_IDS.originHuman, TAG_IDS.sourceConfig, TAG_IDS.intentInformational,
+    ]);
+    expect(transport.createPromptsWithMetadata).to.have.been.calledOnceWithExactly(
+      WORKSPACE,
+      'proj-us-en',
+      [createItemMatch('hello', undefined)],
+      ['keep', TAG_IDS.originHuman, TAG_IDS.sourceConfig, TAG_IDS.intentInformational],
+    );
   });
 
   it('caps a bulk-create tagIds array at MAX_TAG_IDS (50), mirroring the list-read query cap', async () => {
@@ -855,15 +962,13 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
     }, fakeLog());
 
     // The MAX_TAG_IDS cap bounds the CALLER's tags (50); the server-derived
-    // producing `source` (config) and classified `intent` (Informational) are
-    // injected on top (`origin` no longer gets its own tag,
-    // tag-display-names.md §3), so the stored set is the 50 capped tags plus
-    // those two computed ids.
-    expect(result.created[0].tagIds).to.have.lengthOf(52);
+    // origin, producing source, and classified intent are injected on top, so
+    // the stored set is the 50 capped caller tags plus three computed ids.
+    expect(result.created[0].tagIds).to.have.lengthOf(53);
     expect(result.created[0].tagIds).to.deep.equal(
       [
         ...tooMany.slice(0, 50),
-        TAG_IDS.sourceConfig, TAG_IDS.intentInformational,
+        TAG_IDS.originHuman, TAG_IDS.sourceConfig, TAG_IDS.intentInformational,
       ],
     );
   });
@@ -1214,6 +1319,33 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
     expect(result.body.error).to.equal('invalidRequest');
   });
 
+  // Regression: with the MAX_TAG_IDS cap moved out of parseUpdatePromptBody
+  // (capUpdateTagIds applies it later, once the closed-dimension ids are
+  // known), an oversized array must still be rejected up front rather than
+  // flowing uncapped into capUpdateTagIds' classification work.
+  it('400s when tagIds exceeds the sanity ceiling, before any classification work', async () => {
+    const transport = { listProjectTags: sinon.stub().rejects(new Error('should not be called')) };
+    const dataAccess = makeDataAccess([]);
+    const tooMany = Array.from({ length: 501 }, (_, i) => `tag-${i}`);
+
+    const result = await handleUpdatePrompt(
+      transport,
+      dataAccess,
+      BRAND,
+      WORKSPACE,
+      'sem-1',
+      {
+        geoTargetId: 2840, languageCode: 'en', text: 'next', tagIds: tooMany,
+      },
+      fakeLog(),
+    );
+
+    expect(result.status).to.equal(400);
+    expect(result.body.error).to.equal('invalidRequest');
+    expect(result.body.message).to.match(/maxItems=500/);
+    expect(transport.listProjectTags).to.not.have.been.called;
+  });
+
   it('400s when tagIds is present but empty', async () => {
     const transport = {};
     const dataAccess = makeDataAccess([]);
@@ -1326,6 +1458,124 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
     expect(transport.deletePromptsByIds).to.have.callCount(0);
     expect(transport.createPromptsWithMetadata).to.have.callCount(0);
     expect(transport.publishProject).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en');
+  });
+
+  // capUpdateTagIds regression: a client echoing its prompt's full existing tag
+  // list back on PATCH (the documented edit-form pattern) must not have a
+  // closed-dimension id (origin/source — never re-derived on UPDATE) silently
+  // dropped by the MAX_TAG_IDS cap when the echoed list is at/beyond it.
+  it('preserves origin/source ids beyond MAX_TAG_IDS when a client echoes its full existing tag list', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(project);
+
+    // 52 open (unresolvable/customer) ids -- one more than MAX_TAG_IDS -- plus
+    // the two closed-dimension ids a real prompt would already carry, echoed
+    // back verbatim as the PATCH body's full next state.
+    const openIds = Array.from({ length: 52 }, (_, i) => `custom-cat-${i}`);
+    const echoedTagIds = [...openIds, TAG_IDS.originHuman, TAG_IDS.sourceConfig];
+
+    const transport = {
+      listProjectTags: makeListProjectTagsStub(),
+      patchPrompt: sinon.stub().resolves({ id: 'sem-1', name: 'next', is_updated: true }),
+      updatePromptTagsByIds: sinon.stub().resolves(null),
+      publishProject: sinon.stub().resolves(),
+    };
+
+    const result = await handleUpdatePrompt(
+      transport,
+      dataAccess,
+      BRAND,
+      WORKSPACE,
+      'sem-1',
+      {
+        geoTargetId: 2840, languageCode: 'en', text: 'next', tagIds: echoedTagIds,
+      },
+      fakeLog(),
+    );
+
+    expect(result.status).to.equal(200);
+    // Both closed-dimension ids survive; only the OPEN ids are capped at 50, so
+    // the final set is 50 open + originHuman + sourceConfig + intent = 53.
+    expect(result.body.tagIds).to.include.members([TAG_IDS.originHuman, TAG_IDS.sourceConfig]);
+    expect(result.body.tagIds.filter((id) => id.startsWith('custom-cat-'))).to.have.lengthOf(50);
+    const [writtenPrompt] = transport.updatePromptTagsByIds.firstCall.args[2];
+    expect(writtenPrompt.references)
+      .to.include.members([TAG_IDS.originHuman, TAG_IDS.sourceConfig]);
+  });
+
+  describe('capUpdateTagIds', () => {
+    it('returns the input unchanged (no tree walk) when at or under MAX_TAG_IDS', async () => {
+      const transport = { listProjectTags: sinon.stub().rejects(new Error('should not be called')) };
+      const tagIds = ['a', 'b', TAG_IDS.originHuman];
+      const result = await capUpdateTagIds(transport, WORKSPACE, 'proj-1', tagIds, fakeLog());
+      expect(result).to.equal(tagIds);
+    });
+
+    it('exempts closed-dimension ids from the cap and caps only the open remainder', async () => {
+      const transport = { listProjectTags: makeListProjectTagsStub() };
+      const open = Array.from({ length: 51 }, (_, i) => `open-${i}`);
+      const tagIds = [...open, TAG_IDS.originHuman, TAG_IDS.sourceConfig];
+
+      const result = await capUpdateTagIds(transport, WORKSPACE, 'proj-1', tagIds, fakeLog());
+
+      expect(result).to.include.members([TAG_IDS.originHuman, TAG_IDS.sourceConfig]);
+      expect(result.filter((id) => id.startsWith('open-'))).to.have.lengthOf(50);
+      expect(result).to.have.lengthOf(52);
+    });
+
+    it('treats an unresolvable/unknown id as open (capped), not managed', async () => {
+      const transport = { listProjectTags: makeListProjectTagsStub() };
+      const open = Array.from({ length: 51 }, (_, i) => `open-${i}`);
+      const tagIds = [...open, 'stale-deleted-id'];
+
+      const result = await capUpdateTagIds(transport, WORKSPACE, 'proj-1', tagIds, fakeLog());
+
+      expect(result).to.have.lengthOf(50);
+      expect(result).to.not.include('stale-deleted-id');
+    });
+
+    it('contributes nothing for a dimension whose root does not exist yet (legacy mid-provisioning project)', async () => {
+      const levels = dimensionTreeLevels();
+      // Drop the `source` root entirely -- a legacy project that predates the
+      // source dimension. capUpdateTagIds must not throw; it simply has
+      // nothing to exempt for that one dimension.
+      const rootsWithoutSource = levels[''].filter((r) => r.name !== 'source');
+      const transport = {
+        listProjectTags: makeListProjectTagsStub({ ...levels, '': rootsWithoutSource }),
+      };
+      const open = Array.from({ length: 51 }, (_, i) => `open-${i}`);
+      const tagIds = [...open, TAG_IDS.originHuman, TAG_IDS.sourceConfig];
+
+      const result = await capUpdateTagIds(transport, WORKSPACE, 'proj-1', tagIds, fakeLog());
+
+      // origin/human is still exempted (its root exists); sourceConfig is not
+      // (no source root to resolve it against), so it's treated as open and
+      // capped away along with the rest of the open ids.
+      expect(result).to.include(TAG_IDS.originHuman);
+      expect(result).to.not.include(TAG_IDS.sourceConfig);
+    });
+
+    it('propagates a transport error from a children read rather than swallowing it', async () => {
+      const levels = dimensionTreeLevels();
+      const listProjectTags = sinon.stub().callsFake((_workspaceId, _projectId, options) => {
+        if (options?.parentId === TAG_IDS.originRoot) {
+          return Promise.reject(new Error('upstream unavailable'));
+        }
+        return Promise.resolve({
+          page: 1,
+          total: (levels[options?.parentId ?? ''] || []).length,
+          items: levels[options?.parentId ?? ''] || [],
+        });
+      });
+      const open = Array.from({ length: 51 }, (_, i) => `open-${i}`);
+
+      await expect(
+        capUpdateTagIds({ listProjectTags }, WORKSPACE, 'proj-1', open, fakeLog()),
+      ).to.be.rejectedWith('upstream unavailable');
+    });
   });
 
   // Guards the documented always-reclassify invariant: an unchanged-text edit
@@ -2401,7 +2651,7 @@ describe('handlers/prompts.js — unified type classification (serenity-docs#31)
 
       expect(result.created[0].tagIds).to.deep.equal([
         TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded,
-        TAG_IDS.sourceConfig, TAG_IDS.intentInformational,
+        TAG_IDS.originHuman, TAG_IDS.sourceConfig, TAG_IDS.intentInformational,
       ]);
       expect(transport.createPromptsWithMetadata).to.have.been.calledOnceWithExactly(
         WORKSPACE,
@@ -2409,7 +2659,7 @@ describe('handlers/prompts.js — unified type classification (serenity-docs#31)
         [createItemMatch('is Acme good?', undefined)],
         [
           TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded,
-          TAG_IDS.sourceConfig, TAG_IDS.intentInformational,
+          TAG_IDS.originHuman, TAG_IDS.sourceConfig, TAG_IDS.intentInformational,
         ],
       );
       // The whole taxonomy already exists, so nothing is provisioned.
@@ -2438,7 +2688,7 @@ describe('handlers/prompts.js — unified type classification (serenity-docs#31)
 
       expect(result.created[0].tagIds).to.deep.equal([
         TAG_IDS.categoryRunningShoes, TAG_IDS.typeNonBranded,
-        TAG_IDS.sourceConfig, TAG_IDS.intentInformational,
+        TAG_IDS.originHuman, TAG_IDS.sourceConfig, TAG_IDS.intentInformational,
       ]);
     });
 
@@ -2479,7 +2729,7 @@ describe('handlers/prompts.js — unified type classification (serenity-docs#31)
 
       expect(result.created[0].tagIds).to.deep.equal([
         decoyCategoryId, TAG_IDS.typeBranded,
-        TAG_IDS.sourceConfig, TAG_IDS.intentInformational,
+        TAG_IDS.originHuman, TAG_IDS.sourceConfig, TAG_IDS.intentInformational,
       ]);
     });
 
@@ -2504,29 +2754,25 @@ describe('handlers/prompts.js — unified type classification (serenity-docs#31)
         }],
       }, fakeLog(), classifyByBrandMention);
 
-      // The five roots are created at the root level (`origin` is still
-      // provisioned as a root — its retirement is a later, per-project fleet
-      // pass, tag-display-names.md §3 — but nothing is ever minted beneath it
-      // by this write path any more), then `branded` beneath the
-      // freshly-minted `type` root, then `config` beneath the `source` root —
-      // the create path stamps the derived SOURCE (via `deriveSource`, not a
-      // separate `origin` tag) as well as the computed type.
+      // The five roots are created at the root level, then the computed type,
+      // origin, source, and intent values are provisioned beneath their roots.
       expect(createProjectTags.firstCall.args[2]).to.deep.equal([
         'category', INTENT_ROOT_NAME, 'origin', 'type', 'source',
       ]);
       expect(createProjectTags.firstCall.args[3]).to.deep.equal({});
       expect(createProjectTags.secondCall.args[2]).to.deep.equal(['branded']);
       expect(createProjectTags.secondCall.args[3]).to.deep.equal({ parentId: 'created::type' });
-      // source injection mints the derived `config` beneath `source` next (no
-      // `origin`-root create in between any more)...
-      expect(createProjectTags.thirdCall.args[2]).to.deep.equal(['config']);
-      expect(createProjectTags.thirdCall.args[3]).to.deep.equal({ parentId: 'created::source' });
-      // ...then intent injection mints the default `Informational` beneath `intent`.
-      expect(createProjectTags.getCall(3).args[2]).to.deep.equal(['Informational']);
+      expect(createProjectTags.thirdCall.args[2]).to.deep.equal(['human']);
+      expect(createProjectTags.thirdCall.args[3]).to.deep.equal({ parentId: 'created::origin' });
+      expect(createProjectTags.getCall(3).args[2]).to.deep.equal(['config']);
       expect(createProjectTags.getCall(3).args[3])
+        .to.deep.equal({ parentId: 'created::source' });
+      expect(createProjectTags.getCall(4).args[2]).to.deep.equal(['Informational']);
+      expect(createProjectTags.getCall(4).args[3])
         .to.deep.equal({ parentId: `created::${INTENT_ROOT_NAME}` });
       expect(result.created[0].tagIds).to.deep.equal([
         'tag-cat-1', 'created:created::type:branded',
+        'created:created::origin:human',
         'created:created::source:config', `created:created::${INTENT_ROOT_NAME}:Informational`,
       ]);
     });
@@ -2888,22 +3134,12 @@ describe('handlers/prompts.js — deferPublish (serenity-docs#32 CSV-chunking)',
   });
 });
 
-// tag-display-names.md §3: `origin` no longer gets its own tag — every writer
-// that used to stamp one has stopped, and the authorship fact it used to carry
-// now folds into `source` via `deriveSource(source, origin)`. `originValue`
-// survives ONLY as an input to that fold (the Serenity-proxy path has no
-// Postgres row to read `origin` back from), never as a tag id of its own.
-describe('handlers/prompts.js — origin retirement (tag-display-names.md §3)', () => {
+describe('handlers/prompts.js — origin injection', () => {
   const project = () => makeProject({
     semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
   });
 
-  // The create/update asymmetry `origin` used to carry now lives entirely in
-  // `source`'s derivation: a user-authenticated create derives the human
-  // default (`config`, unfolded — the producer wins over a generic `human`
-  // origin), never touching whatever origin-dimension id a caller happens to
-  // pass in `tagIds` (the dimension is no longer server-managed on this path).
-  it('create no longer strips or injects an origin tag, and derives source=config for a human create', async () => {
+  it('create replaces a caller origin with origin=human and stamps source=config', async () => {
     const dataAccess = makeDataAccess([project()]);
     const transport = {
       listProjectTags: makeListProjectTagsStub(),
@@ -2919,26 +3155,19 @@ describe('handlers/prompts.js — origin retirement (tag-display-names.md §3)',
         text: 'best shoes',
         geoTargetId: 2840,
         languageCode: 'en',
-        // A caller-supplied origin-root id rides through untouched — the
-        // injector no longer reasons about the `origin` dimension at all.
+        // A caller-supplied origin is not authoritative.
         tagIds: [TAG_IDS.categoryRunningShoes, TAG_IDS.originAi],
       }],
     }, fakeLog(), classifyByBrandMention);
 
     expect(result.created[0].tagIds).to.deep.equal([
-      TAG_IDS.categoryRunningShoes, TAG_IDS.originAi, TAG_IDS.typeNonBranded,
+      TAG_IDS.categoryRunningShoes, TAG_IDS.typeNonBranded, TAG_IDS.originHuman,
       TAG_IDS.sourceConfig, TAG_IDS.intentInformational,
     ]);
-    expect(result.created[0].tagIds).to.not.include(TAG_IDS.originHuman);
+    expect(result.created[0].tagIds).to.not.include(TAG_IDS.originAi);
   });
 
-  // Exit-criteria test (SITES-50446): a service-principal Serenity create —
-  // no Postgres row, `originValue` derived from the principal as `ai` — lands
-  // under the `ai-onboarding` slug (today's identity-mapped equivalent of
-  // "AI Onboarding"), not `config`'s slug. This is real, structural wiring
-  // (deriveSource operates on slugs), independent of display strings.
-  it('a service-principal create (originValue=ai, sourceValue=config) derives ai-onboarding, not config', async () => {
-    const AI_ONBOARDING_TAG_ID = 'created:root-source:ai-onboarding';
+  it('a service-principal create keeps origin=ai and source=config independent', async () => {
     const transport = {
       listProjectTags: makeListProjectTagsStub(),
       createProjectTags: sinon.stub().callsFake((ws, pid, names, opts) => Promise.resolve(
@@ -2953,12 +3182,8 @@ describe('handlers/prompts.js — origin retirement (tag-display-names.md §3)',
       text: 'best shoes', geoTargetId: 2840, tagIds: [TAG_IDS.categoryRunningShoes],
     });
 
-    // `ai-onboarding` does not pre-exist on the fixture tree (it is a fresh
-    // slug), so resolving it proves the derivation actually ran rather than
-    // coincidentally matching a pre-seeded id.
-    expect(transport.createProjectTags).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', ['ai-onboarding'], { parentId: TAG_IDS.sourceRoot });
-    expect(out.tagIds).to.include(AI_ONBOARDING_TAG_ID);
-    expect(out.tagIds).to.not.include(TAG_IDS.sourceConfig);
+    expect(transport.createProjectTags).to.not.have.been.called;
+    expect(out.tagIds).to.include.members([TAG_IDS.originAi, TAG_IDS.sourceConfig]);
   });
 
   // Defense-in-depth: on a MID-RENAME project the `source` root still means
@@ -3047,8 +3272,8 @@ describe('handlers/prompts.js — origin retirement (tag-display-names.md §3)',
     );
   });
 
-  describe('makePromptTagInjector no longer manages origin', () => {
-    it('create (originValue set): leaves a caller-supplied origin id untouched — only source is derived/appended', async () => {
+  describe('makePromptTagInjector origin management', () => {
+    it('create replaces a caller-supplied origin id with the server-derived value', async () => {
       const transport = { listProjectTags: makeListProjectTagsStub() };
       const inject = makePromptTagInjector(transport, WORKSPACE, undefined, fakeLog(), {
         originValue: ORIGIN_VALUE.HUMAN, sourceValue: PROXY_CREATE_SOURCE_VALUE,
@@ -3059,7 +3284,7 @@ describe('handlers/prompts.js — origin retirement (tag-display-names.md §3)',
       });
 
       expect(out.tagIds).to.deep.equal([
-        TAG_IDS.categoryRunningShoes, TAG_IDS.originAi, TAG_IDS.sourceConfig,
+        TAG_IDS.categoryRunningShoes, TAG_IDS.originHuman, TAG_IDS.sourceConfig,
       ]);
     });
 
@@ -3075,7 +3300,7 @@ describe('handlers/prompts.js — origin retirement (tag-display-names.md §3)',
       expect(transport.listProjectTags).to.not.have.been.called;
     });
 
-    it('memoizes the derived-source resolution per (project, derived value) across a batch', async () => {
+    it('memoizes origin and source resolution across a batch', async () => {
       const transport = {
         listProjectTags: makeListProjectTagsStub(),
         createProjectTags: sinon.stub(),
@@ -3088,7 +3313,7 @@ describe('handlers/prompts.js — origin retirement (tag-display-names.md §3)',
       const readsAfterFirst = transport.listProjectTags.callCount;
       await inject('proj-1', { text: 'b', geoTargetId: 2840, tagIds: ['y'] });
 
-      // Same project + same derived value => served from the source cache.
+      // Same project + same values => served from the origin and source caches.
       expect(transport.listProjectTags.callCount).to.equal(readsAfterFirst);
       expect(transport.createProjectTags).to.not.have.been.called;
     });
@@ -3473,10 +3698,14 @@ describe('handlers/prompts.js — authorship metadata (LLMO-6289)', () => {
       }, fakeLog(), undefined, undefined, undefined, 'caller-42');
 
       // The create also injects the producing-system source (`config`, derived
-      // from origin=`human` — tag-display-names.md §3, `origin` no longer gets
-      // its own tag) and the default intent (Informational) alongside the
-      // caller's tag; the metadata carries the stamped caller id (LLMO-6289).
-      expect(transport.createPromptsWithMetadata).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', [createItemMatch('hi', 'caller-42')], ['tag-1', TAG_IDS.sourceConfig, TAG_IDS.intentInformational]);
+      // and default intent alongside the caller's tag; the metadata carries
+      // the stamped caller id (LLMO-6289).
+      expect(transport.createPromptsWithMetadata).to.have.been.calledOnceWithExactly(
+        WORKSPACE,
+        'proj-us-en',
+        [createItemMatch('hi', 'caller-42')],
+        ['tag-1', TAG_IDS.originHuman, TAG_IDS.sourceConfig, TAG_IDS.intentInformational],
+      );
     });
 
     it('stamps updated_* = the caller id on an edit (created_* untouched)', async () => {
@@ -3539,6 +3768,9 @@ describe('handlers/prompts.js — create is an upsert (existing text replaces ta
 
   const sourceTag = (id, name) => ({
     id, name, parent_id: TAG_IDS.sourceRoot, path: [{ id: TAG_IDS.sourceRoot, name: 'source' }],
+  });
+  const originTag = (id, name) => ({
+    id, name, parent_id: TAG_IDS.originRoot, path: [{ id: TAG_IDS.originRoot, name: 'origin' }],
   });
   const categoryTag = (id, name) => ({
     id, name, parent_id: TAG_IDS.categoryRoot, path: [{ id: TAG_IDS.categoryRoot, name: 'category' }],
@@ -3613,6 +3845,39 @@ describe('handlers/prompts.js — create is an upsert (existing text replaces ta
     const { references } = transport.updatePromptTagsByIds.firstCall.args[2][0];
     expect(references).to.include('source-ai');
     expect(references).to.not.include(TAG_IDS.sourceConfig);
+  });
+
+  it('carries the stored `origin` over, so an import cannot re-author an AI-generated prompt', async () => {
+    // `origin` is injected on CREATE only — an edit leaves it alone, and the PATCH
+    // endpoint relies on the client echoing it back. A CSV row carries no origin id,
+    // so without an explicit carry-over the full replace would strip authorship or
+    // relabel an AI-onboarded prompt as `human`.
+    const { transport, dataAccess } = setup([
+      storedPrompt({ tags: [originTag(TAG_IDS.originAi, 'ai')] }),
+    ]);
+
+    await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      prompts: [importRow('best shoes', ['cat-new'])],
+    }, fakeLog());
+
+    const { references } = transport.updatePromptTagsByIds.firstCall.args[2][0];
+    expect(references).to.include(TAG_IDS.originAi);
+    expect(references).to.not.include(TAG_IDS.originHuman);
+  });
+
+  it('carries origin AND source over together', async () => {
+    const { transport, dataAccess } = setup([
+      storedPrompt({
+        tags: [originTag(TAG_IDS.originAi, 'ai'), sourceTag('source-semrush', 'semrush')],
+      }),
+    ]);
+
+    await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      prompts: [importRow('best shoes', ['cat-new'])],
+    }, fakeLog());
+
+    const { references } = transport.updatePromptTagsByIds.firstCall.args[2][0];
+    expect(references).to.include.members([TAG_IDS.originAi, 'source-semrush', 'cat-new']);
   });
 
   it('collapses a prompt that had accumulated TWO source tags down to one', async () => {

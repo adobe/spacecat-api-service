@@ -118,7 +118,7 @@ function parseParentId(raw) {
  * its dimension while every carrying prompt stays attached.
  *
  * An explicit `null` is rejected. Under the dimension-root model the root level
- * is reserved for the four dimension roots, so promoting a tag to a root is never
+ * is reserved for the five dimension roots, so promoting a tag to a root is never
  * a legal request -- it would produce a tag with no dimension.
  *
  * @param {object} body - the raw request body.
@@ -292,7 +292,7 @@ function requireCreatedId(id) {
 }
 
 /**
- * The id of an OPEN dimension's root tag, provisioning the four dimension roots
+ * The id of an OPEN dimension's root tag, provisioning the five dimension roots
  * if the project predates them. An open-dimension create with no `parentId`
  * hangs the new value directly under this root.
  *
