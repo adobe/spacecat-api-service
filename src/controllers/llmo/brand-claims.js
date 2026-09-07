@@ -172,11 +172,11 @@ export async function handleBrandClaims(context) {
  * Human-readable identity of the caller who triggered the request, for the Slack alert.
  * Mirrors user-details.js: prefer the RFC-5322 address (trial_email, then preferred_username)
  * over profile.email, which is an IMS user GUID; include the name when present. Returns
- * 'unknown' when no profile is available.
+ * null when no identity is available (the alert then omits the "by ..." clause).
  *
  * @param {object} context - Request context (attributes.authInfo).
- * @returns {string|null} e.g. "Ada Lovelace (ada@example.com)" or "ada@example.com";
- *   null when no identity is available (the alert then omits the "by ..." clause).
+ * @returns {string|null} e.g. "Ada Lovelace (ada@example.com)" or "ada@example.com"; null
+ *   when no identity is available.
  */
 function getRequesterLabel(context) {
   try {
@@ -187,10 +187,10 @@ function getRequesterLabel(context) {
     const first = profile.first_name || profile.given_name;
     const last = profile.last_name || profile.family_name;
     const name = [first, last].filter((v) => hasText(v)).join(' ').trim();
-    if (name && email) {
-      return `${name} (${email})`;
-    }
-    return name || email || null;
+    const label = (name && email) ? `${name} (${email})` : (name || email);
+    // Trial users control their own display name, so strip the Slack mrkdwn control
+    // characters (<, >, `, |) that could inject a link/mention/code span into the alert.
+    return hasText(label) ? label.replace(/[<>`|]/g, '') : null;
   } catch {
     // Best-effort label only — never let requester lookup throw into the (already
     // queued) run or the Slack alert.
