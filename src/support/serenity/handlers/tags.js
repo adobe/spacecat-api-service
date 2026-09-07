@@ -487,7 +487,11 @@ export async function handleCreateTag(
     return {
       status: 200,
       body: {
-        brandId, geoTargetId, languageCode, type, ...tag,
+        brandId,
+        geoTargetId,
+        languageCode,
+        type,
+        ...tag,
         created,
       },
     };
@@ -613,7 +617,10 @@ export async function handleCreateTagSubworkspace(
     return {
       status: 200,
       body: {
-        geoTargetId, languageCode, type, ...tag,
+        geoTargetId,
+        languageCode,
+        type,
+        ...tag,
         created,
       },
     };
@@ -1364,7 +1371,8 @@ export async function handleTagImpact(
     id,
     log,
   );
-  const { deletedIds, ...body } = impact;
+  const body = { ...impact };
+  delete body.deletedIds;
   return { status: 200, body };
 }
 
@@ -1388,6 +1396,7 @@ export async function handleTagImpactSubworkspace(
     id,
     log,
   );
-  const { deletedIds, ...body } = impact;
+  const body = { ...impact };
+  delete body.deletedIds;
   return { status: 200, body };
 }

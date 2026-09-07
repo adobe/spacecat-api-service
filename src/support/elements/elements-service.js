@@ -749,16 +749,26 @@ export function createElementsService(transport, log) {
           workspaceId,
           ELEMENT_IDS.TRENDS_MV,
           buildMarketMentionsTrendPayload({
-            model, platform, startDate, endDate,
-            projectIds: resolvedProjectIds, tagPaths, category,
+            model,
+            platform,
+            startDate,
+            endDate,
+            projectIds: resolvedProjectIds,
+            tagPaths,
+            category,
           }),
         ),
         transport.fetchElement(
           workspaceId,
           ELEMENT_IDS.MARKET_CITATIONS_TREND,
           buildMarketCitationsTrendPayload({
-            model, platform, startDate, endDate,
-            projectIds: resolvedProjectIds, tagPaths, category,
+            model,
+            platform,
+            startDate,
+            endDate,
+            projectIds: resolvedProjectIds,
+            tagPaths,
+            category,
           }),
         ),
       ]);
@@ -949,8 +959,13 @@ export function createElementsService(transport, log) {
             workspaceId,
             ELEMENT_IDS.STATS_PER_URL,
             buildOwnedUrlsStatsPayload({
-              model, platform, startDate: rangeStart, endDate: rangeEnd,
-              category, tagPaths, projectId,
+              model,
+              platform,
+              startDate: rangeStart,
+              endDate: rangeEnd,
+              category,
+              tagPaths,
+              projectId,
             }),
           );
           return { stats };
@@ -1144,8 +1159,14 @@ export function createElementsService(transport, log) {
         workspaceId,
         ELEMENT_IDS.KPI_SOURCE_VISIBILITY,
         buildSourceVisibilityPayload({
-          brandUrls, model, platform, startDate, endDate,
-          projectIds: resolvedProjectIds, category, tagPaths,
+          brandUrls,
+          model,
+          platform,
+          startDate,
+          endDate,
+          projectIds: resolvedProjectIds,
+          category,
+          tagPaths,
         }),
         callOpts,
       );

@@ -193,7 +193,8 @@ describe('SerenityController', () => {
   let MockTransportError;
   let SerenityController;
 
-  beforeEach(async () => {
+  beforeEach(async function setupSerenityController() {
+    this.timeout(10000);
     Object.values(handlers).forEach((s) => s.reset());
     resolveWorkspaceIdStub = sinon.stub().resolves(WORKSPACE);
     // Default: flat mode — existing assertions (handlers called with

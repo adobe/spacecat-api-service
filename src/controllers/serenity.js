@@ -2158,9 +2158,12 @@ function SerenityController(context, log, env) {
         return notFound(`Job not found: ${jobId}`);
       }
       const metadata = job.getMetadata?.() ?? {};
-      const publicJobType = metadata.jobType === BULK_TAGS_JOB_TYPE
-        ? BULK_TAGS_PUBLIC_JOB_TYPE
-        : (metadata.jobType === 'serenity-tag-impact' ? 'tagImpact' : 'classifyPrompts');
+      let publicJobType = 'classifyPrompts';
+      if (metadata.jobType === BULK_TAGS_JOB_TYPE) {
+        publicJobType = BULK_TAGS_PUBLIC_JOB_TYPE;
+      } else if (metadata.jobType === 'serenity-tag-impact') {
+        publicJobType = 'tagImpact';
+      }
       const query = parsedQuery(ctx);
       const status = job.getStatus();
       const rawResult = status === 'COMPLETED' ? job.getResult?.() ?? null : null;

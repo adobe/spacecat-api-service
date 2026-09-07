@@ -223,7 +223,10 @@ describe('handlers/prompts.js — handleListPrompts', () => {
 
     expect(result.items[0].semrushPromptId).to.equal('');
     expect(result.items[0].tags).to.deep.equal([{
-      id: '', name: 'consideration', parentId: null, path: null,
+      id: '',
+      name: 'consideration',
+      parentId: null,
+      path: null,
       compatibility: { state: 'canonical', reason: null },
     }]);
   });
@@ -298,7 +301,10 @@ describe('handlers/prompts.js — handleListPrompts', () => {
       // A ROOT tag omits parent_id/path upstream, so its parentage is null and
       // its own name is its dimension.
       tags: [{
-        id: 't-1', name: 'awareness', parentId: null, path: null,
+        id: 't-1',
+        name: 'awareness',
+        parentId: null,
+        path: null,
         compatibility: { state: 'canonical', reason: null },
       }],
       createdAt: null,
@@ -439,15 +445,24 @@ describe('handlers/prompts.js — handleListPrompts', () => {
 
     expect(result.items[0].tags).to.deep.equal([
       {
-        id: '', name: 'name-only', parentId: null, path: null,
+        id: '',
+        name: 'name-only',
+        parentId: null,
+        path: null,
         compatibility: { state: 'canonical', reason: null },
       },
       {
-        id: '42', name: 'valid', parentId: null, path: null,
+        id: '42',
+        name: 'valid',
+        parentId: null,
+        path: null,
         compatibility: { state: 'canonical', reason: null },
       },
       {
-        id: '', name: 'string-tag', parentId: null, path: null,
+        id: '',
+        name: 'string-tag',
+        parentId: null,
+        path: null,
         compatibility: { state: 'canonical', reason: null },
       },
     ]);

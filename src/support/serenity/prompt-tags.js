@@ -641,14 +641,13 @@ export function canonicalizeSource(value) {
  * never a substituted default (mirrors `canonicalizeSource`'s own contract).
  *
  * @param {unknown} source - a raw or already-canonical `prompts.source` value.
- * @param {string | null | undefined} origin - the bare `origin` value
+ * @param {string | null | undefined} _ - retained origin argument for API compatibility
  *   (`ai`/`human`) for THIS write, or `undefined`/`null` on a path that never
  *   derives origin (e.g. an UPDATE, where `origin` is never re-derived).
  * @returns {string | null} the `source`-dimension tag slug to attach, or
  *   `null` when the prompt must not be tagged at all.
  */
-export function deriveSource(source, origin) {
-  void origin;
+export function deriveSource(source, _) {
   return canonicalizeSource(source);
 }
 

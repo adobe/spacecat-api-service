@@ -509,7 +509,7 @@ describe('serenity tag-tree', () => {
         .then(() => null, (e) => e);
       expect(err).to.be.an('error');
       expect(err.status).to.equal(502);
-      expect(err.message).to.match(/upstream created the tag but echoed no id/);
+      expect(err.message).to.match(/upstream did not persist the tag\(s\): type/);
     });
 
     it('resolves the three closed vocabularies concurrently, one level read each', async () => {
@@ -1154,7 +1154,7 @@ describe('serenity tag-tree', () => {
       expect(ids).to.have.lengthOf(4);
     });
 
-    it('502s when the collected id count exceeds the delete-size budget', async () => {
+    it('fails closed when the subtree exceeds the delete-size budget', async () => {
       const children = Array.from({ length: 2001 }, (_, i) => ({
         id: `c${i}`, name: `C${i}`, parent_id: 'r-cat', children_count: 0,
       }));
@@ -1163,8 +1163,8 @@ describe('serenity tag-tree', () => {
       const err = await collectSubtreeIds(transport, WS, PROJECT, 'r-cat', fakeLog())
         .then(() => null, (e) => e);
       expect(err).to.be.an('error');
-      expect(err.status).to.equal(502);
-      expect(err.message).to.match(/tag subtree too large to delete/);
+      expect(err.status).to.equal(503);
+      expect(err.code).to.equal('tagTreeReadIncomplete');
     });
 
     it('fails closed rather than return a partial subtree beyond the read budget', async () => {

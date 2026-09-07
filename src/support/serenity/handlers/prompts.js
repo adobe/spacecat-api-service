@@ -267,7 +267,10 @@ function buildTagsOf(item, compatibilityById) {
   return item.tags.reduce((acc, t) => {
     if (typeof t === 'string' && t) {
       acc.push({
-        id: '', name: t, parentId: null, path: null,
+        id: '',
+        name: t,
+        parentId: null,
+        path: null,
         compatibility: { state: 'canonical', reason: null },
       });
     } else if (typeof t === 'object' && t?.name) {
@@ -364,6 +367,7 @@ export async function handleListPrompts(
     ? query.limit : DEFAULT_PAGE_LIMIT;
   const limit = Math.min(requestedLimit, MAX_PAGE_LIMIT);
   const search = hasText(query?.search) ? String(query.search).trim() : undefined;
+  // eslint-disable-next-line no-use-before-define
   const tagIds = validateTagIds(query?.tagIds, {
     maximum: query?.tagFilterMode === 'faceted-v1' ? MAX_TAG_FILTER_VALUES : MAX_TAG_IDS,
     tooLargeCode: query?.tagFilterMode === 'faceted-v1'
@@ -399,6 +403,7 @@ export async function handleListPrompts(
 
   const projectId = row.getSemrushProjectId();
   if (query?.tagFilterMode === 'faceted-v1') {
+    // eslint-disable-next-line no-use-before-define
     return listFacetedPrompts(
       transport,
       semrushWorkspaceId,
@@ -1152,7 +1157,7 @@ export function makePromptTagInjector(
   const sourceCache = new Map();
   const taxonomyCache = new Map();
   return async function injectComputedTags(projectId, input) {
-    let tagIds = input.tagIds;
+    let { tagIds } = input;
     if (normalizeCustomerTags) {
       let snapshotPromise = taxonomyCache.get(projectId);
       if (!snapshotPromise) {

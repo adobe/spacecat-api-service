@@ -809,12 +809,14 @@ export async function listProjectTagTree(
       parentId, page: requestedPage, limit: requestedLimit, draft: true,
     });
     const batch = Array.isArray(resp?.items) ? resp.items : [];
+    // eslint-disable-next-line no-use-before-define
     const items = normalizeTreeItems(batch);
     const hasTotal = Number.isFinite(resp?.total);
     const total = hasTotal
       ? Number(resp.total)
       : ((requestedPage - 1) * requestedLimit) + items.length;
     return {
+      // eslint-disable-next-line no-use-before-define
       items: decorateTagTreeItems(items),
       page: requestedPage,
       limit: requestedLimit,
@@ -838,6 +840,7 @@ export async function listProjectTagTree(
     for (const t of batch) {
       // AIOTag.id is required upstream; guard defensively and skip a malformed row.
       if (t && typeof t.id === 'string' && t.id) {
+        // eslint-disable-next-line no-use-before-define
         const [item] = normalizeTreeItems([t]);
         items.push(item);
         if (stopWhen && stopWhen(item)) {
@@ -865,6 +868,7 @@ export async function listProjectTagTree(
     page += 1;
   }
   return {
+    // eslint-disable-next-line no-use-before-define
     items: decorateTagTreeItems(items),
     page: 1,
     limit: LIMIT,

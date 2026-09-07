@@ -1,6 +1,13 @@
 /*
  * Copyright 2026 Adobe. All rights reserved.
- * This file is licensed to you under the Apache License, Version 2.0.
+ * This file is licensed to you under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License. You may obtain a copy
+ * of the License at http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed under
+ * the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTATIONS
+ * OF ANY KIND, either express or implied. See the License for the specific language
+ * governing permissions and limitations under the License.
  */
 
 // @ts-check
@@ -100,7 +107,8 @@ function canonicalHash(body) {
 }
 
 function idempotencyJobId(scope) {
-  const hex = createHash('sha256').update(scope).digest('hex').slice(0, 32).split('');
+  const hex = createHash('sha256').update(scope).digest('hex').slice(0, 32)
+    .split('');
   hex[12] = '5';
   hex[16] = ['8', '9', 'a', 'b'][Number.parseInt(hex[16], 16) % 4];
   return [
@@ -472,7 +480,8 @@ export function pageBulkFailures(result, cursor, limit = BULK_FAILURE_PAGE_LIMIT
     : BULK_FAILURE_PAGE_LIMIT;
   const items = failures.slice(safeStart, safeStart + safeLimit);
   const next = safeStart + items.length;
-  const { failures: ignored, ...rest } = result;
+  const rest = { ...result };
+  delete rest.failures;
   return {
     ...rest,
     failuresPage: {

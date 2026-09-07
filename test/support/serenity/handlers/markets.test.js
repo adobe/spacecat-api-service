@@ -2245,7 +2245,7 @@ describe('handlers/markets.js — defensive branch coverage', () => {
   // Line 615: `...(logCtx || {})` — the `|| {}` else branch fires when logCtx
   // is undefined. listTagsForProject reaches this only when the truncation
   // ceiling is hit AND logCtx was not supplied.
-  it('listTagsForProject spreads empty object when logCtx is undefined (truncation warn path)', async () => {
+  it('listTagsForProject fails closed when logCtx is undefined and the read is incomplete', async () => {
     // Re-import so we can call listTagsForProject directly with logCtx omitted.
     const { listTagsForProject: ltp, clearTagCache: ctc } = await import(
       '../../../../src/support/serenity/handlers/markets.js'
@@ -2262,11 +2262,19 @@ describe('handlers/markets.js — defensive branch coverage', () => {
     };
     const log = fakeLog();
     // Call without logCtx (fourth arg omitted → undefined).
-    const result = await ltp(transport, WORKSPACE, 'proj-test', undefined, log);
+    await expect(ltp(
+      transport,
+      WORKSPACE,
+      'proj-test',
+      undefined,
+      log,
+    )).to.be.rejected.then((error) => {
+      expect(error.status).to.equal(503);
+      expect(error.code).to.equal('tagTreeReadIncomplete');
+    });
     // The warn fired; no logCtx keys in the spread means the warn object
     // only has the five built-in keys (semrushWorkspaceId, projectId, …).
     expect(log.warn).to.have.been.calledOnce;
-    expect(result.items.length).to.be.greaterThan(0);
   });
 
   // Line 799: `id: hasText(l.id)?String(l.id):null` — the null branch fires

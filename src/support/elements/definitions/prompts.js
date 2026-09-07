@@ -31,14 +31,13 @@ export function buildFacetedTagFilters({
   const families = new Map();
   for (const path of [...new Set(paths)]) {
     const parts = String(path).split('__');
-    if (parts.length < 2 || parts.some((part) => !part)) {
-      continue;
+    if (parts.length >= 2 && parts.every((part) => part)) {
+      const family = parts.slice(0, 2).join('__');
+      if (!families.has(family)) {
+        families.set(family, []);
+      }
+      families.get(family).push(path);
     }
-    const family = parts.slice(0, 2).join('__');
-    if (!families.has(family)) {
-      families.set(family, []);
-    }
-    families.get(family).push(path);
   }
   return [...families.values()].map((values) => ({
     op: 'or',

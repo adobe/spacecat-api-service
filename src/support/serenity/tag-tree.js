@@ -180,7 +180,7 @@ export async function ensureChildren(
   wanted,
   log,
   aliasesOf = () => [],
-  initialExisting,
+  initialExisting = undefined,
 ) {
   const existing = initialExisting
     ?? await indexLevelByName(transport, semrushWorkspaceId, projectId, parentId, log);
@@ -803,7 +803,9 @@ export async function collectSubtreeIds(transport, semrushWorkspaceId, projectId
       for (const child of items) {
         ids.push(child.id);
         if (ids.length > MAX_SUBTREE_DELETE_SIZE) {
-          throw new ErrorWithStatusCode('tag subtree too large to delete', 502);
+          const error = new ErrorWithStatusCode('Unable to read the complete tag subtree', 503);
+          error.code = ERROR_CODES.TAG_TREE_READ_INCOMPLETE;
+          throw error;
         }
         if (child.childrenCount > 0) {
           next.push(child.id);
