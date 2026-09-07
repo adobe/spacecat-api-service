@@ -3276,14 +3276,31 @@ function SuggestionsController(ctx, sqs, env) {
       }
 
       try {
+        // Resolve the pageId THROUGH the MCP (get-aem-pages by publishPath), not the
+        // author-direct determineAEMCSPageId: the caller's IMS token is accepted by the
+        // MCP gateway but rejected calling the author instance directly, so every step
+        // must go through the MCP. publishPath is the URL pathname minus a trailing
+        // `.html` (AEM CS delivery path), e.g. https://host/us/en.html -> /us/en.
+        let publishPath;
+        try {
+          publishPath = new URL(prependSchema(data.url)).pathname.replace(/\.html$/, '') || '/';
+        } catch {
+          publishPath = null;
+        }
+        if (!publishPath) {
+          results.push({
+            uuid: suggestionId, index: i, statusCode: 422, message: `Invalid suggestion url: ${data.url}`,
+          });
+          continue; // eslint-disable-line no-continue
+        }
         // eslint-disable-next-line no-await-in-loop
-        const pageId = await determineAEMCSPageId(
-          prependSchema(data.url),
-          authorURL,
-          authorization,
-          deliveryConfig?.preferContentApi ?? true,
-          context.log,
-        );
+        const pagesText = await mcp.callTool('get-aem-pages', { authorUrl: authorURL, publishPath, limit: 1 });
+        let pageId;
+        try {
+          pageId = JSON.parse(pagesText.slice(pagesText.indexOf('{')))?.items?.[0]?.id;
+        } catch {
+          pageId = undefined;
+        }
         if (!pageId) {
           results.push({
             uuid: suggestionId, index: i, statusCode: 404, message: `Could not resolve AEM page for URL: ${data.url}`,
