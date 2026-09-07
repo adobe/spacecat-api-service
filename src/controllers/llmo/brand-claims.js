@@ -13,6 +13,7 @@
 import {
   badRequest, notFound, accepted, internalServerError, createResponse,
 } from '@adobe/spacecat-shared-http-utils';
+import { hasText } from '@adobe/spacecat-shared-utils';
 import { HeadObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
 import { cachedOk } from '../../support/cached-response.js';
 import { dateToIsoWeek } from '../../support/elements/week-utils.js';
@@ -174,6 +175,35 @@ export async function handleBrandClaims(context) {
 }
 
 /**
+ * Human-readable identity of the caller who triggered the request, for the Slack alert.
+ * Mirrors user-details.js: prefer the RFC-5322 address (trial_email, then preferred_username)
+ * over profile.email, which is an IMS user GUID; include the name when present. Returns
+ * 'unknown' when no profile is available.
+ *
+ * @param {object} context - Request context (attributes.authInfo).
+ * @returns {string} e.g. "Ada Lovelace (ada@example.com)", "ada@example.com", or "unknown".
+ */
+function getRequesterLabel(context) {
+  try {
+    const authInfo = context?.attributes?.authInfo;
+    const profile = authInfo?.getProfile?.() ?? authInfo?.profile ?? {};
+    const email = [profile.trial_email, profile.preferred_username, profile.email]
+      .find((v) => hasText(v));
+    const first = profile.first_name || profile.given_name;
+    const last = profile.last_name || profile.family_name;
+    const name = [first, last].filter((v) => hasText(v)).join(' ').trim();
+    if (name && email) {
+      return `${name} (${email})`;
+    }
+    return name || email || 'unknown';
+  } catch {
+    // Best-effort label only — never let requester lookup throw into the (already
+    // queued) run or the Slack alert.
+    return 'unknown';
+  }
+}
+
+/**
  * On-demand Brand Claims trigger for trial customers (LLMO-7263). Triggers the
  * audit-worker `brand-claims` audit for the site with `onDemand: true`, which
  * finds the latest Brand Presence sheet and publishes a one-shot
@@ -266,7 +296,7 @@ export async function handleRequestBrandClaims(context, site) {
     try {
       await postSlackMessage(
         slackChannel,
-        `:rocket: On-demand Brand Claims requested for *${site.getBaseURL()}* (${site.getId()}).`,
+        `:rocket: On-demand Brand Claims requested for *${site.getBaseURL()}* (${site.getId()}) by ${getRequesterLabel(context)}.`,
         slackToken,
       );
     } catch (slackError) {
