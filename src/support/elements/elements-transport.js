@@ -16,6 +16,7 @@ import { endpointOf } from '../url-utils.js';
 import { ElementsTransportError } from './errors.js';
 
 const ELEMENTS_API_PATH = '/enterprise/pages/api/v3/workspaces';
+const EXTERNAL_ELEMENTS_BASE_URL = 'https://api.semrush.com';
 const EXTERNAL_ELEMENTS_API_PATH = '/apis/v4-raw/external-api/v1/workspaces';
 
 export const ELEMENTS_PURPOSE_BRAND_CLAIMS = 'brand_claims';
@@ -87,34 +88,6 @@ function buildHeaders(imsToken) {
     Accept: 'application/json',
     'Content-Type': 'application/json',
   };
-}
-
-function externalBaseUrl(env) {
-  const raw = typeof env?.SEMRUSH_BRAND_CLAIMS_BASE_URL === 'string'
-    ? env.SEMRUSH_BRAND_CLAIMS_BASE_URL.trim()
-    : env?.SEMRUSH_BRAND_CLAIMS_BASE_URL;
-  if (!hasText(raw)) {
-    throw new ErrorWithStatusCode(
-      'SEMRUSH_BRAND_CLAIMS_BASE_URL is not configured',
-      503,
-    );
-  }
-  let parsed;
-  try {
-    parsed = new URL(raw);
-  } catch {
-    throw new ErrorWithStatusCode(
-      'SEMRUSH_BRAND_CLAIMS_BASE_URL is invalid',
-      503,
-    );
-  }
-  if (parsed.protocol !== 'https:') {
-    throw new ErrorWithStatusCode(
-      'SEMRUSH_BRAND_CLAIMS_BASE_URL must use HTTPS',
-      503,
-    );
-  }
-  return `${parsed.protocol}//${parsed.host}`;
 }
 
 function technicalApiKey(env) {
@@ -347,12 +320,11 @@ export function createElementsTransport({
 }
 
 function createTechnicalElementsTransport({ env }) {
-  const root = externalBaseUrl(env);
   const apiKey = technicalApiKey(env);
 
   return {
     async fetchElement(workspaceId, elementId, payload, callOpts = {}) {
-      const url = `${root}${EXTERNAL_ELEMENTS_API_PATH}/${enc(workspaceId)}/products/ai/elements/${enc(elementId)}`;
+      const url = `${EXTERNAL_ELEMENTS_BASE_URL}${EXTERNAL_ELEMENTS_API_PATH}/${enc(workspaceId)}/products/ai/elements/${enc(elementId)}`;
       return request(url, buildTechnicalHeaders(apiKey), { render_data: payload }, {
         // Brand Claims owns this stopgap credential and its small per-credential pool. Never
         // replay technical-account requests: retries would amplify concurrent background traffic.

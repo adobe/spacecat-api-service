@@ -66,7 +66,7 @@ The temporary technical-account exception is limited to the code-owned `brand_cl
 The response-feed handler is statically bound to that purpose.
 
 ```
-POST {SEMRUSH_BRAND_CLAIMS_BASE_URL}/apis/v4-raw/external-api/v1/workspaces/{workspaceId}/products/ai/elements/{elementId}
+POST https://api.semrush.com/apis/v4-raw/external-api/v1/workspaces/{workspaceId}/products/ai/elements/{elementId}
 Authorization: Apikey <technical-api-key>
 Content-Type: application/json
 
@@ -482,14 +482,17 @@ Upstream error bodies are **never forwarded to clients** — they are logged ser
 |---|---|---|
 | `SEMRUSH_PROJECTS_BASE_URL` | Vault `dx_mysticat/<env>/api-service` | Internal IMS Elements API base host (e.g. `https://www.semrush.com`) |
 | `SEMRUSH_BRAND_CLAIMS_TECHNICAL_AUTH_ENABLED` | Environment configuration | Exact string `true` enables the temporary technical-account route for the code-owned `brand_claims` purpose only |
-| `SEMRUSH_BRAND_CLAIMS_BASE_URL` | Vault `dx_mysticat/<env>/api-service` | HTTPS origin for the external Elements API (e.g. `https://api.semrush.com`) |
 | `SEMRUSH_BRAND_CLAIMS_API_KEY` | Vault `dx_mysticat/<env>/api-service` | Temporary technical-account API key; never store it in source or local documentation |
 
-The long variable namespace is intentional: this credential is owned by **Brand Claims**, not by Elements or ABV generally. Other ABV capabilities may hold their
-own Semrush API keys and must use distinct purpose-owned names. Broad names such as
-`SEMRUSH_ELEMENTS_TECHNICAL_API_KEY` are deliberately ignored and must never be introduced as aliases.
+The purpose namespace is intentional: this credential is owned by **Brand Claims**, not by Elements
+or ABV generally. Other ABV capabilities may hold their own Semrush API keys and must use distinct
+purpose-owned names. Broad names such as `SEMRUSH_ELEMENTS_TECHNICAL_API_KEY` are deliberately
+ignored and must never be introduced as aliases.
+
+The external origin is the fixed Semrush gateway `https://api.semrush.com`; it is not a secret or an
+environment-dependent deployment target, so the stopgap does not add a configurable base URL.
 
 The technical-account branch is a temporary stopgap until S2S authentication is available. Configure
-the external base and key before setting the enable flag. An enabled allowed purpose fails closed with
-HTTP 503 when either value is missing or invalid; it never falls back to caller IMS or another key.
-Generic Elements endpoints remain IMS-only.
+the key before setting the enable flag. An enabled allowed purpose fails closed with HTTP 503 when
+the key is missing; it never falls back to caller IMS or another key. Generic Elements endpoints
+remain IMS-only.
