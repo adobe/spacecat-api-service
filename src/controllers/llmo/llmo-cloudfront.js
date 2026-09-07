@@ -144,11 +144,11 @@ function LlmoCloudFrontController(ctx) {
       const region = 'us-east-1';
       const roleName = env.EDGE_OPTIMIZE_ROLE_NAME || 'AdobeLLMOptimizerCloudFrontConnectorRole';
       const stackName = env.EDGE_OPTIMIZE_STACK_NAME || 'adobe-edgeoptimize-connector-role';
-      // TEMP (chore/observe-presign-ttl — do NOT merge): default bumped to 2 days to empirically
-      // test whether the presigned URL actually survives past the STS session ceiling (~12h). The
-      // signer uses temporary session-token creds, so the URL likely dies well before 172800s.
+      // Presign TTL capped at 12h (43200s) — the max the signer's STS session can back. The
+      // api-service Lambda signs with temporary (session-token) credentials, so a longer expiresIn
+      // is silently truncated when the session token expires; 12h is the practical ceiling.
       // Override via env.
-      const presignTtlSeconds = Number(env.EDGE_OPTIMIZE_PRESIGN_TTL || 172800);
+      const presignTtlSeconds = Number(env.EDGE_OPTIMIZE_PRESIGN_TTL || 43200);
       // Server-derived external ID (site's IMS org id) baked into the connector-role trust policy
       // below; never client-supplied. See resolveConnectorExternalId.
       const externalId = await resolveConnectorExternalId(site);
@@ -161,17 +161,6 @@ function LlmoCloudFrontController(ctx) {
       const trustedPrincipalArn = env.SPACECAT_CDN_CLOUDFRONT_TRUSTED_PRINCIPAL_ARN;
       if (!hasText(trustedPrincipalArn)) {
         return badRequest('CloudFront connector is not configured for this environment (missing trusted principal)');
-      }
-
-      // TEMP DIAGNOSTIC (chore/observe-presign-ttl — do NOT merge): log the signer credentials'
-      // real expiration, which is the true ceiling a presign can't outlive (vs the requested TTL).
-      try {
-        const creds = await s3.s3Client.config.credentials();
-        log.info(`[cf-presign] signerExpiration=${creds?.expiration?.toISOString?.() ?? 'none (long-lived)'} `
-          + `remainingSec=${creds?.expiration ? Math.round((creds.expiration.getTime() - Date.now()) / 1000) : 'n/a'} `
-          + `requestedTtl=${presignTtlSeconds} hasSessionToken=${Boolean(creds?.sessionToken)}`);
-      } catch (e) {
-        log.info(`[cf-presign] could not resolve signer creds: ${e.message}`);
       }
 
       // Presign the (private) template so the customer's CloudFormation can read it
