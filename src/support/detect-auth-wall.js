@@ -21,9 +21,11 @@
  *
  * The classifier is deliberately HIGH-PRECISION: a false positive waitlists a legitimate
  * public customer, which is worse than missing an edge case. We only flag on a strong
- * signal — an explicit 401, a front door that resolves to a login/SSO URL or IdP host, or
- * a landing page that is unambiguously a login form (password field + a login title/URL).
- * A public homepage with an incidental account/login widget is NOT flagged.
+ * signal — a 401 carrying a WWW-Authenticate header (genuine HTTP auth, not a bare WAF/bot
+ * 401), a front door that resolves to a login/SSO URL or IdP host, or a landing page that is
+ * unambiguously a login form (password field + a login title/URL). A public homepage with an
+ * incidental account/login widget, or a bot-protection 401 without WWW-Authenticate, is NOT
+ * flagged.
  *
  * SSRF guard: the front door is fetched with redirects followed MANUALLY, and every hop's
  * host is validated with `isSafeDomain()` before it is requested. A public domain under
@@ -183,7 +185,11 @@ export async function detectAuthWall({ baseUrl, log }, { fetch = globalThis.fetc
     const { response, finalUrl } = probe;
     const status = response.status ?? null;
 
-    if (status === 401) {
+    // A 401 is only a genuine auth wall when it carries WWW-Authenticate (RFC 7235 requires the
+    // header for HTTP authentication). WAF/bot protection (e.g. Akamai) returns a bare 401 with
+    // no such header to non-browser clients — that is a bot block, not a login wall (real users
+    // pass), so it must NOT be treated as authenticated.
+    if (status === 401 && response.headers?.get?.('www-authenticate')) {
       return {
         authenticated: true, signal: 'status-401', finalUrl, status,
       };
