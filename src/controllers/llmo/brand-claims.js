@@ -13,6 +13,7 @@
 import {
   badRequest, notFound, accepted, internalServerError, createResponse,
 } from '@adobe/spacecat-shared-http-utils';
+import { hasText } from '@adobe/spacecat-shared-utils';
 import { HeadObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
 import { cachedOk } from '../../support/cached-response.js';
 import { dateToIsoWeek } from '../../support/elements/week-utils.js';
@@ -168,6 +169,36 @@ export async function handleBrandClaims(context) {
 }
 
 /**
+ * Human-readable identity of the caller who triggered the request, for the Slack alert.
+ * Mirrors user-details.js: prefer the RFC-5322 address (trial_email, then preferred_username)
+ * over profile.email, which is an IMS user GUID; include the name when present. Returns
+ * null when no identity is available (the alert then omits the "by ..." clause).
+ *
+ * @param {object} context - Request context (attributes.authInfo).
+ * @returns {string|null} e.g. "Ada Lovelace (ada@example.com)" or "ada@example.com"; null
+ *   when no identity is available.
+ */
+function getRequesterLabel(context) {
+  try {
+    const authInfo = context?.attributes?.authInfo;
+    const profile = authInfo?.getProfile?.() ?? authInfo?.profile ?? {};
+    const email = [profile.trial_email, profile.preferred_username, profile.email]
+      .find((v) => hasText(v));
+    const first = profile.first_name || profile.given_name;
+    const last = profile.last_name || profile.family_name;
+    const name = [first, last].filter((v) => hasText(v)).join(' ').trim();
+    const label = (name && email) ? `${name} (${email})` : (name || email);
+    // Trial users control their own display name, so strip the Slack mrkdwn control
+    // characters (<, >, `, |) that could inject a link/mention/code span into the alert.
+    return hasText(label) ? label.replace(/[<>`|]/g, '') : null;
+  } catch {
+    // Best-effort label only — never let requester lookup throw into the (already
+    // queued) run or the Slack alert.
+    return null;
+  }
+}
+
+/**
  * On-demand Brand Claims trigger for trial customers (LLMO-7263). Triggers the
  * audit-worker `brand-claims` audit for the site with `onDemand: true`, which
  * finds the latest Brand Presence sheet and publishes a one-shot
@@ -247,9 +278,11 @@ export async function handleRequestBrandClaims(context, site) {
   const slackToken = env?.SLACK_BOT_TOKEN;
   if (slackChannel && slackToken) {
     try {
+      const requester = getRequesterLabel(context);
+      const requestedBy = requester ? ` by ${requester}` : '';
       await postSlackMessage(
         slackChannel,
-        `:rocket: On-demand Brand Claims requested for *${site.getBaseURL()}* (${site.getId()}).`,
+        `:rocket: On-demand Brand Claims requested for *${site.getBaseURL()}* (${site.getId()})${requestedBy}.`,
         slackToken,
       );
     } catch (slackError) {
