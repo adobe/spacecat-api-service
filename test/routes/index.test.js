@@ -375,6 +375,7 @@ describe('getRouteHandlers', () => {
     deploy: () => null,
     plan: () => null,
     getPermissions: () => null,
+    getTemplate: () => null,
   };
 
   const mockLlmoAkamaiController = {
@@ -976,12 +977,14 @@ describe('getRouteHandlers', () => {
       'GET /organizations/by-ims-org-id/:imsOrgId',
       'GET /organizations/by-ims-org-id/:imsOrgId/slack-config',
       'GET /organizations/by-product-code/:productCode',
+      'GET /organizations/by-access-map-sheet/:productCode',
       'PATCH /organizations/:organizationId',
       'DELETE /organizations/:organizationId',
       'GET /organizations/:organizationId/sites',
       'GET /organizations/:organizationId/brands',
       'GET /v2/orgs/:spaceCatId/brands',
       'GET /v2/orgs/:spaceCatId/brands/:brandId',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/markets',
       'GET /v2/orgs/:spaceCatId/categories',
       'POST /v2/orgs/:spaceCatId/categories',
       'PATCH /v2/orgs/:spaceCatId/categories/:categoryId',
@@ -1326,6 +1329,7 @@ describe('getRouteHandlers', () => {
       'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/deploy',
       'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/plan',
       'GET /sites/:siteId/llmo/cdn-onboard/cloudfront/permissions',
+      'GET /sites/:siteId/llmo/cdn-onboard/cloudfront/template',
       'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/log-delivery',
       'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/log-rescan',
       'GET /sites/:siteId/llmo/edge-optimize-status',

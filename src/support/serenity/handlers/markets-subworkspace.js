@@ -44,7 +44,11 @@ import { provisionDimensionTree, ensureServerOwnedValue } from '../tag-tree.js';
 import { classifyBrandedTag, needlesFromNames } from '../branded-classifier.js';
 import { classifyPromptIntents, AI_GEN_CLASSIFY_MAX, computeWriteDeadline } from '../intent-classification.js';
 import {
-  collectBrandUrlEntries, attachBrandUrlsToProject, primaryDomainSet, primaryIdentitySet,
+  collectBrandUrlEntries,
+  attachBrandUrlsToProject,
+  ensureOwnBrandBenchmark,
+  primaryDomainSet,
+  primaryIdentitySet,
 } from '../brand-urls.js';
 import { resolveProjects } from '../resolve-projects.js';
 import {
@@ -731,13 +735,28 @@ export async function handleCreateMarketSubworkspace(
     );
   }
 
-  // Push the brand's URLs (own sites + social + earned) onto this market's
-  // own-brand benchmark (created on demand when Semrush hasn't provisioned one),
-  // region-filtered to the market. Done before publish so the URLs are part of
-  // the same published version. Best-effort: URL enrichment must never abort the
-  // brand create — a benchmark/URL hiccup is logged and skipped, not propagated,
-  // so the whole block (INCLUDING the project listing the skip set needs) sits
-  // inside the try.
+  // Resolve the own-brand benchmark before best-effort URL enrichment. Semrush
+  // may have auto-created it from customer-cased brand_names, so project creation
+  // is also the blocking point that repairs those stored aliases before publish.
+  const ownBrand = {
+    name: hasText(body.brandDisplayName) ? body.brandDisplayName : body.brandNames[0],
+    domain: body.brandDomain,
+    primaryUrl,
+    aliases: aliasNames,
+  };
+  // Benchmark identity is a correctness step, not enrichment. In particular,
+  // mixed-case aliases on Semrush's auto-created benchmark need a blocking
+  // withhold/re-add repair before the project can be published.
+  const ownBrandBenchmarkId = await ensureOwnBrandBenchmark(
+    transport,
+    workspaceId,
+    projectId,
+    ownBrand,
+    log,
+    { repairAliasCase: true },
+  );
+
+  // URL attachment remains best-effort.
   try {
     // Skip EVERY market's primary domain, not just this one's: a market-mirror
     // brand's other-market primary must not surface as a website URL here either
@@ -766,13 +785,9 @@ export async function handleCreateMarketSubworkspace(
       workspaceId,
       projectId,
       brandUrlEntries,
-      {
-        name: body.brandDisplayName,
-        domain: body.brandDomain,
-        primaryUrl,
-        aliases: aliasNames,
-      },
+      ownBrand,
       log,
+      ownBrandBenchmarkId,
     );
   } catch (e) {
     // Best-effort, but DELIBERATELY non-self-healing: the brand is left live with

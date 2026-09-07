@@ -11,7 +11,7 @@
  */
 
 import { hasText } from '@adobe/spacecat-shared-utils';
-import { resolveElementModel } from '../constants.js';
+import { buildAdvancedFilters, buildModelFilter } from '../constants.js';
 import { dateToIsoWeek } from '../week-utils.js';
 
 /**
@@ -44,10 +44,14 @@ import { dateToIsoWeek } from '../week-utils.js';
  * Shape verified against the live MFE: top-level `auto_bucketing: "week"`, plain
  * `start_date`/`end_date` in `simple`, and `advanced` = model (in an `or` block) +
  * an `or` block of project ids under `projectCol`. No brand filter, no
- * `comparison_data_formatting` (the MFE omits it for these elements).
+ * `comparison_data_formatting` (the MFE omits it for these elements). When neither filter
+ * applies (all-platforms + no region), `advanced` is omitted entirely — Semrush 422s on an
+ * empty AND block (see {@link buildAdvancedFilters}).
  *
  * @param {object} params
- * @param {string} [params.model] - AI model (Semrush engine or UI platform code).
+ * @param {string} [params.model] - AI model (Semrush engine or UI platform code). Absent
+ *   or `'all'` ({@link isAllModelsFilter}) → the `CBF_model` filter is OMITTED so Semrush
+ *   aggregates across all of the brand's models ("All Platforms", LLMO-7093).
  * @param {string} [params.platform] - Legacy alias for `model`; `model` wins.
  * @param {string} params.startDate - ISO date (YYYY-MM-DD).
  * @param {string} params.endDate - ISO date (YYYY-MM-DD).
@@ -60,10 +64,13 @@ import { dateToIsoWeek } from '../week-utils.js';
 function buildMarketTrendPayload({
   model, platform, startDate, endDate, projectIds = [], projectCol,
 }) {
-  const resolvedModel = resolveElementModel(model || platform);
-  const advancedFilters = [
-    { op: 'or', filters: [{ op: 'eq', val: resolvedModel, col: 'CBF_model' }] },
-  ];
+  // "All platforms" (param absent or 'all') → omit CBF_model so Semrush aggregates across
+  // every model that produced data; otherwise scope to the single resolved model (LLMO-7093).
+  const modelFilter = buildModelFilter(model || platform);
+  const advancedFilters = [];
+  if (modelFilter) {
+    advancedFilters.push(modelFilter);
+  }
   if (Array.isArray(projectIds) && projectIds.length > 0) {
     advancedFilters.push({
       op: 'or',
@@ -74,7 +81,7 @@ function buildMarketTrendPayload({
     auto_bucketing: 'week',
     filters: {
       simple: { start_date: startDate, end_date: endDate },
-      advanced: { op: 'and', filters: advancedFilters },
+      ...buildAdvancedFilters(advancedFilters),
     },
   };
 }

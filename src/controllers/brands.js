@@ -78,6 +78,7 @@ import { propagateSiteUrlToSemrush } from '../support/serenity/site-url-propagat
 import { createSerenityTransport } from '../support/serenity/rest-transport.js';
 import { isSemrushTransportError, unwrapTransportCause } from '../support/serenity/errors.js';
 import { logUpstreamError } from '../support/serenity/upstream-log.js';
+import { buildBrandMarketsResponse } from '../support/serenity/brand-markets.js';
 import { syncBrandUrlsAcrossMarkets } from '../support/serenity/brand-urls.js';
 import { syncBrandAliasesAcrossMarkets } from '../support/serenity/brand-aliases.js';
 import { resolveProjects } from '../support/serenity/resolve-projects.js';
@@ -1082,6 +1083,70 @@ function BrandsController(ctx, log, env) {
       return ok(withSerenityState(brand, serenityScopes));
     } catch (error) {
       log.error(`Error getting brand ${brandId} for organization ${spaceCatId}:`, error);
+      return createErrorResponse(error, reqCtxOf(context));
+    }
+  };
+
+  /**
+   * GET /v2/orgs/{spaceCatId}/brands/{brandId}/markets — S2S, tenant-scoped
+   * read of a brand's Serenity markets. Mirrors {@link getBrandForOrg}'s
+   * validation/auth ladder exactly (this route does NOT go through the
+   * serenity IMS wrapper).
+   *
+   * `BrandSemrushProject.allByBrandId` returns tombstoned (soft-deleted) rows
+   * alongside live ones (no package-level soft-delete scope — see
+   * brand-semrush-project.collection.js), so soft-deleted rows are filtered
+   * out here before calling {@link buildBrandMarketsResponse}, which is a
+   * pure builder with no DB-read/soft-delete concern of its own.
+   *
+   * @returns {Promise<Response>} `{ markets: [{ region, languageCode, geoTargetId }] }`.
+   */
+  const listBrandMarketsForOrg = async (context) => {
+    const { spaceCatId, brandId } = context.params || {};
+
+    try {
+      if (!hasText(spaceCatId)) {
+        return badRequest('Organization ID required');
+      }
+      if (!isValidUUID(spaceCatId)) {
+        return badRequest('Organization ID must be a valid UUID');
+      }
+      if (!hasText(brandId)) {
+        return badRequest('Brand ID required');
+      }
+
+      const organization = await getOrganizationOrNotFound(spaceCatId);
+      if (organization.status) {
+        return organization;
+      }
+      // hasAccess = admin bypass OR org membership (the S2S token's `tenants` claim).
+      if (!await accessControlUtil.hasAccess(organization)) {
+        return forbidden('User does not have access to this organization');
+      }
+
+      const unavailable = requirePostgrestForV2Config(context);
+      if (unavailable) {
+        return unavailable;
+      }
+
+      const { postgrestClient } = context.dataAccess.services;
+
+      const brandUuid = await resolveBrandUuid(spaceCatId, brandId, postgrestClient);
+      if (!brandUuid) {
+        return notFound(`Brand not found: ${brandId}`);
+      }
+
+      const rows = await context.dataAccess.BrandSemrushProject.allByBrandId(brandUuid);
+      const liveRows = (rows ?? []).filter((row) => !row.getDeletedAt());
+      // createResponse(body, 200) rather than ok(body) — ok()'s declared type is
+      // `body?: string` (stale vs. its actual object-accepting runtime, which is a
+      // plain createResponse(body, 200) call), so a concretely-typed object here
+      // (buildBrandMarketsResponse's JSDoc return type, unlike the untyped/`any`
+      // values other ok(...) call sites in this file pass) fails `tsc` strict
+      // type-check. Byte-for-byte identical response.
+      return createResponse(buildBrandMarketsResponse(liveRows, log, { brandId }), 200);
+    } catch (error) {
+      log.error(`Error getting markets for brand ${brandId} in organization ${spaceCatId}:`, error);
       return createErrorResponse(error, reqCtxOf(context));
     }
   };
@@ -2768,6 +2833,18 @@ function BrandsController(ctx, log, env) {
           }
         }
 
+        // Resolve the site + real LLMO entitlement tier once, up front: needed both for
+        // the schedule's tier param (step 4, immediately below) and the post-activation
+        // side-effects (step 5/6). This route (LLMO-6634) intentionally has no paid gate
+        // on activation itself — a free/PLG org can reach this whole block as long as the
+        // brand already resolves to a valid primary site — so the schedule created below
+        // must NOT hardcode tier: 'PAID'; that would grant ChatGPT Paid / Copilot
+        // regardless of the org's real entitlement (LLMO-7366).
+        const activatedSite = await Site.findById(baseSiteId);
+        const isPaying = (drsConfigured && activatedSite)
+          ? await isPayingLlmoSite(activatedSite, context)
+          : false;
+
         // 4) Schedule — prompts-gated. Create the weekly brand-presence schedule only
         // when prompts were generated now or the brand already has prompts (a promptless
         // schedule is a weekly no-op). Idempotent: createBrandPresenceSchedule POSTs and
@@ -2789,12 +2866,12 @@ function BrandsController(ctx, log, env) {
             siteId: baseSiteId,
             brandId: brandUuid,
             orgId: spaceCatId,
+            // @ts-ignore tier not yet in the published drs-client type; pending the
+            // release of the spacecat-shared companion fix (LLMO-7366, PR #1915)
+            tier: isPaying ? 'PAID' : 'FREE_TRIAL',
           });
           scheduleId = schedule?.scheduleId;
         }
-
-        // Resolve the site once for the post-activation side-effects below.
-        const activatedSite = await Site.findById(baseSiteId);
 
         // 5) Brand-profile agent ("Brandaid"). The create→activate path never triggered it
         // (only full/PLG/Slack onboarding did), so brands added to an existing org had no
@@ -2838,7 +2915,7 @@ function BrandsController(ctx, log, env) {
         // throws, so a failure here degrades gracefully without failing activation.
         if (drsConfigured) {
           if (activatedSite) {
-            const isPaying = await isPayingLlmoSite(activatedSite, context);
+            // isPaying already resolved once, above, alongside the schedule's tier param.
             const { results, allSucceeded } = await ensurePromptSuggestionSchedules({
               drsClient, siteId: baseSiteId, isPaying, log,
             });
@@ -2986,6 +3063,7 @@ function BrandsController(ctx, log, env) {
     getBrandsForOrganization,
     getBrandGuidelinesForSite,
     getBrandForOrg,
+    listBrandMarketsForOrg,
     getBrandForOrgSite,
     listBrandsForOrg,
     listCategoriesForOrg,

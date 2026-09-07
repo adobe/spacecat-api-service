@@ -1375,6 +1375,16 @@ export declare type TopBrandsByDomainRequest = Message<"semrush.services.ai_seo.
    * @generated from field: string metric_filter_ql = 6;
    */
   metricFilterQl: string;
+
+  /**
+   * search_type controls how brand mentions are scoped: as a whole root domain, a
+   * specific subdomain, a subfolder path, or an exact URL. The scope item is the
+   * brand_domain. Unset / UNSPECIFIED is treated as DOMAIN, so existing callers see
+   * no behavior change.
+   *
+   * @generated from field: semrush.services.ai_seo.v2.source.SEARCH_TYPE.ENUM search_type = 7;
+   */
+  searchType: SEARCH_TYPE_ENUM;
 };
 
 /**
@@ -1414,6 +1424,16 @@ export declare type TopBrandsByDomainRequestJson = {
    * @generated from field: string metric_filter_ql = 6;
    */
   metricFilterQl?: string;
+
+  /**
+   * search_type controls how brand mentions are scoped: as a whole root domain, a
+   * specific subdomain, a subfolder path, or an exact URL. The scope item is the
+   * brand_domain. Unset / UNSPECIFIED is treated as DOMAIN, so existing callers see
+   * no behavior change.
+   *
+   * @generated from field: semrush.services.ai_seo.v2.source.SEARCH_TYPE.ENUM search_type = 7;
+   */
+  searchType?: SEARCH_TYPE_ENUMJson;
 };
 
 /**
