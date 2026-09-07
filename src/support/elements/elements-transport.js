@@ -92,12 +92,12 @@ function buildHeaders(imsToken) {
 }
 
 function externalBaseUrl(env) {
-  const raw = typeof env?.SEMRUSH_ELEMENTS_EXTERNAL_BASE_URL === 'string'
-    ? env.SEMRUSH_ELEMENTS_EXTERNAL_BASE_URL.trim()
-    : env?.SEMRUSH_ELEMENTS_EXTERNAL_BASE_URL;
+  const raw = typeof env?.SEMRUSH_BRAND_CLAIMS_HALLUCINATION_DETECTION_ELEMENTS_BASE_URL === 'string'
+    ? env.SEMRUSH_BRAND_CLAIMS_HALLUCINATION_DETECTION_ELEMENTS_BASE_URL.trim()
+    : env?.SEMRUSH_BRAND_CLAIMS_HALLUCINATION_DETECTION_ELEMENTS_BASE_URL;
   if (!hasText(raw)) {
     throw new ErrorWithStatusCode(
-      'SEMRUSH_ELEMENTS_EXTERNAL_BASE_URL is not configured',
+      'SEMRUSH_BRAND_CLAIMS_HALLUCINATION_DETECTION_ELEMENTS_BASE_URL is not configured',
       503,
     );
   }
@@ -106,13 +106,13 @@ function externalBaseUrl(env) {
     parsed = new URL(raw);
   } catch {
     throw new ErrorWithStatusCode(
-      'SEMRUSH_ELEMENTS_EXTERNAL_BASE_URL is invalid',
+      'SEMRUSH_BRAND_CLAIMS_HALLUCINATION_DETECTION_ELEMENTS_BASE_URL is invalid',
       503,
     );
   }
   if (parsed.protocol !== 'https:') {
     throw new ErrorWithStatusCode(
-      'SEMRUSH_ELEMENTS_EXTERNAL_BASE_URL must use HTTPS',
+      'SEMRUSH_BRAND_CLAIMS_HALLUCINATION_DETECTION_ELEMENTS_BASE_URL must use HTTPS',
       503,
     );
   }
@@ -120,12 +120,12 @@ function externalBaseUrl(env) {
 }
 
 function technicalApiKey(env) {
-  const key = typeof env?.SEMRUSH_ELEMENTS_TECHNICAL_API_KEY === 'string'
-    ? env.SEMRUSH_ELEMENTS_TECHNICAL_API_KEY.trim()
-    : env?.SEMRUSH_ELEMENTS_TECHNICAL_API_KEY;
+  const key = typeof env?.SEMRUSH_BRAND_CLAIMS_HALLUCINATION_DETECTION_ELEMENTS_API_KEY === 'string'
+    ? env.SEMRUSH_BRAND_CLAIMS_HALLUCINATION_DETECTION_ELEMENTS_API_KEY.trim()
+    : env?.SEMRUSH_BRAND_CLAIMS_HALLUCINATION_DETECTION_ELEMENTS_API_KEY;
   if (!hasText(key)) {
     throw new ErrorWithStatusCode(
-      'SEMRUSH_ELEMENTS_TECHNICAL_API_KEY is not configured',
+      'SEMRUSH_BRAND_CLAIMS_HALLUCINATION_DETECTION_ELEMENTS_API_KEY is not configured',
       503,
     );
   }
@@ -389,7 +389,7 @@ export async function createElementsTransportForPurpose({
   maxRetries = DEFAULT_MAX_RETRIES,
   retryBaseDelayMs = DEFAULT_RETRY_BASE_DELAY_MS,
 }) {
-  const useTechnicalAuth = env?.SEMRUSH_ELEMENTS_TECHNICAL_AUTH_ENABLED === 'true'
+  const useTechnicalAuth = env?.SEMRUSH_BRAND_CLAIMS_HALLUCINATION_DETECTION_ELEMENTS_STOPGAP_ENABLED === 'true'
     && TECHNICAL_AUTH_PURPOSES.has(purpose);
 
   if (useTechnicalAuth) {

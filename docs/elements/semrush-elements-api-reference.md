@@ -67,7 +67,7 @@ The temporary technical-account exception for the code-owned `brand_claims` and
 bound to `brand_claims`; there is currently no Hallucination Detection call site.
 
 ```
-POST {SEMRUSH_ELEMENTS_EXTERNAL_BASE_URL}/apis/v4-raw/external-api/v1/workspaces/{workspaceId}/products/ai/elements/{elementId}
+POST {SEMRUSH_BRAND_CLAIMS_HALLUCINATION_DETECTION_ELEMENTS_BASE_URL}/apis/v4-raw/external-api/v1/workspaces/{workspaceId}/products/ai/elements/{elementId}
 Authorization: Apikey <technical-api-key>
 Content-Type: application/json
 
@@ -269,7 +269,7 @@ Generic Semrush Elements APIs authenticate via the caller's **IMS access token**
 `requireImsBearer` throws `ErrorWithStatusCode(401)` if the header is missing or if the caller used a
 non-IMS auth method (e.g. scoped API key).
 
-There is one temporary exception: when `SEMRUSH_ELEMENTS_TECHNICAL_AUTH_ENABLED` is exactly `true`,
+There is one temporary exception: when `SEMRUSH_BRAND_CLAIMS_HALLUCINATION_DETECTION_ELEMENTS_STOPGAP_ENABLED` is exactly `true`,
 the code-owned `brand_claims` and reserved `hallucination_detection` purposes use the external API
 with a Vault-injected technical-account API key. Generic Elements handlers cannot select this mode,
 and request query, header, and body values cannot choose the purpose. Enabled technical mode fails
@@ -482,9 +482,14 @@ Upstream error bodies are **never forwarded to clients** — they are logged ser
 | Variable | Source | Used by |
 |---|---|---|
 | `SEMRUSH_PROJECTS_BASE_URL` | Vault `dx_mysticat/<env>/api-service` | Internal IMS Elements API base host (e.g. `https://www.semrush.com`) |
-| `SEMRUSH_ELEMENTS_TECHNICAL_AUTH_ENABLED` | Environment configuration | Exact string `true` enables the temporary technical-account route for the code-owned `brand_claims` and `hallucination_detection` purposes only |
-| `SEMRUSH_ELEMENTS_EXTERNAL_BASE_URL` | Vault `dx_mysticat/<env>/api-service` | HTTPS origin for the external Elements API (e.g. `https://api.semrush.com`) |
-| `SEMRUSH_ELEMENTS_TECHNICAL_API_KEY` | Vault `dx_mysticat/<env>/api-service` | Temporary technical-account API key; never store it in source or local documentation |
+| `SEMRUSH_BRAND_CLAIMS_HALLUCINATION_DETECTION_ELEMENTS_STOPGAP_ENABLED` | Environment configuration | Exact string `true` enables the temporary technical-account route for the code-owned `brand_claims` and `hallucination_detection` purposes only |
+| `SEMRUSH_BRAND_CLAIMS_HALLUCINATION_DETECTION_ELEMENTS_BASE_URL` | Vault `dx_mysticat/<env>/api-service` | HTTPS origin for the external Elements API (e.g. `https://api.semrush.com`) |
+| `SEMRUSH_BRAND_CLAIMS_HALLUCINATION_DETECTION_ELEMENTS_API_KEY` | Vault `dx_mysticat/<env>/api-service` | Temporary technical-account API key; never store it in source or local documentation |
+
+The long variable namespace is intentional: this credential is owned jointly by **Brand Claims** and
+**Hallucination Detection**, not by Elements or ABV generally. Other ABV capabilities may hold their
+own Semrush API keys and must use distinct purpose-owned names. Broad names such as
+`SEMRUSH_ELEMENTS_TECHNICAL_API_KEY` are deliberately ignored and must never be introduced as aliases.
 
 The technical-account branch is a temporary stopgap until S2S authentication is available. Configure
 the external base and key before setting the enable flag. An enabled allowed purpose fails closed with
