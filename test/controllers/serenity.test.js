@@ -298,8 +298,13 @@ describe('SerenityController', () => {
       },
       '../../src/support/access-control-util.js': MockAccessControlUtil,
       '../../src/support/prompts-storage.js': {
+        // isServicePrincipal is NOT mocked -- the real predicate's fail-safe
+        // shape (isS2SConsumer()/isS2SAdmin() absent -> false, falls through
+        // to a non-jwt/non-ims authType) is exactly what the fake context's
+        // authInfo ({ getType: () => authType }, no S2S methods) exercises,
+        // so the controller-level assertions cover the real function rather
+        // than a stand-in that could silently drift from it.
         resolveBrandUuid: resolveBrandUuidStub,
-        isServicePrincipal: (authInfo) => authInfo?.getType?.() === 'api-key',
       },
       '../../src/support/brands-storage.js': {
         getBrandAliases: getBrandAliasesStub,
@@ -1900,7 +1905,10 @@ describe('SerenityController', () => {
       const response = await controller.createPrompts(fakeContext({ data: { prompts: [] } }));
       expect(response.status).to.equal(200);
       expect(handlers.handleCreatePromptsSubworkspace).to.have.been.calledOnce;
-      expect(handlers.handleCreatePromptsSubworkspace.firstCall.args[8])
+      // .lastArg (the options object) rather than a positional index: the
+      // assertion then survives a signature change that adds/removes an
+      // earlier positional param, instead of silently checking the wrong arg.
+      expect(handlers.handleCreatePromptsSubworkspace.firstCall.lastArg)
         .to.include({ originValue: 'human' });
       expect(handlers.handleCreatePrompts).to.not.have.been.called;
     });
@@ -2896,7 +2904,9 @@ describe('SerenityController', () => {
       }));
       expect(response.status).to.equal(200);
       expect(handlers.handleCreatePrompts).to.have.been.calledOnce;
-      expect(handlers.handleCreatePrompts.firstCall.args[10])
+      // .lastArg, not a positional index -- signature-independent (see the
+      // sibling assertion above).
+      expect(handlers.handleCreatePrompts.firstCall.lastArg)
         .to.include({ originValue: 'human' });
       expect(handlers.handleCreatePromptsSubworkspace).not.to.have.been.called;
     });
@@ -2911,7 +2921,7 @@ describe('SerenityController', () => {
       }));
 
       expect(response.status).to.equal(200);
-      expect(handlers.handleCreatePrompts.firstCall.args[10])
+      expect(handlers.handleCreatePrompts.firstCall.lastArg)
         .to.include({ originValue: 'ai' });
     });
 

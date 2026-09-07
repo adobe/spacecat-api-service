@@ -704,12 +704,13 @@ function validTagIds(raw) {
  * positional slice is only safe when the server-derived ids are added AFTER it.
  *
  * This cap bounds the CALLER-supplied tags only. The server-derived dimension
- * tags (`type`, `origin`) are injected downstream by {@link makePromptTagInjector}
- * AFTER this sanitize, and are intentionally EXEMPT from the user-facing cap — a
- * write may therefore carry up to `MAX_TAG_IDS` + 2 ids. They must never be
- * dropped to fit the cap: a prompt missing its `type`/`origin` tag is invisible
- * to that dimension's filter. On CREATE this holds trivially, since the
- * computed ids are appended by the injector after this slice runs, never
+ * tags (`type`, `origin`, `source`, `intent`) are injected downstream by
+ * {@link makePromptTagInjector} and the intent injector AFTER this sanitize,
+ * and are intentionally EXEMPT from the user-facing cap — a write may
+ * therefore carry up to `MAX_TAG_IDS` + 4 ids. They must never be dropped to
+ * fit the cap: a prompt missing its `type`/`origin`/`source`/`intent` tag is
+ * invisible to that dimension's filter. On CREATE this holds trivially, since
+ * the computed ids are appended by the injector after this slice runs, never
  * supplied by the caller pre-slice.
  *
  * @param {unknown} raw
@@ -1014,6 +1015,15 @@ export function makePromptTagInjector(
 
     // origin — CREATE only. `originValue` unset means UPDATE: leave origin alone
     // (the stored value the caller echoes rides through the replace-mode write).
+    // Cache keyed on projectId ALONE, unlike typeCache/sourceCache's
+    // `${projectId} ${value}` keying: origin is a BATCH constant (one
+    // originValue per call to makePromptTagInjector, never a per-item
+    // override), so every item in a batch resolves the same value and a
+    // single per-project entry is correct. This would need the same
+    // (projectId, value) keying as the others the day a per-item origin
+    // override is added — a per-item value with this keying would silently
+    // bleed the first-resolved item's origin onto every other item in the
+    // same project.
     if (originValue) {
       let pending = originCache.get(projectId);
       if (!pending) {

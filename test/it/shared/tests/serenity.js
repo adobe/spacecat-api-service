@@ -785,6 +785,14 @@ export default function serenityTests(
       await createUsMarket();
       const category = await createTag('Photography');
       const child = await createTag('Cameras', category.body.id);
+      // Resolve (never create twice — closed-dimension POST is idempotent
+      // resolve-or-create) the origin/human id up front, so the assertion
+      // below can check for it BY ID rather than by a bare count that a
+      // double-stamped intent (or any other tag) would also satisfy.
+      const originHuman = await getHttpClient().admin.post(`${base}/tags`, {
+        type: 'origin', name: 'human', geoTargetId: US_GEO, languageCode: 'en',
+      });
+      expect(originHuman.status).to.equal(200);
 
       const created = await getHttpClient().admin.post(`${base}/prompts`, {
         prompts: [{
@@ -806,7 +814,9 @@ export default function serenityTests(
       // — see the fallback ladder). The human-authored create also carries
       // `origin:human`. So the created prompt carries the two supplied tags plus
       // the four computed ones.
-      expect(created.body.created[0].tagIds).to.include.members([category.body.id, child.body.id]);
+      expect(created.body.created[0].tagIds).to.include.members([
+        category.body.id, child.body.id, originHuman.body.id,
+      ]);
       expect(created.body.created[0].tagIds).to.have.lengthOf(6);
       expect(created.body.failed).to.deep.equal([]);
 

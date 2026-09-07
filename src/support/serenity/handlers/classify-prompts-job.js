@@ -140,8 +140,11 @@ async function requeuePending(context, job, semrushWorkspaceId, items) {
  * @param {SerenityTransport} transport - Serenity transport built from the exchanged
  *   access token.
  * @param {object} metadata - the job's metadata (`brandId`, `semrushWorkspaceId`,
- *   `prompts`, and — for a subworkspace-mode CSV import — `authMode`,
- *   `workspaceId`, `parentWorkspaceId`).
+ *   `prompts`, `originValue` — the trusted authorship captured at enqueue
+ *   time, part of the cross-deploy wire contract between the enqueue site and
+ *   this worker (see the `originValue` default below) — and, for a
+ *   subworkspace-mode CSV import, `authMode`, `workspaceId`,
+ *   `parentWorkspaceId`).
  * @returns {Promise<object>} the job result.
  */
 async function createAndClassify(context, job, transport, metadata) {
@@ -324,9 +327,10 @@ async function createAndClassify(context, job, transport, metadata) {
  * @param {SerenityTransport} transport
  * @param {object} metadata - `{ semrushWorkspaceId, items: [{ projectId,
  *   promptId, text, tagIds }] }` — `tagIds` is the FULL desired tag set minus
- *   `intent` (caller tags + server type/source; `origin` no longer gets its
- *   own tag, tag-display-names.md §3), matching the edit handlers'
- *   "recompute the whole set, then replace" contract.
+ *   `intent` (caller tags + the server `type`/`origin`/`source` ids already
+ *   resolved and stamped at create time — this reclassify pass never
+ *   re-derives them), matching the edit handlers' "recompute the whole set,
+ *   then replace" contract.
  * @returns {Promise<object>} the job result.
  */
 async function reclassifyExisting(context, job, transport, metadata) {

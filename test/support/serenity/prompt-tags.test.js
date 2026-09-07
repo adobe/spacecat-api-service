@@ -199,7 +199,21 @@ describe('serenity prompt-tags taxonomy', () => {
     });
 
     it('labels every SOURCE_VALUES entry — CI gate', () => {
-      SOURCE_VALUES.forEach((slug) => {
+      // Asserted against a HARDCODED list, not SOURCE_VALUES itself: SOURCE_LABEL
+      // is now built by reducing SOURCE_VALUES into an identity map, so a loop
+      // over SOURCE_VALUES asking SOURCE_LABEL for the same slug can never fail
+      // — every entry is trivially present by construction. Pinning the
+      // expected slug set independently is what still catches a slug added to
+      // SOURCE_VALUES without a human noticing (e.g. if the identity-mapping
+      // convention is ever changed to something that DOES need a per-slug
+      // label again).
+      const expectedSlugs = [
+        'config', 'base-url', 'gsc', 'drs', 'semrush', 'flow',
+        'synthetic-personas', 'citation-attempt', 'llm-generated', 'sheet',
+        'api', 'personalized', 'agentic-traffic', 'brand-concierge', 'strategy-chat',
+      ];
+      expect([...SOURCE_VALUES].sort()).to.deep.equal([...expectedSlugs].sort());
+      expectedSlugs.forEach((slug) => {
         expect(SOURCE_LABEL[slug], `missing SOURCE_LABEL for ${slug}`)
           .to.be.a('string').and.not.equal('');
       });
