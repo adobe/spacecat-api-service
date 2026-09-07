@@ -1,3 +1,36 @@
+# [1.796.0](https://github.com/adobe/spacecat-api-service/compare/v1.795.0...v1.796.0) (2026-09-07)
+
+
+### Features
+
+* **elements:** Brand Claims response-feed join (141adc88 x 404fb017) ([#3200](https://github.com/adobe/spacecat-api-service/issues/3200)) ([58fba15](https://github.com/adobe/spacecat-api-service/commit/58fba15c7c58eb096e7798b7392877c1589c0d4c))
+
+# [1.795.0](https://github.com/adobe/spacecat-api-service/compare/v1.794.1...v1.795.0) (2026-09-07)
+
+
+### Features
+
+* **serenity:** surface per-prompt executions on the topic-prompts element ([#3207](https://github.com/adobe/spacecat-api-service/issues/3207)) ([0e058e7](https://github.com/adobe/spacecat-api-service/commit/0e058e7fcad85568498954c3c360adb2856c98a5))
+
+## [1.794.1](https://github.com/adobe/spacecat-api-service/compare/v1.794.0...v1.794.1) (2026-09-07)
+
+
+### Bug Fixes
+
+* honor admin organizationId override on FACS access-mapping reads ([#3195](https://github.com/adobe/spacecat-api-service/issues/3195)) ([5b0e66f](https://github.com/adobe/spacecat-api-service/commit/5b0e66f581829261b20297957286289c2ce433a9))
+
+# [1.794.0](https://github.com/adobe/spacecat-api-service/compare/v1.793.4...v1.794.0) (2026-09-07)
+
+
+### Bug Fixes
+
+* restrict PLG skip Slack alert to cwv, alt-text, broken-backlinks ([#3212](https://github.com/adobe/spacecat-api-service/issues/3212)) ([551f4ef](https://github.com/adobe/spacecat-api-service/commit/551f4ef35613262061231c3fa0c1ae74071ecd11))
+
+
+### Features
+
+* include review state in webhook jobs ([#3162](https://github.com/adobe/spacecat-api-service/issues/3162)) ([eda2f84](https://github.com/adobe/spacecat-api-service/commit/eda2f84980485b7cd0cf7489854ddde29e4be37b)), closes [Hi#level](https://github.com/Hi/issues/level)
+
 ## [1.793.4](https://github.com/adobe/spacecat-api-service/compare/v1.793.3...v1.793.4) (2026-09-04)
 
 
