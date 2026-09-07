@@ -3776,6 +3776,37 @@ describe('Suggestions Controller', () => {
       expect(postSlackMessageStub.firstCall.args[1]).to.include('TOO_RISKY');
     });
 
+    it('includes empty Skip Reason and Skip Detail lines when neither is provided', async () => {
+      const postSlackMessageStub = sandbox.stub().resolves();
+      const ControllerWithSlack = await esmock.p('../../src/controllers/suggestions.js', {
+        '../../src/utils/slack/base.js': { postSlackMessage: postSlackMessageStub },
+      });
+
+      const plgSite = makePlgSite('PLG');
+      const da = { ...mockSuggestionDataAccess, Site: { findById: sandbox.stub().resolves(plgSite) } };
+      const ctrl = ControllerWithSlack({
+        dataAccess: da, pathInfo: { headers: {} }, ...authContext,
+      }, mockSqs, {
+      AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue',
+      LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL: 'https://llmo-experimentation-engine-queue',
+    });
+
+      const response = await ctrl.patchSuggestion({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, suggestionId: SUGGESTION_IDS[0] },
+        data: { status: 'SKIPPED' },
+        env: { SLACK_PLG_SKIP_CHANNEL_ID: 'C_SKIP', SLACK_BOT_TOKEN: 'xoxb-token' },
+        ...context,
+        dataAccess: da,
+      });
+      await new Promise(setImmediate);
+
+      expect(response.status).to.equal(200);
+      expect(postSlackMessageStub).to.have.been.calledOnce;
+      const slackBody = postSlackMessageStub.firstCall.args[1];
+      expect(slackBody).to.include('*Skip Reason:* ``');
+      expect(slackBody).to.include('*Skip Detail:* ``');
+    });
+
     it('does not send PLG skip alert when patchSuggestion skips for a PAID site', async () => {
       const postSlackMessageStub = sandbox.stub().resolves();
       const ControllerWithSlack = await esmock.p('../../src/controllers/suggestions.js', {

@@ -266,14 +266,9 @@ async function postPlgSuggestionSkipAlert(site, opportunity, suggestion, context
 
     message += `\n• *Opportunity Type:* \`${opportunityType}\`\n`
       + `• *Opportunity ID:* \`${opportunityId}\`\n`
-      + `• *Suggestion ID:* \`${suggestionId}\``;
-
-    if (skipReason) {
-      message += `\n• *Skip Reason:* \`${skipReason}\``;
-    }
-    if (skipDetail) {
-      message += `\n• *Skip Detail:* \`${skipDetail}\``;
-    }
+      + `• *Suggestion ID:* \`${suggestionId}\`\n`
+      + `• *Skip Reason:* \`${skipReason ?? ''}\`\n`
+      + `• *Skip Detail:* \`${skipDetail ?? ''}\``;
 
     if (organizationId) {
       const experienceUrl = env.EXPERIENCE_URL || 'https://experience.adobe.com';
