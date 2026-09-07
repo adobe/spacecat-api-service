@@ -14673,7 +14673,7 @@ describe('Suggestions Controller', () => {
       expect(fetchStub).to.have.been.calledOnce;
       const fetchArgs = fetchStub.getCall(0).args;
       expect(fetchArgs[0]).to.equal('https://www.lovesac.com/sactionals');
-      expect(fetchArgs[1].headers['User-Agent']).to.equal('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Tokowaka-AI Tokowaka/1.0 AdobeEdgeOptimize-AI AdobeEdgeOptimize/1.0');
+      expect(fetchArgs[1].headers['User-Agent']).to.equal('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Tokowaka-AI AdobeEdgeOptimize-AI');
     });
 
     it('should handle fetch failure with 404', async () => {
@@ -14744,8 +14744,8 @@ describe('Suggestions Controller', () => {
       const body = await response.json();
       expect(body.status).to.equal('error');
       expect(body.statusCode).to.equal(503);
-      expect(warnStub).to.have.been.calledWith(
-        `Failed to fetch URL. Status: 503, x-tokowaka-request-id: ${mockRequestId}`,
+      expect(warnStub.getCall(0).args[0]).to.match(
+        new RegExp(`^\\[edge-live-preview\\] Failed to fetch URL siteId=${SITE_ID} opportunityId=${OPPORTUNITY_ID} url=https://www\\.lovesac\\.com/error-page status=503 elapsedMs=\\d+ x-tokowaka-request-id=${mockRequestId}$`),
       );
     });
 

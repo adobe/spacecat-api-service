@@ -3411,6 +3411,8 @@ function SuggestionsController(ctx, sqs, env) {
     const siteId = context.params?.siteId;
     const opportunityId = context.params?.opportunityId;
 
+    context.log.info(`[edge-live-preview] Received request siteId=${siteId} opportunityId=${opportunityId}`);
+
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
     }
@@ -3455,23 +3457,27 @@ function SuggestionsController(ctx, sqs, env) {
       return notFound('Opportunity not found');
     }
 
+    const fetchStartedAt = Date.now();
     try {
-      context.log.info(`Fetching content from URL: ${url}`);
+      context.log.info(`[edge-live-preview] Fetching content siteId=${siteId} opportunityId=${opportunityId} url=${url}`);
 
       // Make fetch request with Tokowaka-AI User-Agent
       const response = await fetch(url, {
         method: 'GET',
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Tokowaka-AI Tokowaka/1.0 AdobeEdgeOptimize-AI AdobeEdgeOptimize/1.0',
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Tokowaka-AI AdobeEdgeOptimize-AI',
           Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         },
       });
 
+      const elapsedMs = Date.now() - fetchStartedAt;
+
       if (!response.ok) {
-        const requestId = response.headers.get('x-tokowaka-request-id');
+        const requestId = response.headers.get('x-tokowaka-request-id')
+          || response.headers.get('x-edgeoptimize-request-id');
         const logMessage = requestId
-          ? `Failed to fetch URL. Status: ${response.status}, x-tokowaka-request-id: ${requestId}`
-          : `Failed to fetch URL. Status: ${response.status}`;
+          ? `[edge-live-preview] Failed to fetch URL siteId=${siteId} opportunityId=${opportunityId} url=${url} status=${response.status} elapsedMs=${elapsedMs} x-tokowaka-request-id=${requestId}`
+          : `[edge-live-preview] Failed to fetch URL siteId=${siteId} opportunityId=${opportunityId} url=${url} status=${response.status} elapsedMs=${elapsedMs}`;
         context.log.warn(logMessage);
         return ok({
           status: 'error',
@@ -3486,7 +3492,7 @@ function SuggestionsController(ctx, sqs, env) {
 
       const content = await response.text();
 
-      context.log.info(`Successfully fetched content from URL: ${url}`);
+      context.log.info(`[edge-live-preview] Successfully fetched content siteId=${siteId} opportunityId=${opportunityId} url=${url} elapsedMs=${elapsedMs}`);
 
       return ok({
         status: 'success',
@@ -3497,7 +3503,9 @@ function SuggestionsController(ctx, sqs, env) {
         },
       });
     } catch (error) {
-      context.log.error(`Error fetching from URL ${url}: ${error.message}`, error);
+      const elapsedMs = Date.now() - fetchStartedAt;
+      const errorCode = error.cause?.code || error.code || error.name;
+      context.log.error(`[edge-live-preview] Error fetching URL siteId=${siteId} opportunityId=${opportunityId} url=${url} elapsedMs=${elapsedMs} errorCode=${errorCode}: ${error.message}`, error);
       return ok({
         status: 'error',
         statusCode: 500,
