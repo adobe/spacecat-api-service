@@ -831,31 +831,73 @@ export async function listProjectTagTree(
     };
   }
   const items = [];
+  const seenIds = new Set();
   const LIMIT = 100;
   const PAGE_LIMIT = 50;
   let page = 1;
+  let expectedTotal;
+  let stoppedEarly = false;
+  const failIncomplete = (reason) => {
+    log?.warn?.('listProjectTagTree: incomplete tag level', {
+      semrushWorkspaceId,
+      projectId,
+      parentId,
+      page,
+      reason,
+    });
+    const error = new ErrorWithStatusCode('Unable to read the complete tag tree level', 503);
+    error.code = ERROR_CODES.TAG_TREE_READ_INCOMPLETE;
+    throw error;
+  };
   while (page <= PAGE_LIMIT) {
     // eslint-disable-next-line no-await-in-loop
     const resp = await transport.listProjectTags(semrushWorkspaceId, projectId, {
       parentId, page, limit: LIMIT, draft: true,
     });
-    const batch = Array.isArray(resp?.items) ? resp.items : [];
+    if (!resp || !Array.isArray(resp.items)) {
+      failIncomplete('malformedPage');
+    }
+    if (resp.page !== undefined
+      && (!Number.isInteger(resp.page) || resp.page !== page)) {
+      failIncomplete('unexpectedPage');
+    }
+    if (resp.total !== undefined) {
+      if (!Number.isInteger(resp.total) || resp.total < 0
+        || (expectedTotal !== undefined && expectedTotal !== resp.total)) {
+        failIncomplete('inconsistentTotal');
+      }
+      expectedTotal = resp.total;
+    }
+    const batch = resp.items;
+    if (batch.some((item) => !item || typeof item.id !== 'string' || !item.id)) {
+      failIncomplete('malformedItem');
+    }
     let matched = false;
     for (const t of batch) {
-      // AIOTag.id is required upstream; guard defensively and skip a malformed row.
-      if (t && typeof t.id === 'string' && t.id) {
-        // eslint-disable-next-line no-use-before-define
-        const [item] = normalizeTreeItems([t]);
-        items.push(item);
-        if (stopWhen && stopWhen(item)) {
-          matched = true;
-        }
+      if (seenIds.has(t.id)) {
+        failIncomplete('repeatedTagId');
+      }
+      seenIds.add(t.id);
+      // eslint-disable-next-line no-use-before-define
+      const [item] = normalizeTreeItems([t]);
+      items.push(item);
+      if (stopWhen && stopWhen(item)) {
+        matched = true;
       }
     }
     if (matched) {
+      stoppedEarly = true;
       break;
     }
-    if (batch.length < LIMIT) {
+    if (expectedTotal !== undefined) {
+      if (items.length > expectedTotal
+        || (items.length < expectedTotal && batch.length < LIMIT)) {
+        failIncomplete('incompleteTotal');
+      }
+      if (items.length === expectedTotal) {
+        break;
+      }
+    } else if (batch.length < LIMIT) {
       break;
     }
     if (page === PAGE_LIMIT) {
@@ -876,8 +918,8 @@ export async function listProjectTagTree(
     items: decorateTagTreeItems(items),
     page: 1,
     limit: LIMIT,
-    total: items.length,
-    complete: true,
+    total: expectedTotal ?? items.length,
+    complete: !stoppedEarly && (expectedTotal === undefined || items.length === expectedTotal),
   };
 }
 

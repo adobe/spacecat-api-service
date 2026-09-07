@@ -242,7 +242,7 @@ export async function acceptBulkTags({
   const prompts = (await listAllProjectPrompts(transport, workspaceId, projectId, {
     tagIds: resolvedFilter.candidateIds,
     search: parsed.filter.search,
-  })).filter((prompt) => matchesBulkTagFacets(prompt, resolvedFilter.groups));
+  }, log)).filter((prompt) => matchesBulkTagFacets(prompt, resolvedFilter.groups));
 
   for (const prompt of prompts) {
     applyBulkTagOperation(promptTagIds(prompt), parsed.operation, selected, snapshot);
@@ -276,8 +276,15 @@ export async function acceptBulkTags({
     }
     const raced = await context.dataAccess.AsyncJob.findById(deterministicJobId);
     const racedMetadata = raced?.getMetadata?.() ?? {};
-    if (!raced || racedMetadata.requestHash !== hash) {
+    if (!raced) {
       throw error;
+    }
+    if (racedMetadata.requestHash !== hash) {
+      throw codedError(
+        'Idempotency-Key was reused with a different bulk tag request',
+        409,
+        ERROR_CODES.IDEMPOTENCY_CONFLICT,
+      );
     }
     return {
       status: 200,
@@ -397,6 +404,8 @@ export async function bulkTagsHandler(context, job, accessToken, injectedTranspo
     transport,
     metadata.workspaceId,
     metadata.projectId,
+    undefined,
+    context.log,
   );
   const byId = new Map(currentPrompts.map((prompt) => [String(prompt.id), prompt]));
   const outcomes = await mapLimit(metadata.promptIds, BULK_CREATE_CONCURRENCY, async (promptId) => {

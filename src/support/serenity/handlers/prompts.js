@@ -574,7 +574,22 @@ export async function listAllProjectPrompts(
     });
     const batch = Array.isArray(response?.items) ? response.items : [];
     items.push(...batch);
+    log?.debug?.('listAllProjectPrompts: faceted prompt page read', {
+      semrushWorkspaceId,
+      projectId,
+      page,
+      pageSize: limit,
+      pagePromptsRead: batch.length,
+      upstreamPromptsScanned: items.length,
+    });
     if (batch.length < limit) {
+      log?.info?.('listAllProjectPrompts: faceted prompt corpus read', {
+        semrushWorkspaceId,
+        projectId,
+        pagesWalked: page,
+        pageSize: limit,
+        upstreamPromptsScanned: items.length,
+      });
       return items;
     }
     page += 1;

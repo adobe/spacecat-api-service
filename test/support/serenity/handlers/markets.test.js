@@ -1468,7 +1468,7 @@ describe('handlers/markets.js — handleListTags / handleListModels', () => {
     expect(transport.listProjectTags).to.not.have.been.called;
   });
 
-  it('listProjectTagTree fails closed at the page ceiling', async () => {
+  it('listProjectTagTree fails closed when pagination repeats without progress', async () => {
     const fullPage = Array.from({ length: 100 }, (_, i) => ({
       id: `tag-${i}`, name: `Tag ${i}`, parent_id: null, children_count: 0,
     }));
@@ -1486,11 +1486,15 @@ describe('handlers/markets.js — handleListTags / handleListModels', () => {
       expect(error.code).to.equal('tagTreeReadIncomplete');
     });
 
-    expect(listProjectTags.callCount).to.equal(50);
+    expect(listProjectTags.callCount).to.equal(2);
     expect(log.warn).to.have.been.calledOnceWith(
-      'listProjectTagTree: page ceiling hit; tag level may be truncated',
+      'listProjectTagTree: incomplete tag level',
       sinon.match({
-        semrushWorkspaceId: WORKSPACE, projectId: 'proj-tree', parentId: '', pages: 50, limit: 100,
+        semrushWorkspaceId: WORKSPACE,
+        projectId: 'proj-tree',
+        parentId: '',
+        page: 2,
+        reason: 'unexpectedPage',
       }),
     );
   });
