@@ -3474,10 +3474,12 @@ function SuggestionsController(ctx, sqs, env) {
       const elapsedMs = Date.now() - fetchStartedAt;
 
       if (!response.ok) {
-        const requestId = response.headers.get('x-tokowaka-request-id')
-          || response.headers.get('x-edgeoptimize-request-id');
+        const tokowakaRequestId = response.headers.get('x-tokowaka-request-id');
+        const edgeOptimizeRequestId = response.headers.get('x-edgeoptimize-request-id');
+        const requestId = tokowakaRequestId || edgeOptimizeRequestId;
+        const requestIdHeader = tokowakaRequestId ? 'x-tokowaka-request-id' : 'x-edgeoptimize-request-id';
         const logMessage = requestId
-          ? `[edge-live-preview] Failed to fetch URL siteId=${siteId} opportunityId=${opportunityId} url=${url} status=${response.status} elapsedMs=${elapsedMs} x-tokowaka-request-id=${requestId}`
+          ? `[edge-live-preview] Failed to fetch URL siteId=${siteId} opportunityId=${opportunityId} url=${url} status=${response.status} elapsedMs=${elapsedMs} ${requestIdHeader}=${requestId}`
           : `[edge-live-preview] Failed to fetch URL siteId=${siteId} opportunityId=${opportunityId} url=${url} status=${response.status} elapsedMs=${elapsedMs}`;
         context.log.warn(logMessage);
         return ok({
@@ -3505,7 +3507,7 @@ function SuggestionsController(ctx, sqs, env) {
       });
     } catch (error) {
       const elapsedMs = Date.now() - fetchStartedAt;
-      context.log.error(`[edge-live-preview] Error fetching URL siteId=${siteId} opportunityId=${opportunityId} url=${url} elapsedMs=${elapsedMs}: ${error.stack || error.message}`, error);
+      context.log.error(`[edge-live-preview] Error fetching URL siteId=${siteId} opportunityId=${opportunityId} url=${url} elapsedMs=${elapsedMs}: ${error.message}`, error);
       return ok({
         status: 'error',
         statusCode: 500,
