@@ -12809,6 +12809,123 @@ SerenityBrandPresenceSubredditRow:
       description: Semrush project the row belongs to.
       example: 'cb4f6443-e01f-4075-a586-85511f136e31'
 
+SerenityBrandPresenceResponseFeedSource:
+  type: object
+  description: |
+    One source cited by an AI answer.
+
+    Ordered within `sources` by `rank`, which is the element's AGGREGATE ranking for
+    that domain — NOT the position the citation occupied inline in the answer text.
+    True inline citation order is not available upstream; do not present this as
+    citation order.
+  required: [url, domain, rank, domainType]
+  properties:
+    url:
+      type: string
+      description: Cited URL.
+      example: 'https://www.runnersworld.com/gear/best-running-shoes'
+    domain:
+      type: string
+      description: Display/domain form of the source.
+      example: 'runnersworld.com'
+    rank:
+      type: integer
+      description: Aggregate ranking from the element (see the ordering caveat above).
+      example: 1
+    domainType:
+      type: string
+      description: Semrush domain classification.
+      example: 'Earned'
+
+SerenityBrandPresenceResponseFeedRecord:
+  type: object
+  description: |
+    One AI answer with the sources cited in that same execution, keyed by
+    `(projectId, prompt, model, date)`.
+
+    `model` and `date` are always present and are load-bearing: the downstream consumer
+    keys on `(prompt, region)` and carries neither dimension, so it cannot reconstruct
+    them. An empty `sources` array means that execution cited nothing — never that
+    sources were lost.
+  required: [projectId, prompt, model, date, response, sources, sourceCount]
+  properties:
+    projectId:
+      type: string
+      description: Semrush project (one per market).
+      example: '460e0a7b-b8db-44f4-8b16-0e1bd1241efa'
+    prompt:
+      type: string
+      example: 'best running shoes for flat feet'
+    model:
+      type: string
+      description: AI model that produced the answer.
+      example: 'chatgpt-paid'
+    date:
+      type: string
+      format: date
+      description: Calendar day of the execution (YYYY-MM-DD).
+      example: '2026-08-24'
+    response:
+      type: string
+      description: The answer text.
+    sources:
+      type: array
+      items:
+        $ref: '#/SerenityBrandPresenceResponseFeedSource'
+    sourceCount:
+      type: integer
+      description: |
+        Number of source rows joined to this answer. Exposed so a caller can spot an
+        implausible fan-out if the one-execution-per-tuple invariant were violated
+        upstream.
+      example: 3
+
+SerenityBrandPresenceResponseFeed:
+  type: object
+  description: |
+    Brand Claims response feed for the requested days: each AI answer paired with the
+    sources cited in the same execution.
+
+    `truncated` and `unmatchedSourceKeyCount` exist so a consumer can tell an incomplete
+    read from a genuinely quiet day — the distinction the feed depends on, since a
+    missing tuple is normally legitimate.
+  required: [records, totalCount, days, projectIds, pageSize, truncated, unmatchedSourceKeyCount]
+  properties:
+    records:
+      type: array
+      items:
+        $ref: '#/SerenityBrandPresenceResponseFeedRecord'
+    totalCount:
+      type: integer
+      example: 42
+    days:
+      type: array
+      description: Calendar days covered, oldest first.
+      items: { type: string, format: date }
+      example: ['2026-08-23', '2026-08-24']
+    projectIds:
+      type: array
+      description: Projects (markets) scoped to. Empty means workspace-wide.
+      items: { type: string }
+    pageSize:
+      type: integer
+      description: Upstream page size actually used, after clamping.
+      example: 5000
+    truncated:
+      type: boolean
+      description: |
+        True when at least one upstream page came back full, so the window may be
+        clipped and this day's set incomplete. A consumer seeing this should narrow the
+        range rather than treat the result as whole.
+      example: false
+    unmatchedSourceKeyCount:
+      type: integer
+      description: |
+        Source rows whose answer was not present in the same page. Normally 0; a
+        persistently high value means the two elements disagreed and the join is losing
+        citations.
+      example: 0
+
 SerenityBrandPresenceSubreddits:
   type: object
   description: |
