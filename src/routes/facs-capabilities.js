@@ -1376,9 +1376,9 @@ const routeFacsCapabilities = {
     // Filter / pagination / format params (not entities):
     'base64PageUrl', 'base64Url', 'baseURL', 'channel', 'cursor',
     'dataSource', 'deliveryType', 'endDate', 'eventType',
-    'exportId', 'flagName', 'geo', 'handlerType', 'hookSecret', 'limit',
+    'exportId', 'failureCursor', 'failureLimit', 'flagName', 'geo', 'handlerType', 'hookSecret', 'limit',
     'metric', 'processingType', 'product', 'productCode', 'projectName',
-    'sheetType', 'source', 'startDate', 'status', 'tier', 'tokenType', 'type',
+    'sheetType', 'source', 'startDate', 'status', 'tagFilterMode', 'tagPath', 'tier', 'tokenType', 'type',
     'url', 'version', 'week',
     // Single-row id used by the state-layer management endpoints
     // (`/state/access-mappings/:id` — the binding row's own UUID, never a

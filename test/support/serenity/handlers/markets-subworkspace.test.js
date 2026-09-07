@@ -1365,7 +1365,7 @@ describe('markets-subworkspace handlers', () => {
       expect(result.items).to.deep.equal([{ id: 'human', name: 'human' }]);
     });
 
-    it('fails closed when the standalone tag page ceiling is hit', async () => {
+    it('returns partial results when the standalone tag page ceiling is hit', async () => {
       const fullPage = Array.from({ length: 100 }, (_, i) => ({ id: `t${i}`, name: `category:C${i}` }));
       const warnLog = { info: () => {}, error: () => {}, warn: sinon.stub() };
       const transport = makeTransport({
@@ -1374,14 +1374,13 @@ describe('markets-subworkspace handlers', () => {
         // Every page is full → the walk never short-circuits and runs to the ceiling.
         listProjectTags: sinon.stub().resolves({ items: fullPage }),
       });
-      await expect(handleListTagsSubworkspace(
+      const result = await handleListTagsSubworkspace(
         transport,
         WS,
         { geoTargetId: 2840, languageCode: 'en' },
         warnLog,
-      )).to.be.rejected.then((error) => {
-        expect(error.code).to.equal('tagTreeReadIncomplete');
-      });
+      );
+      expect(result.complete).to.equal(false);
       expect(warnLog.warn).to.have.been.calledWithMatch(/page ceiling hit/);
       expect(transport.listProjectTags.callCount).to.equal(50);
     });

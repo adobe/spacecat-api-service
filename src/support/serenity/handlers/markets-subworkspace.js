@@ -985,7 +985,7 @@ export async function handleDeleteMarketSubworkspace(
  * @param {string} workspaceId - Semrush (sub-)workspace id.
  * @param {string} projectId - AIO project id.
  * @param {any} [log] - logger, used to surface a ceiling-hit truncation warning.
- * @returns {Promise<{ items: Array<{ id?: string, name?: string }> }>}
+ * @returns {Promise<{ items: Array<{ id?: string, name?: string }>, complete: boolean }>}
  */
 async function listStandaloneProjectTags(transport, workspaceId, projectId, log) {
   const items = [];
@@ -1009,13 +1009,11 @@ async function listStandaloneProjectTags(transport, workspaceId, projectId, log)
       log?.warn?.('listStandaloneProjectTags: page ceiling hit; standalone tag set may be truncated', {
         workspaceId, projectId, pages: PAGE_LIMIT, limit: LIMIT,
       });
-      const error = new ErrorWithStatusCode('Unable to read the complete tag set', 503);
-      error.code = ERROR_CODES.TAG_TREE_READ_INCOMPLETE;
-      throw error;
+      return { items, complete: false };
     }
     page += 1;
   }
-  return { items };
+  return { items, complete: true };
 }
 
 /**
@@ -1107,7 +1105,7 @@ export async function handleListTagsSubworkspace(transport, workspaceId, query, 
       byId.set(entry.id, entry);
     }
   }
-  return { items: [...byId.values()] };
+  return { items: [...byId.values()], complete: fromPrompts.complete && standalone.complete };
 }
 
 /**

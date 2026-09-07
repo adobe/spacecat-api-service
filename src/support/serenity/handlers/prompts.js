@@ -541,6 +541,7 @@ export function assertPromptTagLimit(tagIds) {
  * @param {string} semrushWorkspaceId
  * @param {string} projectId
  * @param {PromptListOptions} [options]
+ * @param {object} [log]
  * @returns {Promise<SerenityPrompt[]>}
  */
 export async function listAllProjectPrompts(
@@ -550,6 +551,7 @@ export async function listAllProjectPrompts(
   {
     tagIds = [], search, sort, order,
   } = {},
+  log,
 ) {
   const items = [];
   const limit = 200;
@@ -571,6 +573,13 @@ export async function listAllProjectPrompts(
     }
     page += 1;
   }
+  log?.warn?.('listAllProjectPrompts: faceted prompt ceiling reached', {
+    semrushWorkspaceId,
+    projectId,
+    pagesWalked: maxPages,
+    pageSize: limit,
+    upstreamPromptsScanned: items.length,
+  });
   const error = new ErrorWithStatusCode('Unable to read the complete prompt cohort', 503);
   error.code = ERROR_CODES.TAG_TREE_READ_INCOMPLETE;
   throw error;
@@ -711,7 +720,7 @@ export async function listFacetedPrompts(
     search,
     sort,
     order,
-  });
+  }, log);
   const filtered = resolved.groups.length === 0 ? all : all.filter((prompt) => {
     const promptTagIds = new Set((Array.isArray(prompt?.tags) ? prompt.tags : [])
       .map((tag) => (typeof tag === 'string' ? tag : String(tag?.id ?? '')))

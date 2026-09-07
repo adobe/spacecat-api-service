@@ -107,6 +107,8 @@ v2-serenity-prompts:
         description: |
           Enables parent-descendant expansion plus OR-within-family and
           AND-across-family matching. Unknown or incompatible ids fail closed.
+          The faceted scan is bounded to 20,000 upstream prompts; reaching the
+          ceiling returns a failure rather than a partial filter result.
       - name: sort
         in: query
         required: false

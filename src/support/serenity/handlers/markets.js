@@ -746,9 +746,7 @@ export async function listTagsForProject(transport, semrushWorkspaceId, projectI
         tagsFound: seen.size,
       },
     );
-    const error = new ErrorWithStatusCode('Unable to read the complete tag set', 503);
-    error.code = ERROR_CODES.TAG_TREE_READ_INCOMPLETE;
-    throw error;
+    return { items: Array.from(seen.values()).sort((a, b) => a.name.localeCompare(b.name)), complete: false };
   }
 
   const sorted = Array.from(seen.values()).sort((a, b) => a.name.localeCompare(b.name));
@@ -757,7 +755,7 @@ export async function listTagsForProject(transport, semrushWorkspaceId, projectI
   tagCache.delete(cacheKey);
   evictTagCacheIfNeeded();
   tagCache.set(cacheKey, { items: sorted, expiresAt: now + TAG_CACHE_TTL_MS });
-  return { items: sorted };
+  return { items: sorted, complete: true };
 }
 
 /**

@@ -1231,7 +1231,7 @@ describe('handlers/markets.js — handleListTags / handleListModels', () => {
       geoTargetId: 2840, languageCode: 'en',
     }, fakeLog());
 
-    expect(result).to.deep.equal({ items: [] });
+    expect(result).to.deep.equal({ items: [], complete: true });
     expect(transport.listPromptsByTags).to.have.callCount(2);
   });
 
@@ -1290,7 +1290,7 @@ describe('handlers/markets.js — handleListTags / handleListModels', () => {
   // upstream we never saw and the tag set is incomplete. We surface this to
   // operators via a `warn` log so the symptom (missing tag in the UI) is
   // diagnosable from log search.
-  it('listTags fails closed when the pagination ceiling is hit with full pages', async () => {
+  it('listTags returns a partial result when the pagination ceiling is hit with full pages', async () => {
     const project = makeProject({
       semrushProjectId: 'proj-big', geoTargetId: 2840, languageCode: 'en',
     });
@@ -1306,13 +1306,11 @@ describe('handlers/markets.js — handleListTags / handleListModels', () => {
     };
     const log = fakeLog();
 
-    await expect(handleListTags(transport, dataAccess, BRAND, WORKSPACE, {
+    const result = await handleListTags(transport, dataAccess, BRAND, WORKSPACE, {
       geoTargetId: 2840, languageCode: 'en',
-    }, log)).to.be.rejected.then((error) => {
-      expect(error.status).to.equal(503);
-      expect(error.code).to.equal('tagTreeReadIncomplete');
-    });
+    }, log);
 
+    expect(result.complete).to.equal(false);
     expect(transport.listPromptsByTags).to.have.callCount(50);
     expect(log.warn).to.have.been.calledWithMatch(
       'handleListTags: tag pagination ceiling reached',
@@ -2245,7 +2243,7 @@ describe('handlers/markets.js — defensive branch coverage', () => {
   // Line 615: `...(logCtx || {})` — the `|| {}` else branch fires when logCtx
   // is undefined. listTagsForProject reaches this only when the truncation
   // ceiling is hit AND logCtx was not supplied.
-  it('listTagsForProject fails closed when logCtx is undefined and the read is incomplete', async () => {
+  it('listTagsForProject returns partial data when logCtx is undefined and the read is incomplete', async () => {
     // Re-import so we can call listTagsForProject directly with logCtx omitted.
     const { listTagsForProject: ltp, clearTagCache: ctc } = await import(
       '../../../../src/support/serenity/handlers/markets.js'
@@ -2262,16 +2260,14 @@ describe('handlers/markets.js — defensive branch coverage', () => {
     };
     const log = fakeLog();
     // Call without logCtx (fourth arg omitted → undefined).
-    await expect(ltp(
+    const result = await ltp(
       transport,
       WORKSPACE,
       'proj-test',
       undefined,
       log,
-    )).to.be.rejected.then((error) => {
-      expect(error.status).to.equal(503);
-      expect(error.code).to.equal('tagTreeReadIncomplete');
-    });
+    );
+    expect(result.complete).to.equal(false);
     // The warn fired; no logCtx keys in the spread means the warn object
     // only has the five built-in keys (semrushWorkspaceId, projectId, …).
     expect(log.warn).to.have.been.calledOnce;

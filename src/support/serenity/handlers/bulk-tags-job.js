@@ -21,7 +21,9 @@ import { readTagTreeSnapshot, incompatibleTaxonomyError } from '../tag-tree.js';
 import { createAndEnqueueJob } from '../async-job-runner.js';
 import {
   assertPromptTagLimit,
+  BULK_CREATE_CONCURRENCY,
   listAllProjectPrompts,
+  mapLimit,
   publishAffected,
   resolveFacetedTagFilter,
   validateTagIds,
@@ -54,7 +56,7 @@ function promptTagIds(prompt) {
     .filter(Boolean))];
 }
 
-function matchesFacets(prompt, groups) {
+export function matchesBulkTagFacets(prompt, groups) {
   if (groups.length === 0) {
     return true;
   }
@@ -62,7 +64,7 @@ function matchesFacets(prompt, groups) {
   return groups.every((group) => [...group].some((id) => ids.has(id)));
 }
 
-function applyOperation(currentIds, operation, selected, snapshot) {
+export function applyBulkTagOperation(currentIds, operation, selected, snapshot) {
   const result = new Set(currentIds);
   if (operation === 'assign') {
     for (const item of selected) {
@@ -122,7 +124,7 @@ function idempotencyJobId(scope) {
   ].join('-');
 }
 
-function parseBody(body) {
+export function parseBulkTagsBody(body) {
   const geoTargetId = normalizeGeoTargetId(Number(body?.geoTargetId));
   const languageCode = normalizeLanguageCode(body?.languageCode);
   if (geoTargetId === null || languageCode === null) {
@@ -175,7 +177,7 @@ async function acceptBulkTags({
   idempotencyKey,
   log,
 }) {
-  const parsed = parseBody(body);
+  const parsed = parseBulkTagsBody(body);
   const hash = canonicalHash(parsed);
   const key = idempotencyKey == null ? null : String(idempotencyKey).trim();
   if (key && key.length > 256) {
@@ -239,10 +241,10 @@ async function acceptBulkTags({
   const prompts = (await listAllProjectPrompts(transport, workspaceId, projectId, {
     tagIds: resolvedFilter.candidateIds,
     search: parsed.filter.search,
-  })).filter((prompt) => matchesFacets(prompt, resolvedFilter.groups));
+  })).filter((prompt) => matchesBulkTagFacets(prompt, resolvedFilter.groups));
 
   for (const prompt of prompts) {
-    applyOperation(promptTagIds(prompt), parsed.operation, selected, snapshot);
+    applyBulkTagOperation(promptTagIds(prompt), parsed.operation, selected, snapshot);
   }
 
   let job;
@@ -311,7 +313,7 @@ export async function handleBulkTags(
   idempotencyKey,
   log,
 ) {
-  const parsed = parseBody(body);
+  const parsed = parseBulkTagsBody(body);
   const row = await dataAccess.BrandSemrushProject.findBySlice(
     brandId,
     parsed.geoTargetId,
@@ -345,7 +347,7 @@ export async function handleBulkTagsSubworkspace(
   idempotencyKey,
   log,
 ) {
-  const parsed = parseBody(body);
+  const parsed = parseBulkTagsBody(body);
   const project = await resolveProject(
     transport,
     workspaceId,
@@ -395,60 +397,58 @@ export async function bulkTagsHandler(context, job, accessToken) {
     metadata.projectId,
   );
   const byId = new Map(currentPrompts.map((prompt) => [String(prompt.id), prompt]));
-  const failures = [];
-  let updatedCount = 0;
-  let unchangedCount = 0;
-
-  for (const promptId of metadata.promptIds) {
+  const outcomes = await mapLimit(metadata.promptIds, BULK_CREATE_CONCURRENCY, async (promptId) => {
     const prompt = byId.get(promptId);
     if (!prompt) {
-      failures.push({
+      return {
+        failure: {
         semrushPromptId: promptId,
         code: 'promptNotFound',
         message: 'The prompt no longer exists',
         retryable: false,
-      });
-      // eslint-disable-next-line no-continue
-      continue;
+        },
+      };
     }
     const current = promptTagIds(prompt);
     let next;
     try {
-      next = applyOperation(current, metadata.operation, selected, snapshot);
+      next = applyBulkTagOperation(current, metadata.operation, selected, snapshot);
     } catch (error) {
-      failures.push({
-        semrushPromptId: promptId,
-        code: error.code ?? ERROR_CODES.TAG_LIMIT_EXCEEDED,
-        message: error.message,
-        retryable: false,
-      });
-      // eslint-disable-next-line no-continue
-      continue;
+      return {
+        failure: {
+          semrushPromptId: promptId,
+          code: error.code ?? ERROR_CODES.TAG_LIMIT_EXCEEDED,
+          message: 'The requested tag set exceeds the prompt tag limit',
+          retryable: false,
+        },
+      };
     }
     if (next.length === current.length && next.every((id) => current.includes(id))) {
-      unchangedCount += 1;
-      // eslint-disable-next-line no-continue
-      continue;
+      return { unchanged: true };
     }
     try {
-      // eslint-disable-next-line no-await-in-loop
       await transport.updatePromptTagsByIds(metadata.workspaceId, metadata.projectId, [{
         id: promptId,
         references: next,
         replace: true,
       }]);
-      updatedCount += 1;
+      return { updated: true };
     } catch (error) {
-      failures.push({
-        semrushPromptId: promptId,
-        code: isUpstreamGone(error) ? 'promptNotFound' : 'serenityUpstreamError',
-        message: isUpstreamGone(error)
-          ? 'The prompt no longer exists'
-          : 'The prompt could not be updated',
-        retryable: !isUpstreamGone(error),
-      });
+      return {
+        failure: {
+          semrushPromptId: promptId,
+          code: isUpstreamGone(error) ? 'promptNotFound' : 'serenityUpstreamError',
+          message: isUpstreamGone(error)
+            ? 'The prompt no longer exists'
+            : 'The prompt could not be updated',
+          retryable: !isUpstreamGone(error),
+        },
+      };
     }
-  }
+  });
+  const failures = outcomes.filter((outcome) => outcome.failure).map((outcome) => outcome.failure);
+  const updatedCount = outcomes.filter((outcome) => outcome.updated).length;
+  const unchangedCount = outcomes.filter((outcome) => outcome.unchanged).length;
 
   invalidateTagCacheForProject(metadata.workspaceId, metadata.projectId);
   const publishErrors = await publishAffected(

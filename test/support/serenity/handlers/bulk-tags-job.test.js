@@ -11,7 +11,56 @@
  */
 
 import { expect } from 'chai';
-import { pageBulkFailures } from '../../../../src/support/serenity/handlers/bulk-tags-job.js';
+import {
+  applyBulkTagOperation,
+  matchesBulkTagFacets,
+  pageBulkFailures,
+  parseBulkTagsBody,
+} from '../../../../src/support/serenity/handlers/bulk-tags-job.js';
+
+const snapshot = {
+  byId: new Map([
+    ['family', { id: 'family', rootName: 'tag', depth: 2, fullPath: [{ id: 'tag', name: 'tag' }, { id: 'family', name: 'Family' }] }],
+    ['child', { id: 'child', rootName: 'tag', depth: 3, fullPath: [{ id: 'tag', name: 'tag' }, { id: 'family', name: 'Family' }, { id: 'child', name: 'Child' }] }],
+    ['other', { id: 'other', rootName: 'tag', depth: 2, fullPath: [{ id: 'tag', name: 'tag' }, { id: 'other', name: 'Other' }] }],
+  ]),
+  items: [],
+};
+snapshot.items = [...snapshot.byId.values()];
+
+describe('bulk tags job request and tree semantics', () => {
+  it('validates the target slice, operation, mutation ids, and faceted filter mode', () => {
+    expect(() => parseBulkTagsBody({})).to.throw(/geoTargetId and languageCode/);
+    expect(() => parseBulkTagsBody({
+      geoTargetId: 1, languageCode: 'en', operation: 'replace', tagIds: ['child'],
+      filter: { tagFilterMode: 'faceted-v1' },
+    })).to.throw(/operation must be assign or remove/);
+    expect(() => parseBulkTagsBody({
+      geoTargetId: 1, languageCode: 'en', operation: 'assign', tagIds: [],
+      filter: { tagFilterMode: 'faceted-v1' },
+    })).to.throw(/tagIds must be a non-empty array/);
+    expect(parseBulkTagsBody({
+      geoTargetId: 1, languageCode: 'en', operation: 'assign', tagIds: ['child'],
+      filter: { tagFilterMode: 'faceted-v1', search: ' shoes ' },
+    }).filter).to.deep.equal({ tagIds: [], tagFilterMode: 'faceted-v1', search: 'shoes' });
+  });
+
+  it('assigns a child with its parent and removes a parent subtree', () => {
+    expect(applyBulkTagOperation([], 'assign', [snapshot.byId.get('child')], snapshot))
+      .to.have.members(['child', 'family']);
+    expect(applyBulkTagOperation(['family', 'child', 'other'], 'remove', [snapshot.byId.get('family')], snapshot))
+      .to.have.members(['other']);
+  });
+
+  it('uses OR within each facet family and AND across families', () => {
+    expect(matchesBulkTagFacets({ tags: [{ id: 'child' }, { id: 'other' }] }, [
+      new Set(['child', 'missing']), new Set(['other']),
+    ])).to.equal(true);
+    expect(matchesBulkTagFacets({ tags: [{ id: 'child' }] }, [
+      new Set(['child']), new Set(['other']),
+    ])).to.equal(false);
+  });
+});
 
 describe('bulk tags job result paging', () => {
   it('returns at most 100 failures and an opaque next cursor', () => {

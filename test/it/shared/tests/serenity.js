@@ -279,6 +279,29 @@ export default function serenityTests(
       expect(JSON.stringify(res.body)).to.not.match(/promise/i);
     });
 
+    describe('Serenity API — bulk tag and impact route contracts', () => {
+      const base = `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/serenity`;
+
+      it('POST /serenity/prompts/bulk-tags reaches bulk validation', async () => {
+        const res = await getHttpClient().admin.post(`${base}/prompts/bulk-tags`, {});
+        expect(res.status).to.equal(400);
+        expect(res.body.error).to.equal('invalidRequest');
+      });
+
+      it('GET /serenity/tags/:tagId/impact validates the market slice', async () => {
+        const res = await getHttpClient().admin.get(`${base}/tags/not-a-tag/impact`);
+        expect(res.status).to.equal(400);
+      });
+
+      it('GET /serenity/prompts/jobs/:jobId accepts bulk failure pagination params', async () => {
+        const res = await getHttpClient().admin.get(
+          `${base}/prompts/jobs/${SERENITY_CLASSIFY_JOB_ID}?failureCursor=MA&failureLimit=1`,
+        );
+        expect(res.status).to.equal(200);
+        expect(res.body).to.have.property('result');
+      });
+    });
+
     it('GET /serenity/prompts/jobs/:jobId 404s for an unknown job id', async () => {
       const res = await getHttpClient().admin.get(`${base}/prompts/jobs/eeee9999-9999-4999-a999-999999999999`);
       expect(res.status).to.equal(404);

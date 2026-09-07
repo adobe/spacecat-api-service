@@ -175,6 +175,24 @@ function parsedQuery(context) {
   return out;
 }
 
+function publicJobError(error) {
+  if (!error || typeof error !== 'object') {
+    return null;
+  }
+  const allowedCodes = new Set([
+    'invalidRequest', 'promptNotFound', 'serenityUpstreamError',
+    'tagLimitExceeded', 'incompatibleTagTaxonomy',
+  ]);
+  const code = allowedCodes.has(error.code) ? error.code : 'jobFailed';
+  return {
+    code,
+    message: typeof error.message === 'string'
+      ? error.message.slice(0, 256)
+      : 'The background job failed',
+    retryable: error.retryable === true,
+  };
+}
+
 function errorTokenForStatus(status) {
   switch (status) {
     case 401: return 'authenticationRequired';
@@ -803,8 +821,10 @@ function SerenityController(context, log, env) {
       }
       const transport = buildTransport(ctx, imsToken);
       const callerId = resolveCallerId(ctx);
-      const idempotencyKey = ctx?.pathInfo?.headers?.['idempotency-key']
-        ?? ctx?.pathInfo?.headers?.['Idempotency-Key'];
+      const headers = ctx?.pathInfo?.headers ?? {};
+      const idempotencyKey = Object.entries(headers).find(
+        ([name]) => name.toLowerCase() === 'idempotency-key',
+      )?.[1];
       const result = auth.mode === 'subworkspace'
         ? await handleBulkTagsSubworkspace(
           ctx,
@@ -2191,7 +2211,7 @@ function SerenityController(context, log, env) {
       const result = publicJobType === BULK_TAGS_PUBLIC_JOB_TYPE && rawResult
         ? pageBulkFailures(rawResult, query.failureCursor, failureLimit)
         : rawResult;
-      const error = status === 'FAILED' ? job.getError?.() ?? null : null;
+      const error = status === 'FAILED' ? publicJobError(job.getError?.()) : null;
       return createResponse(
         {
           jobId: job.getId(),
