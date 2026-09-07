@@ -287,9 +287,9 @@ const LEGACY_SOURCE_ROOT_NAME = 'source';
  * The dimensions whose ROOT may carry a display rename (tag-display-names.md
  * §1 item 4) — `category`, `type`, `source`. `intent` is excluded (its root is
  * `$abv_tags$intent` forever, no display rename) and `origin` is excluded
- * (retired by remap, not renamed) — both already have their OWN dedicated
- * split-root guardrails above/below, so they are deliberately not folded into
- * this generalized one.
+ * (its root keeps its canonical name, never renamed) — both already have
+ * their OWN dedicated split-root guardrails above/below, so they are
+ * deliberately not folded into this generalized one.
  */
 const DISPLAY_RENAMING_DIMENSIONS = [DIMENSION.CATEGORY, DIMENSION.TYPE, DIMENSION.SOURCE];
 

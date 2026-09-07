@@ -387,6 +387,11 @@ describe('handleRequestBrandClaims (on-demand, LLMO-7263)', () => {
         SLACK_BRAND_CLAIMS_REQUEST_CHANNEL_ID: 'C123',
         SLACK_BOT_TOKEN: 'xoxb-1',
       },
+      attributes: {
+        authInfo: {
+          getProfile: () => ({ trial_email: 'ada@example.com', first_name: 'Ada', last_name: 'Lovelace' }),
+        },
+      },
     };
   });
 
@@ -403,6 +408,45 @@ describe('handleRequestBrandClaims (on-demand, LLMO-7263)', () => {
     expect(msg.onDemand).to.equal(true);
     expect(msg.auditContext).to.deep.equal({ trigger: 'on-demand-brand-claims' });
     expect(postSlackMessage).to.have.been.calledOnce;
+    // The alert names who triggered it (name + human-readable email).
+    expect(postSlackMessage.getCall(0).args[1]).to.include('by Ada Lovelace (ada@example.com)');
+  });
+
+  it('uses preferred_username (RFC-5322) over the profile.email GUID when there is no name', async () => {
+    context.attributes.authInfo.getProfile = () => ({ preferred_username: 'grace@example.com' });
+    await handleRequestBrandClaims(context, site);
+    expect(postSlackMessage.getCall(0).args[1]).to.include('by grace@example.com');
+  });
+
+  it('uses the name alone when the profile has no email', async () => {
+    context.attributes.authInfo.getProfile = () => ({ first_name: 'Ada', last_name: 'Lovelace' });
+    await handleRequestBrandClaims(context, site);
+    // Ends with "by Ada Lovelace." — the name only, no "(email)" appended.
+    expect(postSlackMessage.getCall(0).args[1]).to.include('by Ada Lovelace.');
+  });
+
+  it('omits the "by" clause when no identity is available', async () => {
+    delete context.attributes;
+    await handleRequestBrandClaims(context, site);
+    const text = postSlackMessage.getCall(0).args[1];
+    expect(text).to.not.include(' by ');
+    expect(text).to.include('(site-1).');
+  });
+
+  it('omits the "by" clause when the profile lookup throws (fail-safe)', async () => {
+    context.attributes.authInfo.getProfile = () => {
+      throw new Error('boom');
+    };
+    await handleRequestBrandClaims(context, site);
+    expect(postSlackMessage.getCall(0).args[1]).to.not.include(' by ');
+  });
+
+  it('strips Slack mrkdwn control characters from the requester label', async () => {
+    context.attributes.authInfo.getProfile = () => ({ first_name: '<@here>', last_name: '`Ada`' });
+    await handleRequestBrandClaims(context, site);
+    const text = postSlackMessage.getCall(0).args[1];
+    expect(text).to.include('by @here Ada');
+    expect(text).to.not.match(/[<>`|]/);
   });
 
   it('returns 500 when AUDIT_JOBS_QUEUE_URL is not configured', async () => {
