@@ -228,6 +228,45 @@ async function revokeGrants(SuggestionGrant, grantIds) {
 }
 
 /**
+ * Revokes any active grants tied to the given suggestion IDs — used when suggestions are
+ * deleted (individually, or cascaded via an opportunity delete) so a removed suggestion
+ * doesn't leave an orphaned grant still counted against the site's token budget (SITES-50360).
+ *
+ * @param {Object} SuggestionGrant - SuggestionGrant collection.
+ * @param {string[]} suggestionIds - Suggestion IDs being deleted.
+ * @returns {Promise<void>}
+ */
+export async function revokeGrantsForSuggestions(SuggestionGrant, suggestionIds) {
+  if (!suggestionIds?.length) {
+    return;
+  }
+  const rows = await SuggestionGrant.findBySuggestionIds(suggestionIds);
+  const grantIds = [...new Set(rows.map((r) => r.grant_id))];
+  await revokeGrants(SuggestionGrant, grantIds);
+}
+
+/**
+ * Revokes grants for every suggestion under an opportunity — used before a cascading
+ * opportunity delete removes all its suggestions (SITES-50360).
+ *
+ * @param {Object} dataAccess - Data access collections.
+ * @param {Object} opportunity - Opportunity model (getId()).
+ * @returns {Promise<void>}
+ */
+export async function revokeGrantsForOpportunity(dataAccess, opportunity) {
+  const { Suggestion, SuggestionGrant } = dataAccess ?? {};
+  const opptyId = opportunity?.getId();
+
+  if (!Suggestion || !SuggestionGrant || !opptyId) {
+    return;
+  }
+
+  const suggestions = await Suggestion.allByOpportunityId(opptyId);
+  const suggestionIds = suggestions.map((s) => s.getId());
+  await revokeGrantsForSuggestions(SuggestionGrant, suggestionIds);
+}
+
+/**
  * Revokes outstanding grants for an opportunity's suggestions that are still
  * in NEW status (i.e. never applied/approved) — used when an opportunity
  * moves to a terminal RESOLVED state so a superseding opportunity of the

@@ -16,10 +16,11 @@ import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 
 import {
-  buildReservedDomains,
+  buildReservedIdentities,
   collectCompetitorBenchmarks,
   dropReservedCompetitors,
-  removedCompetitorDomains,
+  removedCompetitors,
+  resolveBenchmarksByCompetitor,
   syncCompetitorBenchmarksForProject,
   syncCompetitorBenchmarksAcrossMarkets,
 } from '../../../src/support/serenity/competitor-benchmarks.js';
@@ -35,18 +36,49 @@ describe('competitor-benchmarks helpers', () => {
   const sandbox = sinon.createSandbox();
   afterEach(() => sandbox.restore());
 
+  // A declaration, not a fake: every stub is created inside the `it` that calls
+  // this, on the per-suite sandbox, so nothing is shared across tests.
+  function makeTransport(benchmarks) {
+    return {
+      listBenchmarks: sandbox.stub().resolves({ aio_benchmarks: benchmarks }),
+      createBenchmarks: sandbox.stub().resolves({ ids: ['new'], existing_count: 0 }),
+      updateBenchmark: sandbox.stub().resolves(null),
+      deleteBenchmarks: sandbox.stub().resolves(null),
+    };
+  }
+
   describe('collectCompetitorBenchmarks', () => {
-    it('region-filters, extracts domains, defaults name to domain, de-dupes, skips url-less', () => {
+    it('region-filters, extracts domains, defaults name to domain, de-dupes by name, skips url-less', () => {
       const competitors = [
         { name: 'Bing', url: 'https://www.bing.com', regions: ['us'] },
         { name: 'DE only', url: 'https://de.com', regions: ['de'] }, // filtered out for us
-        { url: 'https://www.bing.com/x', regions: [] }, // dup of bing.com
+        { name: 'BING', url: 'https://www.bing.com/x', regions: [] }, // dup NAME of Bing
         { name: 'No URL', regions: [] }, // skipped (no url)
         { url: 'https://named-by-domain.com' }, // region-less, no name → name = domain
       ];
       expect(collectCompetitorBenchmarks(competitors, 'us')).to.deep.equal([
-        { name: 'Bing', domain: 'bing.com', aliases: [] },
-        { name: 'named-by-domain.com', domain: 'named-by-domain.com', aliases: [] },
+        {
+          name: 'Bing', key: 'bing', domain: 'bing.com', identity: 'bing.com', aliases: [],
+        },
+        {
+          name: 'named-by-domain.com',
+          key: 'named-by-domain.com',
+          domain: 'named-by-domain.com',
+          identity: 'named-by-domain.com',
+          aliases: [],
+        },
+      ]);
+    });
+
+    it('keeps two distinct competitors that share a host', () => {
+      // A Semrush project holds several benchmarks on one domain, discriminated by
+      // brand_name — de-duping on domain kept one sibling and discarded the rest.
+      const competitors = [
+        { name: 'Phoenix Suns', url: 'https://www.nba.com/suns', regions: ['us'] },
+        { name: 'Golden State Warriors', url: 'https://www.nba.com/warriors', regions: ['us'] },
+      ];
+      expect(collectCompetitorBenchmarks(competitors, 'us').map((c) => c.name)).to.deep.equal([
+        'Phoenix Suns', 'Golden State Warriors',
       ]);
     });
 
@@ -55,42 +87,49 @@ describe('competitor-benchmarks helpers', () => {
       expect(collectCompetitorBenchmarks([], 'us')).to.deep.equal([]);
     });
 
-    it('drops competitors whose domain is one of the brand\'s reserved domains', () => {
+    it('drops competitors whose site identity is one of the brand\'s own', () => {
       const competitors = [
         { name: 'Self primary', url: 'https://www.brand.com', regions: ['us'] },
-        { name: 'Self DE market', url: 'https://brand.de/path', regions: ['us'] },
+        { name: 'Self DE market', url: 'https://brand.de', regions: ['us'] },
         { name: 'Self website url', url: 'https://shop.brand.io', regions: ['us'] },
+        // Same host as the brand's own subpath site, different path — a different
+        // site, and the shape a folded-host comparison discarded.
+        { name: 'Sibling site', url: 'https://brand.de/other', regions: ['us'] },
         { name: 'Real competitor', url: 'https://rival.com', regions: ['us'] },
       ];
-      const reserved = buildReservedDomains(
+      const reserved = buildReservedIdentities(
         ['brand.com', 'brand.de'],
         ['https://shop.brand.io'],
       );
-      expect(collectCompetitorBenchmarks(competitors, 'us', reserved)).to.deep.equal([
-        { name: 'Real competitor', domain: 'rival.com', aliases: [] },
-      ]);
+      expect(collectCompetitorBenchmarks(competitors, 'us', reserved).map((c) => c.name))
+        .to.deep.equal(['Sibling site', 'Real competitor']);
     });
   });
 
-  describe('buildReservedDomains', () => {
+  describe('buildReservedIdentities', () => {
     it('normalizes + dedupes domains and brand URLs (string or { value })', () => {
-      const reserved = buildReservedDomains(
+      const reserved = buildReservedIdentities(
         ['https://www.brand.com', 'brand.com', 'brand.de'],
         [{ value: 'https://shop.brand.io' }, 'https://www.brand.de'],
       );
       expect([...reserved].sort()).to.deep.equal(['brand.com', 'brand.de', 'shop.brand.io']);
     });
 
-    it('tolerates non-array / empty / unparseable inputs', () => {
-      expect([...buildReservedDomains()].length).to.equal(0);
-      expect([...buildReservedDomains(null, undefined)].length).to.equal(0);
-      expect([...buildReservedDomains(['not a url', ''], [null, { value: '' }])].length).to.equal(0);
+    it('keeps the path, and folds www so a www spelling cannot evade the guard', () => {
+      const reserved = buildReservedIdentities(['nba.com'], ['https://www.nba.com/kings']);
+      expect([...reserved].sort()).to.deep.equal(['nba.com', 'nba.com/kings']);
     });
 
-    it('treats a non-array urls argument as no brand URLs (else branch at line 57)', () => {
+    it('tolerates non-array / empty / unparseable inputs', () => {
+      expect([...buildReservedIdentities()].length).to.equal(0);
+      expect([...buildReservedIdentities(null, undefined)].length).to.equal(0);
+      expect([...buildReservedIdentities([''], [null, { value: '' }])].length).to.equal(0);
+    });
+
+    it('treats a non-array urls argument as no brand URLs', () => {
       // urls passed as a string (not an array) → the `Array.isArray(urls) ? urls : []`
       // else arm short-circuits the URL loop; only the domains fold in.
-      const reserved = buildReservedDomains(['https://www.brand.com'], 'https://shop.brand.io');
+      const reserved = buildReservedIdentities(['https://www.brand.com'], 'https://shop.brand.io');
       expect([...reserved]).to.deep.equal(['brand.com']);
     });
   });
@@ -100,12 +139,28 @@ describe('competitor-benchmarks helpers', () => {
       const competitors = [
         { name: 'Self', url: 'https://www.brand.com', regions: ['us'] },
         { name: 'Rival', url: 'https://rival.com', regions: ['us'] },
-        { name: 'No URL', regions: ['us'] }, // unparseable domain → kept (not reserved)
+        { name: 'No URL', regions: ['us'] }, // unparseable identity → kept (not reserved)
       ];
-      const reserved = buildReservedDomains(['brand.com'], []);
+      const reserved = buildReservedIdentities(['brand.com'], []);
       const { kept, dropped } = dropReservedCompetitors(competitors, reserved);
       expect(kept.map((c) => c.name)).to.deep.equal(['Rival', 'No URL']);
       expect(dropped.map((c) => c.name)).to.deep.equal(['Self']);
+    });
+
+    it('keeps a competitor on a sibling path of the brand\'s own host', () => {
+      // The Sacramento Kings shape: brand tracked on nba.com/kings, competitors on
+      // nba.com/suns and nba.com/warriors. Folded to hosts, all three read as
+      // nba.com and every competitor was rejected as self-referential — which, on
+      // the update path, rejected the whole brand edit with a 400.
+      const competitors = [
+        { name: 'Phoenix Suns', url: 'https://www.nba.com/suns' },
+        { name: 'Golden State Warriors', url: 'https://www.nba.com/warriors' },
+        { name: 'Sacramento Kings', url: 'https://www.nba.com/kings' }, // genuinely us
+      ];
+      const reserved = buildReservedIdentities(['nba.com'], ['https://nba.com/kings']);
+      const { kept, dropped } = dropReservedCompetitors(competitors, reserved);
+      expect(kept.map((c) => c.name)).to.deep.equal(['Phoenix Suns', 'Golden State Warriors']);
+      expect(dropped.map((c) => c.name)).to.deep.equal(['Sacramento Kings']);
     });
 
     it('returns everything kept when nothing is reserved / non-array input', () => {
@@ -117,33 +172,60 @@ describe('competitor-benchmarks helpers', () => {
     });
   });
 
-  describe('removedCompetitorDomains', () => {
-    it('returns domains present in old but not new (region-agnostic)', () => {
+  describe('removedCompetitors', () => {
+    it('returns competitors present in old but not new (region-agnostic)', () => {
       const oldC = [
-        { url: 'https://a.com', regions: ['us'] },
-        { url: 'https://b.com', regions: ['de'] },
+        { name: 'A', url: 'https://a.com', regions: ['us'] },
+        { name: 'B', url: 'https://b.com', regions: ['de'] },
       ];
-      const newC = [{ url: 'https://a.com', regions: ['us'] }];
-      expect(removedCompetitorDomains(oldC, newC)).to.deep.equal(['b.com']);
+      const newC = [{ name: 'A', url: 'https://a.com', regions: ['us'] }];
+      expect(removedCompetitors(oldC, newC)).to.deep.equal([
+        { name: 'B', key: 'b', domain: 'b.com' },
+      ]);
+    });
+
+    it('sees the removal of one of two competitors sharing a host', () => {
+      // Diffed on domain this was invisible: the surviving sibling kept the host
+      // present in the new set, so the removal produced nothing to delete.
+      const oldC = [
+        { name: 'Phoenix Suns', url: 'https://www.nba.com/suns' },
+        { name: 'Los Angeles Lakers', url: 'https://www.nba.com/lakers' },
+      ];
+      const newC = [{ name: 'Phoenix Suns', url: 'https://www.nba.com/suns' }];
+      expect(removedCompetitors(oldC, newC)).to.deep.equal([
+        { name: 'Los Angeles Lakers', key: 'los angeles lakers', domain: 'nba.com' },
+      ]);
     });
 
     it('returns [] when nothing was removed', () => {
-      const c = [{ url: 'https://a.com' }];
-      expect(removedCompetitorDomains(c, c)).to.deep.equal([]);
-      expect(removedCompetitorDomains([], [{ url: 'https://a.com' }])).to.deep.equal([]);
+      const c = [{ name: 'A', url: 'https://a.com' }];
+      expect(removedCompetitors(c, c)).to.deep.equal([]);
+      expect(removedCompetitors([], [{ name: 'A', url: 'https://a.com' }])).to.deep.equal([]);
+    });
+
+    it('treats a renamed competitor as still present, not removed and re-added', () => {
+      // Its benchmark must be renamed in place. Deleting and recreating would lose
+      // the aliases Semrush's own resolution added, which survive only by being
+      // carried forward from the live list.
+      const oldC = [{ name: 'Rival', url: 'https://rival.com' }];
+      const newC = [{ name: 'Rival Inc', url: 'https://rival.com' }];
+      expect(removedCompetitors(oldC, newC)).to.deep.equal([]);
+    });
+
+    it('still removes a renamed sibling\'s neighbour on the same host', () => {
+      // Identity, not host: renaming the Suns must not shelter the Lakers.
+      const oldC = [
+        { name: 'Suns', url: 'https://www.nba.com/suns' },
+        { name: 'Los Angeles Lakers', url: 'https://www.nba.com/lakers' },
+      ];
+      const newC = [{ name: 'Phoenix Suns', url: 'https://www.nba.com/suns' }];
+      expect(removedCompetitors(oldC, newC)).to.deep.equal([
+        { name: 'Los Angeles Lakers', key: 'los angeles lakers', domain: 'nba.com' },
+      ]);
     });
   });
 
   describe('syncCompetitorBenchmarksForProject', () => {
-    function makeTransport(benchmarks) {
-      return {
-        listBenchmarks: sandbox.stub().resolves({ aio_benchmarks: benchmarks }),
-        createBenchmarks: sandbox.stub().resolves({ ids: ['new'], existing_count: 0 }),
-        updateBenchmark: sandbox.stub().resolves(null),
-        deleteBenchmarks: sandbox.stub().resolves(null),
-      };
-    }
-
     it('creates benchmarks for new competitors, skipping ones already present', async () => {
       const transport = makeTransport([
         { id: 'own', main_brand: true, domain: 'acme.com' },
@@ -175,17 +257,23 @@ describe('competitor-benchmarks helpers', () => {
       const transport = makeTransport([
         { id: 'own', main_brand: true, domain: 'acme.com' },
         {
-          id: 'held', main_brand: false, domain: 'held.com', brand_name: 'Duck',
+          id: 'held',
+          main_brand: false,
+          domain: 'held.com',
+          brand_name: 'Holder',
+          brand_aliases: ['ddg'],
         },
       ]);
       const competitors = [
-        // 'duck' (its lowercase name) is held by the 'Duck' benchmark above.
-        { name: 'DUCK', url: 'https://duckduckgo.com', regions: ['us'] },
+        // 'ddg' is already held by the 'Holder' benchmark above.
+        {
+          name: 'Duck', url: 'https://duckduckgo.com', aliases: ['DDG'], regions: ['us'],
+        },
         { name: 'Clean', url: 'https://clean.com', regions: ['us'] },
       ];
       const result = await syncCompetitorBenchmarksForProject(transport, WS, PID, competitors, [], 'us', undefined);
       expect(transport.createBenchmarks).to.have.been.calledOnceWith(WS, PID, [
-        { brand_name: 'DUCK', domain: 'duckduckgo.com', brand_aliases: [] },
+        { brand_name: 'Duck', domain: 'duckduckgo.com', brand_aliases: ['duck'] },
         { brand_name: 'Clean', domain: 'clean.com', brand_aliases: ['clean'] },
       ]);
       expect(result.created).to.equal(2);
@@ -196,8 +284,13 @@ describe('competitor-benchmarks helpers', () => {
         { id: 'own', main_brand: true, domain: 'acme.com' },
         { id: 'gone-id', main_brand: false, domain: 'gone.com' },
       ]);
-      const result = await syncCompetitorBenchmarksForProject(transport, WS, PID, [], ['gone.com', 'acme.com'], 'us', undefined);
-      // gone.com deleted by its id; acme.com is main_brand → never deletable.
+      const removed = [
+        { name: 'Gone', key: 'gone', domain: 'gone.com' },
+        { name: 'Acme', key: 'acme', domain: 'acme.com' },
+      ];
+      const result = await syncCompetitorBenchmarksForProject(transport, WS, PID, [], removed, 'us', undefined);
+      // Gone is matched to its benchmark and deleted by id; Acme resolves only to
+      // the main-brand benchmark, which is never a candidate.
       expect(transport.deleteBenchmarks).to.have.been.calledOnceWith(WS, PID, ['gone-id']);
       expect(transport.createBenchmarks).to.not.have.been.called;
       expect(result).to.deep.equal({
@@ -419,13 +512,25 @@ describe('competitor-benchmarks helpers', () => {
       transport.listBenchmarks.onSecondCall().resolves({
         aio_benchmarks: [
           {
-            id: 'own', main_brand: true, domain: 'acme.com', rejected_brand_aliases: ['ignored'],
+            id: 'own',
+            main_brand: true,
+            domain: 'acme.com',
+            brand_name: 'Acme',
+            rejected_brand_aliases: ['ignored'],
           },
           {
-            id: 'bad', main_brand: false, domain: '', rejected_brand_aliases: ['ignored'],
+            id: 'other',
+            main_brand: false,
+            domain: 'duckduckgo.com',
+            brand_name: 'Some sibling',
+            rejected_brand_aliases: ['ignored'],
           },
           {
-            id: 'duck', main_brand: false, domain: 'duckduckgo.com', rejected_brand_aliases: ['bogus'],
+            id: 'duck',
+            main_brand: false,
+            domain: 'duckduckgo.com',
+            brand_name: 'Duck',
+            rejected_brand_aliases: ['bogus'],
           },
         ],
       });
@@ -435,7 +540,555 @@ describe('competitor-benchmarks helpers', () => {
         },
       ];
       const result = await syncCompetitorBenchmarksForProject(transport, WS, PID, competitors, [], 'us', undefined);
-      expect(result.rejected).to.deep.equal([{ domain: 'duckduckgo.com', aliases: ['bogus'] }]);
+      // Selected by NAME: the sibling benchmark on the SAME domain is not ours to
+      // report, and a domain-keyed capture would have attributed its rejections to
+      // the competitor we wrote.
+      expect(result.rejected).to.deep.equal([
+        { name: 'Duck', domain: 'duckduckgo.com', aliases: ['bogus'] },
+      ]);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Sibling competitors on one host — the shape the domain keying could not hold
+  // ---------------------------------------------------------------------------
+
+  describe('syncCompetitorBenchmarksForProject — competitors sharing a host', () => {
+    it('creates a benchmark for each of two distinct competitors on one host', async () => {
+      const transport = makeTransport([
+        {
+          id: 'own', main_brand: true, domain: 'nba.com', brand_name: 'Sacramento Kings',
+        },
+      ]);
+      const competitors = [
+        { name: 'Phoenix Suns', url: 'https://www.nba.com/suns', regions: ['us'] },
+        { name: 'Golden State Warriors', url: 'https://www.nba.com/warriors', regions: ['us'] },
+      ];
+      const result = await syncCompetitorBenchmarksForProject(transport, WS, PID, competitors, [], 'us', undefined);
+      expect(transport.createBenchmarks).to.have.been.calledOnceWith(WS, PID, [
+        { brand_name: 'Phoenix Suns', domain: 'nba.com', brand_aliases: ['phoenix suns'] },
+        {
+          brand_name: 'Golden State Warriors',
+          domain: 'nba.com',
+          brand_aliases: ['golden state warriors'],
+        },
+      ]);
+      expect(result.created).to.equal(2);
+    });
+
+    it('renames one sibling in place and leaves the other untouched', async () => {
+      // Keyed on domain, both siblings collapsed into one Map entry and the rename
+      // was written onto whichever benchmark happened to be set last.
+      const transport = makeTransport([
+        {
+          id: 'own', main_brand: true, domain: 'nba.com', brand_name: 'Sacramento Kings',
+        },
+        {
+          id: 'suns',
+          main_brand: false,
+          domain: 'nba.com',
+          brand_name: 'Suns',
+          brand_aliases: ['suns'],
+        },
+        {
+          id: 'warriors',
+          main_brand: false,
+          domain: 'nba.com',
+          brand_name: 'Golden State Warriors',
+          brand_aliases: ['golden state warriors'],
+        },
+      ]);
+      const competitors = [
+        { name: 'Suns', url: 'https://www.nba.com/suns', regions: ['us'] },
+        { name: 'Warriors', url: 'https://www.nba.com/warriors', regions: ['us'] },
+      ];
+      const result = await syncCompetitorBenchmarksForProject(transport, WS, PID, competitors, [], 'us', undefined);
+      expect(transport.updateBenchmark).to.have.been.calledOnceWith(WS, PID, 'warriors', {
+        brand_name: 'Warriors',
+        domain: 'nba.com',
+        brand_aliases: ['golden state warriors', 'warriors'],
+      });
+      expect(transport.createBenchmarks).to.not.have.been.called;
+      expect(result.updated).to.equal(1);
+    });
+
+    it('deletes exactly the removed sibling, not an arbitrary one on the host', async () => {
+      const transport = makeTransport([
+        {
+          id: 'own', main_brand: true, domain: 'nba.com', brand_name: 'Sacramento Kings',
+        },
+        {
+          id: 'suns',
+          main_brand: false,
+          domain: 'nba.com',
+          brand_name: 'Phoenix Suns',
+          brand_aliases: ['phoenix suns'],
+        },
+        {
+          id: 'warriors',
+          main_brand: false,
+          domain: 'nba.com',
+          brand_name: 'Golden State Warriors',
+          brand_aliases: ['golden state warriors'],
+        },
+      ]);
+      const kept = [{ name: 'Phoenix Suns', url: 'https://www.nba.com/suns', regions: ['us'] }];
+      const removed = removedCompetitors(
+        [...kept, { name: 'Golden State Warriors', url: 'https://www.nba.com/warriors' }],
+        kept,
+      );
+      const result = await syncCompetitorBenchmarksForProject(transport, WS, PID, kept, removed, 'us', undefined);
+      expect(transport.deleteBenchmarks).to.have.been.calledOnceWith(WS, PID, ['warriors']);
+      expect(result.deleted).to.equal(1);
+    });
+
+    it('moves a tracked competitor to a new domain in place rather than orphaning it', async () => {
+      const transport = makeTransport([
+        {
+          id: 'rival',
+          main_brand: false,
+          domain: 'old-rival.com',
+          brand_name: 'Rival',
+          brand_aliases: ['rival'],
+        },
+      ]);
+      const competitors = [{ name: 'Rival', url: 'https://new-rival.com', regions: ['us'] }];
+      const result = await syncCompetitorBenchmarksForProject(transport, WS, PID, competitors, [], 'us', undefined);
+      expect(transport.updateBenchmark).to.have.been.calledOnceWith(WS, PID, 'rival', {
+        brand_name: 'Rival', domain: 'new-rival.com', brand_aliases: ['rival'],
+      });
+      expect(transport.createBenchmarks).to.not.have.been.called;
+      expect(result).to.deep.equal({
+        created: 0, updated: 1, deleted: 0, changed: true, rejected: [],
+      });
+    });
+
+    it('skips a create whose name another benchmark already holds', async () => {
+      // Upstream refuses a duplicate brand_name with a 409 that fails the WHOLE
+      // create — so offering one would take the rest of the batch down with it.
+      const warn = sandbox.stub();
+      // 'Blocked' is not this benchmark's NAME, so the competitor does not resolve
+      // to it — but the benchmark holds it as an alias, so upstream owns the value.
+      const transport = makeTransport([
+        {
+          id: 'holder',
+          main_brand: false,
+          domain: 'holder.com',
+          brand_name: 'Holder',
+          brand_aliases: ['blocked'],
+        },
+      ]);
+      const competitors = [
+        { name: 'Blocked', url: 'https://blocked.com', regions: ['us'] },
+        { name: 'Clean', url: 'https://clean.com', regions: ['us'] },
+      ];
+      const result = await syncCompetitorBenchmarksForProject(transport, WS, PID, competitors, [], 'us', { info: () => {}, warn });
+      // The batch goes out carrying only the competitor upstream can accept.
+      expect(transport.createBenchmarks).to.have.been.calledOnceWith(WS, PID, [
+        { brand_name: 'Clean', domain: 'clean.com', brand_aliases: ['clean'] },
+      ]);
+      expect(result.created).to.equal(1);
+      expect(warn).to.have.been.calledWithMatch(
+        'competitor-benchmarks: skipped, name already used in project',
+        sinon.match({ competitor: 'Blocked' }),
+      );
+    });
+
+    it('keeps a batched create clean against itself, not just against the project', async () => {
+      // Uniqueness spans the union of every benchmark's name and aliases, so two
+      // NEW siblings can collide with each other before either exists upstream.
+      const transport = makeTransport([]);
+      const competitors = [
+        { name: 'Rival', url: 'https://rival.com', regions: ['us'] },
+        // Claims 'rival' as an alias, which the first entry above takes as its name.
+        {
+          name: 'Sibling', url: 'https://rival.com', aliases: ['Rival'], regions: ['us'],
+        },
+      ];
+      const result = await syncCompetitorBenchmarksForProject(transport, WS, PID, competitors, [], 'us', undefined);
+      expect(transport.createBenchmarks).to.have.been.calledOnceWith(WS, PID, [
+        { brand_name: 'Rival', domain: 'rival.com', brand_aliases: ['rival'] },
+        { brand_name: 'Sibling', domain: 'rival.com', brand_aliases: ['sibling'] },
+      ]);
+      expect(result.created).to.equal(2);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Reconciling benchmarks written before names were the key
+  // ---------------------------------------------------------------------------
+
+  describe('resolveBenchmarksByCompetitor', () => {
+    it('matches on name, case-insensitively, and ignores the main brand', () => {
+      const resolved = resolveBenchmarksByCompetitor(
+        [
+          {
+            id: 'own', main_brand: true, domain: 'acme.com', brand_name: 'Acme',
+          },
+          {
+            id: 'r', main_brand: false, domain: 'rival.com', brand_name: 'Rival',
+          },
+        ],
+        [{ key: 'rival', name: 'Rival', domain: 'rival.com' }, { key: 'acme', name: 'Acme', domain: 'acme.com' }],
+      );
+      expect(resolved.get('rival')?.id).to.equal('r');
+      expect(resolved.has('acme')).to.equal(false);
+    });
+
+    it('adopts a domain-keyed benchmark when the host holds exactly one of each', () => {
+      const info = sandbox.stub();
+      const resolved = resolveBenchmarksByCompetitor(
+        [{
+          id: 'legacy', main_brand: false, domain: 'rival.com', brand_name: 'Stale Name',
+        }],
+        [{ key: 'rival', name: 'Rival', domain: 'rival.com' }],
+        new Set(),
+        { info, warn: () => {} },
+        { projectId: PID },
+      );
+      expect(resolved.get('rival')?.id).to.equal('legacy');
+      expect(info).to.have.been.calledWithMatch(
+        'competitor-benchmarks: adopted domain-keyed benchmark',
+        sinon.match({ domain: 'rival.com', benchmarkId: 'legacy', competitor: 'Rival' }),
+      );
+    });
+
+    it('refuses to adopt when two competitors contend for one benchmark on a host', () => {
+      // Guessing here would write one competitor's name and aliases onto another's
+      // benchmark, which no later sync can detect. A duplicate benchmark is the
+      // recoverable failure, so both are left to create.
+      const warn = sandbox.stub();
+      const resolved = resolveBenchmarksByCompetitor(
+        [{
+          id: 'legacy', main_brand: false, domain: 'nba.com', brand_name: 'Stale',
+        }],
+        [
+          { key: 'phoenix suns', name: 'Phoenix Suns', domain: 'nba.com' },
+          { key: 'golden state warriors', name: 'Golden State Warriors', domain: 'nba.com' },
+        ],
+        new Set(),
+        { info: () => {}, warn },
+      );
+      expect(resolved.size).to.equal(0);
+      expect(warn).to.have.been.calledWithMatch(
+        'competitor-benchmarks: benchmark could not be matched by name or domain',
+        sinon.match({ domain: 'nba.com' }),
+      );
+    });
+
+    it('refuses to adopt when a host holds more unclaimed benchmarks than claimants', () => {
+      const warn = sandbox.stub();
+      const resolved = resolveBenchmarksByCompetitor(
+        [
+          {
+            id: 'a', main_brand: false, domain: 'nba.com', brand_name: 'Stale A',
+          },
+          {
+            id: 'b', main_brand: false, domain: 'nba.com', brand_name: 'Stale B',
+          },
+        ],
+        [{ key: 'phoenix suns', name: 'Phoenix Suns', domain: 'nba.com' }],
+        new Set(),
+        { info: () => {}, warn },
+      );
+      expect(resolved.size).to.equal(0);
+      expect(warn).to.have.been.called;
+    });
+
+    it('never hands one benchmark to both a name match and an adoption', () => {
+      // 'Rival' matches by name; the sibling must not then adopt the same row.
+      const resolved = resolveBenchmarksByCompetitor(
+        [{
+          id: 'r', main_brand: false, domain: 'rival.com', brand_name: 'Rival',
+        }],
+        [
+          { key: 'rival', name: 'Rival', domain: 'rival.com' },
+          { key: 'newcomer', name: 'Newcomer', domain: 'rival.com' },
+        ],
+        new Set(),
+        { info: () => {}, warn: () => {} },
+      );
+      expect(resolved.get('rival')?.id).to.equal('r');
+      expect(resolved.has('newcomer')).to.equal(false);
+    });
+
+    it('warns when the project carries two benchmarks under one name', () => {
+      // Upstream enforces name uniqueness case-insensitively, so this should be
+      // unreachable; if it happens, one of the two is unreachable by name and no
+      // sync of ours can resolve it, which is worth saying out loud.
+      const warn = sandbox.stub();
+      const resolved = resolveBenchmarksByCompetitor(
+        [
+          {
+            id: 'first', main_brand: false, domain: 'a.com', brand_name: 'Rival',
+          },
+          {
+            id: 'second', main_brand: false, domain: 'b.com', brand_name: 'RIVAL',
+          },
+        ],
+        [{ key: 'rival', name: 'Rival', domain: 'a.com' }],
+        new Set(),
+        { info: () => {}, warn },
+      );
+      expect(resolved.get('rival')?.id).to.equal('first');
+      expect(warn).to.have.been.calledWithMatch(
+        'competitor-benchmarks: duplicate benchmark name in project',
+        sinon.match({
+          key: 'rival',
+          matched: { id: 'first', name: 'Rival' },
+          ignored: { id: 'second', name: 'RIVAL' },
+        }),
+      );
+    });
+
+    it('ignores benchmarks with no id, and tolerates non-array inputs', () => {
+      expect(resolveBenchmarksByCompetitor(null, null).size).to.equal(0);
+      const resolved = resolveBenchmarksByCompetitor(
+        [{ main_brand: false, domain: 'rival.com', brand_name: 'Rival' }],
+        [{ key: 'rival', name: 'Rival', domain: 'rival.com' }],
+      );
+      expect(resolved.size).to.equal(0);
+    });
+
+    it('leaves a target with no domain unmatched rather than guessing', () => {
+      const resolved = resolveBenchmarksByCompetitor(
+        [{
+          id: 'legacy', main_brand: false, domain: 'rival.com', brand_name: 'Stale',
+        }],
+        [{ key: 'rival', name: 'Rival', domain: null }],
+      );
+      expect(resolved.size).to.equal(0);
+    });
+  });
+
+  describe('syncCompetitorBenchmarksForProject — upstream uniqueness is project-wide', () => {
+    it('never lets a competitor adopt the brand\'s own benchmark', async () => {
+      // ensureOwnBrandBenchmark creates the own-brand benchmark with main_brand
+      // UNSET — the create API cannot set that flag — so main_brand does not
+      // identify it. It carries the project domain, which is exactly the host a
+      // subpath brand's competitors resolve to, so it was an adoption candidate for
+      // the very competitors this change stopped rejecting. Adopting it renames the
+      // brand's own benchmark after a competitor, with the brand's own URLs still
+      // attached, and nothing later detects it.
+      const transport = makeTransport([{
+        id: 'own',
+        main_brand: false,
+        domain: 'nba.com',
+        brand_name: 'Sacramento Kings',
+        brand_aliases: ['sacramento kings'],
+      }]);
+      const reserved = buildReservedIdentities(['nba.com'], ['https://nba.com/kings']);
+      const competitors = [{ name: 'Phoenix Suns', url: 'https://www.nba.com/suns', regions: ['us'] }];
+      const result = await syncCompetitorBenchmarksForProject(transport, WS, PID, competitors, [], 'us', undefined, reserved);
+      expect(transport.updateBenchmark).to.not.have.been.called;
+      expect(transport.createBenchmarks).to.have.been.calledOnceWith(WS, PID, [
+        { brand_name: 'Phoenix Suns', domain: 'nba.com', brand_aliases: ['phoenix suns'] },
+      ]);
+      expect(result.created).to.equal(1);
+    });
+
+    it('still matches a competitor to its own benchmark on the reserved host', async () => {
+      // The other half of the rule: a competitor at nba.com/suns sends the bare
+      // nba.com as its benchmark domain — the reserved value — so excluding reserved
+      // hosts from NAME matching would re-create it on every sync.
+      const transport = makeTransport([
+        {
+          id: 'own', main_brand: true, domain: 'nba.com', brand_name: 'Sacramento Kings',
+        },
+        {
+          id: 'suns',
+          main_brand: false,
+          domain: 'nba.com',
+          brand_name: 'Phoenix Suns',
+          brand_aliases: ['phoenix suns'],
+        },
+      ]);
+      const reserved = buildReservedIdentities(['nba.com'], ['https://nba.com/kings']);
+      const competitors = [{ name: 'Phoenix Suns', url: 'https://www.nba.com/suns', regions: ['us'] }];
+      const result = await syncCompetitorBenchmarksForProject(transport, WS, PID, competitors, [], 'us', undefined, reserved);
+      expect(transport.createBenchmarks).to.not.have.been.called;
+      expect(transport.updateBenchmark).to.not.have.been.called;
+      expect(result.changed).to.equal(false);
+    });
+
+    it('lets a required name win over another competitor\'s optional alias', async () => {
+      // Claiming names and aliases in one pass made this order-dependent: the first
+      // competitor's OPTIONAL alias consumed the second's MANDATORY name, and the
+      // second was skipped entirely — permanently, since every later sync repeats it.
+      const transport = makeTransport([]);
+      const competitors = [
+        {
+          name: 'Alphabet', url: 'https://abc.xyz', aliases: ['Google'], regions: ['us'],
+        },
+        { name: 'Google', url: 'https://google.com', regions: ['us'] },
+      ];
+      const result = await syncCompetitorBenchmarksForProject(transport, WS, PID, competitors, [], 'us', undefined);
+      expect(transport.createBenchmarks).to.have.been.calledOnceWith(WS, PID, [
+        { brand_name: 'Alphabet', domain: 'abc.xyz', brand_aliases: ['alphabet'] },
+        { brand_name: 'Google', domain: 'google.com', brand_aliases: ['google'] },
+      ]);
+      expect(result.created).to.equal(2);
+    });
+
+    it('is order-independent: the same two competitors reversed give the same result', async () => {
+      const transport = makeTransport([]);
+      const competitors = [
+        { name: 'Google', url: 'https://google.com', regions: ['us'] },
+        {
+          name: 'Alphabet', url: 'https://abc.xyz', aliases: ['Google'], regions: ['us'],
+        },
+      ];
+      const result = await syncCompetitorBenchmarksForProject(transport, WS, PID, competitors, [], 'us', undefined);
+      expect(transport.createBenchmarks).to.have.been.calledOnceWith(WS, PID, [
+        { brand_name: 'Google', domain: 'google.com', brand_aliases: ['google'] },
+        { brand_name: 'Alphabet', domain: 'abc.xyz', brand_aliases: ['alphabet'] },
+      ]);
+      expect(result.created).to.equal(2);
+    });
+
+    it('does not offer an update an alias the create batch is about to take', async () => {
+      // The create batch and the update PUTs write into ONE upstream namespace.
+      // Guarded separately against the pre-write listing, each stays clean against
+      // what is already there while colliding with the other — and since creates go
+      // first, the update is what 409s, leaving the market half-written.
+      const transport = makeTransport([{
+        id: 'b1',
+        main_brand: false,
+        domain: 'alpha.com',
+        brand_name: 'Alpha',
+        brand_aliases: ['alpha'],
+      }]);
+      const competitors = [
+        {
+          name: 'Alpha', url: 'https://alpha.com', aliases: ['Acme'], regions: ['us'],
+        },
+        { name: 'Acme', url: 'https://acme.com', regions: ['us'] },
+      ];
+      const result = await syncCompetitorBenchmarksForProject(transport, WS, PID, competitors, [], 'us', undefined);
+      // 'acme' belongs to the benchmark being created, so Alpha does not claim it.
+      expect(transport.createBenchmarks).to.have.been.calledOnceWith(WS, PID, [
+        { brand_name: 'Acme', domain: 'acme.com', brand_aliases: ['acme'] },
+      ]);
+      expect(transport.updateBenchmark).to.not.have.been.called;
+      expect(result).to.deep.equal({
+        created: 1, updated: 0, deleted: 0, changed: true, rejected: [],
+      });
+    });
+
+    it('does not offer two updates the same new alias', async () => {
+      const transport = makeTransport([
+        {
+          id: 'b1', main_brand: false, domain: 'alpha.com', brand_name: 'Alpha', brand_aliases: ['alpha'],
+        },
+        {
+          id: 'b2', main_brand: false, domain: 'beta.com', brand_name: 'Beta', brand_aliases: ['beta'],
+        },
+      ]);
+      transport.listBenchmarks.onSecondCall().resolves({ aio_benchmarks: [] });
+      const competitors = [
+        {
+          name: 'Alpha', url: 'https://alpha.com', aliases: ['Shared'], regions: ['us'],
+        },
+        {
+          name: 'Beta', url: 'https://beta.com', aliases: ['Shared'], regions: ['us'],
+        },
+      ];
+      await syncCompetitorBenchmarksForProject(transport, WS, PID, competitors, [], 'us', undefined);
+      // Exactly one of the two carries 'shared'; neither PUT can 409 the other.
+      const sent = transport.updateBenchmark.getCalls()
+        .flatMap((call) => call.args[3].brand_aliases)
+        .filter((a) => a === 'shared');
+      expect(sent).to.have.lengthOf(1);
+    });
+
+    it('deletes and recreates when a competitor is renamed AND moved at once', async () => {
+      // Neither the name nor the site identity survives, so this is not a rename at
+      // all — removedCompetitors reports it removed, its benchmark is deleted, and
+      // the new one is created clean. No alias can be carried forward, because the
+      // benchmark carrying it does not survive the edit.
+      const transport = makeTransport([{
+        id: 'foo',
+        main_brand: false,
+        domain: 'foo.com',
+        brand_name: 'Foo',
+        brand_aliases: ['foo', 'fooey'],
+      }]);
+      const oldC = [{ name: 'Foo', url: 'https://foo.com', aliases: ['fooey'] }];
+      const newC = [{
+        name: 'Foo Inc', url: 'https://bar.com', aliases: [], regions: ['us'],
+      }];
+      const result = await syncCompetitorBenchmarksForProject(transport, WS, PID, newC, removedCompetitors(oldC, newC), 'us', undefined, new Set(), oldC);
+      expect(transport.deleteBenchmarks).to.have.been.calledOnceWith(WS, PID, ['foo']);
+      expect(transport.createBenchmarks).to.have.been.calledOnceWith(WS, PID, [
+        { brand_name: 'Foo Inc', domain: 'bar.com', brand_aliases: ['foo inc'] },
+      ]);
+      expect(result).to.deep.equal({
+        created: 1, updated: 0, deleted: 1, changed: true, rejected: [],
+      });
+    });
+
+    it('removes an alias the edit dropped even when the competitor was renamed', async () => {
+      // The dropped-alias lookup is keyed by name; a rename made it miss, so the
+      // removed alias was carried forward from the live list — and never removed
+      // again, because the next edit's `previous` no longer contains it.
+      const transport = makeTransport([{
+        id: 'foo',
+        main_brand: false,
+        domain: 'foo.com',
+        brand_name: 'Foo',
+        brand_aliases: ['foo', 'fooey'],
+      }]);
+      transport.listBenchmarks.onSecondCall().resolves({ aio_benchmarks: [] });
+      const previous = [{
+        name: 'Foo', url: 'https://foo.com', aliases: ['fooey'], regions: ['us'],
+      }];
+      const competitors = [{
+        name: 'Foo Inc', url: 'https://foo.com', aliases: [], regions: ['us'],
+      }];
+      await syncCompetitorBenchmarksForProject(transport, WS, PID, competitors, [], 'us', undefined, new Set(), previous);
+      expect(transport.updateBenchmark).to.have.been.calledOnceWith(WS, PID, 'foo', {
+        brand_name: 'Foo Inc',
+        domain: 'foo.com',
+        brand_aliases: ['foo', 'foo inc'],
+      });
+    });
+  });
+
+  describe('syncCompetitorBenchmarksForProject — reconciliation', () => {
+    it('adopts a benchmark created under the domain key instead of duplicating it', async () => {
+      // The first sync after the re-key meets benchmarks whose brand_name matches
+      // no current competitor. Creating alongside them would double-count.
+      const transport = makeTransport([{
+        id: 'legacy',
+        main_brand: false,
+        domain: 'rival.com',
+        brand_name: 'rival.com',
+        brand_aliases: [],
+      }]);
+      transport.listBenchmarks.onSecondCall().resolves({
+        aio_benchmarks: [{
+          id: 'legacy', main_brand: false, domain: 'rival.com', brand_name: 'Rival',
+        }],
+      });
+      const competitors = [{ name: 'Rival', url: 'https://rival.com', regions: ['us'] }];
+      const result = await syncCompetitorBenchmarksForProject(transport, WS, PID, competitors, [], 'us', undefined);
+      expect(transport.createBenchmarks).to.not.have.been.called;
+      expect(transport.updateBenchmark).to.have.been.calledOnceWith(WS, PID, 'legacy', {
+        brand_name: 'Rival', domain: 'rival.com', brand_aliases: ['rival'],
+      });
+      expect(result).to.deep.equal({
+        created: 0, updated: 1, deleted: 0, changed: true, rejected: [],
+      });
+    });
+
+    it('deletes a removed competitor whose benchmark predates the name key', async () => {
+      const transport = makeTransport([{
+        id: 'legacy', main_brand: false, domain: 'gone.com', brand_name: 'gone.com',
+      }]);
+      const removed = removedCompetitors([{ name: 'Gone Inc', url: 'https://gone.com' }], []);
+      const result = await syncCompetitorBenchmarksForProject(transport, WS, PID, [], removed, 'us', undefined);
+      expect(transport.deleteBenchmarks).to.have.been.calledOnceWith(WS, PID, ['legacy']);
+      expect(result.deleted).to.equal(1);
     });
   });
 
@@ -503,7 +1156,7 @@ describe('competitor-benchmarks helpers', () => {
       const competitors = [
         { name: 'US rival', url: 'https://rival.com', regions: ['us'] },
         { name: 'Self primary', url: 'https://www.brand.com', regions: ['us'] },
-        { name: 'Self DE market', url: 'https://brand.de/path', regions: ['us'] },
+        { name: 'Self DE market', url: 'https://brand.de', regions: ['us'] },
         { name: 'Self website', url: 'https://shop.brand.io', regions: ['us'] },
       ];
       const transport = {
@@ -613,34 +1266,44 @@ describe('competitor-benchmarks helpers', () => {
   // Defensive branch coverage — falsy-path and missing-property variants
   // ---------------------------------------------------------------------------
 
-  describe('removedCompetitorDomains — non-array inputs', () => {
+  describe('removedCompetitors — non-array inputs', () => {
     it('treats null oldCompetitors as an empty list', () => {
-      // Exercises `Array.isArray(oldCompetitors) ? ... : []` at line 67 (else branch).
       // No old entries -> nothing removed.
-      expect(removedCompetitorDomains(null, [{ url: 'https://a.com' }])).to.deep.equal([]);
+      expect(removedCompetitors(null, [{ name: 'A', url: 'https://a.com' }])).to.deep.equal([]);
     });
 
     it('treats null newCompetitors as an empty list', () => {
-      // Exercises `Array.isArray(newCompetitors) ? ... : []` at line 68 (else branch).
       // No new entries -> everything in old is considered removed.
-      expect(removedCompetitorDomains([{ url: 'https://a.com' }], null)).to.deep.equal(['a.com']);
+      expect(removedCompetitors([{ name: 'A', url: 'https://a.com' }], null)).to.deep.equal([
+        { name: 'A', key: 'a', domain: 'a.com' },
+      ]);
     });
 
     it('treats undefined oldCompetitors as an empty list', () => {
-      expect(removedCompetitorDomains(undefined, [{ url: 'https://b.com' }])).to.deep.equal([]);
+      expect(removedCompetitors(undefined, [{ name: 'B', url: 'https://b.com' }]))
+        .to.deep.equal([]);
     });
 
     it('treats undefined newCompetitors as an empty list', () => {
-      const old = [{ url: 'https://a.com' }, { url: 'https://b.com' }];
-      const result = removedCompetitorDomains(old, undefined);
-      expect(result).to.have.members(['a.com', 'b.com']);
+      const old = [{ name: 'A', url: 'https://a.com' }, { name: 'B', url: 'https://b.com' }];
+      expect(removedCompetitors(old, undefined).map((r) => r.key)).to.have.members(['a', 'b']);
+    });
+
+    it('falls back to the domain as the name, so an unnamed competitor still diffs', () => {
+      expect(removedCompetitors([{ url: 'https://a.com' }], [])).to.deep.equal([
+        { name: 'a.com', key: 'a.com', domain: 'a.com' },
+      ]);
+    });
+
+    it('skips a competitor with neither a name nor a usable url', () => {
+      // Nothing to key on, so it cannot be matched to a benchmark either way.
+      expect(removedCompetitors([{ url: 'not a url' }, { name: '  ' }], [])).to.deep.equal([]);
     });
   });
 
   describe('syncCompetitorBenchmarksForProject — defensive branch coverage', () => {
     it('returns early (no benchmark read) when both desired and removed sets are empty', async () => {
-      // Exercises the `if (desired.length === 0 && removedSet.size === 0)` early-return
-      // path at line 108/109. No competitors and no removed domains -> skip listBenchmarks.
+      // No competitors and nothing removed -> skip listBenchmarks entirely.
       const transport = {
         listBenchmarks: sandbox.stub(),
         createBenchmarks: sandbox.stub(),
@@ -653,9 +1316,8 @@ describe('competitor-benchmarks helpers', () => {
       expect(transport.listBenchmarks).to.not.have.been.called;
     });
 
-    it('treats non-array removedDomains as empty (else branch at line 103)', async () => {
-      // Exercises `Array.isArray(removedDomains) ? removedDomains : []` at line 103.
-      // With null removedDomains, removedSet is empty; desired is non-empty so
+    it('treats a non-array removed list as empty', async () => {
+      // With null `removed`, removedList is empty; desired is non-empty so
       // listBenchmarks IS called (no early return).
       const transport = {
         listBenchmarks: sandbox.stub().resolves({ aio_benchmarks: [] }),
@@ -676,8 +1338,7 @@ describe('competitor-benchmarks helpers', () => {
     });
 
     it('treats a non-array listBenchmarks response as an empty benchmark list', async () => {
-      // Exercises `Array.isArray(resp?.aio_benchmarks) ? ... : []` at line 113
-      // when listBenchmarks resolves {} (no aio_benchmarks property).
+      // listBenchmarks resolves {} (no aio_benchmarks property).
       const transport = {
         listBenchmarks: sandbox.stub().resolves({}),
         createBenchmarks: sandbox.stub().resolves({ ids: ['new'], existing_count: 0 }),
@@ -697,14 +1358,13 @@ describe('competitor-benchmarks helpers', () => {
       expect(transport.createBenchmarks).to.have.been.calledOnce;
     });
 
-    it('skips benchmarks whose domain normalizes to null (continue at line 120)', async () => {
-      // Exercises `if (domain === null) continue` at line 120.
-      // A benchmark with an empty/unparseable domain produces null from
-      // normalizeBenchmarkDomain and is skipped without being added to presentDomains.
+    it('skips benchmarks with no name and an unparseable domain', async () => {
+      // Such a benchmark can be reached by neither key, so it is not a candidate
+      // for any competitor and is left alone.
       const transport = {
         listBenchmarks: sandbox.stub().resolves({
           aio_benchmarks: [
-            { id: 'bad', main_brand: false, domain: '' }, // null domain -> skip
+            { id: 'bad', main_brand: false, domain: '' }, // no name, no domain -> skip
             // Carries the derived form, so being present is all this asserts.
             {
               id: 'good', main_brand: false, domain: 'bing.com', brand_aliases: ['bing'],
@@ -727,7 +1387,7 @@ describe('competitor-benchmarks helpers', () => {
         'us',
         undefined,
       );
-      // bing.com is in presentDomains -> not created. Duck -> created.
+      // Bing adopts the unnamed benchmark on its host -> not created. Duck -> created.
       expect(result.created).to.equal(1);
       expect(transport.createBenchmarks).to.have.been.calledOnceWith(WS, PID, [
         { brand_name: 'Duck', domain: 'duckduckgo.com', brand_aliases: ['duck'] },

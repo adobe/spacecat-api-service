@@ -92,11 +92,18 @@ v2-brands-for-org:
         $ref: './responses.yaml#/404-organization-not-found-with-id'
       '409':
         description: |
-          Conflict. A by-name upsert matched an existing **active** brand and the
-          supplied `status` would demote it to `pending`. Silent demotion is
-          rejected (`code: brand_status_demotion_not_allowed`). Use
-          `PATCH /v2/orgs/{spaceCatId}/brands/{brandId}/status` for intentional
-          status transitions.
+          Conflict. One of (disambiguated by the `code` field in the response body,
+          where present):
+          - A by-name upsert matched an existing **active** brand and the supplied
+            `status` would demote it to `pending`. Silent demotion is rejected
+            (`code: brand_status_demotion_not_allowed`). Use
+            `PATCH /v2/orgs/{spaceCatId}/brands/{brandId}/status` for intentional
+            status transitions.
+          - The supplied `baseSiteId` is a fresh anchor (the brand has no
+            persisted primary site yet) but that site belongs to a different
+            organization (`code: brand_site_org_mismatch`).
+          - The brand's primary URL is already the primary URL (base site) of
+            another brand in this organization.
         headers:
           X-Error:
             $ref: './headers.yaml#/xError'
@@ -215,6 +222,10 @@ v2-brand-for-org:
             persisted `updatedAt` — another write landed after this client last
             loaded the brand (`code: brand_stale_write`). Reload the brand and
             reapply the edit rather than retrying with the same body.
+          - The supplied `baseSiteId` is a fresh anchor (the brand has no
+            persisted primary site, or is `pending` and re-pointing) but that
+            site belongs to a different organization
+            (`code: brand_site_org_mismatch`).
           - The brand's primary URL is already the primary URL (base site) of
             another brand in this organization.
         headers:
@@ -245,6 +256,63 @@ v2-brand-for-org:
     responses:
       '204':
         description: Brand deleted successfully
+      '400':
+        $ref: './responses.yaml#/400'
+      '403':
+        description: User does not have access to this organization
+      '404':
+        description: Organization or brand not found
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        description: PostgREST unavailable (DATA_SERVICE_PROVIDER=postgres required)
+
+v2-brand-markets-for-org:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+        example: 'a1b2c3d4-5678-90ab-cdef-1234567890ab'
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID)
+      schema:
+        type: string
+        format: uuid
+  get:
+    tags:
+      - brands
+      - customer-config
+    summary: List a brand's markets (v2)
+    description: |
+      Returns the brand's configured markets, derived from its
+      `BrandSemrushProject` rows, as whole-country
+      `(region, languageCode, geoTargetId)` entries. Soft-deleted rows are
+      excluded.
+
+      Whole-countries-only: `region` is derived server-side from each row's
+      `geoTargetId` (a Google Ads Geo Target ID) via the whole-country
+      inverse of the `criterion_id = 2000 + ISO numeric` formula. A row whose
+      `geoTargetId` is not a whole country (city/region/postal code, etc.)
+      has no ISO 3166-1 alpha-2 region to report and is omitted from
+      `markets` rather than mislabeled. A row with a blank `languageCode` is
+      omitted for the same reason.
+    operationId: listBrandMarketsForOrg
+    security:
+      - session_token: []
+      - api_key: []
+    responses:
+      '200':
+        description: Brand markets retrieved successfully
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/BrandMarketsResponse'
       '400':
         $ref: './responses.yaml#/400'
       '403':

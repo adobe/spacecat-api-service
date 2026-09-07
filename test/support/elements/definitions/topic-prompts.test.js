@@ -136,7 +136,7 @@ describe('topic-prompts definitions', () => {
             position: 1,
             sentiment: 0.72,
             volume: 5658,
-            days: 30,
+            days: 42,
             model: 'Chat GPT',
           }],
         },
@@ -152,6 +152,8 @@ describe('topic-prompts definitions', () => {
         position: 1,
         sentiment: 0.72,
         volume: 5658,
+        // Distinct from mentions (30) so a mentions->executions mis-map is caught.
+        executions: 42,
       }]);
     });
 
@@ -178,6 +180,7 @@ describe('topic-prompts definitions', () => {
       expect(row.citations).to.equal(0);
       expect(row.visibility).to.equal(0);
       expect(row.volume).to.equal(0);
+      expect(row.executions).to.equal(0);
     });
 
     it('defaults missing string fields to empty strings', () => {

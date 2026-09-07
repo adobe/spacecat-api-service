@@ -4,7 +4,7 @@ This document is the runtime reference for the `/v2/orgs/:spaceCatId/brands/:bra
 
 ## Architecture in one paragraph
 
-api-service exposes nine endpoints that front the Adobe-hosted Semrush AIO API at `https://adobe-hackathon.semrush.com`. Authentication is IMS-bearer-only: the client sends an `Authorization: Bearer <ims_user_token>`, api-service forwards that header verbatim to Semrush, and the Adobe gateway exchanges the IMS token for Semrush's internal credential server-side. There are no Semrush cookies, API keys, or service accounts in api-service — every outbound request carries the caller's IMS user token. The brand-to-project mapping lives in the `brand_to_semrush_projects` table in mysticat-data-service; the Semrush workspace per org is read from `organizations.semrush_workspace_id` (already in place since PR #2403).
+api-service exposes nine endpoints that front the Adobe-hosted Semrush AIO API at `https://www.semrush.com`. Authentication is IMS-bearer-only: the client sends an `Authorization: Bearer <ims_user_token>`, api-service forwards that header verbatim to Semrush, and the Adobe gateway exchanges the IMS token for Semrush's internal credential server-side. There are no Semrush cookies, API keys, or service accounts in api-service — every outbound request carries the caller's IMS user token. The brand-to-project mapping lives in the `brand_to_semrush_projects` table in mysticat-data-service; the Semrush workspace per org is read from `organizations.semrush_workspace_id` (already in place since PR #2403).
 
 ## Environment configuration
 
@@ -23,11 +23,11 @@ vault login -method=oidc   # opens browser
 
 # value used for all three today; production target host may differ later
 vault kv patch dx_mysticat/dev/api-service \
-  SEMRUSH_PROJECTS_BASE_URL=https://adobe-hackathon.semrush.com
+  SEMRUSH_PROJECTS_BASE_URL=https://www.semrush.com
 vault kv patch dx_mysticat/stage/api-service \
-  SEMRUSH_PROJECTS_BASE_URL=https://adobe-hackathon.semrush.com
+  SEMRUSH_PROJECTS_BASE_URL=https://www.semrush.com
 vault kv patch dx_mysticat/prod/api-service \
-  SEMRUSH_PROJECTS_BASE_URL=https://adobe-hackathon.semrush.com
+  SEMRUSH_PROJECTS_BASE_URL=https://www.semrush.com
 
 # verify (must export VAULT_ADDR — the CLI default is 127.0.0.1:8200)
 export VAULT_ADDR=https://vault-amer.adobe.net
@@ -259,7 +259,7 @@ curl -X DELETE "${API_BASE}/organizations/${ORG_ID}/feature-flags/llmo/serenity_
 
 ## Endpoint surface
 
-All endpoints require `Authorization: Bearer <ims_user_token>` and `organization:read` (GET) or `organization:write` (mutating) capability. The `:brandId` path param is UUID-only on this surface — name-based brand lookup is rejected with 400. The slice key for everything is `(brandId, geoTargetId, languageCode)`; the upstream workspace id and per-project upstream identifier are resolved server-side and never leak into request/response shapes.
+All `/serenity/*` endpoints require `Authorization: Bearer <ims_user_token>` and `organization:read` (GET) or `organization:write` (mutating) capability. (The S2S brand-markets read documented at the end of this section is the exception: it is reachable without an IMS user token, though it still requires `organization:read`.) The `:brandId` path param is UUID-only on this surface — name-based brand lookup is rejected with 400. The slice key for everything is `(brandId, geoTargetId, languageCode)`; the upstream workspace id and per-project upstream identifier are resolved server-side and never leak into request/response shapes.
 
 | Method | Path | Purpose | OperationId |
 |---|---|---|---|
@@ -271,8 +271,8 @@ All endpoints require `Authorization: Bearer <ims_user_token>` and `organization
 | POST | `/serenity/markets` | Onboard a new (brand, geoTargetId, languageCode) slice (accepts `siteId` in place of `brandDomain`) | `createSerenityMarket` |
 | DELETE | `/serenity/markets/:geoTargetId/:languageCode` | Remove a slice (idempotent; upstream-first, DB-second) | `deleteSerenityMarket` |
 | GET | `/serenity/tags?geoTargetId=&languageCode=` | Unique tag names for one slice. Add `parentId` (present, even empty) to switch to the nested-tree read instead: `parentId=''` returns root categories with `childrenCount`, `parentId=<tagId>` returns that root's children with a `path` breadcrumb. | `listSerenityTags` |
-| POST | `/serenity/tags` | Create/resolve a tag on one slice; body is `{ type, name, geoTargetId, languageCode, parentId? }`. `name` is always BARE — a `:` is rejected, as is a reserved dimension-root name. `type` names the dimension the value belongs to: `category` (open — customer-authored at any depth; `parentId` must be the `category` root or one of its descendants, and defaults to the root) or `intent`/`source`/`type` (closed — `name` must match the fixed enum, `parentId` is not allowed, resolve-before-create is idempotent, and the response is `200 { ..., created }` not `201`). | `createSerenityTag` |
-| PATCH | `/serenity/tags/:tagId` | Rename and/or re-parent a tag by its upstream id. `name` is a bare value. `parentId`: an id RE-PARENTS within the tag's own dimension, omitted preserves the current parent, and an explicit `null` is rejected — the root level is reserved for the four dimension roots. The new parent may be neither the tag itself nor one of its descendants (400): upstream stores a parent pointer rather than a tree and would accept the edge, leaving the tag's subtree reachable from no root, and so unreachable and unrepairable through this API. The proxy always re-sends a parent upstream, because a PATCH that omits one promotes the tag to a root. A dimension root (400), a closed dimension's value (400), and an unknown id (404 `tagNotFound`) are all refused. | `updateSerenityTag` |
+| POST | `/serenity/tags` | Create/resolve a tag on one slice; body is `{ type, name, geoTargetId, languageCode, parentId? }`. `name` is always BARE — a `:` is rejected, as is a reserved dimension-root name. `type` names the dimension the value belongs to: `category` (open — customer-authored at any depth; `parentId` must be the `category` root or one of its descendants, and defaults to the root) or `intent`/`origin`/`source`/`type` (closed — `name` must match the fixed enum, `parentId` is not allowed, resolve-before-create is idempotent, and the response is `200 { ..., created }` not `201`). | `createSerenityTag` |
+| PATCH | `/serenity/tags/:tagId` | Rename and/or re-parent a tag by its upstream id. `name` is a bare value. `parentId`: an id RE-PARENTS within the tag's own dimension, omitted preserves the current parent, and an explicit `null` is rejected — the root level is reserved for the five dimension roots. The new parent may be neither the tag itself nor one of its descendants (400): upstream stores a parent pointer rather than a tree and would accept the edge, leaving the tag's subtree reachable from no root, and so unreachable and unrepairable through this API. The proxy always re-sends a parent upstream, because a PATCH that omits one promotes the tag to a root. A dimension root (400), a closed dimension's value (400), and an unknown id (404 `tagNotFound`) are all refused. | `updateSerenityTag` |
 | GET | `/serenity/models?geoTargetId=&languageCode=` | AI models for one slice (catalog mode when no params) | `listSerenityModels` |
 | PUT | `/serenity/models` | Replace the AI-model set for one slice (publishes after change) | `updateSerenityModels` |
 | POST | `/serenity/activate` | Activate into sub-workspace mode. A **pending** brand activates sub-workspace-only (ensure sub-workspace + flip active, no markets); an already-**active** brand's body-supplied markets are provisioned (reactivation) | `activateSerenityBrand` |
@@ -286,6 +286,12 @@ Two **org-level** catalogue routes are brand-independent (prefixed with `/v2/org
 |---|---|---|---|
 | GET | `/serenity/models` | Global AI-model catalog (`GET /v1/ai_models`) | `listSerenityOrgModels` |
 | GET | `/serenity/languages` | Supported Semrush language catalog (`GET /v1/languages`) | `listSerenityOrgLanguages` |
+
+### S2S brand markets read (`GET /v2/orgs/:spaceCatId/brands/:brandId/markets`)
+
+A separate, S2S-authenticated route reads a brand's markets straight from the `brand_to_semrush_projects` table (`BrandSemrushProject.allByBrandId`), bypassing the IMS-gated `/serenity/*` surface above entirely. It exists for consumers that need a brand's configured markets without an IMS user token — DRS is the first caller. The response is `{ markets: [{ region, languageCode, geoTargetId }] }`; a row whose `geoTargetId` isn't a whole country, or whose `languageCode` is blank, is skipped rather than mislabeled.
+
+This differs from `GET /serenity/markets` in three ways: it carries no live/draft `status` (that only exists in the upstream Semrush listing, which this route never calls), no `siteId` (the market-mirror Site link is a `/serenity/*` concern), and it only ever reports whole countries (the flat table has no sub-national representation, whereas the IMS-gated route resolves markets live from Semrush and can surface sub-national slices). Soft-deleted (`deletedAt`) rows are excluded.
 
 ## The onboarding flow
 
@@ -316,11 +322,11 @@ against the whole of `nba.com`.
 
 If step 5, 6 or 7 fails, no row is written and the caller may safely retry with the same body. The 409 gate catches the case where a previous attempt succeeded all three upstream calls but failed the DB write — extremely unlikely in practice; covered by the integration tests in `test/it/`.
 
-**`brandDomain` OR `siteId` (LLMO-6405 Phase 2).** A market created from an already-onboarded URL can send `siteId` (the SpaceCat Site UUID) instead of a raw `brandDomain`. The server derives **both** Semrush URL values from that Site's `base_url` in one read (`resolveSiteUrls`): the project `domain` (bare host, the same normalization as every other brand→domain derivation) and the project's tracked `primary_url` (host + path, scheme-less to match the stored upstream form). They come from one read so the two can never describe different URLs; an unresolvable `siteId` is a 400. `primary_url` is always derived server-side and never read from the request body. At least one of the two is required. In sub-workspace mode a supplied `siteId` also makes the post-201 mirror link **that** Site directly (skipping the domain→Site find-or-create — see below); the linked `siteId` then surfaces on the market DTO (`GET /serenity/markets[/:slice]`, both modes). The flat handler self-derives (it holds `dataAccess.Site`); the sub-workspace handler relies on the controller (its `dataAccess` is narrowed). When `siteId` is absent, behavior is byte-for-byte unchanged.
+**`siteId` is authoritative over `brandDomain` (LLMO-6405 Phase 2).** A market created from an already-onboarded URL can send `siteId` (the SpaceCat Site UUID) instead of, or alongside, a raw `brandDomain`. When `siteId` is supplied, its resolved Site identity is **always** used for the project's Semrush URL values — even if the request also carries a `brandDomain` that differs from it; a mismatch is the normal, intended shape (most brands have markets on Sites other than their apex domain) and is never compared or rejected. `brandDomain` is consulted **only** when no `siteId` was supplied. The server derives **both** Semrush URL values from the resolved Site's `base_url` in one read (`resolveSiteIdentity`): the project `domain` (bare host, the same normalization as every other brand→domain derivation) and the project's tracked `primary_url` (host + path, scheme-less to match the stored upstream form). They come from one read so the two can never describe different URLs; a supplied-but-unresolvable `siteId` is a hard 400, regardless of whether a `brandDomain` was also supplied — it never silently falls back. `primary_url` is always derived server-side and never read from the request body. At least one of `siteId`/`brandDomain` is required. In sub-workspace mode a supplied `siteId` also makes the post-201 mirror link **that** Site directly (skipping the domain→Site find-or-create — see below); the linked `siteId` then surfaces on the market DTO (`GET /serenity/markets[/:slice]`, both modes). The flat handler self-derives (it holds `dataAccess.Site`); the sub-workspace handler relies on the controller (its `dataAccess` is narrowed). Both call sites share one precedence implementation (`resolveMarketIdentity`). When `siteId` is absent, behavior is unchanged: the raw `brandDomain` is used.
 
 ## Delete-market semantics
 
-`DELETE /serenity/markets/:geoTargetId/:languageCode` removes a slice from the brand. Upstream support was verified 2026-05-28 against `adobe-hackathon.semrush.com`:
+`DELETE /serenity/markets/:geoTargetId/:languageCode` removes a slice from the brand. Upstream support was verified 2026-05-28 against `www.semrush.com`:
 
 ```
 OPTIONS /v1/workspaces/{ws}/projects/{pid} → 405, allow: DELETE, GET, PATCH
@@ -441,7 +447,7 @@ What that means operationally: a market carrying this token is **live and usable
 Greppable failure tokens worth alerting on: `SERENITY_MARKET_LINK_REJECTED` (the `brand_sites.type='serenity'` migration is not deployed in the env — every market create/activate then produces a Semrush project + Site with no link), `SERENITY_ACTIVATE_LINK_INCOMPLETE` (markets live upstream but the brand stayed pending because the site mirror failed), and `SERENITY_ACTIVATE_SAVE_DIVERGENCE` / `SERENITY_DEACTIVATE_SAVE_DIVERGENCE` (upstream succeeded but the status/pointer persist failed).
 
 Expected fields in the structured log payload:
-- outbound host: `adobe-hackathon.semrush.com`
+- outbound host: `www.semrush.com`
 - outbound auth: `Authorization: Bearer ...` (the token itself is redacted by the platform)
 - the IMS sub of the caller in the `actor` field
 
@@ -547,10 +553,10 @@ Negative-path checks worth covering: non-UUID `:brandId` → 400 `invalidRequest
 After the walkthrough, verify Splunk has the outbound traces:
 
 ```spl
-index=dx_aem_engineering sourcetype=dx_aem_sites_spacecat_backend_<env> service=api-service "adobe-hackathon.semrush.com" | head 30
+index=dx_aem_engineering sourcetype=dx_aem_sites_spacecat_backend_<env> service=api-service "www.semrush.com" | head 30
 ```
 
-Expected: outbound host `adobe-hackathon.semrush.com`, IMS sub of the caller in `actor`, no `SerenityTransportError` entries beyond the deliberate 404/409 cases above.
+Expected: outbound host `www.semrush.com`, IMS sub of the caller in `actor`, no `SerenityTransportError` entries beyond the deliberate 404/409 cases above.
 
 ## Troubleshooting
 

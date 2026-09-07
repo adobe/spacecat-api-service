@@ -50,6 +50,8 @@ npm run docs:lint         # Validate OpenAPI specs
 npm run docs:serve        # Preview docs locally
 ```
 
+**`docs/index.html` non-determinism:** `docs:build` regenerates this file's styled-components CSS as inline hashed class names, and the hash assignment order is not stable across Redocly CLI/Node versions — an environment other than the canonical CI toolchain can produce a diff of tens of thousands of lines that is pure hash/markup churn, not a content change (verify by diffing for the actual OpenAPI content you touched, e.g. `grep` for the field/path name in old vs new). Don't commit a hash-noise diff from a non-canonical environment: either regenerate on the canonical CI toolchain, or note the exception in the PR description (spec files are the source of truth and are what reviewers should verify) and leave `docs/index.html` as committed on `main`.
+
 ### Deployment
 ```bash
 npm run build             # Build production bundle with Helix Deploy
@@ -279,7 +281,7 @@ return accepted('Audit queued successfully');
 
 **Files**:
 - `src/controllers/slack.js` - Main controller
-- `src/support/slack/commands/` - Command handlers (36 commands)
+- `src/support/slack/commands/` - Command handlers
 - `src/support/slack/actions/` - Action handlers (17 actions)
 
 Architecture:
@@ -315,7 +317,7 @@ Agents in `src/agents/` use `@langchain/langgraph` for workflow orchestration.
 2. **Specification Sync**: Keep OpenAPI specs and implementation in sync
    - Run `npm run docs:lint` after modifying specs
    - Run `npm run docs:build` before completing implementation
-3. **Routing Consistency**: Add routes to BOTH `src/index.js` and `src/routes/index.js`
+3. **Routing Consistency**: Add routes to `src/routes/index.js`. `src/index.js` only wires each domain's controller into context (e.g. `SerenityController(context, log, context.env)`) — it does not list individual routes, so it needs a change only when adding a new controller/pattern, not for a new route on an existing one.
 4. **Access Control**: Always use `AccessControlUtil` for tenant data
 5. **DTO Usage**: Transform all responses through DTOs
 6. **HTTP Helpers**: Use shared helpers from `@adobe/spacecat-shared-http-utils` (`ok`, `badRequest`, `notFound`, `forbidden`, `accepted`, etc.)
@@ -533,12 +535,13 @@ Most complex domain:
 ### Slack Commands
 **Location**: `src/support/slack/commands/`
 
-36 commands for operations:
+Commands for operations (see `src/support/slack/commands.js` for the full, current list):
 - Site management: `/add-site`, `/update-site`, `/remove-site`
 - Audit operations: `/run-audit`, `/run-audit-for-all-sites`
 - Organization setup: `/add-slack-channel`, `/configure-slack`
 - Debugging: `/site-info`, `/audit-info`
 - LLMO: `/brand-profile`, `/llmo-onboard`, `enable-brand-claims`, `disable-brand-claims`
+- Geo-experiments: `/trigger-impact-measurement`, `/check-impact-measurement`, `/get-experiment`
 
 ## Common Utilities
 

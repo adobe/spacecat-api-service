@@ -25,6 +25,7 @@ import { DOMAINS_REQUEST_ORDER_BY_ENUM } from '@quazar/ai-seo-ts/v2/source/enums
 import {
   parseLimitOffset,
   resolveCountry,
+  resolveSearchType,
   engineToLlm,
   brandTarget,
   parseCompetitorDomainsList,
@@ -45,6 +46,7 @@ export function buildGapSourceDomainsDimensionFilterQl(sp) {
 
 export async function handleGapSourceDomains(sp, clients) {
   const domain = sp.get('domain');
+  const searchType = resolveSearchType(domain);
   const competitorDomains = parseCompetitorDomainsList(sp);
   const competitors = competitorDomains.length > 0
     ? competitorDomains.map(brandTarget)
@@ -78,6 +80,7 @@ export async function handleGapSourceDomains(sp, clients) {
         range: { limit, offset },
         dimension_filter_ql: dimensionFilterQl,
         target_date: date,
+        search_type: searchType,
       },
       PROTO_FROM_JSON,
     );

@@ -18,6 +18,7 @@ import {
   SERENITY_FEATURE_FLAG_NAME,
   SERENITY_FEATURE_FLAG_PRODUCT,
 } from './serenity/serenity-active.js';
+import { sanitizeRegions } from './customer-config-mapper.js';
 
 /**
  * PostgREST select string — joins all normalized child tables.
@@ -159,26 +160,10 @@ export function withSerenityState(brand, scopes) {
   };
 }
 
-/**
- * Maps a DB brand row (with all joined child tables) to the V2 config shape
- * the UI expects.
- *
- * `urls[]` unions `brand_urls` (raw user-submitted list) with `brand_sites`
- * (join to the sites table). Each entry carries `onboarded` — true when the
- * URL's base resolves to a site row in the org — and `siteId` for onboarded
- * entries. Legacy brands with no `brand_urls` rows fall back to the
- * `brand_sites` expansion, where every entry is by definition onboarded.
- *
- * The derived per-brand serenity fields are NOT set here — a handler returning
- * this payload to a client adds them with {@link withSerenityState}.
- *
- * @param {object} row - DB brand row with joined child tables.
- * @returns {object} Brand in V2 config shape.
- */
-function mapDbBrandToV2(row) {
+function mapBrandUrlsToV2(brandUrls, brandSites) {
   // The set of base URLs the brand explicitly lists as its own (brand_urls).
   const brandUrlBases = new Set(
-    (row.brand_urls || [])
+    (brandUrls || [])
       .map((bu) => composeBaseURL(parseUrlParts(bu.url).base))
       .filter(hasText),
   );
@@ -194,7 +179,7 @@ function mapDbBrandToV2(row) {
   // serenity-typed row (one row per (brand, site)); surfacing it here is what keeps
   // a brand URL from silently flipping to onboarded:false the moment a market is
   // created for the same domain.
-  const ownBrandSites = (row.brand_sites || [])
+  const ownBrandSites = (brandSites || [])
     .filter((bs) => bs.type !== SERENITY_BRAND_SITE_TYPE
       || (hasText(bs.sites?.base_url) && brandUrlBases.has(composeBaseURL(bs.sites.base_url))));
 
@@ -239,7 +224,7 @@ function mapDbBrandToV2(row) {
     });
   });
 
-  const brandUrlsEntries = (row.brand_urls || []).map((bu) => {
+  const brandUrlsEntries = (brandUrls || []).map((bu) => {
     const { base } = parseUrlParts(bu.url);
     const siteInfo = siteByBase.get(composeBaseURL(base));
     const entry = { value: bu.url, onboarded: Boolean(siteInfo) };
@@ -256,7 +241,50 @@ function mapDbBrandToV2(row) {
   });
 
   const urls = brandUrlsEntries.length > 0 ? brandUrlsEntries : brandSitesUrls;
+  return { urls, siteIds };
+}
 
+const mapSocialAccountsToV2 = (rows) => (rows || []).map((s) => ({
+  url: s.url,
+  regions: s.regions || [],
+}));
+
+const mapEarnedContentToV2 = (rows) => (rows || []).map((e) => ({
+  name: e.name,
+  url: e.url,
+  regions: e.regions || [],
+}));
+
+const mapBrandAliasesToV2 = (rows) => (rows || []).map((a) => ({
+  name: a.alias,
+  regions: a.regions || [],
+}));
+
+const mapCompetitorsToV2 = (rows) => (rows || []).map((c) => ({
+  name: c.name,
+  url: c.url || null,
+  aliases: c.aliases || [],
+  regions: c.regions || [],
+}));
+
+/**
+ * Maps a DB brand row (with all joined child tables) to the V2 config shape
+ * the UI expects.
+ *
+ * `urls[]` unions `brand_urls` (raw user-submitted list) with `brand_sites`
+ * (join to the sites table). Each entry carries `onboarded` — true when the
+ * URL's base resolves to a site row in the org — and `siteId` for onboarded
+ * entries. Legacy brands with no `brand_urls` rows fall back to the
+ * `brand_sites` expansion, where every entry is by definition onboarded.
+ *
+ * The derived per-brand serenity fields are NOT set here — a handler returning
+ * this payload to a client adds them with {@link withSerenityState}.
+ *
+ * @param {object} row - DB brand row with joined child tables.
+ * @returns {object} Brand in V2 config shape.
+ */
+function mapDbBrandToV2(row) {
+  const { urls, siteIds } = mapBrandUrlsToV2(row.brand_urls, row.brand_sites);
   return {
     id: row.id,
     name: row.name,
@@ -286,25 +314,10 @@ function mapDbBrandToV2(row) {
     brandClaimsEnabled: row.brand_claims_enabled ?? false,
     region: row.regions || [],
     urls,
-    socialAccounts: (row.brand_social_accounts || []).map((s) => ({
-      url: s.url,
-      regions: s.regions || [],
-    })),
-    earnedContent: (row.brand_earned_sources || []).map((e) => ({
-      name: e.name,
-      url: e.url,
-      regions: e.regions || [],
-    })),
-    brandAliases: (row.brand_aliases || []).map((a) => ({
-      name: a.alias,
-      regions: a.regions || [],
-    })),
-    competitors: (row.competitors || []).map((c) => ({
-      name: c.name,
-      url: c.url || null,
-      aliases: c.aliases || [],
-      regions: c.regions || [],
-    })),
+    socialAccounts: mapSocialAccountsToV2(row.brand_social_accounts),
+    earnedContent: mapEarnedContentToV2(row.brand_earned_sources),
+    brandAliases: mapBrandAliasesToV2(row.brand_aliases),
+    competitors: mapCompetitorsToV2(row.competitors),
     siteIds,
     createdAt: row.created_at,
     createdBy: row.created_by,
@@ -333,6 +346,57 @@ async function replaceChildRows(table, brandId, rows, onConflict, postgrestClien
     .upsert(rows, { onConflict });
   if (insertError) {
     throw new Error(`Failed to sync ${table}: ${insertError.message}`);
+  }
+}
+
+/**
+ * Verifies a candidate primary site (`baseSiteId`) belongs to the same org as the
+ * brand being anchored to it, before that site_id is ever persisted.
+ *
+ * serenity-docs#346: `brand.organization_id != site.organization_id` is exactly the
+ * org-ID mismatch pattern the investigation traced (Tata Capital, BMW, Toyota, ...) —
+ * a brand silently anchored to a *different* org's site. Both upsertBrand (fresh
+ * create / first anchor) and updateBrand (first set, or pending re-point) must call
+ * this before writing site_id; the immutable-once-set branches in each are
+ * unaffected, since they already refuse to change an existing active site_id.
+ *
+ * @param {object} postgrestClient - PostgREST client
+ * @param {string} siteId - Candidate `brands.site_id`
+ * @param {string} organizationId - SpaceCat organization UUID the brand belongs to
+ * @param {string} brandLabel - Whatever identifies the brand in the caller's context,
+ *   for the error message only — upsertBrand passes the brand name (not yet
+ *   persisted, so no id exists yet); updateBrand passes the fetched brand's
+ *   name when its existing-row read found one, else falls back to brandId.
+ * @throws {Error} status 409, code 'brand_site_org_mismatch', if the site does not
+ *   belong to organizationId (including if it doesn't exist at all)
+ */
+async function assertSiteBelongsToOrg(postgrestClient, siteId, organizationId, brandLabel) {
+  const { data: anchorSite, error: anchorSiteError } = await postgrestClient
+    .from('sites')
+    .select('id')
+    .eq('id', siteId)
+    .eq('organization_id', organizationId)
+    .maybeSingle();
+  if (anchorSiteError) {
+    throw new Error(
+      `Failed to verify primary site org for brand "${brandLabel}": ${anchorSiteError.message}`,
+    );
+  }
+  if (!anchorSite) {
+    // Plain ASCII (no em dash) to match this file's other thrown, client-facing
+    // messages: an em dash here previously crashed createErrorResponse's
+    // X-Error header (@adobe/fetch rejects non-Latin1 header content with a
+    // raw TypeError, surfacing as a 500 instead of this 409 — caught by the
+    // it-postgres IT suite, not the mocked unit tests). createErrorResponse
+    // now sanitizes the header regardless (serenity-docs#346), but this stays
+    // ASCII too rather than leaning on that alone.
+    const err = new Error(
+      `Cannot anchor brand "${brandLabel}" to site ${siteId}: that site `
+      + `does not exist, or does not belong to organization ${organizationId}.`,
+    );
+    err.status = 409;
+    err.code = 'brand_site_org_mismatch';
+    throw err;
   }
 }
 
@@ -383,7 +447,7 @@ async function syncBrandSites(organizationId, brandId, urls, postgrestClient, up
   }
 
   if (!urls || urls.length === 0) {
-    return;
+    return [];
   }
 
   // Group paths by base URL and track type
@@ -409,7 +473,7 @@ async function syncBrandSites(organizationId, brandId, urls, postgrestClient, up
     });
 
   if (pathsByBase.size === 0) {
-    return;
+    return [];
   }
 
   const { data: sites, error: sitesError } = await postgrestClient
@@ -422,10 +486,10 @@ async function syncBrandSites(organizationId, brandId, urls, postgrestClient, up
   }
 
   if (!sites || sites.length === 0) {
-    return;
+    return [];
   }
 
-  const rows = sites.map((s) => ({
+  const canonicalRows = sites.map((s) => ({
     organization_id: organizationId,
     brand_id: brandId,
     site_id: s.id,
@@ -436,7 +500,9 @@ async function syncBrandSites(organizationId, brandId, urls, postgrestClient, up
       ? SERENITY_BRAND_SITE_TYPE
       : (typeByBase.get(s.base_url) || null),
     updated_by: updatedBy,
+    sites: { base_url: s.base_url },
   }));
+  const rows = canonicalRows.map(({ sites: _, ...dbFields }) => dbFields);
 
   const { error } = await postgrestClient
     .from('brand_sites')
@@ -444,6 +510,7 @@ async function syncBrandSites(organizationId, brandId, urls, postgrestClient, up
   if (error) {
     throw new Error(`Failed to sync brand_sites: ${error.message}`);
   }
+  return canonicalRows;
 }
 
 /**
@@ -455,7 +522,7 @@ async function syncBrandSites(organizationId, brandId, urls, postgrestClient, up
  */
 async function syncBrandUrls(organizationId, brandId, urls, postgrestClient, updatedBy) {
   const seen = new Set();
-  const rows = (urls || [])
+  const canonicalRows = (urls || [])
     .map((u) => {
       const value = typeof u === 'string' ? u : u?.value;
       if (!hasText(value)) {
@@ -464,14 +531,15 @@ async function syncBrandUrls(organizationId, brandId, urls, postgrestClient, upd
       const { base, path } = parseUrlParts(value);
       return { url: `${composeBaseURL(base)}${path}` };
     })
-    .filter((u) => u && !seen.has(u.url) && seen.add(u.url))
-    .map((u) => ({
-      organization_id: organizationId,
-      brand_id: brandId,
-      url: u.url,
-      updated_by: updatedBy,
-    }));
+    .filter((u) => u && !seen.has(u.url) && seen.add(u.url));
+  const rows = canonicalRows.map((u) => ({
+    ...u,
+    organization_id: organizationId,
+    brand_id: brandId,
+    updated_by: updatedBy,
+  }));
   await replaceChildRows('brand_urls', brandId, rows, 'brand_id,url', postgrestClient);
+  return canonicalRows;
 }
 
 /**
@@ -487,18 +555,22 @@ async function syncBrandUrls(organizationId, brandId, urls, postgrestClient, upd
 // eslint-disable-next-line max-len
 async function syncSocialAccounts(brandId, organizationId, socialAccounts, postgrestClient, updatedBy) {
   if (socialAccounts === undefined || socialAccounts === null) {
-    return;
+    return undefined;
   }
-  const rows = (socialAccounts || [])
+  const canonicalRows = (socialAccounts || [])
     .filter((s) => hasText(s?.url))
     .map((s) => ({
-      organization_id: organizationId,
-      brand_id: brandId,
       url: s.url,
-      regions: s.regions || [],
-      updated_by: updatedBy,
+      regions: sanitizeRegions(s.regions),
     }));
+  const rows = canonicalRows.map((s) => ({
+    ...s,
+    organization_id: organizationId,
+    brand_id: brandId,
+    updated_by: updatedBy,
+  }));
   await replaceChildRows('brand_social_accounts', brandId, rows, 'brand_id,url', postgrestClient);
+  return mapSocialAccountsToV2(canonicalRows);
 }
 
 /**
@@ -510,19 +582,23 @@ async function syncSocialAccounts(brandId, organizationId, socialAccounts, postg
 // eslint-disable-next-line max-len
 async function syncEarnedSources(brandId, organizationId, earnedContent, postgrestClient, updatedBy) {
   if (earnedContent === undefined || earnedContent === null) {
-    return;
+    return undefined;
   }
-  const rows = (earnedContent || [])
+  const canonicalRows = (earnedContent || [])
     .filter((e) => hasText(e?.url) && hasText(e?.name))
     .map((e) => ({
-      organization_id: organizationId,
-      brand_id: brandId,
       name: e.name,
       url: e.url,
-      regions: e.regions || [],
-      updated_by: updatedBy,
+      regions: sanitizeRegions(e.regions),
     }));
+  const rows = canonicalRows.map((e) => ({
+    ...e,
+    organization_id: organizationId,
+    brand_id: brandId,
+    updated_by: updatedBy,
+  }));
   await replaceChildRows('brand_earned_sources', brandId, rows, 'brand_id,url', postgrestClient);
+  return mapEarnedContentToV2(canonicalRows);
 }
 
 /**
@@ -533,20 +609,23 @@ async function syncEarnedSources(brandId, organizationId, earnedContent, postgre
  */
 async function syncAliases(brandId, organizationId, brandAliases, postgrestClient, updatedBy) {
   if (brandAliases === undefined || brandAliases === null) {
-    return;
+    return undefined;
   }
   const seen = new Set();
-  const rows = (brandAliases || [])
-    .map((a) => ({ alias: typeof a === 'string' ? a : a?.name, regions: a?.regions || [] }))
-    .filter((a) => hasText(a.alias) && !seen.has(a.alias) && seen.add(a.alias))
+  const canonicalRows = (brandAliases || [])
     .map((a) => ({
-      organization_id: organizationId,
-      brand_id: brandId,
-      alias: a.alias,
-      regions: a.regions,
-      updated_by: updatedBy,
-    }));
+      alias: typeof a === 'string' ? a : a?.name,
+      regions: sanitizeRegions(a?.regions),
+    }))
+    .filter((a) => hasText(a.alias) && !seen.has(a.alias) && seen.add(a.alias));
+  const rows = canonicalRows.map((a) => ({
+    ...a,
+    organization_id: organizationId,
+    brand_id: brandId,
+    updated_by: updatedBy,
+  }));
   await replaceChildRows('brand_aliases', brandId, rows, 'brand_id,alias', postgrestClient);
+  return mapBrandAliasesToV2(canonicalRows);
 }
 
 /**
@@ -557,27 +636,25 @@ async function syncAliases(brandId, organizationId, brandAliases, postgrestClien
  */
 async function syncCompetitors(brandId, organizationId, competitors, postgrestClient, updatedBy) {
   if (competitors === undefined || competitors === null) {
-    return;
+    return undefined;
   }
   const seen = new Set();
-  const rows = (competitors || [])
+  const canonicalRows = (competitors || [])
     .map((c) => ({
       name: typeof c === 'string' ? c : c?.name,
       url: c?.url || null,
       aliases: Array.isArray(c?.aliases) ? c.aliases : [],
-      regions: c?.regions || [],
+      regions: sanitizeRegions(c?.regions),
     }))
-    .filter((c) => hasText(c.name) && !seen.has(c.name) && seen.add(c.name))
-    .map((c) => ({
-      organization_id: organizationId,
-      brand_id: brandId,
-      name: c.name,
-      url: c.url,
-      aliases: c.aliases,
-      regions: c.regions,
-      updated_by: updatedBy,
-    }));
+    .filter((c) => hasText(c.name) && !seen.has(c.name) && seen.add(c.name));
+  const rows = canonicalRows.map((c) => ({
+    ...c,
+    organization_id: organizationId,
+    brand_id: brandId,
+    updated_by: updatedBy,
+  }));
   await replaceChildRows('competitors', brandId, rows, 'brand_id,name', postgrestClient);
+  return mapCompetitorsToV2(canonicalRows);
 }
 
 /**
@@ -1098,8 +1175,7 @@ export async function upsertBrand({
     throw new Error('Brand name is required');
   }
 
-  const regions = (brand.region || [])
-    .map((r) => (typeof r === 'string' ? r : String(r))).filter(hasText);
+  const regions = sanitizeRegions(brand.region);
 
   // Check if a non-deleted brand already exists with this name. Soft-deleted
   // brands are excluded (.neq('status', 'deleted')) so that creating a brand
@@ -1123,14 +1199,12 @@ export async function upsertBrand({
     throw new Error(`Failed to look up existing brand "${brand.name}": ${existingError.message}`);
   }
 
-  // An active brand must be anchored by either a SpaceCat base site OR a Semrush
-  // sub-workspace (serenity dual-mode): a Semrush brand has no SpaceCat site, but
-  // its sub-workspace (semrush_sub_workspace_id, set on the serenity-first create
-  // path) is a valid anchor — mirrors the relaxed chk_active_brand_has_site_id
-  // DB constraint. Respect persisted site_id on the update path.
-  const hasAnchor = hasText(brand.baseSiteId)
-    || hasText(existing?.site_id)
-    || hasText(semrushSubWorkspaceId);
+  // An active brand must be anchored by a SpaceCat base site (chk_active_brand_has_site_id,
+  // SITES-49449). A Semrush sub-workspace brand is NOT exempt from this — the
+  // brand/market management model (LLMO-6405) makes site_id mandatory on every
+  // create path, subworkspace mode or not, so semrush_sub_workspace_id is no
+  // longer a substitute anchor. Respect persisted site_id on the update path.
+  const hasAnchor = hasText(brand.baseSiteId) || hasText(existing?.site_id);
   const status = (!hasAnchor && (brand.status || 'active') === 'active')
     ? 'pending'
     : (brand.status || 'active');
@@ -1202,18 +1276,43 @@ export async function upsertBrand({
   // (which left Semrush brands' site_id NULL) is removed; a genuine collision with
   // another brand's primary site still surfaces as the brands_base_site_unique 409
   // handled below.
-  if (existing === null) {
+  // serenity-docs#346: a brand's primary site must belong to the same org as the
+  // brand itself — anchoring to another org's site is exactly the org-ID mismatch
+  // pattern the investigation traced (Tata Capital, BMW, Toyota, ...). Verify on
+  // both paths that assign a *new* anchor (fresh create, or first anchor for a
+  // previously Semrush-only brand); the immutable-once-set branch below is
+  // unaffected since it already refuses to change an existing site_id.
+  const wantsNewAnchor = hasText(brand.baseSiteId)
+    && (existing === null || !hasText(existing.site_id));
+  if (wantsNewAnchor) {
+    await assertSiteBelongsToOrg(postgrestClient, brand.baseSiteId, organizationId, brand.name);
+  }
+
+  if (existing === null || !hasText(existing.site_id)) {
+    // Fresh create, or first anchor for a previously unanchored brand: assign
+    // whatever baseSiteId the caller supplied (or leave unset if they didn't).
     row.site_id = hasText(brand.baseSiteId) ? brand.baseSiteId : null;
-  } else if (hasText(brand.baseSiteId) && !hasText(existing.site_id)) {
-    row.site_id = brand.baseSiteId;
-  } else if (
-    hasText(brand.baseSiteId)
-    && hasText(existing.site_id)
-    && existing.site_id !== brand.baseSiteId
-  ) {
-    log.warn(`upsertBrand: ignoring baseSiteId change for brand "${brand.name}" `
-      + `(org ${organizationId}) — primary site is immutable `
-      + `(existing=${existing.site_id}, attempted=${brand.baseSiteId})`);
+  } else {
+    // Already anchored (existing.site_id is set) — site_id is immutable once
+    // persisted, so this call never changes it. But it MUST still be carried
+    // forward into `row` explicitly: this upsert always goes through
+    // `.upsert(row, { onConflict: 'organization_id,name' })`, and a column
+    // absent from that payload is not preserved on the resulting UPDATE — it
+    // ends up unset on the written row. Before this fix, re-submitting the
+    // brand's OWN already-correct baseSiteId (the common case: any caller
+    // that reads a brand back and re-upserts it verbatim) omitted site_id
+    // from every one of the three prior branches, silently clearing an
+    // already-anchored brand's site_id and tripping
+    // chk_active_brand_has_site_id — a 400 on a request that never intended
+    // to touch the anchor at all. Found via a brandalf migration script
+    // re-upserting already-onboarded brands (Grainger, Druva, Interface, ABB,
+    // Arkose Labs all hit this identically).
+    if (hasText(brand.baseSiteId) && brand.baseSiteId !== existing.site_id) {
+      log.warn(`upsertBrand: ignoring baseSiteId change for brand "${brand.name}" `
+        + `(org ${organizationId}) — primary site is immutable `
+        + `(existing=${existing.site_id}, attempted=${brand.baseSiteId})`);
+    }
+    row.site_id = existing.site_id;
   }
 
   const { data: upserted, error } = await postgrestClient
@@ -1314,7 +1413,7 @@ export async function updateBrand({
   if (needsExistingFetch) {
     const { data: current, error: currentError } = await postgrestClient
       .from('brands')
-      .select('site_id, status, updated_at')
+      .select('name, site_id, status, updated_at')
       .eq('id', brandId)
       .maybeSingle();
     // Fail closed: a swallowed read error leaves `current` null, so the guard
@@ -1362,25 +1461,30 @@ export async function updateBrand({
     }
   }
 
-  // baseSiteId mutation rules (LLMO-5870):
+  // baseSiteId mutation rules:
   //  - First set (NULL -> value): allowed for any brand.
-  //  - Re-point (value -> different value): allowed ONLY for pending brands, so a
-  //    draft can swap its primary URL before activation.
+  //  - Re-point (value -> different value): allowed for ANY brand via THIS explicit
+  //    updateBrand path (serenity-docs#349). A user deliberately picks an existing
+  //    Site in the org to become the brand's primary site, and the controller
+  //    (updateBrandForOrg) validates eligibility + drives the Semrush propagation
+  //    before this write. This is the sanctioned re-point path — NOT to be confused
+  //    with the SILENT overwrite guard that stays in upsertBrand (the automated
+  //    re-onboard path, LLMO-5556: mongodb.com -> learn.mongodb.com etc.), which
+  //    still refuses to move an existing site_id.
   //  - Clear (value -> NULL): allowed ONLY for pending brands, so the site can be
-  //    freed for reuse by another brand.
-  // Active brands stay immutable-once-set: a routine field save that echoes a
-  // stale baseSiteId must never re-point or strip a live brand's anchor (the
-  // LLMO-5556 / express.adobe.com regression guard). Clearing a pending brand's
-  // site_id is safe at the DB level — the partial unique index
-  // (brands_base_site_unique) skips NULLs and chk_active_brand_has_site_id only
-  // constrains active brands. The unique index still rejects a re-point that
-  // collides with another brand's primary URL.
+  //    freed for reuse by another brand. Active brands keep chk_active_brand_has_site_id.
+  // The partial unique index (brands_base_site_unique) skips NULLs and still rejects
+  // a re-point that collides with another brand's primary URL at the DB level.
   const isPending = (existing?.status || '').toLowerCase() === 'pending';
   if (wantsClearBaseSite) {
     if (isPending) {
       patch.site_id = null;
     }
-  } else if (hasText(updates.baseSiteId) && (!existing?.site_id || isPending)) {
+  } else if (hasText(updates.baseSiteId) && updates.baseSiteId !== existing?.site_id) {
+    // serenity-docs#346: same org-ID mismatch guard as upsertBrand — verify the
+    // new/re-pointed site actually belongs to this brand's org before persisting.
+    const brandLabel = existing?.name || brandId;
+    await assertSiteBelongsToOrg(postgrestClient, updates.baseSiteId, organizationId, brandLabel);
     patch.site_id = updates.baseSiteId;
   }
 
@@ -1416,8 +1520,7 @@ export async function updateBrand({
   }
 
   if (updates.region !== undefined) {
-    patch.regions = (updates.region || [])
-      .map((r) => (typeof r === 'string' ? r : String(r))).filter(hasText);
+    patch.regions = sanitizeRegions(updates.region);
   }
 
   // Clear legacy columns on any brand update so old data doesn't linger.
@@ -1441,7 +1544,24 @@ export async function updateBrand({
   if (updates.expectedUpdatedAt !== undefined) {
     updateQuery = updateQuery.eq('updated_at', updates.expectedUpdatedAt);
   }
-  const { data, error } = await updateQuery.select('id').maybeSingle();
+  // serenity-docs#349 / #3131 follow-up (LLMO — live e2e on prod): select the SAME
+  // wide embed getBrandById reads, directly off THIS UPDATE's own
+  // `Prefer: return=representation` — PostgREST embeds resources on an UPDATE's
+  // RETURNING exactly like it does on a GET. That makes `data` below a
+  // guaranteed-fresh snapshot: it comes back on the very request that just
+  // committed the write, and — confirmed against this env's Vault config
+  // (`dx_mysticat/prod/api-service` POSTGREST_URL=`http://data-svc-balanced.internal`)
+  // and mysticat-data-service's `reader.tf` ALB rules — every non-GET/HEAD/OPTIONS
+  // request on that host lands on the writer fleet, no exceptions. A plain
+  // follow-up `getBrandById()` call is a bare GET, and GETs on that same host ARE
+  // routed to a *separate* PostgREST fleet reading Aurora's reader endpoint — a
+  // real, independently-replicating replica with nonzero lag, not the same node
+  // the write just landed on. That is the confirmed mechanism behind the
+  // brand_repoint_not_persisted false-positive: the write commits on the writer,
+  // but the very next GET can still be served stale data by the reader. Selecting
+  // the full embed here means the common case (see below) never needs that
+  // second, possibly-stale GET at all.
+  const { data, error } = await updateQuery.select(BRAND_SELECT).maybeSingle();
 
   if (error) {
     if (error.code === '23505' && error.message?.includes('brands_base_site_unique')) {
@@ -1468,24 +1588,75 @@ export async function updateBrand({
     return null;
   }
 
-  // Each sync function now skips itself when its collection is `undefined`
-  // (LLMO-6591), so the per-field `!== undefined` guards that used to live
-  // here are redundant — call unconditionally and let the shared guard decide.
-  await Promise.all([
+  // Nullable collections skip themselves when omitted or explicitly null
+  // (LLMO-6591), so call them unconditionally and let each helper decide
+  // whether the collection was touched.
+  const [
+    brandAliases,
+    competitors,
+    socialAccounts,
+    earnedContent,
+  ] = await Promise.all([
     syncAliases(brandId, organizationId, updates.brandAliases, postgrestClient, updatedBy),
     syncCompetitors(brandId, organizationId, updates.competitors, postgrestClient, updatedBy),
     syncSocialAccounts(brandId, organizationId, updates.socialAccounts, postgrestClient, updatedBy),
     syncEarnedSources(brandId, organizationId, updates.earnedContent, postgrestClient, updatedBy),
   ]);
 
+  const authoritativeCollections = {};
+  if (brandAliases !== undefined) {
+    authoritativeCollections.brandAliases = brandAliases;
+  }
+  if (competitors !== undefined) {
+    authoritativeCollections.competitors = competitors;
+  }
+  if (socialAccounts !== undefined) {
+    authoritativeCollections.socialAccounts = socialAccounts;
+  }
+  if (earnedContent !== undefined) {
+    authoritativeCollections.earnedContent = earnedContent;
+  }
+
   if (updates.urls !== undefined) {
-    await Promise.all([
+    const [brandSites, brandUrls] = await Promise.all([
       syncBrandSites(organizationId, brandId, updates.urls, postgrestClient, updatedBy),
       syncBrandUrls(organizationId, brandId, updates.urls, postgrestClient, updatedBy),
     ]);
+    Object.assign(authoritativeCollections, mapBrandUrlsToV2(brandUrls, brandSites));
   }
 
-  return getBrandById(organizationId, brandId, postgrestClient);
+  // Whether a follow-up read is even needed depends on what this call actually
+  // changed. `data` already reflects this UPDATE's own committed `brands` row —
+  // including the `base_site` join that drives baseSiteId/baseUrl — with none of
+  // the reader-replica staleness risk described above. A request that touched no
+  // child-table collection can therefore return it directly: no second read, no
+  // race, period.
+  const childTablesTouched = Object.keys(authoritativeCollections).length > 0;
+  const writerRow = mapDbBrandToV2(data);
+
+  if (!childTablesTouched) {
+    return writerRow;
+  }
+
+  // The child-table syncs above ran as separate requests AFTER this UPDATE
+  // committed, so their effect isn't part of `data`'s RETURNING payload. Reload
+  // the child collections, but never let the replica overwrite parent fields
+  // already returned authoritatively by the writer — especially `updatedAt`,
+  // which is the optimistic-concurrency token for the next edit.
+  const freshRow = await getBrandById(organizationId, brandId, postgrestClient);
+  const replicaCollections = freshRow ? {
+    brandAliases: freshRow.brandAliases,
+    competitors: freshRow.competitors,
+    socialAccounts: freshRow.socialAccounts,
+    earnedContent: freshRow.earnedContent,
+    urls: freshRow.urls,
+    siteIds: freshRow.siteIds,
+  } : {};
+  return {
+    ...writerRow,
+    ...replicaCollections,
+    ...authoritativeCollections,
+  };
 }
 
 /**

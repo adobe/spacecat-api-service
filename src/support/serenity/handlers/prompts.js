@@ -20,12 +20,16 @@ import { ERROR_CODES, isMeteredQuota, isUpstreamGone } from '../errors.js';
 import { alertQuotaRejection, alertRollbackFailure } from '../quota-alerts.js';
 import { normalizeGeoTargetId, normalizeLanguageCode, isValidTagIdFormat } from '../validation.js';
 import { invalidateTagCacheForProject } from './markets.js';
-import { resolveTypeValueInjection, resolveIntentValueInjection, resolveServerOwnedValueInjection } from '../tag-tree.js';
+import {
+  resolveTypeValueInjection, resolveIntentValueInjection, resolveServerOwnedValueInjection,
+  indexLevelByName,
+} from '../tag-tree.js';
 import {
   DIMENSION, ORIGIN_VALUE, INTENT_VALUE, PROXY_CREATE_SOURCE_VALUE,
-  canonicalizeSource, SOURCE_VALUES,
+  canonicalizeSource, SOURCE_VALUES, rootNameOfDimension,
 } from '../prompt-tags.js';
 import { classifyPromptIntents } from '../intent-classification.js';
+import { logPromptDeleteEvent } from '../prompt-delete-log.js';
 
 /** @typedef {import('../rest-transport.js').SerenityTransport} SerenityTransport */
 
@@ -42,6 +46,16 @@ import { classifyPromptIntents } from '../intent-classification.js';
 export const DEFAULT_PAGE_LIMIT = 50;
 export const MAX_PAGE_LIMIT = 1000;
 export const MAX_TAG_IDS = 50;
+// PATCH's sanity ceiling on the RAW incoming tagIds array, ahead of any format
+// validation or the MAX_TAG_IDS cap. parseUpdatePromptBody deliberately does
+// NOT slice at MAX_TAG_IDS up front (see validTagIds/capUpdateTagIds) so a
+// closed-dimension id echoed back by the client is never dropped to fit the
+// cap -- but that means an unbounded array would otherwise flow past parsing
+// into capUpdateTagIds' classification work with no cap in front of it at
+// all. Generous relative to any legitimate echoed list (which tops out around
+// MAX_TAG_IDS + a handful of server-derived ids): rejects only a pathological
+// payload, never a real client's.
+export const MAX_UPDATE_TAG_IDS_INPUT = 500;
 // Caps the inflight upstream calls when fanning out a bulk create.
 // 8 keeps per-call wall time reasonable without overwhelming upstream rate
 // limits — the prior `serenity` testing exhausted Semrush's shared limit
@@ -193,6 +207,33 @@ export function validateDeferPublish(body) {
 }
 
 /**
+ * Whether a bulk-create request opts into the ASYNC job runner (serenity-docs#33).
+ *
+ * This is a DEDICATED trigger, deliberately separate from `deferPublish`. The
+ * two are unrelated concerns and must not be conflated: `deferPublish` is a
+ * publish-batching hint on the synchronous path (defer the upstream publish
+ * until the last chunk), whereas `async` routes the whole write off the request
+ * path onto the SQS worker and returns 202 + a job id to poll. Overloading
+ * `deferPublish` for both meant the sync CSV-chunking client (which sets
+ * `deferPublish: true` on every non-final chunk) silently got 202s it did not
+ * expect. Keying async off its own explicit flag lets that client keep working
+ * synchronously untouched, and makes async strictly opt-in.
+ *
+ * Present-but-non-boolean is a hard 400 (mirrors validateDeferPublish); absent,
+ * `false`, or `true` are all accepted.
+ *
+ * @param {object} body - request body.
+ * @returns {boolean} true when `async === true`.
+ */
+export function validateAsync(body) {
+  const asyncFlag = body?.async;
+  if (asyncFlag !== undefined && typeof asyncFlag !== 'boolean') {
+    throw new ErrorWithStatusCode('async must be a boolean', 400);
+  }
+  return asyncFlag === true;
+}
+
+/**
  * Builds the prompt's tag list from the upstream item: one entry per tag,
  * carrying its id, bare name, parent id and root-first ancestry breadcrumb.
  *
@@ -211,11 +252,10 @@ export function validateDeferPublish(body) {
  *
  * Names are passed through as upstream holds them, root breadcrumb included, so
  * a root's name is not always the bare dimension key: the intent root is named
- * `$abv_tags$intent` on a project the rename (LLMO-6984) has reached, and
- * `intent` on one it has not. Folding either spelling to the dimension key here
- * would put a name in `path[]` beside an id that upstream does not hold under
- * it, so this stays a faithful mirror and a consumer that keys on the intent
- * dimension matches both spellings.
+ * `$abv_tags$intent`. Folding it to the dimension key here would put a name in
+ * `path[]` beside an id that upstream does not hold under it, so this stays a
+ * faithful mirror. A consumer keying on the intent dimension matches
+ * `$abv_tags$intent`; use `dimensionOfRootName` rather than comparing by hand.
  *
  * String-form tags (a defensive upstream fallback) carry a name but no id, and
  * are surfaced with an empty id rather than dropped.
@@ -444,6 +484,82 @@ export async function publishAffected(
 }
 
 /**
+ * Deletes each project's prompt batch via `transport.deletePromptsByIds`, treating an
+ * upstream 404 as idempotent success, and emits one structured, requester-attributed
+ * `logPromptDeleteEvent` line per prompt (SITES-50099) — success or failure alike.
+ * Shared by flat and subworkspace callers: the loop is identical in both once `byProject`
+ * is built, so it lives here rather than being hand-duplicated across the two twins (same
+ * reasoning as {@link publishAffected} and {@link invalidateTagCacheForProject}).
+ * @param {SerenityTransport} transport
+ * @param {string} workspaceId
+ * @param {Map<string, { ids: string[], targets: Array<{ semrushPromptId: string,
+ *   geoTargetId: number, languageCode: string }> }>} byProject
+ * @param {any} log
+ * @param {object} auditCtx
+ * @param {string | null} auditCtx.orgId
+ * @param {string | null | undefined} auditCtx.brandId
+ * @param {string} auditCtx.callerId
+ * @returns {Promise<{ deleted: number, failed: Array<{ semrushPromptId: string,
+ *   geoTargetId: number, languageCode: string, status: number, message: string }>,
+ *   projectsToPublish: Set<string> }>}
+ */
+export async function deleteProjectBatches(
+  transport,
+  workspaceId,
+  byProject,
+  log,
+  { orgId, brandId, callerId },
+) {
+  let deleted = 0;
+  const failed = [];
+  const projectsToPublish = new Set();
+
+  const logEvent = (t, outcome, extra = {}) => logPromptDeleteEvent(log, {
+    organizationId: orgId,
+    brandId,
+    semrushWorkspaceId: workspaceId,
+    semrushPromptId: t.semrushPromptId,
+    geoTargetId: t.geoTargetId,
+    languageCode: t.languageCode,
+    callerId,
+    outcome,
+    ...extra,
+  });
+
+  await Promise.all(Array.from(byProject.entries()).map(async ([pid, bucket]) => {
+    try {
+      await transport.deletePromptsByIds(workspaceId, pid, bucket.ids);
+      deleted += bucket.ids.length;
+      projectsToPublish.add(pid);
+      bucket.targets.forEach((t) => logEvent(t, 'deleted'));
+    } catch (e) {
+      if (isUpstreamGone(e)) {
+        deleted += bucket.ids.length;
+        projectsToPublish.add(pid);
+        bucket.targets.forEach((t) => logEvent(t, 'deleted', { alreadyGone: true }));
+        return;
+      }
+      // Computed once per bucket, not per target — both values depend only on the
+      // one caught error `e`, shared by every target in this project's batch.
+      const message = redactUpstreamMessage(e);
+      const status = e.status || 500;
+      bucket.targets.forEach((t) => {
+        failed.push({
+          semrushPromptId: t.semrushPromptId,
+          geoTargetId: t.geoTargetId,
+          languageCode: t.languageCode,
+          status,
+          message,
+        });
+        logEvent(t, 'error', { status, message });
+      });
+    }
+  }));
+
+  return { deleted, failed, projectsToPublish };
+}
+
+/**
  * Reconciles `publishAffected`'s per-project failures against this request's newly created
  * prompts (serenity-docs#72 §4.1 atomicity: "no write may leave prompts staged-but-unpublished" —
  * "the handler MUST delete the prompts this request staged... and then return the quota token").
@@ -561,33 +677,155 @@ export async function reconcilePublishErrors(
 }
 
 /**
- * Trims a raw `tagIds` array to strings, drops anything empty or malformed
+ * Trims a raw `tagIds` array to strings and drops anything empty or malformed
  * (see {@link isValidTagIdFormat} -- the same length/control-char bound
- * `parentId` is held to), and caps the result at {@link MAX_TAG_IDS} -- the
- * same cap the tagIds *query* filter already enforces above, so a bulk write
- * can't fan out further than a bulk read is allowed to. Shared by
- * {@link normalizePromptInput} (create) and {@link parseUpdatePromptBody}
- * (update) so the two write paths can't silently diverge on what counts as
- * a valid tag id.
- *
- * This cap bounds the CALLER-supplied tags only. The server-derived dimension
- * tags (`type`, `origin`) are injected downstream by {@link makePromptTagInjector}
- * AFTER this sanitize, and are intentionally EXEMPT from the user-facing cap — a
- * write may therefore carry up to `MAX_TAG_IDS` + 2 ids. They must never be
- * dropped to fit the cap: a prompt missing its `type`/`origin` tag is invisible
- * to that dimension's filter.
+ * `parentId` is held to). Applies NO cap -- see {@link sanitizeTagIds} (create)
+ * and {@link capUpdateTagIds} (update) for the two different cap strategies
+ * layered on top of this shared format validation.
  *
  * @param {unknown} raw
  * @returns {string[]}
  */
-function sanitizeTagIds(raw) {
+function validTagIds(raw) {
   if (!Array.isArray(raw)) {
     return [];
   }
   return raw
     .map((t) => String(t || '').trim())
-    .filter((t) => isValidTagIdFormat(t))
-    .slice(0, MAX_TAG_IDS);
+    .filter((t) => isValidTagIdFormat(t));
+}
+
+/**
+ * {@link validTagIds} plus a flat cap at {@link MAX_TAG_IDS} -- the same cap the
+ * tagIds *query* filter already enforces above, so a bulk write can't fan out
+ * further than a bulk read is allowed to. Used by {@link normalizePromptInput}
+ * (CREATE) only: {@link parseUpdatePromptBody} (UPDATE) uses {@link validTagIds}
+ * directly and applies {@link capUpdateTagIds} afterward instead, because a flat
+ * positional slice is only safe when the server-derived ids are added AFTER it.
+ *
+ * This cap bounds the CALLER-supplied tags only. The server-derived dimension
+ * tags (`type`, `origin`, `source`, `intent`) are injected downstream by
+ * {@link makePromptTagInjector} and the intent injector AFTER this sanitize,
+ * and are intentionally EXEMPT from the user-facing cap — a write may
+ * therefore carry up to `MAX_TAG_IDS` + 4 ids. They must never be dropped to
+ * fit the cap: a prompt missing its `type`/`origin`/`source`/`intent` tag is
+ * invisible to that dimension's filter. On CREATE this holds trivially, since
+ * the computed ids are appended by the injector after this slice runs, never
+ * supplied by the caller pre-slice.
+ *
+ * @param {unknown} raw
+ * @returns {string[]}
+ */
+function sanitizeTagIds(raw) {
+  return validTagIds(raw).slice(0, MAX_TAG_IDS);
+}
+
+/**
+ * The closed, server-owned dimensions whose ids {@link capUpdateTagIds} exempts
+ * from the caller cap on UPDATE.
+ */
+const CLOSED_DIMENSIONS_FOR_UPDATE_CAP = [
+  DIMENSION.TYPE, DIMENSION.INTENT, DIMENSION.ORIGIN, DIMENSION.SOURCE,
+];
+
+/**
+ * Reads every id currently under one of {@link CLOSED_DIMENSIONS_FOR_UPDATE_CAP}'s
+ * roots, by root NAME rather than a generic tree walk. `findTagsInTree`'s walk
+ * only descends a root whose OWN `childrenCount` is reported nonzero, and the
+ * open `source` root reports `childrenCount: 0` (tag-tree.js fixture comment;
+ * matches upstream, since `source` values are minted on demand rather than
+ * eagerly counted) — a walk-based resolver would therefore never find a
+ * `source` id and misclassify every one of them as open. Reading each of the
+ * four roots' children directly, by the name each is provisioned under, has no
+ * such blind spot.
+ *
+ * A dimension whose root does not exist yet (a legacy project mid-provisioning)
+ * contributes nothing — there is nothing to protect on that project.
+ *
+ * @param {SerenityTransport} transport
+ * @param {string} semrushWorkspaceId
+ * @param {string} projectId
+ * @param {object} [log]
+ * @returns {Promise<Set<string>>}
+ */
+async function collectClosedDimensionTagIds(transport, semrushWorkspaceId, projectId, log) {
+  const rootsByName = await indexLevelByName(transport, semrushWorkspaceId, projectId, '', log);
+  const ids = new Set();
+  const rootIds = /** @type {string[]} */ (
+    CLOSED_DIMENSIONS_FOR_UPDATE_CAP
+      .map((dimension) => rootsByName.get(rootNameOfDimension(dimension)))
+      .filter((rootId) => Boolean(rootId))
+  );
+  // The four CLOSED-dimension roots' (type/intent/origin/source) children
+  // reads are independent of each other -- run them concurrently rather than
+  // one dimension at a time. Four, not five: `category` is the one OPEN
+  // dimension and is never exempted from the update cap.
+  const childrenByRoot = await Promise.all(
+    rootIds.map(
+      (rootId) => indexLevelByName(transport, semrushWorkspaceId, projectId, rootId, log),
+    ),
+  );
+  rootIds.forEach((rootId, i) => {
+    ids.add(rootId);
+    for (const childId of childrenByRoot[i].values()) {
+      ids.add(childId);
+    }
+  });
+  return ids;
+}
+
+/**
+ * Re-applies {@link MAX_TAG_IDS} to an UPDATE's format-validated `tagIds`, but
+ * ONLY to the ids that do NOT sit under a closed, server-owned dimension root
+ * (`type`/`intent`/`origin`/`source`).
+ *
+ * On CREATE, {@link sanitizeTagIds}'s flat positional slice is safe because the
+ * server-derived ids are appended by {@link makePromptTagInjector} strictly
+ * AFTER the slice runs — a caller can never supply one pre-slice. On UPDATE
+ * there is no such ordering guarantee: the body is the full next state (see
+ * {@link handleUpdatePrompt}'s docblock), so a client that echoes its prompt's
+ * own previously-returned tag list — the documented edit-form pattern, since
+ * clients always have the existing tagIds available locally — is submitting
+ * ALREADY-INJECTED closed-dimension ids as ordinary caller-supplied ids. A flat
+ * slice at {@link MAX_TAG_IDS} would then silently drop whichever one landed
+ * past index 50. `type`/`intent` self-heal because {@link makePromptTagInjector}
+ * and the intent injector always strip-and-reinject them regardless of what
+ * survived the slice, but `origin`/`source` are NOT re-derived on UPDATE
+ * (origin-dimension.md §3 item 3: the stored value rides through untouched) --
+ * once truncated away, nothing puts them back, and the prompt becomes invisible
+ * to that dimension's filter with no error.
+ *
+ * Resolves the closed-dimension id set in {@link collectClosedDimensionTagIds},
+ * then caps only the ids NOT in it. Skips that resolve entirely when `tagIds`
+ * is already at or under the cap — the overwhelmingly common case — so this
+ * adds no cost to a typical edit.
+ *
+ * @param {SerenityTransport} transport
+ * @param {string} semrushWorkspaceId
+ * @param {string} projectId
+ * @param {string[]} tagIds - already {@link validTagIds}-validated.
+ * @param {object} [log]
+ * @returns {Promise<string[]>}
+ */
+export async function capUpdateTagIds(transport, semrushWorkspaceId, projectId, tagIds, log) {
+  if (tagIds.length <= MAX_TAG_IDS) {
+    return tagIds;
+  }
+  const closedIds = await collectClosedDimensionTagIds(
+    transport,
+    semrushWorkspaceId,
+    projectId,
+    log,
+  );
+  const managed = [];
+  const open = [];
+  for (const id of tagIds) {
+    (closedIds.has(id) ? managed : open).push(id);
+  }
+  // Reorders managed ids ahead of open ids relative to the caller's original
+  // array -- harmless today since the upstream replace-mode write treats
+  // `references` as an unordered set, never a caller-meaningful sequence.
+  return [...managed, ...open.slice(0, MAX_TAG_IDS)];
 }
 
 /**
@@ -690,9 +928,9 @@ export async function createOnePrompt(transport, semrushWorkspaceId, projectId, 
 
 /**
  * Builds the per-request prompt-tag injector — the UNIFIED server-owned-dimension
- * layer (serenity-docs#31 for `type`; origin-dimension.md §3 for `origin`). It
- * stamps the two dimensions a client may never set on a prompt: `type` (branded /
- * non-branded, classified from the text) and `origin` (who authored the prompt).
+ * layer (serenity-docs#31 for `type`; source-dimension.md for `source`). It
+ * stamps the dimensions a client may never set on a prompt: `type` (branded /
+ * non-branded, classified from the text) and `source` (the producing system).
  *
  * `injectComputedTags(projectId, input)` STRIPS every caller-supplied tag id that
  * lives under a server-owned dimension's root and APPENDS the pre-resolved
@@ -707,31 +945,28 @@ export async function createOnePrompt(transport, semrushWorkspaceId, projectId, 
  * always safe to recompute. A non-function `classifyPromptType` (defensive) skips
  * the `type` step.
  *
- * **`origin`** — carries the CREATE/UPDATE ASYMMETRY (origin-dimension.md §3
- * item 3). It is a fact about the row's CREATION, never a classification, so:
- *   - on CREATE (`originValue` set, e.g. `human` for a user-authenticated write),
- *     any caller-supplied origin id is stripped and the derived value injected;
- *   - on UPDATE (`originValue` unset) the injector leaves origin ALONE. The stored
- *     value the caller echoes back rides through the full-replace tag write
- *     unchanged. Re-deriving would relabel every edited `ai` prompt `human`;
- *     stripping without injecting would leave the prompt invisible to the
- *     dimension's filter — both are illegal, so the update path does neither.
+ * **`origin`** — authorship, injected on CREATE from the authenticated caller
+ * and left untouched on UPDATE.
  *
- * **`source`** — the PRODUCING SYSTEM (source-dimension.md), and like `origin` it
- * is a fact about CREATION, not a classification, so it carries the same asymmetry:
+ * **`source`** — the PRODUCING SYSTEM (source-dimension.md), a fact about
+ * CREATION, not a classification:
  *   - on CREATE (`sourceValue` set — the constant `config` for this proxy dialog,
- *     the value the same prompt gets in Postgres on the v2 path), any caller-supplied
- *     tag id beneath the `source` root is stripped (by RESOLVED ID, never by name — a
- *     customer category may legitimately be called `gsc`) and the derived value
- *     injected. The dimension has no client write surface;
- *   - on UPDATE (`sourceValue` unset) the injector leaves source ALONE — a prompt's
- *     producer is fixed at creation.
+ *     the value the same prompt gets in Postgres on the v2 path, or a validated
+ *     per-item override), the EFFECTIVE value injected is
+ *     `canonicalizeSource(itemSource)`, independently from origin.
+ *     Any caller-supplied tag id beneath the `source` root is stripped (by RESOLVED
+ *     ID, never by name — a customer category may legitimately be called
+ *     `gsc`) and the derived value injected. The dimension has no client write
+ *     surface;
+ *   - on UPDATE (`sourceValue` and `originValue` both unset) the injector leaves
+ *     source ALONE — a prompt's producer is fixed at creation.
  *
  * Resolution ({@link resolveTypeValueInjection} / {@link resolveServerOwnedValueInjection},
  * two tag-tree reads per distinct value per project — the root level plus the
  * root's children) is memoized for the request, so a bulk create fans out over
- * the distinct computed values rather than over the items. The origin and source
- * values are constant per request, so each resolution is memoized per project.
+ * the distinct computed values rather than over the items. The source value is
+ * effectively constant per request (modulo the rare per-item override), so each
+ * resolution is memoized per (project, derived value).
  *
  * Resolution resolves or throws, so a server tag is always attached; it is never
  * dropped, and a resolution failure aborts the write (which is free — the upstream
@@ -742,9 +977,8 @@ export async function createOnePrompt(transport, semrushWorkspaceId, projectId, 
  * @param {string} semrushWorkspaceId
  * @param {((text: string, geoTargetId: number) => string) | undefined} classifyPromptType
  * @param {object} [log]
- * @param {{ originValue?: string, sourceValue?: string }} [options] - `originValue`
- *   / `sourceValue` are the derived `origin` / `source` to inject on CREATE; omit
- *   each on UPDATE so that dimension is left untouched.
+ * @param {{ originValue?: string, sourceValue?: string }} [options] - values to
+ *   inject on CREATE; omit each on UPDATE so that dimension is left untouched.
  * @returns {(projectId: string, input: { text: string, geoTargetId: number,
  *   tagIds: string[], source?: string }) =>
  *   Promise<{ text: string, geoTargetId: number, tagIds: string[] }>}
@@ -787,6 +1021,15 @@ export function makePromptTagInjector(
 
     // origin — CREATE only. `originValue` unset means UPDATE: leave origin alone
     // (the stored value the caller echoes rides through the replace-mode write).
+    // Cache keyed on projectId ALONE, unlike typeCache/sourceCache's
+    // `${projectId} ${value}` keying: origin is a BATCH constant (one
+    // originValue per call to makePromptTagInjector, never a per-item
+    // override), so every item in a batch resolves the same value and a
+    // single per-project entry is correct. This would need the same
+    // (projectId, value) keying as the others the day a per-item origin
+    // override is added — a per-item value with this keying would silently
+    // bleed the first-resolved item's origin onto every other item in the
+    // same project.
     if (originValue) {
       let pending = originCache.get(projectId);
       if (!pending) {
@@ -805,14 +1048,15 @@ export function makePromptTagInjector(
     }
 
     // source — CREATE only, same asymmetry as origin. Per-item `input.source`
-    // (Track flow, LLMO-6556) overrides the batch default (`sourceValue`); absent
-    // on both means UPDATE — leave the producer alone (fixed at creation). Cache
-    // is keyed on (projectId, source) so a mixed-surface batch resolves each
-    // producer's tag independently. Stripped by resolved id, never by name.
-    // `??` not `||` (MysticatBot nit): `normalizePromptInput` yields a valid slug
-    // or `undefined`, so "absent means use the batch default" is exactly the
-    // nullish-coalesce contract.
-    const itemSource = input.source ?? sourceValue;
+    // (Track flow, LLMO-6556) overrides the
+    // batch default (`sourceValue`); absent on both means UPDATE — leave the
+    // producer alone (fixed at creation). `??` not `||` (MysticatBot nit):
+    // `normalizePromptInput` yields a valid slug or `undefined`, so "absent
+    // means use the batch default" is exactly the nullish-coalesce contract.
+    // Cache is keyed on (projectId, source) so a mixed-surface batch resolves
+    // each producer's tag independently. Stripped by resolved id, never by name.
+    const rawSource = input.source ?? sourceValue;
+    const itemSource = rawSource ? canonicalizeSource(rawSource) : null;
     if (itemSource) {
       const key = `${projectId} ${itemSource}`;
       let pending = sourceCache.get(key);
@@ -952,7 +1196,22 @@ export function parseUpdatePromptBody(body) {
       body: { error: 'invalidRequest', message: 'text must be a non-empty string' },
     };
   }
-  const tagIds = sanitizeTagIds(body.tagIds);
+  if (Array.isArray(body.tagIds) && body.tagIds.length > MAX_UPDATE_TAG_IDS_INPUT) {
+    return {
+      ok: false,
+      status: 400,
+      body: {
+        error: 'invalidRequest',
+        message: `tagIds array exceeds maxItems=${MAX_UPDATE_TAG_IDS_INPUT}`,
+      },
+    };
+  }
+  // No MAX_TAG_IDS cap here -- capUpdateTagIds (called by the handler once
+  // projectId is known) applies it only to the ids that are NOT a
+  // closed-dimension id, so an echoed origin/source/type/intent id is never
+  // dropped to fit it. MAX_UPDATE_TAG_IDS_INPUT above is the sanity ceiling
+  // that still bounds this function's (and capUpdateTagIds') work.
+  const tagIds = validTagIds(body.tagIds);
   if (tagIds.length === 0) {
     return {
       ok: false,
@@ -1020,6 +1279,7 @@ export async function mapLimit(items, limit, mapper) {
  * @param {object} [options]
  * @param {boolean} [options.publish] - see above.
  * @param {string | null} [options.orgId] - serenity-docs#72 §5 alert payload only.
+ * @param {string} [options.originValue=human] - trusted caller-principal origin.
  */
 export async function handleCreatePrompts(
   transport,
@@ -1032,7 +1292,7 @@ export async function handleCreatePrompts(
   env,
   writeDeadline,
   callerId,
-  { publish = true, orgId = null } = {},
+  { publish = true, orgId = null, originValue = ORIGIN_VALUE.HUMAN } = {},
 ) {
   const inputs = Array.isArray(body?.prompts) ? body.prompts : [];
   if (inputs.length === 0) {
@@ -1052,18 +1312,15 @@ export async function handleCreatePrompts(
     projectsBySlice.set(`${p.getGeoTargetId()}:${p.getLanguageCode()}`, p);
   }
 
-  // CREATE: user-authenticated write → derived `origin` is `human`
-  // (origin-dimension.md §3). Any caller-supplied origin tag id is stripped and
-  // this value injected; on the twin AI-generation path a service producer stamps
-  // `ai` via STANDARD_PROMPT_TAG_VALUES instead (that path does not run here).
-  // The producing `source` is the constant `config` — this human create dialog is
-  // what the same prompt gets in Postgres on the v2 path (source-dimension.md §1).
+  // CREATE: origin comes from the trusted request-principal classification.
+  // Source defaults independently to `config`, while a per-item service source
+  // may override that default.
   const injectComputedTags = makePromptTagInjector(
     transport,
     semrushWorkspaceId,
     classifyPromptType,
     log,
-    { originValue: ORIGIN_VALUE.HUMAN, sourceValue: PROXY_CREATE_SOURCE_VALUE },
+    { originValue, sourceValue: PROXY_CREATE_SOURCE_VALUE },
   );
   // Unified layer (serenity-docs#32): batch-classify every distinct text ONCE
   // under the shared request deadline, then thread the resolved map into each
@@ -1106,10 +1363,9 @@ export async function handleCreatePrompts(
     }
     const projectId = project.getSemrushProjectId();
     try {
-      // Unified layer: strip caller-supplied type/origin/intent, then inject the
-      // computed type + derived origin (origin-dimension.md §3) and the
-      // classified intent (serenity-docs#32). The two injectors act on disjoint
-      // dimensions, so chaining composes cleanly.
+      // Unified layer: strip caller-supplied type/origin/source/intent, then inject
+      // the computed type, derived origin, producing source, and classified intent.
+      // The two injectors act on disjoint dimensions, so chaining composes cleanly.
       let typed = await injectComputedTags(projectId, input);
       typed = await injectComputedIntent(projectId, typed);
       const semrushPromptId = await createOnePrompt(
@@ -1328,6 +1584,19 @@ export async function handleUpdatePrompt(
   }
   const projectId = project.getSemrushProjectId();
 
+  // capUpdateTagIds guards against sanitizeTagIds' create-time cap strategy:
+  // a client echoing its prompt's full existing tag list (at/beyond
+  // MAX_TAG_IDS) would otherwise risk a closed-dimension id (origin/source —
+  // never re-derived on UPDATE) being silently dropped by a flat positional
+  // slice. See capUpdateTagIds' docblock.
+  const cappedTagIds = await capUpdateTagIds(
+    transport,
+    semrushWorkspaceId,
+    projectId,
+    nextTagIds,
+    log,
+  );
+
   // Recompute the type AND intent tags from the NEW text BEFORE the rename: the
   // unified layer (tree read / on-demand tag create / LLM classify) must run
   // before any upstream write, so a classification failure aborts cleanly with
@@ -1358,7 +1627,7 @@ export async function handleUpdatePrompt(
   );
   const injectComputedIntent = makeIntentInjector(transport, semrushWorkspaceId, intentByText, log);
   let typed = await injectComputedTags(projectId, {
-    text: nextText, geoTargetId, tagIds: nextTagIds,
+    text: nextText, geoTargetId, tagIds: cappedTagIds,
   });
   typed = await injectComputedIntent(projectId, typed);
 
@@ -1434,8 +1703,10 @@ export async function handleUpdatePrompt(
  * @param {any} body
  * @param {any} log
  * @param {object} [options]
- * @param {string | null} [options.orgId] - serenity-docs#72 §5 alert payload only.
+ * @param {string | null} [options.orgId] - also the audit log's organizationId.
  * @param {object | null} [options.env] - serenity-docs#72 §5 alert kill-switch/config only.
+ * @param {string} [options.callerId] - resolved requester id (see resolveCallerId),
+ *   stamped on every audit log line this call emits (SITES-50099).
  */
 export async function handleBulkDeletePrompts(
   transport,
@@ -1444,7 +1715,9 @@ export async function handleBulkDeletePrompts(
   semrushWorkspaceId,
   body,
   log,
-  { orgId = null, env = null } = {},
+  {
+    orgId = null, env = null, callerId = 'unknown',
+  } = {},
 ) {
   const targets = Array.isArray(body?.prompts) ? body.prompts : [];
   if (targets.length === 0) {
@@ -1499,31 +1772,12 @@ export async function handleBulkDeletePrompts(
     bucket.targets.push({ semrushPromptId: sid, geoTargetId, languageCode });
   });
 
-  let deleted = 0;
-  const projectsToPublish = new Set();
-  await Promise.all(Array.from(byProject.entries()).map(async ([pid, bucket]) => {
-    try {
-      await transport.deletePromptsByIds(semrushWorkspaceId, pid, bucket.ids);
-      deleted += bucket.ids.length;
-      projectsToPublish.add(pid);
-    } catch (e) {
-      if (isUpstreamGone(e)) {
-        deleted += bucket.ids.length;
-        projectsToPublish.add(pid);
-        log?.info?.('bulk-delete: upstream already-deleted (404 treated as success)', { ids: bucket.ids });
-        return;
-      }
-      bucket.targets.forEach((t) => {
-        failed.push({
-          semrushPromptId: t.semrushPromptId,
-          geoTargetId: t.geoTargetId,
-          languageCode: t.languageCode,
-          status: e.status || 500,
-          message: redactUpstreamMessage(e),
-        });
-      });
-    }
-  }));
+  const {
+    deleted, failed: deleteFailures, projectsToPublish,
+  } = await deleteProjectBatches(transport, semrushWorkspaceId, byProject, log, {
+    orgId, brandId, callerId,
+  });
+  failed.push(...deleteFailures);
 
   // Deleting prompts can remove the last carrier of a tag in the project,
   // so any project that lost prompts must drop its cached tag set on this

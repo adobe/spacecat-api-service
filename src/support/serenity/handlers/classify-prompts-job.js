@@ -28,8 +28,9 @@ import {
   publishAffected,
   BULK_CREATE_CONCURRENCY,
 } from './prompts.js';
-import { ORIGIN_VALUE } from '../prompt-tags.js';
+import { ORIGIN_VALUE, PROXY_CREATE_SOURCE_VALUE } from '../prompt-tags.js';
 import { resolveIntentValueInjection } from '../tag-tree.js';
+import { buildSliceProjectMap, sliceKey } from '../subworkspace-projects.js';
 
 /** @typedef {import('../rest-transport.js').SerenityTransport} SerenityTransport */
 
@@ -139,32 +140,70 @@ async function requeuePending(context, job, semrushWorkspaceId, items) {
  * @param {SerenityTransport} transport - Serenity transport built from the exchanged
  *   access token.
  * @param {object} metadata - the job's metadata (`brandId`, `semrushWorkspaceId`,
- *   `prompts`).
+ *   `prompts`, `originValue` — the trusted authorship captured at enqueue
+ *   time, part of the cross-deploy wire contract between the enqueue site and
+ *   this worker (see the `originValue` default below) — and, for a
+ *   subworkspace-mode CSV import, `authMode`, `workspaceId`,
+ *   `parentWorkspaceId`).
  * @returns {Promise<object>} the job result.
  */
 async function createAndClassify(context, job, transport, metadata) {
   const {
     dataAccess, env, log,
   } = context;
-  // Authorship (LLMO-6289): the caller id captured at enqueue time in the create
-  // controller, carried through the async job so classified-on-create prompts are
-  // stamped with the human/service that submitted them, not the job runner.
-  const { brandId, semrushWorkspaceId, callerId = 'unknown' } = metadata;
+  // Capture both audit attribution and trusted authorship at enqueue time so the
+  // async worker stamps the submitting principal rather than the job runner.
+  const {
+    brandId, semrushWorkspaceId, callerId = 'unknown', authMode,
+    // Fail-safe for jobs enqueued by a pre-deploy build (before this field
+    // existed on the wire) — every CURRENT enqueue site always sets
+    // `originValue` explicitly (see serenity.js's createPrompts). Once the
+    // queue has drained past this deploy, this default is never exercised.
+    originValue = ORIGIN_VALUE.HUMAN,
+  } = metadata;
   const inputs = Array.isArray(metadata.prompts) ? metadata.prompts : [];
 
-  const projects = await dataAccess.BrandSemrushProject.allByBrandId(brandId);
-  const projectsBySlice = new Map();
-  for (const p of projects || []) {
-    projectsBySlice.set(`${p.getGeoTargetId()}:${p.getLanguageCode()}`, p);
+  // Slice→project resolution is the ONLY create-path difference between the two
+  // modes (mirrors the sync twins handleCreatePrompts vs
+  // handleCreatePromptsSubworkspace): flat mode reads the BrandSemrushProject DB
+  // mapping, subworkspace resolves projects from ONE live listing of the
+  // sub-workspace (buildSliceProjectMap). Everything downstream — the classifier,
+  // tag/intent injectors, per-slice create + publish-once fan-out, the pending
+  // self-requeue — is the shared, project-id-keyed logic below.
+  const isSubworkspace = authMode === 'subworkspace';
+  /** @type {(geoTargetId: number, languageCode: string) => string | null} */
+  let resolveProjectIdForSlice;
+  if (isSubworkspace) {
+    const projectsBySlice = await buildSliceProjectMap(transport, semrushWorkspaceId, log);
+    resolveProjectIdForSlice = (geoTargetId, languageCode) => {
+      const project = projectsBySlice.get(sliceKey(geoTargetId, languageCode));
+      return project ? String(project.id) : null;
+    };
+  } else {
+    const projects = await dataAccess.BrandSemrushProject.allByBrandId(brandId);
+    const projectsBySlice = new Map();
+    for (const p of projects || []) {
+      projectsBySlice.set(`${p.getGeoTargetId()}:${p.getLanguageCode()}`, p);
+    }
+    resolveProjectIdForSlice = (geoTargetId, languageCode) => {
+      const project = projectsBySlice.get(`${geoTargetId}:${languageCode}`);
+      return project ? project.getSemrushProjectId() : null;
+    };
   }
 
   const classifyPromptType = await buildPromptTypeClassifier(dataAccess, brandId);
+  // `sourceValue` is a second, deliberate behavior change riding alongside the
+  // origin restoration: the base branch passed `originValue` alone here, so
+  // `itemSource` resolved to null and no `source` tag was ever attached to an
+  // async-imported prompt. Passing `PROXY_CREATE_SOURCE_VALUE` brings this
+  // path in line with the sync create paths (source-dimension.md's write-path
+  // table) — every async-created prompt now carries `source/config` too.
   const injectComputedTags = makePromptTagInjector(
     transport,
     semrushWorkspaceId,
     classifyPromptType,
     log,
-    { originValue: ORIGIN_VALUE.HUMAN },
+    { originValue, sourceValue: PROXY_CREATE_SOURCE_VALUE },
   );
 
   // No time budget (serenity-docs#33): retries with backoff until resolved or
@@ -180,8 +219,8 @@ async function createAndClassify(context, job, transport, metadata) {
     if (!input) {
       return { skipped: { text: String(raw?.text || ''), reason: /** @type {string} */ (reason) } };
     }
-    const project = projectsBySlice.get(`${input.geoTargetId}:${input.languageCode}`);
-    if (!project) {
+    const projectId = resolveProjectIdForSlice(input.geoTargetId, input.languageCode);
+    if (!projectId) {
       return {
         skipped: {
           text: input.text,
@@ -189,7 +228,6 @@ async function createAndClassify(context, job, transport, metadata) {
         },
       };
     }
-    const projectId = project.getSemrushProjectId();
     try {
       let typed = await injectComputedTags(projectId, input);
       typed = await injectComputedIntent(projectId, typed);
@@ -289,8 +327,10 @@ async function createAndClassify(context, job, transport, metadata) {
  * @param {SerenityTransport} transport
  * @param {object} metadata - `{ semrushWorkspaceId, items: [{ projectId,
  *   promptId, text, tagIds }] }` — `tagIds` is the FULL desired tag set minus
- *   `intent` (caller tags + server type/origin), matching the edit handlers'
- *   "recompute the whole set, then replace" contract.
+ *   `intent` (caller tags + the server `type`/`origin`/`source` ids already
+ *   resolved and stamped at create time — this reclassify pass never
+ *   re-derives them), matching the edit handlers' "recompute the whole set,
+ *   then replace" contract.
  * @returns {Promise<object>} the job result.
  */
 async function reclassifyExisting(context, job, transport, metadata) {

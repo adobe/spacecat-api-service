@@ -13,6 +13,7 @@
 import {
   CAP_CONFIGURATION_READ,
   CAP_CONFIGURATION_WRITE,
+  CAP_ENTITLEMENT_CREATE,
   CAP_FIX_ENTITY_CREATE,
   CAP_ORG_READ_ALL,
   CAP_PROMPT_SUGGESTION_SCHEDULE_WRITE,
@@ -96,6 +97,7 @@ export const INTERNAL_ROUTES = [
   'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/deploy',
   'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/plan',
   'GET /sites/:siteId/llmo/cdn-onboard/cloudfront/permissions',
+  'GET /sites/:siteId/llmo/cdn-onboard/cloudfront/template',
   'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/log-delivery',
   'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/log-rescan',
   'PUT /sites/:siteId/llmo/opportunities-reviewed',
@@ -114,6 +116,7 @@ export const INTERNAL_ROUTES = [
   // via hasLlmoCapabilityForSite (isLLMOAdministrator fallback for non-FACS orgs).
   'GET /sites/:siteId/llmo/cdn-onboard/akamai/config',
   'GET /sites/:siteId/llmo/cdn-onboard/akamai/properties',
+  'GET /sites/:siteId/llmo/cdn-onboard/akamai/versions',
   'POST /sites/:siteId/llmo/cdn-onboard/akamai/plan',
   'POST /sites/:siteId/llmo/cdn-onboard/akamai/deploy',
   'GET /sites/:siteId/llmo/cdn-onboard/akamai/deploy-status',
@@ -142,11 +145,11 @@ export const INTERNAL_ROUTES = [
   'GET /trial-users/email-preferences',
   'PATCH /trial-users/email-preferences',
 
-  // Entitlement upsert + PLG site enrollment - admin/manual provisioning only, not S2S
-  'POST /organizations/:organizationId/entitlements',
+  // Entitlement tier PATCH - S2S-admin-only (hasS2SAdminAccess), not a general S2S
+  // capability. The POST create/ensure + PLG site-enrollment routes moved to
+  // routeRequiredCapabilities under entitlement:create so the Mystique S2S consumer can
+  // provision entitlements on the unified onboarding path (SITES-50526).
   'PATCH /organizations/:organizationId/entitlements',
-  'POST /sites/:siteId/site-enrollments',
-  'POST /sites/:siteId/entitlements',
   // Feature flags write - admin only, mysticat-backed org config
   'PUT /organizations/:organizationId/feature-flags/:product/:flagName',
   'DELETE /organizations/:organizationId/feature-flags/:product/:flagName',
@@ -272,6 +275,16 @@ const routeRequiredCapabilities = {
 
   // Organizations
   'GET /organizations': CAP_ORG_READ_ALL,
+  'GET /organizations/by-product-code/:productCode': CAP_ORG_READ_ALL,
+  // Mapped (not INTERNAL_ROUTES) so readOnlyAdminWrapper takes its read fast-path instead of
+  // the ownership check (this route has no siteId/organizationId path param to own). Reusing
+  // CAP_ORG_READ_ALL lets an S2S consumer pass this wrapper, but getByAccessMapSheet only
+  // calls hasAdminReadAccess() - no hasS2SCapability check - so S2S still gets 403 there;
+  // this route is intentionally admin-only end-to-end, unlike its by-product-code sibling.
+  // See the INVARIANT comment on getByAccessMapSheet in organizations.js: do not add a
+  // hasS2SCapability(CAP_ORG_READ_ALL) fallback there - this mapping's only purpose is the
+  // readOnlyAdminWrapper read fast-path, not S2S opt-in.
+  'GET /organizations/by-access-map-sheet/:productCode': CAP_ORG_READ_ALL,
   'POST /organizations': 'organization:write',
   'GET /organizations/:organizationId': 'organization:read',
   'GET /organizations/by-ims-org-id/:imsOrgId': 'organization:read',
@@ -282,6 +295,7 @@ const routeRequiredCapabilities = {
   'GET /organizations/:organizationId/brands': 'brand:read',
   'GET /v2/orgs/:spaceCatId/brands': 'organization:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId': 'organization:read',
+  'GET /v2/orgs/:spaceCatId/brands/:brandId/markets': 'organization:read',
   'GET /v2/orgs/:spaceCatId/categories': 'organization:read',
   'POST /v2/orgs/:spaceCatId/categories': 'organization:write',
   'PATCH /v2/orgs/:spaceCatId/categories/:categoryId': 'organization:write',
@@ -304,6 +318,7 @@ const routeRequiredCapabilities = {
   'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts/delete': 'organization:write',
   'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts/check': 'organization:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts': 'organization:read',
+  'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/jobs/:jobId': 'organization:read',
   'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts': 'organization:write',
   'PATCH /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/:semrushPromptId': 'organization:write',
   'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/bulk-delete': 'organization:write',
@@ -314,6 +329,7 @@ const routeRequiredCapabilities = {
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags': 'organization:read',
   'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags': 'organization:write',
   'PATCH /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags/:tagId': 'organization:write',
+  'DELETE /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags/:tagId': 'organization:write',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/models': 'organization:read',
   'PUT /v2/orgs/:spaceCatId/brands/:brandId/serenity/models': 'organization:write',
   // Org-level Semrush catalogue lookups (brand-independent): read-only, org
@@ -326,6 +342,10 @@ const routeRequiredCapabilities = {
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/prompts': 'organization:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/cited-domains': 'brand:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/sentiment-overview': 'brand:read',
+  'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/responses': 'brand:read',
+  'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/subreddits': 'brand:read',
+  'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/reddit-threads': 'brand:read',
+  'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/youtube-videos': 'brand:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/topics': 'brand:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/topics/:topicId/prompts': 'brand:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/owned-urls': 'brand:read',
@@ -539,7 +559,9 @@ const routeRequiredCapabilities = {
   'GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status/paged/:limit/:cursor': 'suggestion:read',
   'GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status/paged/:limit': 'suggestion:read',
   'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': 'suggestion:read',
+  'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/guidance-csv/:refKey': 'suggestion:read',
   'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/fixes': 'fixEntity:read',
+  'GET /sites/:siteId/edge-deployed-urls': 'suggestion:read',
   'POST /sites/:siteId/opportunities/:opportunityId/suggestions': CAP_SUGGESTION_WRITE,
   'POST /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/backoffice-reviews': CAP_SUGGESTION_WRITE,
   'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/status': CAP_SUGGESTION_WRITE,
@@ -710,6 +732,7 @@ const routeRequiredCapabilities = {
   'GET /sites/:siteId/llmo/edge-optimize-status': 'site:read',
   'GET /sites/:siteId/llmo/probes/edge-optimize': 'site:read',
   'GET /sites/:siteId/llmo/brand-claims': 'site:read',
+  'POST /sites/:siteId/llmo/brand-claims/request': 'site:write',
   'GET /sites/:siteId/llmo/strategy/demo/brand-presence': 'site:read',
   'GET /sites/:siteId/llmo/strategy/demo/recommendations': 'site:read',
   'GET /llmo/agentic-traffic/global': 'report:read',
@@ -787,12 +810,20 @@ const routeRequiredCapabilities = {
 
   // Site Enrollments
   'GET /sites/:siteId/site-enrollments': 'siteEnrollment:read',
+  // PLG site-enrollment provisioning: admin-or-S2S under entitlement:create (it links a
+  // site to an existing org entitlement, part of the onboarding entitlement flow).
+  'POST /sites/:siteId/site-enrollments': CAP_ENTITLEMENT_CREATE,
 
   // Trial Users
   'GET /organizations/:organizationId/trial-users': CAP_TRIAL_USER_READ,
 
   // Entitlements
   'GET /organizations/:organizationId/entitlements': 'entitlement:read',
+  // Entitlement create/ensure: admin-or-S2S under entitlement:create so the Mystique S2S
+  // consumer can provision org- and site-level entitlements on the unified onboarding
+  // path (SITES-50526). The tier PATCH stays S2S-admin-only (see INTERNAL_ROUTES).
+  'POST /organizations/:organizationId/entitlements': CAP_ENTITLEMENT_CREATE,
+  'POST /sites/:siteId/entitlements': CAP_ENTITLEMENT_CREATE,
   'GET /organizations/:organizationId/feature-flags': 'organization:read',
 
   // Sandbox

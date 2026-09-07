@@ -28,6 +28,7 @@ import {
   isArray,
   getStoredMetrics,
   isValidUUID,
+  isValidUrl,
   deepEqual,
   isNonEmptyObject,
   canonicalizeUrl,
@@ -48,7 +49,7 @@ import { validateRepoUrl } from '../utils/validations.js';
 import { applyFieldProjection } from '../utils/field-projection.js';
 import {
   wwwUrlResolver, resolveWwwUrl, getAsoEntitlement, getAsoTier, CUSTOMER_VISIBLE_TIERS,
-  isInternalOrg,
+  isInternalOrg, resolveSemrushImsToken,
 } from '../support/utils.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { CAP_SITE_READ_ALL, CAP_SITE_CREATE } from '../routes/capability-constants.js';
@@ -62,6 +63,10 @@ import {
   resolveProductCode,
 } from '../support/tier-provisioning.js';
 import { getBrandBySite, isSemrushMarketMirrorSite } from '../support/brands-storage.js';
+import { normalizeHostCase } from '../support/url-utils.js';
+import { createSerenityTransport } from '../support/serenity/rest-transport.js';
+import { propagateSiteUrlToSemrush } from '../support/serenity/site-url-propagation.js';
+import { isSemrushTransportError, unwrapTransportCause } from '../support/serenity/errors.js';
 import { listViewableResourceIds } from '../support/state-access-mapping-utils.js';
 import { requirePostgrestForFacsMappings } from '../support/postgrest-availability.js';
 import { isFacsRebacResource } from '../routes/facs-capabilities.js';
@@ -1194,43 +1199,78 @@ function SitesController(ctx, log, env) {
       return badRequest('Request body required');
     }
 
-    // A site's URL is immutable once it backs a Semrush-managed brand. That brand's
-    // tracked domain lives on its Semrush projects/markets, which have no
-    // domain-update path (the domain is set only at project-create time), so
-    // letting the SpaceCat site URL drift would desync the site from its Semrush
-    // projects. Only the URL is gated here — every other site field stays editable.
-    // The brand lookup runs only when a URL change is actually requested, so the
-    // common patch path (no baseURL) pays no extra query.
-    //
-    // TODO (~2026-07-07): Semrush is expected to support changing a project's
-    // primary URL — which is its main (own-brand, `main_brand: true`) benchmark
-    // domain, see ensureOwnBrandBenchmark in support/serenity/brand-urls.js — in
-    // ~2 weeks (heads-up received 2026-06-23). Once available, relax this guard to
-    // propagate the new URL to each market's main benchmark (and republish) instead
-    // of blocking the edit.
-    if (hasText(requestBody.baseURL) && requestBody.baseURL !== site.getBaseURL()) {
+    // Normalize a trailing slash ONCE, up front — so `https://x.com/` and `https://x.com`
+    // (or a subpath with/without one) compare, collide-check, propagate, and persist
+    // identically, matching how `createSite` normalizes its input before ever touching
+    // `Site.findByBaseURL`. Deliberately NOT reusing `composeBaseURL`/`canonicalizeUrl`
+    // here — both also strip `www.`, which this feature must NOT collapse (a Semrush
+    // project's identity treats `www.x.com` and `x.com` as distinct sites; see
+    // `siteIdentityFromUrlString`'s own "do NOT collapse www vs apex" contract). The host's
+    // case is normalized here too — hosts are case-insensitive (RFC 3986 / WHATWG URL), so
+    // `Site1.com` and `site1.com` must compare, collide-check, propagate, and persist as the
+    // same value — but the path is left untouched, since paths ARE case-sensitive.
+    const nextBaseURL = hasText(requestBody.baseURL)
+      ? normalizeHostCase(requestBody.baseURL.replace(/\/$/, ''))
+      : requestBody.baseURL;
+
+    // A site's URL backing a Semrush-managed brand can be changed, but only for the
+    // brand's OWN primary site — see serenity-docs#349. A registrable-domain change is
+    // ALSO allowed here today, on the strength of an earlier version of this comment that
+    // claimed Semrush's project PATCH persists a changed `domain` (not just `primary_url`)
+    // and that "would this lose history?" therefore does not apply to a cross-domain edit.
+    // That claim was WRONG and has been corrected — live-verified 2026-09-01 against
+    // www.semrush.com (the earlier comment's `adobe-hackathon.semrush.com` test host is now
+    // decommissioned; see semrush-project-domain-immutable-once-published in project
+    // memory): a Semrush project's `domain` is settable only at create time. A PATCH that
+    // changes `domain` on an already-published project is accepted and echoed back once,
+    // then silently dropped from every later read, including after a republish — only
+    // `primary_url` and the own-brand benchmark's `domain`/`primary_url` genuinely move in
+    // place. So `propagateSiteUrlToSemrush` does NOT keep a market project's `domain` in
+    // step with a cross-domain rename made here: it moves `primary_url` and the benchmark,
+    // but the project's `domain` stays on whatever it was at first publish, producing the
+    // same domain/primary_url split the Add Market siteId/brandDomain precedence bug
+    // produced. Fixing that (or gating this cross-domain path until it's fixed) is tracked
+    // separately — this comment update corrects the factual claim only, it does not change
+    // the code path below. A market-mirror site (linked via brand_sites, type='serenity')
+    // stays immutable: whether/how a mirror should follow a rename is a separate, open
+    // decision (issue #349 workstream 4) this change does not make. The brand lookup runs
+    // only when a URL change is actually requested, so the common patch path (no baseURL)
+    // pays no extra query.
+    if (hasText(nextBaseURL) && nextBaseURL !== site.getBaseURL()) {
+      if (!isValidUrl(nextBaseURL)) {
+        return badRequest('baseURL must be a valid URL');
+      }
+
+      const collidingSite = await Site.findByBaseURL(nextBaseURL);
+      if (collidingSite && collidingSite.getId() !== site.getId()) {
+        return createResponse({
+          message: 'A site with this baseURL already exists',
+          code: 'siteUrlTaken',
+        }, 409);
+      }
+
       const postgrestClient = context.dataAccess?.services?.postgrestClient;
       if (postgrestClient?.from) {
-        // Two ways a site can back a Semrush-managed brand, both immutable:
+        // Two ways a site can back a Semrush-managed brand:
         //  - the brand's OWN primary site (brands.site_id) — getBrandBySite, or
         //  - a Semrush market mirror linked via brand_sites (type='serenity'),
         //    which a serenity brand shell (no brands.site_id) reaches ONLY here.
         // The lookups can throw on a transient PostgREST error; map that to a 5xx
         // rather than letting it escape this catch-less handler as an opaque 500.
-        let attachedToSemrushBrand = false;
+        let attachedBrand = null;
+        let isMirror = false;
         try {
-          const attachedBrand = await getBrandBySite(
+          attachedBrand = await getBrandBySite(
             site.getOrganizationId(),
             site.getId(),
             postgrestClient,
             log,
           );
-          attachedToSemrushBrand = hasText(attachedBrand?.semrushSubWorkspaceId)
-            || await isSemrushMarketMirrorSite(
-              site.getOrganizationId(),
-              site.getId(),
-              postgrestClient,
-            );
+          isMirror = !attachedBrand && await isSemrushMarketMirrorSite(
+            site.getOrganizationId(),
+            site.getId(),
+            postgrestClient,
+          );
         } catch (lookupError) {
           log.error('updateSite: failed to resolve Semrush-brand attachment for URL-immutability guard', {
             siteId: site.getId(),
@@ -1238,13 +1278,60 @@ function SitesController(ctx, log, env) {
           });
           return internalServerError('Could not verify whether this site URL is editable; please retry');
         }
-        if (attachedToSemrushBrand) {
+
+        // v1 scope: market-mirror sites stay immutable (see comment above).
+        if (isMirror) {
           return forbidden('Updating the URL of a site attached to a Semrush-managed brand is not allowed');
+        }
+
+        if (hasText(attachedBrand?.semrushSubWorkspaceId)) {
+          try {
+            await propagateSiteUrlToSemrush({
+              dataAccess: context.dataAccess,
+              transport: createSerenityTransport({
+                env: context.env,
+                imsToken: await resolveSemrushImsToken(context, log, 'sites'),
+              }),
+              workspaceId: attachedBrand.semrushSubWorkspaceId,
+              brandId: attachedBrand.id,
+              siteId: site.getId(),
+              brandIdentity: { name: attachedBrand.name, aliases: attachedBrand.brandAliases },
+              newBaseURL: nextBaseURL,
+              log,
+            });
+          } catch (propagationError) {
+            const err = unwrapTransportCause(propagationError);
+            log.error('updateSite: Semrush URL propagation failed', {
+              siteId: site.getId(),
+              brandId: attachedBrand.id,
+              status: err?.status,
+              error: err?.message,
+            });
+            if (isSemrushTransportError(err)) {
+              // Never echo an upstream message (it embeds the gateway host + workspace/
+              // project UUIDs) — mirrors the brands.js re-sync's error hygiene.
+              return createResponse({ message: 'Failed to update the tracked URL in Semrush' }, 502);
+            }
+            const status = err?.status || 500;
+            return createResponse({
+              message: status === 500 ? 'Failed to update the tracked URL in Semrush' : err.message,
+              ...(err?.code ? { code: err.code } : {}),
+            }, status);
+            // toQuotaExceededError() sets status=409, code='quotaExceeded' — passes through above.
+          }
+          // NOT persisted on failure: the Semrush call runs BEFORE site.save() below, so a
+          // thrown error here returns before `updates` is ever set for baseURL.
         }
       }
     }
 
     let updates = false;
+
+    if (hasText(nextBaseURL) && nextBaseURL !== site.getBaseURL()) {
+      site.setBaseURL(nextBaseURL);
+      updates = true;
+    }
+
     if (isBoolean(requestBody.isLive) && requestBody.isLive !== site.getIsLive()) {
       site.toggleLive();
       updates = true;

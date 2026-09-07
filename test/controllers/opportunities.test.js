@@ -185,6 +185,8 @@ describe('Opportunities Controller', () => {
 
   let mockOpportunityDataAccess;
   let mockOpportunity;
+  let mockOpportunitySuggestion;
+  let mockOpportunitySuggestionGrant;
   let opportunitiesController;
   let mockSite;
   let mockContext;
@@ -228,9 +230,20 @@ describe('Opportunities Controller', () => {
       }),
     };
 
+    mockOpportunitySuggestion = {
+      allByOpportunityId: sandbox.stub().resolves([]),
+    };
+
+    mockOpportunitySuggestionGrant = {
+      findBySuggestionIds: sandbox.stub().resolves([]),
+      revokeSuggestionGrant: sandbox.stub().resolves({ success: true }),
+    };
+
     mockOpportunityDataAccess = {
       Opportunity: mockOpportunity,
       Site: mockSite,
+      Suggestion: mockOpportunitySuggestion,
+      SuggestionGrant: mockOpportunitySuggestionGrant,
     };
 
     mockContext = {
@@ -286,6 +299,36 @@ describe('Opportunities Controller', () => {
     const opportunities = await response.json();
     expect(opportunities).to.be.an('array').with.lengthOf(1);
     expect(opportunities[0]).to.have.property('id', OPPORTUNITY_ID);
+  });
+
+  it('narrows opportunities to the caller\'s permitted types when the resolver deferred (D4)', async () => {
+    const response = await opportunitiesController.getAllForSite({
+      params: { siteId: SITE_ID },
+      attributes: { facsComposite: { values: ['__no-match__'] } },
+    });
+    expect(response.status).to.equal(200);
+    const opportunities = await response.json();
+    expect(opportunities).to.be.an('array').with.lengthOf(0);
+  });
+
+  it('returns all opportunities for a site-wide (all) composite grant (D4)', async () => {
+    const response = await opportunitiesController.getAllForSite({
+      params: { siteId: SITE_ID },
+      attributes: { facsComposite: { values: 'all' } },
+    });
+    expect(response.status).to.equal(200);
+    const opportunities = await response.json();
+    expect(opportunities).to.be.an('array').with.lengthOf(1);
+  });
+
+  it('narrows by-status opportunities to the caller\'s permitted types (D4)', async () => {
+    const response = await opportunitiesController.getByStatus({
+      params: { siteId: SITE_ID, status: 'NEW' },
+      attributes: { facsComposite: { values: ['__no-match__'] } },
+    });
+    expect(response.status).to.equal(200);
+    const opportunities = await response.json();
+    expect(opportunities).to.be.an('array').with.lengthOf(0);
   });
 
   it('projects opportunities to the requested fields when ?fields= is passed', async () => {
@@ -1010,6 +1053,53 @@ describe('Opportunities Controller', () => {
     expect(response.status).to.equal(404);
     const error = await response.json();
     expect(error).to.have.property('message', 'Opportunity not found');
+  });
+
+  it('revokes grants for the opportunity\'s suggestions before removing it', async () => {
+    const s1 = { getId: () => 'sugg-1' };
+    mockOpportunitySuggestion.allByOpportunityId.resolves([s1]);
+    mockOpportunitySuggestionGrant.findBySuggestionIds.resolves([
+      { suggestion_id: 'sugg-1', grant_id: 'grant-1' },
+    ]);
+    const removeSpy = sandbox.spy(mockOpptyEntity, 'remove');
+    const response = await opportunitiesController.removeOpportunity({
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      data: {},
+    });
+    expect(response.status).to.equal(204);
+    expect(mockOpportunitySuggestion.allByOpportunityId).to.have.been.calledOnceWith(
+      OPPORTUNITY_ID,
+    );
+    expect(mockOpportunitySuggestionGrant.revokeSuggestionGrant)
+      .to.have.been.calledOnceWith('grant-1');
+    expect(mockOpportunitySuggestionGrant.revokeSuggestionGrant)
+      .to.have.been.calledBefore(removeSpy);
+  });
+
+  it('removes an opportunity with no suggestions without attempting a revoke', async () => {
+    const response = await opportunitiesController.removeOpportunity({
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      data: {},
+    });
+    expect(response.status).to.equal(204);
+    expect(mockOpportunitySuggestionGrant.revokeSuggestionGrant).to.not.have.been.called;
+  });
+
+  it('still removes the opportunity and logs a warning when revoking its grants fails', async () => {
+    const s1 = { getId: () => 'sugg-1' };
+    mockOpportunitySuggestion.allByOpportunityId.resolves([s1]);
+    mockOpportunitySuggestionGrant.findBySuggestionIds.resolves([
+      { suggestion_id: 'sugg-1', grant_id: 'grant-1' },
+    ]);
+    mockOpportunitySuggestionGrant.revokeSuggestionGrant.rejects(new Error('rpc failure'));
+    const removeSpy = sandbox.spy(mockOpptyEntity, 'remove');
+    const response = await opportunitiesController.removeOpportunity({
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      data: {},
+    });
+    expect(response.status).to.equal(204);
+    expect(removeSpy).to.have.been.calledOnce;
+    expect(mockContext.log.warn).to.have.been.calledOnce;
   });
 
   it('returns 500 when removing an opportunity if there is a data access layer error', async () => {

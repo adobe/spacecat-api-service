@@ -34,7 +34,7 @@ import {
   validateParentIdQuery,
 } from './markets.js';
 import {
-  listMarkets, resolveProject, mapPublishStatus, projectToSlice,
+  listMarkets, resolveProject, mapPublishStatus, projectToSlice, primaryUrlOf,
 } from '../subworkspace-projects.js';
 import { ensureSubworkspace } from '../workspace-lifecycle.js';
 import {
@@ -44,11 +44,18 @@ import { provisionDimensionTree, ensureServerOwnedValue } from '../tag-tree.js';
 import { classifyBrandedTag, needlesFromNames } from '../branded-classifier.js';
 import { classifyPromptIntents, AI_GEN_CLASSIFY_MAX, computeWriteDeadline } from '../intent-classification.js';
 import {
-  collectBrandUrlEntries, attachBrandUrlsToProject, primaryDomainSet,
-  ensureOwnBrandBenchmark, assertMainBrandBenchmark,
+  collectBrandUrlEntries,
+  attachBrandUrlsToProject,
+  ensureOwnBrandBenchmark,
+  assertMainBrandBenchmark,
+  primaryDomainSet,
+  primaryIdentitySet,
 } from '../brand-urls.js';
 import { resolveProjects } from '../resolve-projects.js';
-import { buildReservedDomains, syncCompetitorBenchmarksForProject } from '../competitor-benchmarks.js';
+import {
+  buildReservedIdentities,
+  syncCompetitorBenchmarksForProject,
+} from '../competitor-benchmarks.js';
 import { collectAliasNames } from '../brand-aliases.js';
 import { upsertMappingRow, tombstoneMappingRow } from '../mapping-rows.js';
 import { primaryUrlPatchBody } from '../project-provisioning.js';
@@ -293,11 +300,13 @@ function validateCreateBody(body) {
  * Generates topics + prompts for (domain, country) via the AI-SEO service
  * (transport.getBrandTopics) and attaches them to the project. Keeps the top
  * `topicCap` topics by search volume (0 = keep all) and tags every prompt with
- * the standard closed-dimension values ({@link STANDARD_PROMPT_TAG_VALUES}, minus
- * its seeded `intent` default), the producing `source/semrush` value, plus a
- * branded / non-branded `type` value derived from `brandNames` (brand name +
- * aliases) and a per-prompt server-classified `intent` value (serenity-docs#32,
- * replacing the seeded `Informational` default). Returns the topic/prompt counts.
+ * the standard closed-dimension values ({@link STANDARD_PROMPT_TAG_VALUES} —
+ * `origin/ai` plus the seeded `intent` default — minus that seeded `intent`
+ * default, which is classified per prompt below instead), the producing
+ * `source/semrush` value, plus a branded / non-branded `type` value derived
+ * from `brandNames` (brand name + aliases) and a per-prompt server-classified
+ * `intent` value (serenity-docs#32, replacing the seeded `Informational`
+ * default). Returns the topic/prompt counts.
  * A generation that yields nothing is a clean no-op (no upstream write).
  *
  * The generated topic name is NOT attached. Under the dimension-root model a
@@ -678,7 +687,7 @@ export async function handleCreateMarketSubworkspace(
   // so classification can later apply intent/origin/type values per prompt and the
   // Categories surface has a `category` root to hang customer categories under.
   // Idempotent (resolve-before-create), and unconditional: every project carries
-  // exactly the four dimension roots, whether or not it has prompts yet.
+  // exactly the five dimension roots, whether or not it has prompts yet.
   const provisioned = await provisionDimensionTree(transport, workspaceId, projectId, log);
 
   // Attach the selected AI models (LLMs) to the project before populating /
@@ -726,36 +735,44 @@ export async function handleCreateMarketSubworkspace(
     );
   }
 
-  // Blocking provisioning invariant (LLMO-7421): resolve/repair the own-brand
-  // benchmark and confirm exactly one main_brand:true benchmark exists in the
-  // DRAFT before this market is allowed to publish. Unlike the URL/competitor
-  // syncs below, this is NOT best-effort — a project that can't establish its
-  // own-brand benchmark must not publish and must not reach `upsertMappingRow`
-  // (recorded as complete). A retry re-enters this handler, re-resolves the same
-  // still-draft project via the leftover-draft adopt branch above, and retries
-  // idempotently (ensureOwnBrandBenchmark is safe to re-run). Checked only
-  // pre-publish: publish is asynchronous (a 202 with the project transitioning
-  // to live in the background — see `publish-status.js`), so a published-view
-  // read taken immediately after the publish call below resolves would race
-  // that transition rather than confirm anything; that confirmation is
-  // deferred to the fleet reconciliation this ticket also scopes.
-  await ensureOwnBrandBenchmark(
+  // Resolve/repair the own-brand benchmark before best-effort URL enrichment.
+  // Two concerns converge here, both blocking (NOT best-effort like the
+  // URL/competitor syncs below):
+  //   - LLMO-7421: exactly one main_brand:true benchmark must exist in the
+  //     DRAFT before this market is allowed to publish, or Brand Presence has
+  //     no customer baseline. A project that can't establish its own-brand
+  //     benchmark must not publish and must not reach `upsertMappingRow`
+  //     (recorded as complete). A retry re-enters this handler, re-resolves
+  //     the same still-draft project via the leftover-draft adopt branch
+  //     above, and retries idempotently (ensureOwnBrandBenchmark is safe to
+  //     re-run). Checked only pre-publish: publish is asynchronous (a 202
+  //     with the project transitioning to live in the background — see
+  //     `publish-status.js`), so a published-view read taken immediately
+  //     after the publish call below resolves would race that transition
+  //     rather than confirm anything; that confirmation is deferred to the
+  //     fleet reconciliation this ticket also scopes.
+  //   - Semrush may have auto-created the benchmark from customer-cased
+  //     brand_names, so project creation is also the blocking point that
+  //     repairs those stored aliases (mixed-case aliases need a blocking
+  //     withhold/re-add repair) before publish.
+  const ownBrand = {
+    name: hasText(body.brandDisplayName) ? body.brandDisplayName : body.brandNames[0],
+    domain: body.brandDomain,
+    primaryUrl,
+    aliases: aliasNames,
+  };
+  const ownBrandBenchmarkId = await ensureOwnBrandBenchmark(
     transport,
     workspaceId,
     projectId,
-    { name: body.brandDisplayName, domain: body.brandDomain, aliases: aliasNames },
+    ownBrand,
     log,
-    { repairUnflagged: true },
+    { repairUnflagged: true, repairAliasCase: true },
   );
   await assertMainBrandBenchmark(transport, workspaceId, projectId);
 
-  // Push the brand's URLs (own sites + social + earned) onto this market's
-  // own-brand benchmark (resolved above), region-filtered to the market. Done
-  // before publish so the URLs are part of the same published version.
-  // Best-effort: URL enrichment must never abort the brand create — a URL-push
-  // hiccup is logged and skipped, not propagated, so the whole block (INCLUDING
-  // the project listing the skip set needs) sits inside the try. The benchmark
-  // itself is already guaranteed to exist and be flagged by this point.
+  // URL attachment remains best-effort. The benchmark itself is already
+  // guaranteed to exist and be flagged by this point.
   try {
     // Skip EVERY market's primary domain, not just this one's: a market-mirror
     // brand's other-market primary must not surface as a website URL here either
@@ -766,18 +783,27 @@ export async function handleCreateMarketSubworkspace(
       body.brandDomain,
       ...siblings.map((p) => p?.domain),
     ]);
+    // The same skip keyed on what each market TRACKS. This market's own tracked
+    // url is the one PATCHed above; a sibling's comes from its project, which the
+    // listing already carries.
+    const primaryIdentities = primaryIdentitySet([
+      primaryUrl,
+      ...siblings.map((p) => primaryUrlOf(p)),
+    ]);
     const brandUrlEntries = collectBrandUrlEntries(
       brandUrlSources,
       body.market,
       primaryDomains,
+      primaryIdentities,
     );
     await attachBrandUrlsToProject(
       transport,
       workspaceId,
       projectId,
       brandUrlEntries,
-      { name: body.brandDisplayName, domain: body.brandDomain, aliases: aliasNames },
+      ownBrand,
       log,
+      ownBrandBenchmarkId,
     );
   } catch (e) {
     // Best-effort, but DELIBERATELY non-self-healing: the brand is left live with
@@ -798,7 +824,7 @@ export async function handleCreateMarketSubworkspace(
   try {
     // Reserve the brand's own domains (this market's project domain + the brand's
     // own website URLs) so a competitor can't be one of the brand's own properties.
-    const reservedDomains = buildReservedDomains(
+    const reservedIdentities = buildReservedIdentities(
       [body.brandDomain],
       brandUrlSources?.urls,
     );
@@ -810,7 +836,7 @@ export async function handleCreateMarketSubworkspace(
       [],
       body.market,
       log,
-      reservedDomains,
+      reservedIdentities,
     );
   } catch (e) {
     // Same non-self-healing best-effort seam as the URL attach above — distinct

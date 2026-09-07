@@ -97,6 +97,7 @@ describe('brand-aliases helpers', () => {
       expect(transport.updateBenchmark).to.have.been.calledOnceWith(WS, 'p-us', 'own', {
         brand_name: 'Brand',
         domain: 'brand.com',
+        primary_url: 'brand.com',
         brand_aliases: ['brand', 'acme', 'acme inc'],
       });
       // The benchmark diff reads the DRAFT view — writes act on the draft.
@@ -157,7 +158,7 @@ describe('brand-aliases helpers', () => {
       // the DE-only alias is clamped out of the US market.
       expect(transport.updateProject).to.not.have.been.called;
       expect(transport.updateBenchmark).to.have.been.calledOnceWith(WS, 'p-us', 'own', {
-        brand_name: 'Brand', domain: 'brand.com', brand_aliases: ['brand'],
+        brand_name: 'Brand', domain: 'brand.com', primary_url: 'brand.com', brand_aliases: ['brand'],
       });
       expect(result.projectsUpdated).to.equal(0);
       expect(result.benchmarksUpdated).to.equal(1);
@@ -198,7 +199,11 @@ describe('brand-aliases helpers', () => {
       // After the PUT, the re-read surfaces the rejected alias.
       transport.listBenchmarks.onSecondCall().resolves({
         aio_benchmarks: [{
-          id: 'own', main_brand: true, domain: 'brand.com', rejected_brand_aliases: ['bogus'],
+          id: 'own',
+          main_brand: true,
+          domain: 'brand.com',
+          brand_name: 'Brand',
+          rejected_brand_aliases: ['bogus'],
         }],
       });
       const aliases = [{ name: 'Acme', regions: [] }, { name: 'bogus', regions: [] }];
@@ -207,7 +212,7 @@ describe('brand-aliases helpers', () => {
 
       expect(result.rejected).to.deep.equal([
         {
-          projectId: 'p-us', market: 'us', domain: 'brand.com', aliases: ['bogus'],
+          projectId: 'p-us', market: 'us', name: 'Brand', domain: 'brand.com', aliases: ['bogus'],
         },
       ]);
     });
@@ -276,7 +281,7 @@ describe('brand-aliases helpers', () => {
       );
 
       expect(transport.updateBenchmark).to.have.been.calledOnceWith(WS, 'p-us', 'own', {
-        brand_name: 'Brand', domain: 'brand.com', brand_aliases: ['brand'],
+        brand_name: 'Brand', domain: 'brand.com', primary_url: 'brand.com', brand_aliases: ['brand'],
       });
       expect(result.benchmarksUpdated).to.equal(1);
     });
@@ -306,6 +311,7 @@ describe('brand-aliases helpers', () => {
       expect(transport.updateBenchmark).to.have.been.calledOnceWith(WS, 'p-us', 'own', {
         brand_name: 'Brand',
         domain: 'brand.com',
+        primary_url: 'brand.com',
         brand_aliases: ['Bass Pro', 'brand', 'bass pro shops', 'outdoor world'],
       });
       expect(result.benchmarksUpdated).to.equal(1);
@@ -388,7 +394,36 @@ describe('brand-aliases helpers', () => {
       expect(transport.updateBenchmark).to.have.been.calledOnceWith(WS, 'p-us', 'own', {
         brand_name: 'Existing Brand',
         domain: 'existing.com',
+        primary_url: 'existing.com',
         brand_aliases: ['brand', 'acme', 'existing brand'],
+      });
+    });
+
+    it('keeps a benchmark on its subpath url when only an alias changes', async () => {
+      // domain and primary_url are ONE value upstream: a body carrying a host-only
+      // domain resets a benchmark that tracks a subpath, re-scoping the brand to
+      // its parent site as a side effect of renaming an alias.
+      const transport = makeTransport(
+        [projectWith('p-us', 'us', { domain: 'nba.com', brandNames: ['Brand'] })],
+        {
+          'p-us': [{
+            id: 'own',
+            main_brand: true,
+            brand_name: 'Brand',
+            domain: 'nba.com/lakers',
+            root_domain: 'nba.com',
+            brand_aliases: [],
+          }],
+        },
+      );
+
+      await syncBrandAliasesAcrossMarkets(transport, [{ name: 'Acme', regions: [] }], 'Brand', WS, undefined);
+
+      expect(transport.updateBenchmark).to.have.been.calledOnceWith(WS, 'p-us', 'own', {
+        brand_name: 'Brand',
+        domain: 'nba.com/lakers',
+        primary_url: 'nba.com/lakers',
+        brand_aliases: ['brand', 'acme'],
       });
     });
 
@@ -403,6 +438,7 @@ describe('brand-aliases helpers', () => {
       expect(transport.updateBenchmark).to.have.been.calledOnceWith(WS, 'p-us', 'own', {
         brand_name: 'Brand',
         domain: 'brand.com',
+        primary_url: 'brand.com',
         brand_aliases: ['brand', 'acme'],
       });
     });
@@ -469,6 +505,7 @@ describe('brand-aliases helpers', () => {
       expect(transport.updateBenchmark).to.have.been.calledOnceWith(WS, 'p-us', 'own', {
         brand_name: 'Brand',
         domain: 'brand.com',
+        primary_url: 'brand.com',
         brand_aliases: ['brand', 'acme'],
       });
       expect(transport.publishProject).to.have.been.calledOnceWith(WS, 'p-us');

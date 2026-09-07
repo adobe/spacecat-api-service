@@ -52,9 +52,14 @@ Notes:
    markets by construction). Apply on BOTH project `brand_names` and benchmark
    `brand_aliases`, and on BOTH the create-market path and the edit re-sync.
 
-3. **Competitor URL → domain — ACCEPT (document).** `normalizeBenchmarkDomain`
-   reduces the URL to a bare host (no scheme/path/`www.`); URLs differing only by
-   path dedupe. Inherent to Semrush's domain-keyed benchmark model. No change.
+3. **Competitor identity → `brand_name` — FIX (re-key).** A Semrush project holds
+   several benchmarks on one domain, told apart by `brand_name`; upstream rejects a
+   duplicate name within a project, never a duplicate domain (live-verified against
+   one `nba.com` project carrying five distinct team benchmarks). De-dupe, update and
+   delete therefore key on the case-folded competitor name, and the benchmark
+   `domain` is payload rather than identity. The self-reference guard compares full
+   site identity (host AND path, `www.` folded) instead of a bare host, so a
+   competitor on a sibling path of the brand's own host is kept.
 
 4. **earned-source `name` — ACCEPT (document).** `brand_earned_sources.name` is
    not carried onto the benchmark `brand_url` entry (`{url, type}` only). No

@@ -43,6 +43,7 @@ import { projectionAudits } from './seed-data/projection-audits.js';
 import { featureFlags } from './seed-data/feature-flags.js';
 import { prompts } from './seed-data/prompts.js';
 import { brandPresenceExecutions } from './seed-data/brand-presence-executions.js';
+import { brandSemrushProjects } from './seed-data/brand-semrush-projects.js';
 import { taskManagementConnections } from './seed-data/task-management-connections.js';
 import { tickets } from './seed-data/tickets.js';
 import { ticketSuggestions } from './seed-data/ticket-suggestions.js';
@@ -300,6 +301,48 @@ async function seed() {
 export async function seedBrandPresenceIntentFixture() {
   await insertRows('prompts', prompts); // FK: BPE.prompt_id → prompts.id
   await insertRows('brand_presence_executions', brandPresenceExecutions);
+}
+
+/**
+ * Optional per-test fixture: three `brand_to_semrush_projects` rows under
+ * BRAND_1 (live whole-country, soft-deleted, non-country) for the brand-markets
+ * IT (test/it/shared/tests/brand-markets.js). NOT part of the baseline seed —
+ * a `sites.js` IT relies on BRAND_1 carrying zero mapping rows in the baseline,
+ * so this is seeded only by that suite after its own resetPostgres().
+ */
+export async function seedBrandMarketsFixture() {
+  // brand_to_semrush_projects does not grant INSERT to postgrest_anon, so seed
+  // with the writer JWT (same as feature_flags above).
+  await insertRows('brand_to_semrush_projects', brandSemrushProjects, { asWriter: true });
+}
+
+/**
+ * Seeds a single recent `brand-claims` Audit row for `siteId` — the timestamp the
+ * on-demand Brand Claims request cooldown (LLMO-7263) reads via
+ * `Site.getLatestAuditByAuditType('brand-claims')`. Returns the ISO `auditedAt`
+ * used so a test can assert the derived `availableAt` (= auditedAt + 7 days).
+ *
+ * Kept out of the baseline seed so it doesn't perturb the audit-count assertions
+ * in the shared Audits suite (SITE_1 there is asserted to have exactly 3 audits).
+ * Seed it only after resetPostgres(); cleared by the next suite's clearData.
+ *
+ * @param {string} siteId - Site to attach the audit to.
+ * @param {{ agoMs?: number }} [opts] - How long ago the audit ran (default 1h).
+ * @returns {Promise<string>} The ISO `auditedAt` used.
+ */
+export async function seedRecentBrandClaimsAudit(siteId, { agoMs = 60 * 60 * 1000 } = {}) {
+  const auditedAt = new Date(Date.now() - agoMs).toISOString();
+  await insertRows('audits', [{
+    id: 'bc111111-bc11-4c11-bc11-bc1111111111',
+    site_id: siteId,
+    audit_type: 'brand-claims',
+    audit_result: { onDemand: true, week: 36, year: 2026 },
+    full_audit_ref: 'brand-claims/it-seed',
+    is_live: true,
+    is_error: false,
+    audited_at: auditedAt,
+  }]);
+  return auditedAt;
 }
 
 /**

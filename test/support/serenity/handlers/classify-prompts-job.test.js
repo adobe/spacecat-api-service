@@ -62,6 +62,16 @@ describe('handlers/classify-prompts-job.js (serenity-docs#33)', () => {
       createPromptsWithMetadata: sinon.stub().resolves({ items: [{ id: 'created-prompt' }] }),
       publishProject: sinon.stub().resolves(),
       updatePromptTagsByIds: sinon.stub().resolves(),
+      // Subworkspace create branch resolves projects from ONE live listing
+      // (buildSliceProjectMap) instead of the BrandSemrushProject DB mapping.
+      // A single project on the (2840, en) slice: settings echo the draft's real
+      // geo/language, mirroring the v1 default view buildSliceProjectMap reads.
+      listProjects: sinon.stub().resolves({
+        items: [{
+          id: 'proj-sw-1',
+          settings: { ai: { location: { id: 2840 }, language: { name: 'en' } } },
+        }],
+      }),
     };
   });
 
@@ -95,11 +105,47 @@ describe('handlers/classify-prompts-job.js (serenity-docs#33)', () => {
 
       const result = await classifyPromptsHandler(context, job, 'token');
       expect(result.created).to.have.lengthOf(1);
-      expect(result.created[0].tagIds).to.include(TAG_IDS.intentTask);
+      expect(result.created[0].tagIds).to.include.members([
+        TAG_IDS.intentTask,
+        TAG_IDS.originHuman,
+        TAG_IDS.sourceConfig,
+      ]);
       expect(result.published).to.equal(true);
       expect(result.pendingClassificationCount).to.equal(0);
       expect(result.requeuedJobId).to.equal(null);
       expect(createAndEnqueueJobStub).to.not.have.been.called;
+    });
+
+    it('uses the trusted ai origin from job metadata while retaining source/config', async () => {
+      const intentByTextMap = new Map([['generated prompt', 'Task']]);
+      const { classifyPromptsHandler } = await load({
+        intentByTextMap,
+        createAndEnqueueJobStub: sinon.stub(),
+        transport,
+      });
+      const project = { getGeoTargetId: () => 2840, getLanguageCode: () => 'en', getSemrushProjectId: () => 'proj-1' };
+      const context = {
+        env: {}, log: fakeLog(), dataAccess: dataAccessFor([project]),
+      };
+      const job = makeJob({
+        brandId: 'brand-1',
+        semrushWorkspaceId: WORKSPACE,
+        originValue: 'ai',
+        prompts: [{
+          text: 'generated prompt',
+          geoTargetId: 2840,
+          languageCode: 'en',
+          tagIds: ['customer-tag'],
+        }],
+      });
+
+      const result = await classifyPromptsHandler(context, job, 'token');
+
+      expect(result.created[0].tagIds).to.include.members([
+        TAG_IDS.originAi,
+        TAG_IDS.sourceConfig,
+      ]);
+      expect(result.created[0].tagIds).to.not.include(TAG_IDS.originHuman);
     });
 
     it('creates a prompt with NO intent value and requeues a reclassify job when classification is exhausted', async () => {
@@ -190,6 +236,66 @@ describe('handlers/classify-prompts-job.js (serenity-docs#33)', () => {
         semrushWorkspaceId: WORKSPACE,
         prompts: [{
           text: 'x', geoTargetId: 2840, languageCode: 'en', tagIds: [TAG_IDS.categoryRunningShoes],
+        }],
+      });
+
+      const result = await classifyPromptsHandler(context, job, 'token');
+
+      expect(result.created).to.have.lengthOf(0);
+      expect(result.skipped).to.have.lengthOf(1);
+    });
+  });
+
+  describe('mode: create (subworkspace) — CSV import async path', () => {
+    it('resolves projects from the live listing (not the DB mapping), creates with intent, and publishes', async () => {
+      const intentByTextMap = new Map([['great product', 'Task']]);
+      const createAndEnqueueJobStub = sinon.stub();
+      const { classifyPromptsHandler } = await load({
+        intentByTextMap, createAndEnqueueJobStub, transport,
+      });
+
+      const dataAccess = dataAccessFor([]);
+      const context = { env: {}, log: fakeLog(), dataAccess };
+      const job = makeJob({
+        mode: 'create',
+        authMode: 'subworkspace',
+        brandId: 'brand-1',
+        semrushWorkspaceId: WORKSPACE,
+        workspaceId: WORKSPACE,
+        parentWorkspaceId: 'parent-ws-1',
+        prompts: [{
+          text: 'great product', geoTargetId: 2840, languageCode: 'en', tagIds: [TAG_IDS.categoryRunningShoes],
+        }],
+      });
+
+      const result = await classifyPromptsHandler(context, job, 'token');
+
+      expect(result.created).to.have.lengthOf(1);
+      expect(result.created[0].tagIds).to.include(TAG_IDS.intentTask);
+      expect(result.published).to.equal(true);
+      expect(result.pendingClassificationCount).to.equal(0);
+      // Subworkspace path enumerates the live listing...
+      expect(transport.listProjects).to.have.been.calledWith(WORKSPACE);
+      // ...and never touches the flat-mode DB mapping.
+      expect(dataAccess.BrandSemrushProject.allByBrandId).to.not.have.been.called;
+    });
+
+    it('skips a prompt whose slice has no matching project in the live listing', async () => {
+      const intentByTextMap = new Map([['great product', 'Task']]);
+      const createAndEnqueueJobStub = sinon.stub();
+      transport.listProjects.resolves({ items: [] });
+      const { classifyPromptsHandler } = await load({
+        intentByTextMap, createAndEnqueueJobStub, transport,
+      });
+
+      const context = { env: {}, log: fakeLog(), dataAccess: dataAccessFor([]) };
+      const job = makeJob({
+        mode: 'create',
+        authMode: 'subworkspace',
+        brandId: 'brand-1',
+        semrushWorkspaceId: WORKSPACE,
+        prompts: [{
+          text: 'great product', geoTargetId: 2840, languageCode: 'en', tagIds: [TAG_IDS.categoryRunningShoes],
         }],
       });
 

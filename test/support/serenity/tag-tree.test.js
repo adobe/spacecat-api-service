@@ -14,6 +14,7 @@ import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
+import esmock from 'esmock';
 
 import {
   indexLevelByName,
@@ -26,11 +27,11 @@ import {
   resolveServerOwnedValueInjection,
   findTagsInTree,
   assertParentWithinDimension,
+  collectSubtreeIds,
 } from '../../../src/support/serenity/tag-tree.js';
 import {
   DIMENSION,
   INTENT_ROOT_NAME,
-  LEGACY_INTENT_ROOT_NAME,
 } from '../../../src/support/serenity/prompt-tags.js';
 import {
   TAG_IDS,
@@ -297,36 +298,24 @@ describe('serenity tag-tree', () => {
       expect(log.warn).to.not.have.been.called;
     });
 
-    it('adopts the pre-rename `intent` root rather than minting a second one beside it', async () => {
-      // A project the intent rename has not reached. Minting `$abv_tags$intent` here
-      // would split the dimension: the new root is empty, every already-tagged prompt
-      // stays under the old one, and no read sees both.
+    it('resolves the intent root by its upstream name, keyed by dimension', async () => {
       const transport = {
-        listProjectTags: makeListProjectTagsStub(
-          dimensionTreeLevels({}, { legacyIntentRoot: true }),
-        ),
+        listProjectTags: makeListProjectTagsStub(dimensionTreeLevels()),
         createProjectTags: sinon.stub(),
       };
-      const log = fakeLog();
-      const roots = await ensureDimensionRoots(transport, WS, PROJECT, log);
+      const roots = await ensureDimensionRoots(transport, WS, PROJECT, fakeLog());
       expect(transport.createProjectTags).to.not.have.been.called;
-      // Keyed by dimension, so the caller never learns which spelling this project has…
-      expect(roots.get('intent')).to.equal(TAG_IDS.intentRoot);
-      // …but the sweep's progress stays observable.
-      expect(log.info).to.have.been.calledWithMatch(
-        sinon.match(/has not reached this project/),
-        sinon.match({ projectId: PROJECT }),
-      );
+      // Upstream names it `$abv_tags$intent`; the caller reads it by dimension.
+      expect(roots.get(DIMENSION.INTENT)).to.equal(TAG_IDS.intentRoot);
     });
 
-    it('keeps the adopted legacy root when a concurrent writer wins the create race', async () => {
-      // The race-recovery path answers from a FRESH level index, so the alias
-      // adoption has to be applied to that one too. Without it the intent root
-      // drops out of the returned map, and the `undefined` root id that follows
-      // makes the next create mint the intent VALUES as bogus root-level tags.
+    it('resolves every root when a concurrent writer wins the create race', async () => {
+      // The race-recovery path answers from a FRESH level index. A root missing from
+      // that map yields an `undefined` root id, which makes the next create mint the
+      // dimension's VALUES as bogus root-level tags.
       const rootLevel = (extra = []) => ([
         { id: 'r-category', name: 'category', children_count: 0 },
-        { id: 'r-intent-legacy', name: LEGACY_INTENT_ROOT_NAME, children_count: 5 },
+        { id: 'r-intent', name: INTENT_ROOT_NAME, children_count: 5 },
         { id: 'r-origin', name: 'origin', children_count: 2 },
         { id: 'r-type', name: 'type', children_count: 2 },
         ...extra,
@@ -343,13 +332,15 @@ describe('serenity tag-tree', () => {
         createProjectTags: sinon.stub().rejects(new Error('duplicate (parent, name)')),
       };
       const roots = await ensureDimensionRoots(transport, WS, PROJECT, fakeLog());
-      expect(roots.get(DIMENSION.INTENT)).to.equal('r-intent-legacy');
+      expect(roots.get(DIMENSION.INTENT)).to.equal('r-intent');
       expect(roots.get('source')).to.equal('r-source-other');
     });
 
-    it('prefers the renamed root over a leftover `intent` root when a project carries both', async () => {
-      // Two distinct roots is not the mid-rename shape — the rename is done here and a
-      // stale empty `intent` root simply survived it.
+    it('resolves the renamed root and reports a bare `intent` root beside it', async () => {
+      // A bare `intent` root sitting beside the renamed one. Resolution is unaffected
+      // — the root is found by its upstream name only — but the project is in the
+      // split state, which no rename or reshape can repair on its own, so the pass
+      // must say so even though it creates nothing.
       const levels = dimensionTreeLevels();
       const transport = {
         listProjectTags: makeListProjectTagsStub({
@@ -357,7 +348,7 @@ describe('serenity tag-tree', () => {
           '': [
             ...levels[''],
             {
-              id: 'stale-intent', name: LEGACY_INTENT_ROOT_NAME, parent_id: null, children_count: 0,
+              id: 'stale-intent', name: DIMENSION.INTENT, parent_id: null, children_count: 0,
             },
           ],
         }),
@@ -367,7 +358,10 @@ describe('serenity tag-tree', () => {
       const roots = await ensureDimensionRoots(transport, WS, PROJECT, log);
       expect(roots.get('intent')).to.equal(TAG_IDS.intentRoot);
       expect(transport.createProjectTags).to.not.have.been.called;
-      expect(log.info).to.not.have.been.called;
+      // Nothing was minted, and it still warns: the split is a STATE, and a check that
+      // only fired at the moment of minting would stay silent on every later pass over
+      // exactly the projects that are still broken.
+      expect(log.warn).to.have.been.calledWithMatch(/intent dimension is split/);
     });
 
     it('creates a fresh `origin` root, leaving a legacy `source` root untouched', async () => {
@@ -379,7 +373,7 @@ describe('serenity tag-tree', () => {
       const legacyLevels = {
         '': [
           { id: 'root-category', name: 'category', children_count: 0 },
-          { id: 'root-intent', name: 'intent', children_count: 5 },
+          { id: 'root-intent', name: INTENT_ROOT_NAME, children_count: 5 },
           { id: 'root-source', name: 'source', children_count: 2 },
           { id: 'root-type', name: 'type', children_count: 2 },
         ],
@@ -423,7 +417,7 @@ describe('serenity tag-tree', () => {
       const bothLevels = {
         '': [
           { id: 'root-category', name: 'category', children_count: 0 },
-          { id: 'root-intent', name: 'intent', children_count: 5 },
+          { id: 'root-intent', name: INTENT_ROOT_NAME, children_count: 5 },
           { id: 'root-origin', name: 'origin', children_count: 2 },
           { id: 'root-source', name: 'source', children_count: 2 },
           { id: 'root-type', name: 'type', children_count: 2 },
@@ -478,7 +472,7 @@ describe('serenity tag-tree', () => {
       const listProjectTags = makeListProjectTagsStub({
         '': [
           { id: 'r-cat', name: 'category', children_count: 0 },
-          { id: 'r-int', name: 'intent', children_count: 0 },
+          { id: 'r-int', name: INTENT_ROOT_NAME, children_count: 0 },
           { id: 'r-org', name: 'origin', children_count: 0 },
         ],
         'r-int': [],
@@ -602,11 +596,13 @@ describe('serenity tag-tree', () => {
   // and maps the existing `source` as the producing-system root (WP-S2). The
   // observability guardrail fires to surface the reshape-missed state.
   describe('ensureDimensionRoots on a reshape-missed project', () => {
-    // Shared levels fixture: legacy `source` (ai/human), no `origin`.
+    // Shared levels fixture: legacy `source` (ai/human), no `origin`. The intent
+    // root is already renamed here so this fixture isolates the `origin` concern —
+    // the un-renamed intent case is its own test below.
     const midRenameLevels = () => ({
       '': [
         { id: 'root-category', name: 'category', children_count: 0 },
-        { id: 'root-intent', name: 'intent', children_count: 5 },
+        { id: 'root-intent', name: INTENT_ROOT_NAME, children_count: 5 },
         { id: 'root-source', name: 'source', children_count: 2 },
         { id: 'root-type', name: 'type', children_count: 2 },
       ],
@@ -635,6 +631,159 @@ describe('serenity tag-tree', () => {
       expect(roots.get('source')).to.equal('root-source');
       // Guardrail: minting `origin` while `source` was already present triggers the warn.
       expect(log.warn).to.have.been.calledWithMatch(/reshape may have missed/);
+      // Pin the create batch: `origin` is the ONLY root missing from this fixture.
+      // Without this, a fixture whose intent root is spelled the pre-rename way
+      // would silently add `$abv_tags$intent` to the batch and still pass.
+      expect(createProjectTags).to.have.been.calledOnce;
+      expect(createProjectTags.firstCall.args[2]).to.deep.equal(['origin']);
+      expect(log.warn).to.not.have.been.calledWithMatch(/intent dimension is split/);
+    });
+
+    // The intent counterpart: a project the rename never reached still names its
+    // populated root `intent`. The strict resolver mints `$abv_tags$intent` beside
+    // it, which splits the dimension and strands every prompt tagged under the old
+    // root. That state must not pass through silently — the fleet-sweep gate proves
+    // it is empty at merge time, not that it stays empty.
+    it('warns when it mints a fresh intent root beside a pre-rename `intent` one', async () => {
+      const levels = midRenameLevels();
+      levels[''] = levels[''].map(
+        (t) => (t.name === INTENT_ROOT_NAME ? { ...t, name: DIMENSION.INTENT } : t),
+      );
+      const listProjectTags = makeListProjectTagsStub(levels);
+      const createProjectTags = sinon.stub().callsFake(
+        (_ws, _proj, names, options = {}) => Promise.resolve(
+          names.map((name) => ({ id: `new-${name}`, name, parent_id: options.parentId ?? null })),
+        ),
+      );
+      const log = fakeLog();
+      const transport = { listProjectTags, createProjectTags };
+      const roots = await ensureDimensionRoots(transport, WS, PROJECT, log);
+
+      // The split really happens: a second, empty intent root is minted.
+      expect(createProjectTags.firstCall.args[2]).to.include(INTENT_ROOT_NAME);
+      expect(roots.get('intent')).to.equal(`new-${INTENT_ROOT_NAME}`);
+      // And it is loud rather than silent.
+      expect(log.warn).to.have.been.calledWithMatch(/intent dimension is split/);
+    });
+
+    // The common case must stay quiet, or the warn is noise nobody reads.
+    it('stays quiet about intent when the project is already renamed', async () => {
+      const listProjectTags = makeListProjectTagsStub(midRenameLevels());
+      const createProjectTags = sinon.stub().callsFake(
+        (_ws, _proj, names, options = {}) => Promise.resolve(
+          names.map((name) => ({ id: `new-${name}`, name, parent_id: options.parentId ?? null })),
+        ),
+      );
+      const log = fakeLog();
+      await ensureDimensionRoots({ listProjectTags, createProjectTags }, WS, PROJECT, log);
+      expect(log.warn).to.not.have.been.calledWithMatch(/intent dimension is split/);
+    });
+  });
+
+  // The generalized display-rename split-root guardrail (tag-display-names.md §3
+  // step 4, §5 phase 1) is dormant today — ROOT_DISPLAY_NAME is an IDENTITY
+  // PLACEHOLDER, so `rootNameOfDimension(dimension) === dimension` for all three
+  // display-renaming dimensions and the loop body in `ensureDimensionRoots` never
+  // runs. Exercising it for real means mocking `rootNameOfDimension` to actually
+  // diverge, which is exactly what happens the moment serenity-docs#407 merges and
+  // the orchestrator swaps the placeholder values in — this pins that the guardrail
+  // will fire correctly on that day, not just today's no-op shape.
+  //
+  // Parameterized across all three DISPLAY_RENAMING_DIMENSIONS (category, type,
+  // source — MysticatBot review, WP-D2): the guardrail loop body is generic over
+  // the dimension, so a bug specific to one dimension's branch (e.g. an
+  // off-by-one in which array position feeds the log message) would not
+  // necessarily show up if only `category` were ever exercised.
+  describe('ensureDimensionRoots — generalized display-rename split-root guardrail', () => {
+    const CASES = [
+      { dimension: DIMENSION.CATEGORY, slug: 'category', display: 'Category' },
+      { dimension: DIMENSION.TYPE, slug: 'type', display: 'Type' },
+      { dimension: DIMENSION.SOURCE, slug: 'source', display: 'Source' },
+    ];
+
+    /** Every OTHER root at its normal, un-renamed spelling. */
+    const OTHER_DEFAULT_ROOTS = [
+      { id: 'root-intent', name: INTENT_ROOT_NAME, children_count: 5 },
+      { id: 'root-origin', name: 'origin', children_count: 2 },
+      { id: 'root-category', name: 'category', children_count: 0 },
+      { id: 'root-type', name: 'type', children_count: 2 },
+      { id: 'root-source', name: 'source', children_count: 0 },
+    ];
+
+    /**
+     * Mocks `rootNameOfDimension` so ONLY `targetDimension` diverges to
+     * `fakeDisplayName` — every other dimension keeps resolving through the
+     * real implementation, so a test for one dimension can't accidentally
+     * exercise (or mask) another's branch of the guardrail loop.
+     */
+    async function ensureDimensionRootsRenaming(targetDimension, fakeDisplayName) {
+      const realPromptTags = await import('../../../src/support/serenity/prompt-tags.js');
+      const { ensureDimensionRoots: renamed } = await esmock(
+        '../../../src/support/serenity/tag-tree.js',
+        {
+          '../../../src/support/serenity/prompt-tags.js': {
+            rootNameOfDimension: (dimension) => (
+              dimension === targetDimension
+                ? fakeDisplayName
+                : realPromptTags.rootNameOfDimension(dimension)
+            ),
+          },
+        },
+      );
+      return renamed;
+    }
+
+    /** Root-level fixture: every other dimension default, plus `slug`/`display` rows. */
+    function rootsFixture(slug, display, { includeSlug, includeDisplay }) {
+      const others = OTHER_DEFAULT_ROOTS.filter((r) => r.name !== slug);
+      const target = [
+        ...(includeSlug ? [{ id: `root-${slug}-slug`, name: slug, children_count: 0 }] : []),
+        ...(includeDisplay ? [{ id: `root-${slug}-display`, name: display, children_count: 0 }] : []),
+      ];
+      return { '': [...others, ...target] };
+    }
+
+    CASES.forEach(({ dimension, slug, display }) => {
+      describe(`${slug} dimension`, () => {
+        it(`warns when "${slug}" and "${display}" exist as distinct root tags`, async () => {
+          const renamed = await ensureDimensionRootsRenaming(dimension, display);
+          const listProjectTags = makeListProjectTagsStub(
+            rootsFixture(slug, display, { includeSlug: true, includeDisplay: true }),
+          );
+          const createProjectTags = sinon.stub();
+          const log = fakeLog();
+          const roots = await renamed(
+            { listProjectTags, createProjectTags },
+            WS,
+            PROJECT,
+            log,
+          );
+          // Both spellings already existed — nothing to create.
+          expect(createProjectTags).to.not.have.been.called;
+          // The split is real (two different ids under the same dimension) and loud.
+          expect(log.warn).to.have.been.calledWithMatch(
+            new RegExp(`both the slug root "${slug}" and its display root "${display}" exist as distinct tags`),
+          );
+          // The canonical (display) spelling wins in the returned map.
+          expect(roots.get(slug)).to.equal(`root-${slug}-display`);
+        });
+
+        it(`stays quiet when only "${display}" exists (the migrated, common case)`, async () => {
+          const renamed = await ensureDimensionRootsRenaming(dimension, display);
+          const listProjectTags = makeListProjectTagsStub(
+            rootsFixture(slug, display, { includeSlug: false, includeDisplay: true }),
+          );
+          const createProjectTags = sinon.stub();
+          const log = fakeLog();
+          await renamed(
+            { listProjectTags, createProjectTags },
+            WS,
+            PROJECT,
+            log,
+          );
+          expect(log.warn).to.not.have.been.calledWithMatch(/display-name migration may/);
+        });
+      });
     });
   });
 
@@ -833,19 +982,13 @@ describe('serenity tag-tree', () => {
 
     // The descendant branch reads `path[0]`, which upstream fills with the root's
     // real name — so this is where an unfolded `$abv_tags$intent` would leak out and
-    // silently disarm every guard that compares against `DIMENSION.*`. Both spellings
-    // must answer the same dimension; LLMO-6986 drops the legacy row.
-    [
-      { label: 'renamed', levels: dimensionTreeLevels() },
-      { label: 'pre-rename', levels: dimensionTreeLevels({}, { legacyIntentRoot: true }) },
-    ].forEach(({ label, levels }) => {
-      it(`reports a value under the ${label} intent root as the \`intent\` dimension`, async () => {
-        const transport = { listProjectTags: makeListProjectTagsStub(levels) };
-        const id = TAG_IDS.intentCommercial;
-        const found = (await findTagsInTree(transport, WS, PROJECT, [id], fakeLog())).get(id);
-        expect(found.kind).to.equal('descendant');
-        expect(found.rootName).to.equal(DIMENSION.INTENT);
-      });
+    // silently disarm every guard that compares against `DIMENSION.*`.
+    it('reports a value under the intent root as the `intent` dimension', async () => {
+      const transport = { listProjectTags: makeListProjectTagsStub(dimensionTreeLevels()) };
+      const id = TAG_IDS.intentCommercial;
+      const found = (await findTagsInTree(transport, WS, PROJECT, [id], fakeLog())).get(id);
+      expect(found.kind).to.equal('descendant');
+      expect(found.rootName).to.equal(DIMENSION.INTENT);
     });
 
     it('reports a depth-3 sub-category with the dimension it descends from', async () => {
@@ -918,6 +1061,111 @@ describe('serenity tag-tree', () => {
       expect(err).to.be.an('error');
       expect(err.status).to.equal(502);
       expect(err.message).to.match(/tag tree too large to resolve/);
+    });
+  });
+
+  describe('collectSubtreeIds', () => {
+    it('collects just its own id for a childless leaf', async () => {
+      const transport = { listProjectTags: makeListProjectTagsStub() };
+      const ids = await collectSubtreeIds(
+        transport,
+        WS,
+        PROJECT,
+        TAG_IDS.subCategoryHuman,
+        fakeLog(),
+      );
+      expect(ids).to.deep.equal([TAG_IDS.subCategoryHuman]);
+    });
+
+    it('collects a parent plus every descendant across levels, in level order', async () => {
+      const transport = { listProjectTags: makeListProjectTagsStub() };
+      const ids = await collectSubtreeIds(
+        transport,
+        WS,
+        PROJECT,
+        TAG_IDS.categoryRunningShoes,
+        fakeLog(),
+      );
+      expect(ids).to.deep.equal([TAG_IDS.categoryRunningShoes, TAG_IDS.subCategoryHuman]);
+    });
+
+    it('composes the subtree independently of whatever upstream does with a cascade delete', async () => {
+      // The composed id set is what gets sent upstream regardless of whether
+      // the batch-delete operation itself cascades, orphans, or errors on a
+      // parent with live children (category-delete.md §6 gate G1) — this
+      // module never relies on that answer.
+      const transport = { listProjectTags: makeListProjectTagsStub() };
+      const ids = await collectSubtreeIds(transport, WS, PROJECT, TAG_IDS.categoryRoot, fakeLog());
+      expect(ids).to.include.members(
+        [TAG_IDS.categoryRoot, TAG_IDS.categoryRunningShoes, TAG_IDS.subCategoryHuman],
+      );
+    });
+
+    it('collects every sibling at a level, including a sibling with its own descendants alongside a childless one', async () => {
+      // Regression guard for a per-level fan-out bug (e.g. only capturing the
+      // LAST frontier node's children into `next`) that a single-branch chain
+      // can never catch: two siblings under the root, only one of which has
+      // its own child.
+      const leafSiblingId = 'category-leaf-sibling';
+      const levels = dimensionTreeLevels({
+        [TAG_IDS.categoryRoot]: [
+          {
+            id: TAG_IDS.categoryRunningShoes,
+            name: 'Running Shoes',
+            parent_id: TAG_IDS.categoryRoot,
+            children_count: 1,
+            path: null,
+          },
+          {
+            id: leafSiblingId,
+            name: 'Leaf Sibling',
+            parent_id: TAG_IDS.categoryRoot,
+            children_count: 0,
+            path: null,
+          },
+        ],
+      });
+      const transport = { listProjectTags: makeListProjectTagsStub(levels) };
+      const ids = await collectSubtreeIds(transport, WS, PROJECT, TAG_IDS.categoryRoot, fakeLog());
+      expect(ids).to.have.members([
+        TAG_IDS.categoryRoot, TAG_IDS.categoryRunningShoes, TAG_IDS.subCategoryHuman, leafSiblingId,
+      ]);
+      expect(ids).to.have.lengthOf(4);
+    });
+
+    it('502s when the collected id count exceeds the delete-size budget', async () => {
+      const children = Array.from({ length: 2001 }, (_, i) => ({
+        id: `c${i}`, name: `C${i}`, parent_id: 'r-cat', children_count: 0,
+      }));
+      const levels = { 'r-cat': children };
+      const transport = { listProjectTags: makeListProjectTagsStub(levels) };
+      const err = await collectSubtreeIds(transport, WS, PROJECT, 'r-cat', fakeLog())
+        .then(() => null, (e) => e);
+      expect(err).to.be.an('error');
+      expect(err.status).to.equal(502);
+      expect(err.message).to.match(/tag subtree too large to delete/);
+    });
+
+    it('502s rather than walk a subtree larger than the read budget', async () => {
+      // Depth, not width, exhausts the READ budget here: a single-child chain
+      // over 200 levels deep costs 200+ reads (one per level) while the total
+      // id count stays small — this isolates the read-count cap from the
+      // separate id-count cap covered by the delete-size-budget test below.
+      const levels = {};
+      let parentId = 'r-cat';
+      for (let i = 0; i < 205; i += 1) {
+        const childId = `c${i}`;
+        levels[parentId] = [{
+          id: childId, name: `C${i}`, parent_id: parentId, children_count: 1,
+        }];
+        parentId = childId;
+      }
+      const transport = { listProjectTags: makeListProjectTagsStub(levels) };
+      const err = await collectSubtreeIds(transport, WS, PROJECT, 'r-cat', fakeLog())
+        .then(() => null, (e) => e);
+      expect(err).to.be.an('error');
+      expect(err.status).to.equal(502);
+      expect(err.message).to.match(/tag subtree too large to resolve/);
     });
   });
 

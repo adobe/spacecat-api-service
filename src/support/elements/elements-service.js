@@ -14,11 +14,11 @@ import { hasText } from '@adobe/spacecat-shared-utils';
 import { ELEMENT_IDS } from './element-ids.js';
 import { SEP } from './constants.js';
 import { mapWithConcurrency } from './concurrency.js';
-import { splitDateRangeIntoWeeksBackward } from './week-utils.js';
+import { splitDateRangeIntoWeeksBackward, addDaysToDate } from './week-utils.js';
 import {
+  DIMENSION,
   INTENT_VALUE,
   INTENT_ROOT_NAME,
-  LEGACY_INTENT_ROOT_NAME,
 } from '../serenity/prompt-tags.js';
 import {
   buildBrandsPayload,
@@ -41,6 +41,19 @@ import {
   buildCitedDomainsPayload,
   transformCitedDomainsResponse,
   transformCitedDomainsResponses,
+  buildPromptResponsesPayload,
+  transformPromptResponsesResponse,
+  clampLimit,
+  buildResponseSourcesPayload,
+  transformResponseSourcesResponse,
+  joinResponsesToSources,
+  diffDayExecutions,
+  buildSubredditsPayload,
+  transformSubredditsResponse,
+  buildRedditThreadsPayload,
+  transformRedditThreadsResponse,
+  buildYoutubeVideosPayload,
+  transformYoutubeVideosResponse,
   buildTopicPromptsPayload,
   transformTopicPromptsResponse,
   aggregateTopicsFromPrompts,
@@ -89,6 +102,45 @@ const SOURCE_VISIBILITY_CALL_MAX_RETRIES = 1;
 const STATS_TRENDS_WEEK_CONCURRENCY = 4;
 
 /**
+ * Bounds parallel per-project (per-market) fan-out for the response feed.
+ *
+ * Deliberately lower than {@link FANOUT_CONCURRENCY} elsewhere in this file. The production
+ * path for this feed is the technical account over the external gateway, whose rate limit is
+ * 100 requests per ~60s window and is PER CREDENTIAL, not per workspace (measured
+ * 2026-09-04: three different workspaces decremented one shared counter under one reset
+ * timestamp). The budget therefore does NOT scale with the number of brands — every
+ * consumer of that credential draws from one pool, so this feed contends fleet-wide and a
+ * large multi-market brand must not be able to spend the budget in a burst.
+ *
+ * The internal IMS route exposes no `x-ratelimit-*` headers, but that is absence of
+ * evidence, not a higher limit — the bound above is the one to design against.
+ *
+ * Each unit of concurrency costs 2 requests per boundary (one per element), so 4 markets
+ * over a 7-day range is already 4 x 8 x 2 = 64 requests against a 100-per-minute pool.
+ */
+const RESPONSE_FEED_CONCURRENCY = 4;
+
+/**
+ * Expands an inclusive `YYYY-MM-DD` range into its individual days, oldest first.
+ *
+ * The controller has already validated both ends and capped the span, so this does no
+ * validation of its own beyond guarding against a non-terminating loop.
+ *
+ * @param {string} startDate - First day, `YYYY-MM-DD`.
+ * @param {string} endDate - Last day, `YYYY-MM-DD`.
+ * @returns {string[]} Days from `startDate` to `endDate` inclusive.
+ */
+function enumerateDays(startDate, endDate) {
+  const days = [];
+  let cursor = startDate;
+  while (cursor <= endDate) {
+    days.push(cursor);
+    cursor = addDaysToDate(cursor, 1);
+  }
+  return days;
+}
+
+/**
  * Creates the Elements service that composes transport calls with per-element
  * payload builders and response transformers.
  *
@@ -131,16 +183,6 @@ export function createElementsService(transport, log) {
         origins: transformOriginsToFilterDimensions(rawTopics),
         content_types: transformContentTypesToFilterDimensions(rawContentTypes),
       };
-      // The dual-prefix intent read is the one rename tolerance that would otherwise
-      // fire silently forever — the write-path alias and the `getPrompts` retry both
-      // log. Report it too, so LLMO-6986 can be gated on all three going quiet rather
-      // than on a judgement call about which projects the sweep reached.
-      if (result.page_intents.some((i) => i.id.startsWith(`${LEGACY_INTENT_ROOT_NAME}${SEP}`))) {
-        log?.info?.(
-          'serenity filter dimensions: workspace still carries pre-rename `intent__` tags',
-          { event: 'intent-rename-legacy-tags-present', workspaceId },
-        );
-      }
       // Merge any tag types not covered above (e.g. `type:branded`) under their own
       // prefix key, and plain prefix-less tags under `tags` — see
       // transformOtherTagsForFilterDimensions. The reserved-key list is derived
@@ -150,8 +192,17 @@ export function createElementsService(transport, log) {
       // below would repoint result's prototype instead of adding a property for
       // those (rather than dropping such tags, routing them as "reserved" sends
       // them into the generic `tags` array, same as any other collision).
+      //
+      // `intent` is reserved explicitly because it is NOT one of `result`'s keys —
+      // the intent dimension surfaces as `page_intents`. Without it, a project the
+      // intent rename has not reached would have its pre-rename `intent__` tags
+      // caught by the catch-all and published as a dynamic, customer-visible
+      // `intent` filter group — the exposure the `$abv_tags$` marker exists to
+      // prevent. Reserving it routes them to the generic `tags` array instead.
+      // This is a blast-radius bound on an un-swept project, not a tolerance: the
+      // tags are still not read as intents.
       const reservedResultKeys = [
-        ...Object.keys(result), 'tags', '__proto__', 'constructor', 'prototype',
+        ...Object.keys(result), DIMENSION.INTENT, 'tags', '__proto__', 'constructor', 'prototype',
       ];
       const { tags, ...otherGroups } = transformOtherTagsForFilterDimensions(
         rawTopics,
@@ -191,21 +242,14 @@ export function createElementsService(transport, log) {
      * derived with one `<intentRoot>__<value>`-filtered call per Semrush intent, run
      * in parallel and joined back to the base rows.
      *
-     * The intent root is being renamed to `$abv_tags$intent` project by project
-     * (LLMO-6984), and an Elements tag filter is the `__`-joined tag PATH — so the
-     * root's name IS the prefix, and a filter carrying the wrong one matches nothing
-     * and answers 200 with an empty `userIntent` on every row. The current spelling
-     * is therefore tried first and the pre-rename `intent` only as a RETRY, fired
-     * when all five calls came back empty: that is the signature of a project the
-     * rename has not reached. A renamed project stays at five calls, and the retry
-     * stops firing on its own as the sweep progresses, so removing the legacy
-     * spelling (LLMO-6986) is a no-op rather than a behaviour change.
+     * An Elements tag filter is the `__`-joined tag PATH, so the intent root's name
+     * IS the prefix every one of those five filters carries: `$abv_tags$intent__`
+     * ({@link INTENT_ROOT_NAME}). A filter carrying any other spelling matches
+     * nothing and answers 200 with an empty `userIntent` on every row, so the
+     * prefix is taken from the constant rather than written out here.
      *
      * Enrichment is non-fatal per intent value: each call catches its own failure
      * and contributes nothing, so one failing intent drops only that intent's rows.
-     * A failed call is NOT read as the empty-result signature, though — when any of
-     * the five failed, the legacy retry is skipped rather than doubling the call
-     * volume against a struggling upstream for an answer that would be a guess.
      * The base call still propagates on failure. Without the flag, response shape
      * and upstream call count are unchanged.
      *
@@ -241,11 +285,10 @@ export function createElementsService(transport, log) {
       // scanners treat this file as binary and silently skip it.
       const rowKey = (row) => `${row?.prompt ?? ''}\0${row?.prompt_topic ?? ''}`;
 
-      // One intent-filtered call per intent value under one root spelling, in
-      // parallel (~one extra round-trip). Each call degrades independently and
-      // reports whether it failed, so an empty round can be told apart from a
-      // broken one.
-      const fetchIntentRound = (intentRoot) => mapWithConcurrency(
+      // One intent-filtered call per intent value, in parallel (~one extra
+      // round-trip). Each call degrades independently. Started here rather than at
+      // the join below so it runs alongside the base call, not after it.
+      const intentRound = mapWithConcurrency(
         Object.values(INTENT_VALUE),
         INTENT_ENRICH_CONCURRENCY,
         async (value) => {
@@ -256,34 +299,25 @@ export function createElementsService(transport, log) {
               ELEMENT_IDS.PROMPTS,
               buildPromptsPayload({
                 ...promptParams,
-                tags: [...(promptParams.tags ?? []), `${intentRoot}${SEP}${value}`],
+                tags: [...(promptParams.tags ?? []), `${INTENT_ROOT_NAME}${SEP}${value}`],
               }),
             );
-            return { key, rows: transformPromptsResponse(raw).prompts, failed: false };
+            return { key, rows: transformPromptsResponse(raw).prompts };
           } catch (e) {
-            log?.warn?.(`serenity userIntent enrichment: intent-filtered PROMPTS call failed for '${value}' under '${intentRoot}'`, { workspaceId, error: e?.message });
-            return { key, rows: [], failed: true };
+            // A failed call contributes an empty round, so it reaches the caller as a
+            // blank `userIntent` — indistinguishable in the response from a prompt that
+            // genuinely carries no intent tag. This warn is the only thing that tells
+            // the two apart, so it carries an `event` key to stay queryable.
+            log?.warn?.(
+              `serenity userIntent enrichment: intent-filtered PROMPTS call failed for '${value}'`,
+              { workspaceId, error: e?.message, event: 'intent-enrichment-call-failed' },
+            );
+            return { key, rows: [] };
           }
         },
       );
 
-      // Current spelling first; the pre-rename one only when all five answered
-      // successfully AND empty (see the doc above).
-      const resolveIntentRows = async () => {
-        const current = await fetchIntentRound(INTENT_ROOT_NAME);
-        const unreached = current.every(({ rows, failed }) => rows.length === 0 && !failed);
-        if (!unreached) {
-          return current;
-        }
-        log?.info?.(
-          'serenity userIntent enrichment: no rows under the renamed intent root, retrying the pre-rename one',
-          { event: 'intent-rename-legacy-retry', workspaceId },
-        );
-        return fetchIntentRound(LEGACY_INTENT_ROOT_NAME);
-      };
-
-      // Base call runs alongside the intent rounds rather than after them.
-      const [base, intentResults] = await Promise.all([basePromise, resolveIntentRows()]);
+      const [base, intentResults] = await Promise.all([basePromise, intentRound]);
 
       // (prompt, prompt_topic) → own intent. A prompt carries exactly one intent
       // tag, so within a single slice it appears in at most one filtered result.
@@ -302,6 +336,146 @@ export function createElementsService(transport, log) {
       return { count: base.count, prompts };
     },
 
+    /**
+     * Fetches the Brand Claims RESPONSE FEED for a date range: each AI answer paired with
+     * the sources cited in that same execution.
+     *
+     * Neither element can serve this alone. `CITATIONS_SOURCES` (141adc88) has the answer
+     * text but NO date; `SOURCES_DATES` (404fb017) has the date and the cited URLs but no
+     * answer. They are joined on `(project_id, prompt, model, date)` — sound because at most
+     * one execution exists per that tuple (measured 2026-09-04: 2,553 tuples, every one
+     * mapping to exactly one `execution_id`, zero violations).
+     *
+     * BOUNDARY AMORTISATION — the reason this is range-based rather than per-day. The
+     * element ignores `CBF_date__start` and honours `CBF_date__end` as an upper bound over a
+     * rolling window, so a single day is recovered as a difference of two pulls:
+     *
+     *     executions(D) = responses(end = D) MINUS responses(end = D-1)
+     *
+     * Consecutive days SHARE a boundary, so fetching each boundary exactly once and reusing
+     * it for the two days it borders costs N+1 pulls for N days rather than 2N — a ~43%
+     * saving at a week, approaching 2x for longer ranges. The boundary set below is built
+     * once and indexed; no day re-fetches a boundary its neighbour already pulled.
+     *
+     * BUDGET. The production path for this feed is the technical account over the external
+     * gateway, where the rate limit is 100 requests per ~60s window and is PER CREDENTIAL,
+     * not per workspace (measured 2026-09-04: three different workspaces decremented one
+     * shared counter under one reset timestamp). The budget does NOT scale with brands, so
+     * this endpoint contends fleet-wide with every other consumer of that credential. Hence
+     * the deliberately low {@link RESPONSE_FEED_CONCURRENCY}, no retry logic here (a retry
+     * storm would consume the shared pool), and a preference for fewer/larger pages: every
+     * call re-scans the whole rolling window, so raising `limit` is strictly better than
+     * walking `offset`. The internal IMS route publishes no rate-limit headers, which is
+     * absence of evidence rather than a higher ceiling.
+     *
+     * ABSENCE IS MEANINGFUL. A `(prompt, model)` tuple runs on a median 61 of 74 days
+     * (`google-ai-overview` on only 50), so gaps are ROUTINE. A missing tuple means that
+     * model did not run that day — never an error, never data loss. No branch here treats an
+     * empty page or an unmatched key as a failure.
+     *
+     * @param {string} workspaceId - Semrush workspace UUID (resolved from the brand; the
+     *   caller never supplies one).
+     * @param {object} params - Query params.
+     * @param {string[]} [params.projectIds] - Ownership-checked project ids (one per
+     *   market). Empty → a single workspace-wide call.
+     * @param {string} params.startDate - First day to report, `YYYY-MM-DD`.
+     * @param {string} params.endDate - Last day to report, `YYYY-MM-DD`.
+     * @param {string} [params.model] - Model/platform filter.
+     * @param {number} [params.limit] - Upstream page size (clamped by the payload builders).
+     * @returns {Promise<object>} `{ records, days, projectIds, pageSize, truncated,
+     *   unmatchedSourceKeyCount }`.
+     */
+    async getResponseFeed(workspaceId, params) {
+      const {
+        projectIds, startDate, endDate, model, limit,
+      } = params;
+      const ids = Array.isArray(projectIds)
+        // `.trim()` before the emptiness test: `hasText('  ')` is true, so a whitespace-only
+        // id would otherwise become a scope and be sent upstream as `project_id: '  '`.
+        // The controller's UUID validation makes that unreachable today, but the service
+        // must not depend on a caller-side check for its own correctness.
+        ? [...new Set(projectIds.map((id) => String(id ?? '').trim()).filter(hasText))]
+        : [];
+      // No project id → one workspace-wide read. `undefined` (not '') so the payload
+      // builders omit `project_id` entirely rather than sending an empty scope.
+      const scopes = ids.length > 0 ? ids : [undefined];
+
+      // Days to report, plus the extra D-1 boundary the first day needs. Each boundary is
+      // fetched ONCE below and reused by the (at most two) days that border it.
+      const days = enumerateDays(startDate, endDate);
+      const boundaries = [addDaysToDate(days[0], -1), ...days];
+
+      const perScope = await mapWithConcurrency(
+        scopes,
+        RESPONSE_FEED_CONCURRENCY,
+        async (projectId) => {
+          const answersByBoundary = new Map();
+          const sourcesByBoundary = new Map();
+          // Sequential across boundaries: the credential's budget is shared fleet-wide, so
+          // this trades wall-clock for a smaller instantaneous burst against the 100/min pool.
+          for (const boundary of boundaries) {
+            /* eslint-disable no-await-in-loop */
+            const [rawAnswers, rawSources] = await Promise.all([
+              transport.fetchElement(
+                workspaceId,
+                ELEMENT_IDS.CITATIONS_SOURCES,
+                buildPromptResponsesPayload({
+                  projectId, model, endDate: boundary, limit,
+                }),
+              ),
+              transport.fetchElement(
+                workspaceId,
+                ELEMENT_IDS.SOURCES_DATES,
+                buildResponseSourcesPayload({
+                  projectId, model, endDate: boundary, limit,
+                }),
+              ),
+            ]);
+            /* eslint-enable no-await-in-loop */
+            answersByBoundary.set(boundary, transformPromptResponsesResponse(rawAnswers));
+            sourcesByBoundary.set(boundary, transformResponseSourcesResponse(rawSources));
+          }
+          return { answersByBoundary, sourcesByBoundary };
+        },
+      );
+
+      const records = [];
+      let unmatchedSourceKeyCount = 0;
+      let truncated = false;
+      const pageSize = clampLimit(limit);
+
+      for (const { answersByBoundary, sourcesByBoundary } of perScope) {
+        for (const day of days) {
+          // Every `day` and its `D-1` predecessor are members of `boundaries`, which was
+          // fully populated above — so these lookups always hit. No `?? []` fallback: it
+          // would be unreachable, and would mask a genuine gap if the boundary set and the
+          // day list ever fell out of step.
+          const answersToday = answersByBoundary.get(day);
+          const answersYesterday = answersByBoundary.get(addDaysToDate(day, -1));
+          // A full page means the upstream window was cut off, so this day's difference may
+          // be incomplete. Reported rather than silently served as if it were whole.
+          if (answersToday.length >= pageSize) {
+            truncated = true;
+          }
+          const dayAnswers = diffDayExecutions(answersToday, answersYesterday);
+          // Source rows carry their own date, so the day's rows are selected directly
+          // rather than by difference — no second pull needed on this side.
+          const daySources = sourcesByBoundary.get(day).filter((row) => row.date === day);
+          const joined = joinResponsesToSources(dayAnswers, daySources, { date: day });
+          records.push(...joined.records);
+          unmatchedSourceKeyCount += joined.unmatchedSourceKeys.length;
+        }
+      }
+
+      return {
+        records,
+        days,
+        projectIds: ids,
+        pageSize,
+        truncated,
+        unmatchedSourceKeyCount,
+      };
+    },
     /**
      * Fetches domains most frequently cited alongside owned URLs (URL Inspector
      * Cited Domains panel), backed by element 98b91d00 ("Stats per Domain").
@@ -343,6 +517,84 @@ export function createElementsService(transport, log) {
         buildCitedDomainsPayload({ ...rest, projectId: ids[0] }),
       );
       return transformCitedDomainsResponse(raw, rest);
+    },
+
+    /**
+     * Fetches per-subreddit Reddit stats from the Subreddits element (faf56e29),
+     * normalized into `{ subreddits: [...], totalCount }`. (Inside the surrounding
+     * c8-ignore region — same POC coverage treatment as the sibling methods here.)
+     *
+     * Single call (no per-project fan-out): the element aggregates across ALL of the
+     * workspace's projects when no `project_id` is supplied (verified live). A
+     * caller-supplied project id scopes to that one project. `projectIds` (a CSV the
+     * controller already parsed + ownership-checked) is narrowed to its first id here.
+     *
+     * @param {string} workspaceId - Semrush workspace UUID.
+     * @param {object} params - Query params (model/platform, startDate, endDate,
+     *   projectIds, page, pageSize).
+     * @returns {Promise<{ subreddits: object[], totalCount: number }>}
+     */
+    async getSubreddits(workspaceId, params) {
+      const { projectIds, ...rest } = params;
+      const projectId = Array.isArray(projectIds) ? projectIds.find(hasText) : undefined;
+      const raw = await transport.fetchElement(
+        workspaceId,
+        ELEMENT_IDS.SUBREDDITS,
+        buildSubredditsPayload({ ...rest, projectId }),
+      );
+      return transformSubredditsResponse(raw, rest);
+    },
+
+    /**
+     * Fetches top Reddit threads by response count from the Reddit Threads element
+     * (5af96fd9), normalized into `{ threads: [...], totalCount }`. (Inside the
+     * surrounding c8-ignore region — same POC coverage treatment as the sibling
+     * methods here.)
+     *
+     * Single call (no per-project fan-out), mirroring `getSubreddits`. A
+     * caller-supplied project id scopes to that one project; `projectIds` (a CSV the
+     * controller already parsed + ownership-checked) is narrowed to its first id here.
+     *
+     * @param {string} workspaceId - Semrush workspace UUID.
+     * @param {object} params - Query params (model/platform, startDate, endDate,
+     *   projectIds, page, pageSize).
+     * @returns {Promise<{ threads: object[], totalCount: number }>}
+     */
+    async getRedditThreads(workspaceId, params) {
+      const { projectIds, ...rest } = params;
+      const projectId = Array.isArray(projectIds) ? projectIds.find(hasText) : undefined;
+      const raw = await transport.fetchElement(
+        workspaceId,
+        ELEMENT_IDS.REDDIT_THREADS,
+        buildRedditThreadsPayload({ ...rest, projectId }),
+      );
+      return transformRedditThreadsResponse(raw, rest);
+    },
+
+    /**
+     * Fetches top YouTube videos by citation count from the YouTube Videos element
+     * (05e624db), normalized into `{ videos: [...], totalCount }`. (Inside the
+     * surrounding c8-ignore region — same POC coverage treatment as the sibling
+     * methods here.)
+     *
+     * Single call (no per-project fan-out), mirroring `getRedditThreads`. A
+     * caller-supplied project id scopes to that one project; `projectIds` (a CSV the
+     * controller already parsed + ownership-checked) is narrowed to its first id here.
+     *
+     * @param {string} workspaceId - Semrush workspace UUID.
+     * @param {object} params - Query params (model/platform, startDate, endDate,
+     *   projectIds, page, pageSize).
+     * @returns {Promise<{ videos: object[], totalCount: number }>}
+     */
+    async getYoutubeVideos(workspaceId, params) {
+      const { projectIds, ...rest } = params;
+      const projectId = Array.isArray(projectIds) ? projectIds.find(hasText) : undefined;
+      const raw = await transport.fetchElement(
+        workspaceId,
+        ELEMENT_IDS.YOUTUBE_VIDEOS,
+        buildYoutubeVideosPayload({ ...rest, projectId }),
+      );
+      return transformYoutubeVideosResponse(raw, rest);
     },
 
     /**

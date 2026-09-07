@@ -21,6 +21,7 @@ import {
 } from '@quazar/ai-seo-ts/v2/source/messages_pb.js';
 import {
   resolveCountry,
+  resolveSearchType,
   engineToLlm,
   brandTarget,
   parseCompetitorDomainsList,
@@ -33,6 +34,7 @@ import { buildGapSourceDomainsDimensionFilterQl } from './gap-source-domains.js'
 /* c8 ignore start */
 export async function handleGapSourceDomainsTotals(sp, clients) {
   const domain = sp.get('domain');
+  const searchType = resolveSearchType(domain);
   const competitorDomains = parseCompetitorDomainsList(sp);
   const competitors = competitorDomains.length > 0
     ? competitorDomains.map(brandTarget)
@@ -54,6 +56,7 @@ export async function handleGapSourceDomainsTotals(sp, clients) {
         competitors,
         dimension_filter_ql: dimensionFilterQl,
         target_date: date,
+        search_type: searchType,
       },
       PROTO_FROM_JSON,
     );

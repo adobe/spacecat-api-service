@@ -340,15 +340,18 @@ export async function ensureMarketSite(ctx, {
  * detection does not report a difference that is not there.
  *
  * Best-effort: returns null (never throws) on missing input, unavailable
- * data-access, an unknown site, or a lookup failure.
+ * data-access, an unknown site, a cross-org site, or a lookup failure.
  *
  * @param {object} dataAccess - `ctx.dataAccess` (reads `dataAccess.Site`).
  * @param {string|null|undefined} siteId - the SpaceCat Site UUID to resolve.
  * @param {object} [log] - logger.
+ * @param {string} [organizationId] - when given, the Site must belong to this
+ *   organization or nothing resolves. Omit only where the caller genuinely has
+ *   no organization to check against.
  * @returns {Promise<{domain: string|null, primaryUrl: string|null}|null>} the
  *   derived values, or null when the site cannot be resolved.
  */
-export async function resolveSiteIdentity(dataAccess, siteId, log) {
+export async function resolveSiteIdentity(dataAccess, siteId, log, organizationId) {
   if (!siteId || !hasText(siteId)) {
     return null;
   }
@@ -363,6 +366,17 @@ export async function resolveSiteIdentity(dataAccess, siteId, log) {
       log?.warn?.('resolveSiteIdentity: site not found', { siteId });
       return null;
     }
+    // Same-org guard, when the caller can state the organization. A Site named by
+    // the request decides what the market's project analyses (its url reaches
+    // `settings.ai.primary_url` via brand_to_semrush_projects.site_id), so a Site
+    // belonging to another organization must not resolve — it would point one
+    // customer's project at another's site.
+    if (organizationId && hasText(organizationId) && site.getOrganizationId() !== organizationId) {
+      log?.warn?.('resolveSiteIdentity: site belongs to another organization; refusing to resolve', {
+        siteId, siteOrg: site.getOrganizationId(), brandOrg: organizationId,
+      });
+      return null;
+    }
     const baseURL = site.getBaseURL();
     return {
       domain: hostnameFromUrlString(baseURL),
@@ -372,6 +386,76 @@ export async function resolveSiteIdentity(dataAccess, siteId, log) {
     log?.warn?.('resolveSiteIdentity: lookup failed (non-fatal)', { siteId, error: e.message });
     return null;
   }
+}
+
+/**
+ * Decides which identity source becomes a market's Semrush project domain +
+ * primary URL. A supplied siteId is authoritative: when one was supplied, its
+ * resolved Site identity wins, even alongside a caller-supplied brandDomain
+ * that differs from it — a brandDomain that merely differs from the market's
+ * Site is the normal, intended Add Market shape and is never compared or
+ * rejected as a mismatch. brandDomain is consulted ONLY when no siteId was
+ * supplied at all. A siteId that was supplied but did not resolve is a hard
+ * failure — this returns nulls in that case rather than silently falling
+ * back to brandDomain; callers reject nulls with a 400.
+ *
+ * @param {{ domain: string|null, primaryUrl: string|null }|null} siteIdentity -
+ *   the already-resolved identity from `resolveSiteIdentity`, or null.
+ * @param {boolean} siteIdSupplied - whether the caller supplied a siteId at
+ *   all, independent of whether it resolved. Distinguishes "no siteId" (fall
+ *   back to brandDomain) from "siteId supplied but unresolved" (hard fail).
+ * @param {string|null|undefined} brandDomain - caller-supplied brandDomain.
+ * @param {string|null|undefined} primaryUrl - caller-supplied primaryUrl.
+ * @returns {{ domain: string|null, primaryUrl: string|null }}
+ */
+export function resolveMarketIdentity(siteIdentity, siteIdSupplied, brandDomain, primaryUrl) {
+  if (siteIdSupplied) {
+    return {
+      domain: siteIdentity?.domain ?? null,
+      primaryUrl: siteIdentity?.primaryUrl ?? null,
+    };
+  }
+  if (brandDomain && hasText(brandDomain)) {
+    const source = primaryUrl && hasText(primaryUrl) ? primaryUrl : brandDomain;
+    return {
+      domain: brandDomain,
+      primaryUrl: siteIdentityFromUrlString(source),
+    };
+  }
+  return { domain: null, primaryUrl: null };
+}
+
+/**
+ * Emits the Add Market success telemetry event, shared by the flat and
+ * sub-workspace create-market paths so the field list exists once — ops needs
+ * to know, after the fact, what identity source a given call resolved to and
+ * whether prompt generation was requested and how many prompts it produced.
+ *
+ * @param {{ info?: (...args: unknown[]) => void }|undefined} log
+ * @param {{
+ *   brandId: string, geoTargetId: number, languageCode: string|null,
+ *   siteId: string|null, brandDomain: string|null, primaryUrl: string|null,
+ *   semrushWorkspaceId: string, semrushProjectId: string,
+ *   generatePrompts: boolean, promptCount?: number,
+ * }} fields
+ */
+export function logMarketCreated(log, fields) {
+  const {
+    brandId, geoTargetId, languageCode, siteId, brandDomain, primaryUrl,
+    semrushWorkspaceId, semrushProjectId, generatePrompts, promptCount,
+  } = fields;
+  log?.info?.('serenity create-market: market created', {
+    brandId,
+    geoTargetId,
+    languageCode,
+    siteId,
+    brandDomain,
+    primaryUrl,
+    semrushWorkspaceId,
+    semrushProjectId,
+    generatePrompts,
+    ...(generatePrompts ? { promptCount } : {}),
+  });
 }
 
 /**

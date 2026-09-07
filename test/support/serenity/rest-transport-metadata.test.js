@@ -22,7 +22,7 @@ use(sinonChai);
 const IMS = 'ims-bearer-test-token';
 const WS = '11111111-2222-3333-4444-555555555555';
 const PID = 'proj-xyz';
-const TEST_ENV = { SEMRUSH_PROJECTS_BASE_URL: 'https://adobe-hackathon.semrush.com' };
+const TEST_ENV = { SEMRUSH_PROJECTS_BASE_URL: 'https://www.semrush.com' };
 
 /**
  * The v3 prompt-authorship-metadata write methods (LLMO-6289) call facade

@@ -25,6 +25,7 @@ import { SerenityTransportError } from '../../../../src/support/serenity/rest-tr
 import { ErrorWithStatusCode } from '../../../../src/support/utils.js';
 import { ERROR_CODES } from '../../../../src/support/serenity/errors.js';
 import { TAG_IDS, makeListProjectTagsStub } from '../fixtures/tag-tree.js';
+import { parseAuditLine } from './audit-log-test-utils.js';
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -248,14 +249,47 @@ describe('prompts-subworkspace handlers', () => {
       }, log);
       expect(result.created).to.have.length(1);
       expect(result.created[0]).to.include({ semrushPromptId: 'new-prompt', geoTargetId: 2840 });
-      // A create is a user-authenticated write: the derived `origin` (`human`) and
-      // producing `source` (`config`) are stamped, and intent defaults to
-      // Informational (Azure unconfigured, serenity-docs#32), alongside the caller's
-      // tag (origin-dimension.md §3, source-dimension.md §1). The v3
-      // metadata-carrying write stamps created_*/updated_* (LLMO-6289).
-      expect(transport.createPromptsWithMetadata).to.have.been.calledOnceWithExactly(WS, 'p-us-en', [createItemMatch('p', undefined)], ['tag-1', TAG_IDS.originHuman, TAG_IDS.sourceConfig, TAG_IDS.intentInformational]);
+      // A create is a user-authenticated write: `origin/human` and
+      // `source/config` are stamped independently, and intent defaults to
+      // Informational (Azure unconfigured, serenity-docs#32), alongside the
+      // caller's tag. The v3 metadata-carrying write stamps
+      // created_*/updated_* (LLMO-6289).
+      expect(transport.createPromptsWithMetadata).to.have.been.calledOnceWithExactly(
+        WS,
+        'p-us-en',
+        [createItemMatch('p', undefined)],
+        ['tag-1', TAG_IDS.originHuman, TAG_IDS.sourceConfig, TAG_IDS.intentInformational],
+      );
       expect(transport.publishProject).to.have.been.calledOnceWith(WS, 'p-us-en');
       expect(result.published).to.equal(true);
+    });
+
+    it('uses a trusted service-principal origin without changing source/config', async () => {
+      const transport = makeTransport();
+      const result = await handleCreatePromptsSubworkspace(
+        transport,
+        WS,
+        {
+          prompts: [{
+            text: 'generated prompt',
+            tagIds: ['customer-tag'],
+            geoTargetId: 2840,
+            languageCode: 'en',
+          }],
+        },
+        log,
+        undefined,
+        undefined,
+        undefined,
+        'service-caller',
+        { originValue: 'ai' },
+      );
+
+      expect(result.created[0].tagIds).to.include.members([
+        TAG_IDS.originAi,
+        TAG_IDS.sourceConfig,
+      ]);
+      expect(result.created[0].tagIds).to.not.include(TAG_IDS.originHuman);
     });
 
     it('skips the trailing publish and reports published:false when deferPublish is true', async () => {
@@ -288,10 +322,15 @@ describe('prompts-subworkspace handlers', () => {
           text: 'p', tagIds: ['tag-1'], geoTargetId: 2840, languageCode: 'en',
         }],
       }, log, undefined, undefined, undefined, 'caller-42');
-      // The create also injects the derived origin, producing-system source, and
-      // default intent alongside the caller's tag; the metadata carries the resolved
+      // The create also injects independent origin/source values and default
+      // intent alongside the caller's tag; the metadata carries the resolved
       // caller id (LLMO-6289).
-      expect(transport.createPromptsWithMetadata).to.have.been.calledOnceWithExactly(WS, 'p-us-en', [createItemMatch('p', 'caller-42')], ['tag-1', TAG_IDS.originHuman, TAG_IDS.sourceConfig, TAG_IDS.intentInformational]);
+      expect(transport.createPromptsWithMetadata).to.have.been.calledOnceWithExactly(
+        WS,
+        'p-us-en',
+        [createItemMatch('p', 'caller-42')],
+        ['tag-1', TAG_IDS.originHuman, TAG_IDS.sourceConfig, TAG_IDS.intentInformational],
+      );
     });
 
     // A tag NAME cannot address a nested tag, so a `tags` key is rejected
@@ -320,16 +359,16 @@ describe('prompts-subworkspace handlers', () => {
         }],
       }, log, classifyByBrandMention);
       expect(result.created[0].tagIds).to.deep.equal([
-        TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded, TAG_IDS.originHuman,
-        TAG_IDS.sourceConfig, TAG_IDS.intentInformational,
+        TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded,
+        TAG_IDS.originHuman, TAG_IDS.sourceConfig, TAG_IDS.intentInformational,
       ]);
       expect(transport.createPromptsWithMetadata).to.have.been.calledOnceWithExactly(
         WS,
         'p-us-en',
         [createItemMatch('is Acme good?', undefined)],
         [
-          TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded, TAG_IDS.originHuman,
-          TAG_IDS.sourceConfig, TAG_IDS.intentInformational,
+          TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded,
+          TAG_IDS.originHuman, TAG_IDS.sourceConfig, TAG_IDS.intentInformational,
         ],
       );
     });
@@ -506,6 +545,28 @@ describe('prompts-subworkspace handlers', () => {
       expect(result.body.error).to.equal('marketNotFound');
     });
 
+    // capUpdateTagIds regression (twin of the flat-mode test): echoing a
+    // prompt's full existing tag list back on PATCH must not have a
+    // closed-dimension id (origin/source — never re-derived on UPDATE)
+    // silently dropped by MAX_TAG_IDS when the echoed list is at/beyond it.
+    it('preserves origin/source ids beyond MAX_TAG_IDS when a client echoes its full existing tag list', async () => {
+      const transport = makeTransport();
+      const openIds = Array.from({ length: 52 }, (_, i) => `custom-cat-${i}`);
+      const echoedTagIds = [...openIds, TAG_IDS.originHuman, TAG_IDS.sourceConfig];
+
+      const result = await handleUpdatePromptSubworkspace(transport, WS, 'old-id', {
+        text: 'new', tagIds: echoedTagIds, geoTargetId: 2840, languageCode: 'en',
+      }, log);
+
+      expect(result.status).to.equal(200);
+      const [writtenPrompt] = transport.updatePromptTagsByIds.firstCall.args[2];
+      expect(writtenPrompt.references).to.include.members(
+        [TAG_IDS.originHuman, TAG_IDS.sourceConfig],
+      );
+      expect(writtenPrompt.references.filter((id) => id.startsWith('custom-cat-')))
+        .to.have.lengthOf(50);
+    });
+
     it('404s promptNotFound when the upstream patchPrompt 404s (no tag write)', async () => {
       const transport = makeTransport({
         patchPrompt: sinon.stub().rejects(new SerenityTransportError(404, 'gone')),
@@ -676,6 +737,104 @@ describe('prompts-subworkspace handlers', () => {
       }, log);
       expect(result.deleted).to.equal(1);
       expect(result.failed).to.have.length(0);
+    });
+
+    // SITES-50099: every deleted prompt gets one structured, requester-attributed
+    // audit log line — the only durable trail for "who deleted which prompt".
+    it('logs one structured "Serenity prompt delete" line per successfully deleted prompt', async () => {
+      const transport = makeTransport();
+      const spyLog = { info: sinon.stub(), error: sinon.stub(), warn: sinon.stub() };
+
+      await handleBulkDeletePromptsSubworkspace(transport, WS, {
+        prompts: [{ semrushPromptId: 'q1', geoTargetId: 2840, languageCode: 'en' }],
+      }, spyLog, { orgId: 'org-1', brandId: 'brand-1', callerId: 'caller@example.com' });
+
+      expect(spyLog.info).to.have.been.calledOnce;
+      const [line] = spyLog.info.firstCall.args;
+      expect(line).to.match(/^Serenity prompt delete /);
+      expect(parseAuditLine(line)).to.deep.equal({
+        organizationId: 'org-1',
+        brandId: 'brand-1',
+        semrushWorkspaceId: WS,
+        semrushPromptId: 'q1',
+        geoTargetId: 2840,
+        languageCode: 'en',
+        callerId: 'caller@example.com',
+        outcome: 'deleted',
+      });
+    });
+
+    it('defaults callerId to "unknown" when the caller is not threaded through', async () => {
+      const transport = makeTransport();
+      const spyLog = { info: sinon.stub(), error: sinon.stub(), warn: sinon.stub() };
+
+      await handleBulkDeletePromptsSubworkspace(transport, WS, {
+        prompts: [{ semrushPromptId: 'q1', geoTargetId: 2840, languageCode: 'en' }],
+      }, spyLog);
+
+      const [line] = spyLog.info.firstCall.args;
+      expect(parseAuditLine(line).callerId).to.equal('unknown');
+    });
+
+    // Important (MysticatBot review, PR #3108): the audit log must be able to
+    // distinguish a genuine delete from finding the prompt already gone upstream
+    // (idempotent 404) — otherwise the trail cannot answer "did we delete it, or
+    // was it already gone" for reconciliation against the upstream's own records.
+    it('logs outcome=deleted with alreadyGone=true for the idempotent upstream-404 case', async () => {
+      const transport = makeTransport({
+        deletePromptsByIds: sinon.stub().rejects(new SerenityTransportError(404, 'gone')),
+      });
+      const spyLog = { info: sinon.stub(), error: sinon.stub(), warn: sinon.stub() };
+
+      await handleBulkDeletePromptsSubworkspace(transport, WS, {
+        prompts: [{ semrushPromptId: 'q1', geoTargetId: 2840, languageCode: 'en' }],
+      }, spyLog, { callerId: 'caller@example.com' });
+
+      expect(spyLog.info).to.have.been.calledOnce;
+      const [line] = spyLog.info.firstCall.args;
+      const payload = parseAuditLine(line);
+      expect(payload.outcome).to.equal('deleted');
+      expect(payload.alreadyGone).to.equal(true);
+    });
+
+    it('logs a structured error-outcome line for a failed delete, without leaking the raw upstream error', async () => {
+      const transport = makeTransport({
+        deletePromptsByIds: sinon.stub().rejects(
+          new SerenityTransportError(500, 'boom, includes secret internal detail'),
+        ),
+      });
+      const spyLog = { info: sinon.stub(), error: sinon.stub(), warn: sinon.stub() };
+
+      await handleBulkDeletePromptsSubworkspace(transport, WS, {
+        prompts: [{ semrushPromptId: 'q1', geoTargetId: 2840, languageCode: 'en' }],
+      }, spyLog, { callerId: 'caller@example.com' });
+
+      expect(spyLog.error).to.have.been.calledOnce;
+      const [line] = spyLog.error.firstCall.args;
+      const payload = parseAuditLine(line);
+      expect(payload.outcome).to.equal('error');
+      expect(payload.status).to.equal(500);
+      expect(payload.callerId).to.equal('caller@example.com');
+      expect(payload.message).to.equal('Upstream request failed');
+    });
+
+    // Non-blocking (MysticatBot review, PR #3108): directly verifies per-prompt
+    // (not per-batch) log emission for the subworkspace path too.
+    it('logs one line per prompt for a multi-prompt batch in the same project', async () => {
+      const transport = makeTransport();
+      const spyLog = { info: sinon.stub(), error: sinon.stub(), warn: sinon.stub() };
+
+      await handleBulkDeletePromptsSubworkspace(transport, WS, {
+        prompts: [
+          { semrushPromptId: 'q1', geoTargetId: 2840, languageCode: 'en' },
+          { semrushPromptId: 'q2', geoTargetId: 2840, languageCode: 'en' },
+        ],
+      }, spyLog, { callerId: 'caller@example.com' });
+
+      expect(spyLog.info).to.have.callCount(2);
+      const loggedIds = spyLog.info.getCalls()
+        .map((c) => parseAuditLine(c.args[0]).semrushPromptId);
+      expect(loggedIds.sort()).to.deep.equal(['q1', 'q2']);
     });
 
     it('400s on an empty prompts array', async () => {

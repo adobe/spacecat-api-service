@@ -16,37 +16,45 @@ import { hasText, tracingFetch as fetch } from '@adobe/spacecat-shared-utils';
 import { ErrorWithStatusCode } from '../utils.js';
 
 /**
- * Builds the Slack incoming-webhook message body for an onboarding request.
+ * Builds the Slack incoming-webhook message body for a failed workspace
+ * provisioning attempt.
  *
- * @param {{ email: string, workspaceId: string|null, spaceCatId: string }} params
+ * @param {{ email: string, workspaceId: string|null, spaceCatId: string, reason?: string }} params
  * @returns {{ text: string }}
  */
-function buildMessage({ email, workspaceId, spaceCatId }) {
+function buildMessage({
+  email, workspaceId, spaceCatId, reason,
+}) {
   const workspace = hasText(workspaceId) ? workspaceId : 'not available';
-  return {
-    text: [
-      ':wave: *New Semrush onboarding request*',
-      `• Customer email: ${email}`,
-      `• Workspace ID: ${workspace}`,
-      `• Organization: ${spaceCatId}`,
-    ].join('\n'),
-  };
+  const lines = [
+    ':warning: *Semrush workspace provisioning failed*',
+    `• Customer email: ${email}`,
+    `• Workspace ID: ${workspace}`,
+    `• Organization: ${spaceCatId}`,
+  ];
+  if (hasText(reason)) {
+    lines.push(`• Reason: ${reason}`);
+  }
+  return { text: lines.join('\n') };
 }
 
 /**
- * Sends an onboarding notification to the Semrush Slack workspace via an
- * incoming webhook. This is the seam where a future Styx-authenticated Semrush
- * (SR) API call will be added.
+ * Alerts the Semrush Slack workspace, via an incoming webhook, that a user
+ * could not be automatically granted access to their organization's Semrush
+ * workspace — i.e. this is a FAILURE-ONLY alert. It is never called on a
+ * successful provisioning call (see `workspace-provisioning.js` /
+ * `controllers/onboarding.js`), so a CSM only sees this channel when the
+ * automated flow needs manual follow-up.
  *
  * @param {Record<string, string|undefined>} env - Runtime env (context.env).
- * @param {{ email: string, workspaceId: string|null, spaceCatId: string }} payload
+ * @param {{ email: string, workspaceId: string|null, spaceCatId: string, reason?: string }} payload
  * @returns {Promise<void>}
  * @throws {ErrorWithStatusCode} 500 if the webhook URL is unset; 502 on failure.
  *   Invariant: thrown error messages never contain the webhook URL or other
  *   secrets — they are safe to log. Covered by the "does not leak the webhook
  *   URL" test; keep it green if this function's error text changes.
  */
-export async function notifyOnboarding(env, payload) {
+export async function notifyProvisioningFailure(env, payload) {
   const webhookUrl = env?.SLACK_ONBOARDING_WEBHOOK_URL;
   if (!hasText(webhookUrl)) {
     throw new ErrorWithStatusCode('onboarding notifications not configured', 500);

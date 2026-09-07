@@ -704,6 +704,42 @@ site-opportunity-suggestions-edge-deploy:
     security:
       - session_token: [ ]
 
+site-edge-deployed-urls:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  get:
+    operationId: getEdgeDeployedUrls
+    summary: List URLs edge-deployed by the site's Tokowaka opportunities
+    description: |
+      Returns the URLs already deployed to the edge by the site's non-prerender ELMO
+      ("Tokowaka") opportunities, each with the opportunity type(s) that deployed it.
+
+      The ELMO Overview uses this to derive prerender / Content-Visibility gains without
+      fanning out one suggestions request per opportunity. Read-only; computed server-side
+      from the site's opportunities and their suggestions (filtered on the `edgeDeployed`
+      flag), returning a compact list instead of full suggestion payloads.
+    tags:
+      - opportunity-suggestions
+    responses:
+      '200':
+        description: List of edge-deployed URLs with their source opportunity types
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: '#/EdgeDeployedUrl'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+    security:
+      - session_token: [ ]
+
 site-geo-experiments:
   parameters:
     - $ref: './parameters.yaml#/siteId'
@@ -957,6 +993,24 @@ site-geo-experiment-validate:
         $ref: './responses.yaml#/503'
     security:
       - ims_key: [ ]
+
+EdgeDeployedUrl:
+  type: object
+  required:
+    - url
+    - sources
+  properties:
+    url:
+      type: string
+      format: uri
+      description: A URL that has been deployed to the edge by a Tokowaka opportunity.
+    sources:
+      type: array
+      description: The opportunity type(s) that edge-deployed this URL.
+      items:
+        type: string
+      example:
+        - meta-tags
 
 GeoExperiment:
   type: object
@@ -1368,6 +1422,71 @@ site-opportunity-suggestion:
         description: Suggestion deleted
       '401':
         $ref: './responses.yaml#/401'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - session_token: [ ]
+
+site-opportunity-suggestion-guidance-csv:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/opportunityId'
+    - $ref: './parameters.yaml#/suggestionId'
+    - name: refKey
+      in: path
+      required: true
+      description: |
+        Which of the `gads-placement-exclusions` guidance CSV references to presign.
+      schema:
+        type: string
+        enum:
+          - account_auto_ref
+          - account_pmax_ref
+          - site_auto_ref
+          - site_pmax_ref
+  get:
+    operationId: getSiteOpportunitySuggestionGuidanceCsv
+    summary: |
+      Get a short-lived presigned download URL for a guidance CSV
+    description: |
+      Mints, on request, a short-lived (1-hour) presigned S3 URL for one of a
+      `gads-placement-exclusions` suggestion's guidance CSV references. The CSV's
+      key is resolved server-side from the suggestion's stored data and signed
+      against the pinned mystique-assets bucket; the caller supplies only the
+      constrained `refKey`.
+    tags:
+      - opportunity-suggestions
+    responses:
+      '200':
+        description: A short-lived presigned download URL for the requested guidance CSV.
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - presignedUrl
+                - expiresAt
+              properties:
+                presignedUrl:
+                  type: string
+                  format: uri
+                  description: Presigned S3 GetObject URL for the CSV (1-hour TTL).
+                expiresAt:
+                  type: string
+                  format: date-time
+                  description: ISO-8601 expiry of the presigned URL.
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
       '404':
         $ref: './responses.yaml#/404'
       '429':

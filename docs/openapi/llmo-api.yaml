@@ -1085,11 +1085,6 @@ llmo-onboard:
                 type: string
                 description: The brand name for the site
                 example: "Example Brand"
-              temp-onboarding:
-                type: boolean
-                description: |
-                  When true, skips updating helix-query.yaml in the project-elmo-ui-data GitHub repo
-                  (temporary onboarding; default is false).
               region:
                 type: string
                 pattern: '^[A-Z]{2}$'
@@ -1205,6 +1200,66 @@ llmo-onboard:
                     the request body; omitted when the DRS default ('US')
                     applies.
                   example: "IN"
+                brandActivation:
+                  type: object
+                  description: |
+                    Submission-level outcome of the brand activation / prompt-generation
+                    side-effects (LLMO-7218). "Submission" because Brandalf and prompt
+                    generation both complete asynchronously via a DRS-side callback this
+                    endpoint has no visibility into — this reports whether the required
+                    work was successfully HANDED OFF to DRS, not whether it eventually
+                    succeeded. Omitted for site-only onboarding, which never runs this step.
+                  properties:
+                    brandalfTriggered:
+                      type: boolean
+                      description: True if the Brandalf brand-identification job was
+                        successfully submitted (v2 onboarding mode only; always false in v1).
+                    brandalfError:
+                      type:
+                        - string
+                        - 'null'
+                      description: Reason the Brandalf submission failed or was skipped, if any.
+                    promptGenerationJobId:
+                      type:
+                        - string
+                        - 'null'
+                      description: The v1-mode direct prompt-generation DRS job id, if submitted.
+                    promptGenerationError:
+                      type:
+                        - string
+                        - 'null'
+                      description: Reason the v1-mode prompt-generation submission failed, if any.
+                    promptSuggestionSchedules:
+                      type:
+                        - array
+                        - 'null'
+                      description: Per-pipeline registration result (v2 mode only); null when
+                        registration timed out rather than completed.
+                      items:
+                        type: object
+                        properties:
+                          providerId:
+                            type: string
+                            description: The prompt-suggestion pipeline's provider id.
+                          status:
+                            type: string
+                            enum: ["created", "already-existed", "submitted", "failed"]
+                            description: |
+                              "created"/"already-existed" for a paying site's recurring schedule;
+                              "submitted" for a trial site's one-shot run; "failed" if
+                              registration/submission itself failed.
+                          error:
+                            type: string
+                            description: Present only when status is "failed".
+                    promptSuggestionSchedulesTimedOut:
+                      type: boolean
+                      description: True if prompt-suggestion schedule registration timed out
+                        before completing (v2 mode only).
+                    requiredWorkFailed:
+                      type: boolean
+                      description: True if any required submission for the resolved onboarding
+                        mode failed. When true, `message` reports a degraded outcome instead of
+                        unconditional success.
               required:
                 - message
                 - domain
@@ -1925,6 +1980,96 @@ llmo-brand-claims:
                 error:
                   type: string
                   example: 'Brand claims data not found for site 9ae8877a-bbf3-407d-9adb-d6a72ce3c5e3'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+llmo-brand-claims-request:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  post:
+    tags:
+      - llmo
+    summary: Request an on-demand Brand Claims run
+    description: |
+      Triggers a single, on-demand Brand Claims pipeline run for the site
+      (LLMO-7263), bypassing the persistent weekly cadence. Intended for trial
+      customers who have no Brand Claims data yet and want to generate it once.
+
+      The request enqueues a `brand-claims` audit (which republishes the DRS
+      brand-presence ready-signal with `onDemand: true`); results appear once the
+      downstream claims pipeline completes.
+
+      Rate limited to **once per 7 days per site**: the last `brand-claims` audit's
+      timestamp is the cooldown anchor. A request inside the window returns `429`
+      with the `availableAt` timestamp and a `Retry-After` header. The request body
+      is empty.
+    operationId: requestBrandClaims
+    requestBody:
+      required: false
+      content:
+        application/json:
+          schema:
+            type: object
+            description: No body is required; any payload is ignored.
+    responses:
+      '202':
+        description: Brand Claims run accepted and enqueued
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                siteId:
+                  type: string
+                  format: uuid
+                  description: The site the run was requested for
+                  example: '9ae8877a-bbf3-407d-9adb-d6a72ce3c5e3'
+                message:
+                  type: string
+                  example: 'Brand Claims run requested; results appear once the pipeline completes.'
+              required:
+                - siteId
+                - message
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        description: >
+          Cooldown active — a Brand Claims run was requested for this site within
+          the last 7 days.
+        headers:
+          Retry-After:
+            description: Seconds until a new run can be requested.
+            required: true
+            schema:
+              type: integer
+              example: 432000
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                siteId:
+                  type: string
+                  format: uuid
+                  example: '9ae8877a-bbf3-407d-9adb-d6a72ce3c5e3'
+                availableAt:
+                  type: string
+                  format: date-time
+                  description: ISO 8601 timestamp when a new run can be requested
+                  example: '2026-09-09T12:00:00.000Z'
+                message:
+                  type: string
+                  example: 'A Brand Claims run was requested recently; a new run can be requested once per 7 days.'
+              required:
+                - siteId
+                - availableAt
+                - message
       '500':
         $ref: './responses.yaml#/500'
     security:
@@ -3495,6 +3640,39 @@ site-llmo-cloudfront-permissions:
                           items:
                             - Scoped to All distributions
                             - Add the Edge Optimize origin and routing function.
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
+site-llmo-cloudfront-template:
+  get:
+    tags:
+      - llmo
+    summary: Download the CloudFront connector role CloudFormation template
+    description: |
+      Returns the raw CloudFormation connector-role template as a YAML file download. It is the
+      same template the AWS quick-create link uses, for customers who create the stack manually
+      (expired quick-create presign, or no AWS console admin access). Read-only — no cross-account
+      customer AWS calls.
+    operationId: getLlmoCloudFrontTemplate
+    parameters:
+      - $ref: './parameters.yaml#/siteId'
+    responses:
+      '200':
+        description: The CloudFront connector role CloudFormation template YAML.
+        content:
+          text/yaml:
+            schema:
+              type: string
       '400':
         $ref: './responses.yaml#/400'
       '401':
@@ -5284,6 +5462,7 @@ llmo-referral-traffic-filter-dimensions:
       range. Queries `rpc_referral_traffic_filter_dimensions`.
     operationId: getReferralTrafficFilterDimensions
     parameters:
+      - $ref: './parameters.yaml#/referralUrlPathPrefix'
       - name: source
         in: query
         schema: { $ref: './schemas.yaml#/ReferralTrafficSource' }
@@ -5319,6 +5498,7 @@ llmo-referral-traffic-kpis:
       sources; meaningful for `optel` / `ga4`.
     operationId: getReferralTrafficKpis
     parameters:
+      - $ref: './parameters.yaml#/referralUrlPathPrefix'
       - name: source
         in: query
         schema: { $ref: './schemas.yaml#/ReferralTrafficSource' }
@@ -5359,6 +5539,7 @@ llmo-referral-traffic-trend:
       `cja` sources; null for `optel` / `cdn`.
     operationId: getReferralTrafficTrend
     parameters:
+      - $ref: './parameters.yaml#/referralUrlPathPrefix'
       - name: source
         in: query
         schema: { $ref: './schemas.yaml#/ReferralTrafficSource' }
@@ -5398,6 +5579,7 @@ llmo-referral-traffic-by-platform:
       and `orders` are null for `optel` / `cdn` sources.
     operationId: getReferralTrafficByPlatform
     parameters:
+      - $ref: './parameters.yaml#/referralUrlPathPrefix'
       - name: source
         in: query
         schema: { $ref: './schemas.yaml#/ReferralTrafficSource' }
@@ -5434,6 +5616,7 @@ llmo-referral-traffic-by-region:
     description: Queries `rpc_referral_traffic_by_region`. Returns rows ordered by pageviews descending.
     operationId: getReferralTrafficByRegion
     parameters:
+      - $ref: './parameters.yaml#/referralUrlPathPrefix'
       - name: source
         in: query
         schema: { $ref: './schemas.yaml#/ReferralTrafficSource' }
@@ -5470,6 +5653,7 @@ llmo-referral-traffic-by-page-intent:
     description: Queries `rpc_referral_traffic_by_page_intent`. Returns rows ordered by pageviews descending.
     operationId: getReferralTrafficByPageIntent
     parameters:
+      - $ref: './parameters.yaml#/referralUrlPathPrefix'
       - name: source
         in: query
         schema: { $ref: './schemas.yaml#/ReferralTrafficSource' }
@@ -5514,6 +5698,7 @@ llmo-referral-traffic-by-url:
       28-day window.
     operationId: getReferralTrafficByUrl
     parameters:
+      - $ref: './parameters.yaml#/referralUrlPathPrefix'
       - name: source
         in: query
         schema: { $ref: './schemas.yaml#/ReferralTrafficSource' }
@@ -5640,6 +5825,7 @@ llmo-referral-traffic-by-device:
       sources.
     operationId: getReferralTrafficByDevice
     parameters:
+      - $ref: './parameters.yaml#/referralUrlPathPrefix'
       - name: source
         in: query
         schema: { $ref: './schemas.yaml#/ReferralTrafficSource' }
@@ -5686,6 +5872,7 @@ llmo-referral-traffic-business-impact:
       28-day window.
     operationId: getReferralTrafficBusinessImpact
     parameters:
+      - $ref: './parameters.yaml#/referralUrlPathPrefix'
       - name: source
         in: query
         schema: { $ref: './schemas.yaml#/ReferralTrafficBusinessImpactSource' }
@@ -6044,6 +6231,10 @@ site-llmo-cloudflare-routes:
       name is not client-supplied. `zoneId` is a Cloudflare identifier (not a SpaceCat entity),
       so it is supplied in the request body.
 
+      The caller supplies the route `pattern` verbatim once it passes the in-domain check below —
+      the service does not re-derive or normalize the host, so the caller can confirm or correct
+      the apex/`www` choice itself.
+
       Before creating the route the service fetches the zone's existing routes and protects the
       customer's current routing using wildcard-aware host-overlap detection (not just exact
       pattern-string matching): if any existing route **bound to a different worker** shares a
@@ -6074,9 +6265,10 @@ site-llmo-cloudflare-routes:
               pattern:
                 type: string
                 description: >-
-                  Cloudflare route pattern. Its host must belong to the site's domain — the
-                  host portion (after stripping any leading wildcard) has to equal the site's
-                  canonical host (base URL host minus a leading `www.`) or be a subdomain of it.
+                  Cloudflare route pattern, used exactly as supplied. Its host must belong to the
+                  site's domain — the host portion (after stripping any leading wildcard) has to
+                  equal the site's canonical host (base URL host minus a leading `www.`) or be a
+                  subdomain of it.
                 example: 'www.example.com/*'
     responses:
       '200':
@@ -6249,6 +6441,86 @@ site-llmo-akamai-properties:
     security:
       - session_token: [ ]
 
+site-llmo-akamai-versions:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - $ref: './parameters.yaml#/akamaiHost'
+    - $ref: './parameters.yaml#/akamaiClientToken'
+    - $ref: './parameters.yaml#/akamaiClientSecret'
+    - $ref: './parameters.yaml#/akamaiAccessToken'
+    - $ref: './parameters.yaml#/akamaiAccountSwitchKey'
+    - name: propertyId
+      in: query
+      required: true
+      description: Akamai property ID (e.g. `prp_1253269`).
+      schema:
+        type: string
+        pattern: '^prp_[A-Za-z0-9]+$'
+    - name: contractId
+      in: query
+      required: true
+      description: Akamai contract ID (e.g. `ctr_1-ABC123`).
+      schema:
+        type: string
+        pattern: '^ctr_[A-Za-z0-9-]+$'
+    - name: groupId
+      in: query
+      required: true
+      description: Akamai group ID (e.g. `grp_18385`).
+      schema:
+        type: string
+        pattern: '^grp_[A-Za-z0-9]+$'
+  get:
+    operationId: getLlmoAkamaiVersions
+    summary: Get the latest and active Akamai property versions
+    description: |
+      Returns the property's latest (highest-numbered) version plus the version currently ACTIVE on
+      each network (STAGING/PRODUCTION), so the onboarding UI can offer a base version to onboard
+      from (default: latest) and show what is live on each network. Read-only.
+
+      **Note:** This endpoint requires LLMO administrator access for the site.
+    tags:
+      - llmo
+    responses:
+      '200':
+        description: The latest and active versions for the property
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                propertyId:
+                  type: string
+                  example: 'prp_1253269'
+                latestVersion:
+                  type: integer
+                  description: The highest-numbered (newest-created) property version.
+                  example: 5
+                active:
+                  type: object
+                  description: >-
+                    The PAPI activation record currently ACTIVE on each network, keyed by network
+                    name. A network with no active version is absent.
+                  properties:
+                    STAGING:
+                      $ref: '#/akamai-active-activation'
+                    PRODUCTION:
+                      $ref: '#/akamai-active-activation'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '502':
+        $ref: './responses.yaml#/502'
+    security:
+      - session_token: [ ]
+
 site-llmo-akamai-plan:
   parameters:
     - $ref: './parameters.yaml#/siteId'
@@ -6288,6 +6560,12 @@ site-llmo-akamai-plan:
                   type: string
                 latestVersion:
                   type: integer
+                  description: The property's latest (highest-numbered) version.
+                baseVersion:
+                  type: integer
+                  description: >-
+                    The version the plan was built against: the chosen `baseVersion`, else the
+                    property's latest.
                 ruleFormat:
                   type: string
                   description: The property's PAPI rule format (e.g. `v2024-01-01`).
@@ -6803,8 +7081,9 @@ akamai-property-ref:
       type: integer
       minimum: 1
       description: >-
-        (deploy only) Optional property version to copy the new version from. Defaults to the
-        property's latest version.
+        (plan and deploy) Optional property version to operate on. On deploy, the new version is
+        copied from it; on plan, the dry-run preview is built against it. Defaults to the property's
+        latest version.
     retryVersion:
       type: integer
       minimum: 1
@@ -6812,6 +7091,24 @@ akamai-property-ref:
         (deploy only) A version a PRIOR attempt already created but failed to write rules into.
         When supplied, deploy RESUMES into it (writes directly, skipping createVersion) instead of
         minting a fresh version — the guard against piling up empty versions on repeated retries.
+
+akamai-active-activation:
+  type: object
+  additionalProperties: false
+  description: The version currently ACTIVE on a network (projected from the PAPI activation record).
+  properties:
+    activationId:
+      type: string
+      example: 'atv_20135679'
+    propertyVersion:
+      type: integer
+      example: 5
+    network:
+      type: string
+      enum: [STAGING, PRODUCTION]
+    status:
+      type: string
+      example: 'ACTIVE'
 
 akamai-property:
   type: object

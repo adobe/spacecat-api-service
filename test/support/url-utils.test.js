@@ -12,7 +12,7 @@
 
 import { expect } from 'chai';
 import {
-  endpointOf, hostnameFromUrlString, isPublicHostname,
+  endpointOf, hostnameFromUrlString, isPublicHostname, normalizeHostCase,
 } from '../../src/support/url-utils.js';
 
 describe('url-utils: hostnameFromUrlString', () => {
@@ -123,5 +123,27 @@ describe('url-utils: endpointOf', () => {
     expect(endpointOf(null)).to.equal(undefined);
     expect(endpointOf(undefined)).to.equal(undefined);
     expect(endpointOf('')).to.equal(undefined);
+  });
+});
+
+describe('url-utils: normalizeHostCase', () => {
+  it('lowercases a mixed-case host while preserving path/query/fragment case', () => {
+    expect(normalizeHostCase('https://EXAMPLE.COM/Some/Path?Q=Value#Frag'))
+      .to.equal('https://example.com/Some/Path?Q=Value#Frag');
+  });
+
+  it('leaves an already-lowercase host untouched', () => {
+    expect(normalizeHostCase('https://example.com/some/path'))
+      .to.equal('https://example.com/some/path');
+  });
+
+  it('returns the input unchanged for a bare hostname with no scheme', () => {
+    expect(normalizeHostCase('EXAMPLE.COM')).to.equal('EXAMPLE.COM');
+  });
+
+  it('returns empty/falsy input unchanged', () => {
+    expect(normalizeHostCase('')).to.equal('');
+    expect(normalizeHostCase(undefined)).to.equal(undefined);
+    expect(normalizeHostCase(null)).to.equal(null);
   });
 });
