@@ -30,6 +30,7 @@ import {
   isValidUrl,
   isWithinSiteScope,
   isPathPatternWithinSiteScope,
+  SPACECAT_USER_AGENT,
 } from '@adobe/spacecat-shared-utils';
 
 import {
@@ -3465,7 +3466,7 @@ function SuggestionsController(ctx, sqs, env) {
       const response = await fetch(url, {
         method: 'GET',
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Spacecat/1.0 Tokowaka-AI AdobeEdgeOptimize-AI',
+          'User-Agent': `${SPACECAT_USER_AGENT} Tokowaka-AI AdobeEdgeOptimize-AI`,
           Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         },
       });

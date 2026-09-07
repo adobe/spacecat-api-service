@@ -25,6 +25,7 @@ import {
 } from '@adobe/spacecat-shared-data-access';
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
+import { SPACECAT_USER_AGENT } from '@adobe/spacecat-shared-utils';
 import SuggestionsController from '../../src/controllers/suggestions.js';
 import AccessControlUtil from '../../src/support/access-control-util.js';
 
@@ -14760,7 +14761,7 @@ describe('Suggestions Controller', () => {
       expect(fetchStub).to.have.been.calledOnce;
       const fetchArgs = fetchStub.getCall(0).args;
       expect(fetchArgs[0]).to.equal('https://www.lovesac.com/sactionals');
-      expect(fetchArgs[1].headers['User-Agent']).to.equal('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Spacecat/1.0 Tokowaka-AI AdobeEdgeOptimize-AI');
+      expect(fetchArgs[1].headers['User-Agent']).to.equal(`${SPACECAT_USER_AGENT} Tokowaka-AI AdobeEdgeOptimize-AI`);
     });
 
     it('should handle fetch failure with 404', async () => {
