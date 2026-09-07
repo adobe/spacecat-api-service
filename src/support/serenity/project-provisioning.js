@@ -14,6 +14,8 @@
 
 import { hasText } from '@adobe/spacecat-shared-utils';
 
+import { ensureOwnBrandBenchmark, assertMainBrandBenchmark } from './brand-urls.js';
+
 /** @typedef {import('./rest-transport.js').SerenityTransport} SerenityTransport */
 
 /**
@@ -89,9 +91,20 @@ export function primaryUrlPatchBody(primaryUrl) {
  * repairs in place. Deleting an otherwise-valid project because a refinement could
  * not be applied trades a recoverable degradation for no market at all.
  *
+ * Unlike the primary-url PATCH, the own-brand benchmark is a BLOCKING invariant
+ * (LLMO-7421): exactly one `main_brand: true` benchmark must exist before publish
+ * (draft view) and must still be exactly one after publish (published view), or
+ * Brand Presence has no customer baseline. Either check failing triggers the same
+ * best-effort-cleanup-then-rethrow as a publish failure — the caller (markets.js
+ * `handleCreateMarket`) never persists the `BrandSemrushProject` row on that path,
+ * so a retry is a byte-identical create rather than an adoption of a
+ * half-provisioned one.
+ *
  * @param {SerenityTransport} transport - the Semrush transport.
  * @param {string} semrushWorkspaceId - the (sub-)workspace to create in.
- * @param {object} createBody - the `createProject` body; carries `domain`.
+ * @param {object} createBody - the `createProject` body; carries `domain`,
+ *   `brand_name_display`, `brand_names` — also used to resolve/create the
+ *   own-brand benchmark.
  * @param {object} [opts] - optional extras.
  * @param {string|null} [opts.primaryUrl] - the url the project tracks. Skipped when
  *   absent, which leaves the upstream's own apex default in place rather than
@@ -101,6 +114,9 @@ export function primaryUrlPatchBody(primaryUrl) {
  * @param {string} [opts.caller] - name used to prefix the failure logs.
  * @returns {Promise<string>} the new project's id.
  * @throws {CreateNoProjectIdError} when create returns no id.
+ * @throws {import('./brand-urls.js').MainBrandBenchmarkInvariantError} when the
+ *   benchmark invariant cannot be established pre- or post-publish, after a
+ *   best-effort cleanup delete.
  * @throws when the publish fails, after a best-effort cleanup delete. A failed
  *   PATCH never throws.
  */
@@ -144,9 +160,11 @@ export async function createProvisionAndPublishProject(
     }
   }
 
-  try {
-    await transport.publishProject(semrushWorkspaceId, semrushProjectId);
-  } catch (e) {
+  // Best-effort cleanup-then-rethrow, shared by every failure past this point
+  // (benchmark invariant pre-publish, publish itself, benchmark invariant
+  // post-publish) so a half-provisioned project is never left for a caller to
+  // mistakenly persist as complete.
+  const cleanupAndRethrow = async (e) => {
     let cleanedUp = false;
     try {
       await transport.deleteProject(semrushWorkspaceId, semrushProjectId);
@@ -168,6 +186,52 @@ export async function createProvisionAndPublishProject(
       },
     );
     throw e;
+  };
+
+  // Blocking invariant (LLMO-7421): resolve/repair the own-brand benchmark and
+  // confirm exactly one main_brand:true benchmark exists in the DRAFT before
+  // publishing. This is the fix for the root cause — the prior version of this
+  // function never touched benchmark state at all, so a project could publish
+  // and be recorded as provisioned with zero main-brand benchmarks.
+  const brand = {
+    name: hasText(createBody?.brand_name_display)
+      ? createBody.brand_name_display
+      : createBody?.brand_names?.[0],
+    domain: createBody?.domain,
+    aliases: hasText(createBody?.brand_name_display)
+      ? createBody?.brand_names
+      : createBody?.brand_names?.slice(1),
+  };
+  try {
+    await ensureOwnBrandBenchmark(transport, semrushWorkspaceId, semrushProjectId, brand, log);
+    await assertMainBrandBenchmark(
+      transport,
+      semrushWorkspaceId,
+      semrushProjectId,
+      { draft: true },
+    );
+  } catch (e) {
+    await cleanupAndRethrow(e);
+  }
+
+  try {
+    await transport.publishProject(semrushWorkspaceId, semrushProjectId);
+  } catch (e) {
+    await cleanupAndRethrow(e);
+  }
+
+  // Re-confirm on the PUBLISHED view: publish promotes the draft, but a
+  // mid-flight upstream race is exactly what this second read exists to catch
+  // before the caller persists the mapping row as a completed provisioning.
+  try {
+    await assertMainBrandBenchmark(
+      transport,
+      semrushWorkspaceId,
+      semrushProjectId,
+      { draft: false },
+    );
+  } catch (e) {
+    await cleanupAndRethrow(e);
   }
 
   return semrushProjectId;

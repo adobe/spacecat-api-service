@@ -196,6 +196,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     const transport = {
       listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-new' }),
+      listBenchmarks: sinon.stub().resolves({ aio_benchmarks: [{ id: 'bm-1', main_brand: true }] }),
       updateProject: sinon.stub().resolves(),
       publishProject: sinon.stub().resolves(),
     };
@@ -249,6 +250,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     const transport = {
       listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-new' }),
+      listBenchmarks: sinon.stub().resolves({ aio_benchmarks: [{ id: 'bm-1', main_brand: true }] }),
       updateProject: sinon.stub().resolves(),
       publishProject: sinon.stub().resolves(),
     };
@@ -277,6 +279,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     const transport = {
       listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-new' }),
+      listBenchmarks: sinon.stub().resolves({ aio_benchmarks: [{ id: 'bm-1', main_brand: true }] }),
       updateProject: sinon.stub().resolves(),
       publishProject: sinon.stub().resolves(),
     };
@@ -302,6 +305,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     const transport = {
       listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-new' }),
+      listBenchmarks: sinon.stub().resolves({ aio_benchmarks: [{ id: 'bm-1', main_brand: true }] }),
       updateProject: sinon.stub().rejects(new Error('patch boom')),
       publishProject: sinon.stub().resolves(),
     };
@@ -327,6 +331,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     const transport = {
       listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-new' }),
+      listBenchmarks: sinon.stub().resolves({ aio_benchmarks: [{ id: 'bm-1', main_brand: true }] }),
       updateProject: sinon.stub().resolves(),
       publishProject: sinon.stub().resolves(),
     };
@@ -349,6 +354,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     const transport = {
       listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-new' }),
+      listBenchmarks: sinon.stub().resolves({ aio_benchmarks: [{ id: 'bm-1', main_brand: true }] }),
       updateProject: sinon.stub().resolves(),
       publishProject: sinon.stub().resolves(),
     };
@@ -374,6 +380,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     const transport = {
       listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-new' }),
+      listBenchmarks: sinon.stub().resolves({ aio_benchmarks: [{ id: 'bm-1', main_brand: true }] }),
       updateProject: sinon.stub().resolves(),
       publishProject: sinon.stub().resolves(),
     };
@@ -398,6 +405,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     const transport = {
       listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-orphan-patch' }),
+      listBenchmarks: sinon.stub().resolves({ aio_benchmarks: [{ id: 'bm-1', main_brand: true }] }),
       updateProject: sinon.stub().rejects(new Error('upstream 503')),
       publishProject: sinon.stub().resolves(),
       deleteProject: sinon.stub().resolves(),
@@ -430,6 +438,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     const transport = {
       listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-new' }),
+      listBenchmarks: sinon.stub().resolves({ aio_benchmarks: [{ id: 'bm-1', main_brand: true }] }),
       updateProject: sinon.stub().resolves(),
       publishProject: sinon.stub().resolves(),
     };
@@ -611,6 +620,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     const transport = {
       listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-orphan-1' }),
+      listBenchmarks: sinon.stub().resolves({ aio_benchmarks: [{ id: 'bm-1', main_brand: true }] }),
       updateProject: sinon.stub().resolves(),
       publishProject: sinon.stub().rejects(new Error('upstream 503')),
       deleteProject: sinon.stub().resolves(),
@@ -645,6 +655,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     const transport = {
       listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-orphan-3' }),
+      listBenchmarks: sinon.stub().resolves({ aio_benchmarks: [{ id: 'bm-1', main_brand: true }] }),
       updateProject: sinon.stub().resolves(),
       publishProject: sinon.stub().rejects(new Error('upstream 503')),
       deleteProject: sinon.stub().rejects(new Error('cleanup network glitch')),
@@ -677,6 +688,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     const transport = {
       listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-orphan-2' }),
+      listBenchmarks: sinon.stub().resolves({ aio_benchmarks: [{ id: 'bm-1', main_brand: true }] }),
       updateProject: sinon.stub().resolves(),
       publishProject: sinon.stub().resolves(),
     };
@@ -703,6 +715,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     const transport = {
       listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
       createProject: sinon.stub().resolves({}), // missing id
+      listBenchmarks: sinon.stub().resolves({ aio_benchmarks: [{ id: 'bm-1', main_brand: true }] }),
       updateProject: sinon.stub().resolves(),
       publishProject: sinon.stub(),
     };
@@ -723,6 +736,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     const transport = {
       listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-de', name: 'German' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-x' }),
+      listBenchmarks: sinon.stub().resolves({ aio_benchmarks: [{ id: 'bm-1', main_brand: true }] }),
       updateProject: sinon.stub().resolves(),
       publishProject: sinon.stub().resolves(),
     };
@@ -748,6 +762,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     const transport = {
       listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-x' }),
+      listBenchmarks: sinon.stub().resolves({ aio_benchmarks: [{ id: 'bm-1', main_brand: true }] }),
       updateProject: sinon.stub().resolves(),
       publishProject: sinon.stub().resolves(),
     };
@@ -806,6 +821,7 @@ describe('handlers/markets.js — language-catalog cache (Important #8)', () => 
       listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-1' }),
       updateProject: sinon.stub().resolves(),
+      listBenchmarks: sinon.stub().resolves({ aio_benchmarks: [{ id: 'bm-1', main_brand: true }] }),
       publishProject: sinon.stub().resolves(),
     };
 
@@ -836,6 +852,7 @@ describe('handlers/markets.js — language-catalog cache (Important #8)', () => 
         listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
         createProject: sinon.stub().resolves({ id: 'proj-1' }),
         updateProject: sinon.stub().resolves(),
+        listBenchmarks: sinon.stub().resolves({ aio_benchmarks: [{ id: 'bm-1', main_brand: true }] }),
         publishProject: sinon.stub().resolves(),
       };
 

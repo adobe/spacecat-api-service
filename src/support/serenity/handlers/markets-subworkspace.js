@@ -43,7 +43,10 @@ import {
 import { provisionDimensionTree, ensureServerOwnedValue } from '../tag-tree.js';
 import { classifyBrandedTag, needlesFromNames } from '../branded-classifier.js';
 import { classifyPromptIntents, AI_GEN_CLASSIFY_MAX, computeWriteDeadline } from '../intent-classification.js';
-import { collectBrandUrlEntries, attachBrandUrlsToProject, primaryDomainSet } from '../brand-urls.js';
+import {
+  collectBrandUrlEntries, attachBrandUrlsToProject, primaryDomainSet,
+  ensureOwnBrandBenchmark, assertMainBrandBenchmark,
+} from '../brand-urls.js';
 import { resolveProjects } from '../resolve-projects.js';
 import { buildReservedDomains, syncCompetitorBenchmarksForProject } from '../competitor-benchmarks.js';
 import { collectAliasNames } from '../brand-aliases.js';
@@ -723,13 +726,30 @@ export async function handleCreateMarketSubworkspace(
     );
   }
 
+  // Blocking provisioning invariant (LLMO-7421): resolve/repair the own-brand
+  // benchmark and confirm exactly one main_brand:true benchmark exists in the
+  // DRAFT before this market is allowed to publish. Unlike the URL/competitor
+  // syncs below, this is NOT best-effort — a project that can't establish its
+  // own-brand benchmark must not publish and must not reach `upsertMappingRow`
+  // (recorded as complete). A retry re-enters this handler, re-resolves the same
+  // still-draft project via the leftover-draft adopt branch above, and retries
+  // idempotently (ensureOwnBrandBenchmark is safe to re-run).
+  await ensureOwnBrandBenchmark(
+    transport,
+    workspaceId,
+    projectId,
+    { name: body.brandDisplayName, domain: body.brandDomain, aliases: aliasNames },
+    log,
+  );
+  await assertMainBrandBenchmark(transport, workspaceId, projectId, { draft: true });
+
   // Push the brand's URLs (own sites + social + earned) onto this market's
-  // own-brand benchmark (created on demand when Semrush hasn't provisioned one),
-  // region-filtered to the market. Done before publish so the URLs are part of
-  // the same published version. Best-effort: URL enrichment must never abort the
-  // brand create — a benchmark/URL hiccup is logged and skipped, not propagated,
-  // so the whole block (INCLUDING the project listing the skip set needs) sits
-  // inside the try.
+  // own-brand benchmark (resolved above), region-filtered to the market. Done
+  // before publish so the URLs are part of the same published version.
+  // Best-effort: URL enrichment must never abort the brand create — a URL-push
+  // hiccup is logged and skipped, not propagated, so the whole block (INCLUDING
+  // the project listing the skip set needs) sits inside the try. The benchmark
+  // itself is already guaranteed to exist and be flagged by this point.
   try {
     // Skip EVERY market's primary domain, not just this one's: a market-mirror
     // brand's other-market primary must not surface as a website URL here either
@@ -833,6 +853,16 @@ export async function handleCreateMarketSubworkspace(
       }
       throw e;
     }
+  }
+
+  // Re-confirm on the PUBLISHED view (LLMO-7421): publish promotes the draft
+  // benchmark established above, but this is the last chance to catch a
+  // mid-flight upstream race before the mapping row below records this market
+  // as successfully provisioned. Only meaningful once actually published —
+  // `publishMode: 'skip'` (LLMO-5492 defer-publish) leaves the project a draft
+  // by design, so there is no published view to check yet.
+  if (published) {
+    await assertMainBrandBenchmark(transport, workspaceId, projectId, { draft: false });
   }
 
   if (dataAccess) {

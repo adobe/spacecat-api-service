@@ -194,48 +194,99 @@ export function collectBrandUrlEntries(sources, market, primaryDomains) {
 }
 
 /**
+ * Thrown by {@link assertMainBrandBenchmark} when a project's benchmark state
+ * does not carry exactly one `main_brand: true` benchmark. A blocking
+ * provisioning invariant (LLMO-7421): without exactly one, Brand Presence has
+ * no customer baseline, so the caller must not publish (pre-publish check) or
+ * record the provisioning as complete (post-publish check).
+ */
+export class MainBrandBenchmarkInvariantError extends Error {
+  constructor(workspaceId, projectId, { draft = false, count = 0 } = {}) {
+    super(
+      'Expected exactly one main_brand=true benchmark for '
+      + `${workspaceId}/${projectId} (${draft ? 'draft' : 'published'} view), found ${count}`,
+    );
+    this.name = 'MainBrandBenchmarkInvariantError';
+    this.workspaceId = workspaceId;
+    this.projectId = projectId;
+    this.draft = draft;
+    this.count = count;
+  }
+}
+
+/**
  * Ensures the project has a benchmark to hang brand URLs on, and returns its id.
  *
  * Brand URLs can only be created *under a benchmark*. Semrush is meant to
  * auto-provision the project's own-brand (`main_brand: true`) benchmark from the
  * project's `brand_names`/`domain`, but some tenants don't — leaving the project
  * with zero benchmarks and nowhere to attach URLs. So we resolve the own-brand
- * benchmark, creating it when absent:
+ * benchmark, creating/repairing it when absent or unflagged:
  *   1. an existing `main_brand: true` benchmark (the system one) always wins;
- *   2. else an existing benchmark whose domain matches the brand's own domain
- *      (the one a previous run created — keeps the ensure idempotent);
- *   3. else create it from the brand's name + domain + aliases.
+ *   2. else an existing benchmark whose domain matches the brand's own domain —
+ *      the flag cannot be set via PUT (live-verified), so it is deleted and
+ *      recreated flagged rather than reused as-is (LLMO-7421; the same rule
+ *      proven live and shipped in mysticat-data-service's migration executor);
+ *   3. else create it from the brand's name + domain + aliases, flagged.
  *
- * A benchmark we create is NOT `main_brand` (the create API can't set it), but
- * brand URLs attach to any benchmark, so that does not affect URL sync. Returns
- * `null` only when there is no benchmark to reuse AND no usable domain to create
- * one with — callers then skip the URL attach (never a hard failure).
+ * `main_brand: true` IS accepted by the v2 batch-create endpoint (live-verified;
+ * see mysticat-data-service PR #945/executor.py `_own_brand_body`) — a prior
+ * version of this function assumed otherwise and left every benchmark it created
+ * unflagged, which is the root cause of LLMO-7421 (published projects with no
+ * main-brand baseline). Reads the DRAFT view (not published) so this can run
+ * before a project's first publish, and so it observes a benchmark this same
+ * ensure call just wrote.
+ *
+ * Returns `null` only when there is no benchmark to reuse AND no usable domain
+ * to create one with — callers then skip the URL attach (never a hard failure).
+ * Callers that must enforce the invariant (provisioning, not URL sync) should
+ * follow this with {@link assertMainBrandBenchmark}.
  *
  * @param {SerenityTransport} transport
  * @param {string} workspaceId - the brand's sub-workspace id.
  * @param {string} projectId - the market/project to ensure the benchmark on.
  * @param {object} brand - { name, domain, aliases? } identity of the own brand.
  * @param {object} [log] - optional logger ({ info?, warn? }).
- * @returns {Promise<string|null>} the resolved benchmark id, or null when none
- *   exists and none can be created (no usable brand domain).
+ * @returns {Promise<string|null>} the resolved (flagged) benchmark id, or null
+ *   when none exists and none can be created (no usable brand domain).
  */
 export async function ensureOwnBrandBenchmark(transport, workspaceId, projectId, brand, log) {
-  const resp = await transport.listBenchmarks(workspaceId, projectId);
+  const resp = await transport.listBenchmarks(workspaceId, projectId, { draft: true });
   const benchmarks = Array.isArray(resp?.aio_benchmarks) ? resp.aio_benchmarks : [];
   const ownDomain = normalizeBenchmarkDomain(brand?.domain);
   const matchesOwn = (b) => hasText(b?.id) && ownDomain !== null
     && normalizeBenchmarkDomain(b?.domain) === ownDomain;
 
-  const existing = benchmarks.find((b) => b?.main_brand === true && hasText(b?.id))
-    || benchmarks.find(matchesOwn);
-  if (existing) {
-    return String(existing.id);
+  const flagged = benchmarks.find((b) => b?.main_brand === true && hasText(b?.id));
+  if (flagged) {
+    return String(flagged.id);
   }
 
-  // Nothing to reuse — create the own-brand benchmark. Needs a name + domain.
   if (!hasText(brand?.name) || ownDomain === null) {
-    return null;
+    // Nothing to create/flag with — fall back to an unflagged domain match (if
+    // any) so URL attach still has somewhere to write. The invariant check
+    // downstream ({@link assertMainBrandBenchmark}) is what catches this case
+    // for callers that must block on it.
+    const domainMatch = benchmarks.find(matchesOwn);
+    return domainMatch ? String(domainMatch.id) : null;
   }
+
+  const domainMatch = benchmarks.find(matchesOwn);
+  if (domainMatch) {
+    // Unflagged own-domain benchmark: main_brand can only be set at create, so
+    // delete and recreate it flagged. Brand URLs/aliases attached to it are
+    // re-pushed by the caller after this resolves (attachBrandUrlsToProject
+    // writes verbatim and the upstream skips duplicates), so nothing here needs
+    // to snapshot/restore them itself.
+    try {
+      await transport.deleteBenchmarks(workspaceId, projectId, [String(domainMatch.id)]);
+    } catch (e) {
+      log?.warn?.('brand-urls: could not delete unflagged own-domain benchmark before recreate', {
+        workspaceId, projectId, benchmarkId: domainMatch.id, error: e?.message,
+      });
+    }
+  }
+
   // Create is the one point where we choose an alias's spelling: upstream keeps
   // whatever an alias was created with, so a later PUT cannot re-case it. Use the
   // lowercase form Semrush's own resolution would have stored.
@@ -243,13 +294,14 @@ export async function ensureOwnBrandBenchmark(transport, workspaceId, projectId,
   const body = [{
     brand_name: brand.name,
     domain: brand.domain,
+    main_brand: true,
     ...(aliases.length ? { brand_aliases: aliases } : {}),
   }];
   try {
     const created = await transport.createBenchmarks(workspaceId, projectId, body);
     const id = Array.isArray(created?.ids) && created.ids.length ? created.ids[0] : null;
     if (hasText(id)) {
-      log?.info?.('brand-urls: created own-brand benchmark', {
+      log?.info?.('brand-urls: created flagged own-brand benchmark', {
         workspaceId, projectId, benchmarkId: id,
       });
       return String(id);
@@ -261,11 +313,50 @@ export async function ensureOwnBrandBenchmark(transport, workspaceId, projectId,
       throw e;
     }
   }
-  // Create returned no id (existing_count) or 409'd — re-list and match by domain.
-  const after = await transport.listBenchmarks(workspaceId, projectId);
+  // Create returned no id (existing_count) or 409'd — re-list and match flagged,
+  // then by domain.
+  const after = await transport.listBenchmarks(workspaceId, projectId, { draft: true });
   const afterList = Array.isArray(after?.aio_benchmarks) ? after.aio_benchmarks : [];
-  const found = afterList.find(matchesOwn);
-  return found ? String(found.id) : null;
+  const afterFlagged = afterList.find((b) => b?.main_brand === true && hasText(b?.id));
+  if (afterFlagged) {
+    return String(afterFlagged.id);
+  }
+  const afterMatch = afterList.find(matchesOwn);
+  return afterMatch ? String(afterMatch.id) : null;
+}
+
+/**
+ * Blocking provisioning gate (LLMO-7421): asserts a project carries exactly one
+ * `main_brand: true` benchmark and returns its id. Callers use this to decide
+ * whether provisioning may proceed to publish (draft view) and whether it may be
+ * recorded as complete (published view, after publish) — see
+ * `project-provisioning.js` and `handlers/markets-subworkspace.js`.
+ *
+ * @param {SerenityTransport} transport
+ * @param {string} workspaceId
+ * @param {string} projectId
+ * @param {object} [opts]
+ * @param {boolean} [opts.draft=false] - read the draft (pre-publish) view instead
+ *   of the published one.
+ * @returns {Promise<string>} the single flagged benchmark's id.
+ * @throws {MainBrandBenchmarkInvariantError} when the count is not exactly one.
+ */
+export async function assertMainBrandBenchmark(
+  transport,
+  workspaceId,
+  projectId,
+  { draft = false } = {},
+) {
+  const resp = await transport.listBenchmarks(workspaceId, projectId, { draft });
+  const benchmarks = Array.isArray(resp?.aio_benchmarks) ? resp.aio_benchmarks : [];
+  const flagged = benchmarks.filter((b) => b?.main_brand === true && hasText(b?.id));
+  if (flagged.length !== 1) {
+    throw new MainBrandBenchmarkInvariantError(workspaceId, projectId, {
+      draft,
+      count: flagged.length,
+    });
+  }
+  return String(flagged[0].id);
 }
 
 /**

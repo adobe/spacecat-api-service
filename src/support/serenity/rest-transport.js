@@ -1233,10 +1233,17 @@ export function createSerenityTransport({ env, imsToken }) {
     /**
      * POST /v2/workspaces/{ws}/projects/{pid}/ai_models/benchmarks — batch-create
      * benchmarks. Body is an ARRAY of `{ brand_name, domain, brand_aliases?,
-     * color? }`. The API cannot set `main_brand` (system-managed); a created
-     * benchmark is a regular tracked brand. Returns `{ ids: [...], existing_count }`.
-     * We use it to create the project's own-brand benchmark when Semrush has not
-     * auto-provisioned one (the `benchmark_id` brand URLs must attach to).
+     * color?, main_brand? }`. `main_brand: true` IS accepted and honoured at
+     * create (live-verified; see mysticat-data-service PR #945/executor.py
+     * `_own_brand_body` — a prior version of this doc claimed the opposite, which
+     * was the root cause of LLMO-7421: every benchmark this codebase created was
+     * left unflagged). It can only be set at create — a PUT never sets it (see
+     * `updateBenchmark` below) — so repairing an unflagged own-domain benchmark
+     * means delete-then-recreate-flagged, not an in-place update. Returns
+     * `{ ids: [...], existing_count }`. We use it to create/repair the project's
+     * own-brand benchmark (see `ensureOwnBrandBenchmark` /
+     * `assertMainBrandBenchmark` in `brand-urls.js`) — the `benchmark_id` brand
+     * URLs must attach to.
      *
      * @param {string} workspaceId
      * @param {string} projectId

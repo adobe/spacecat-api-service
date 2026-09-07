@@ -18,9 +18,15 @@ import {
   CreateNoProjectIdError,
   primaryUrlPatchBody,
 } from '../../../src/support/serenity/project-provisioning.js';
+import { MainBrandBenchmarkInvariantError } from '../../../src/support/serenity/brand-urls.js';
 
 const WS = 'workspace-1';
-const CREATE_BODY = { name: 'US-en', type: 'ai', domain: 'nba.com' };
+const CREATE_BODY = {
+  name: 'US-en', type: 'ai', domain: 'nba.com', brand_name_display: 'Kings', brand_names: ['Kings'],
+};
+
+const FLAGGED = { aio_benchmarks: [{ id: 'bm-1', domain: 'nba.com', main_brand: true }] };
+const EMPTY = { aio_benchmarks: [] };
 
 describe('serenity project-provisioning: createProvisionAndPublishProject', () => {
   let transport;
@@ -32,6 +38,9 @@ describe('serenity project-provisioning: createProvisionAndPublishProject', () =
       updateProject: sinon.stub().resolves(),
       publishProject: sinon.stub().resolves(),
       deleteProject: sinon.stub().resolves(),
+      listBenchmarks: sinon.stub().resolves(FLAGGED),
+      createBenchmarks: sinon.stub().resolves({ ids: ['bm-1'] }),
+      deleteBenchmarks: sinon.stub().resolves(),
     };
     log = { error: sinon.spy(), warn: sinon.spy(), info: sinon.spy() };
   });
@@ -186,5 +195,95 @@ describe('serenity project-provisioning: createProvisionAndPublishProject', () =
 
     expect(id).to.equal('proj-1');
     expect(transport.updateProject).to.not.have.been.called;
+  });
+
+  describe('LLMO-7421: main-brand benchmark invariant', () => {
+    it('creates a flagged own-brand benchmark when none exists, before publishing', async () => {
+      // Call 0: ensureOwnBrandBenchmark's own read (nothing yet). Create succeeds
+      // with an id, so no re-list is needed there. Call 1: pre-publish assert
+      // (draft) sees the newly-created flagged benchmark. Call 2: post-publish
+      // assert (published) agrees.
+      transport.listBenchmarks.onCall(0).resolves(EMPTY);
+      transport.listBenchmarks.onCall(1).resolves(FLAGGED);
+      transport.listBenchmarks.onCall(2).resolves(FLAGGED);
+
+      const id = await createProvisionAndPublishProject(transport, WS, CREATE_BODY, { log });
+
+      expect(id).to.equal('proj-1');
+      expect(transport.createBenchmarks).to.have.been.calledOnceWith(
+        WS,
+        'proj-1',
+        [sinon.match({ brand_name: 'Kings', domain: 'nba.com', main_brand: true })],
+      );
+      expect(transport.createBenchmarks).to.have.been.calledBefore(transport.publishProject);
+    });
+
+    it('deletes and recreates an unflagged own-domain benchmark, flagged, before publishing', async () => {
+      const unflagged = { aio_benchmarks: [{ id: 'bm-old', domain: 'nba.com', main_brand: false }] };
+      transport.createBenchmarks.resolves({ ids: ['bm-new'] });
+      // Call 0: ensureOwnBrandBenchmark's own read finds the unflagged match (no
+      // re-list needed — create succeeds with an id). Calls 1/2: pre/post-publish
+      // asserts both see the new flagged benchmark.
+      transport.listBenchmarks.onCall(0).resolves(unflagged);
+      transport.listBenchmarks.onCall(1).resolves(FLAGGED);
+      transport.listBenchmarks.onCall(2).resolves(FLAGGED);
+
+      const id = await createProvisionAndPublishProject(transport, WS, CREATE_BODY, { log });
+
+      expect(id).to.equal('proj-1');
+      expect(transport.deleteBenchmarks).to.have.been.calledOnceWith(WS, 'proj-1', ['bm-old']);
+      expect(transport.createBenchmarks).to.have.been.calledOnceWith(
+        WS,
+        'proj-1',
+        [sinon.match({ main_brand: true })],
+      );
+      expect(transport.deleteBenchmarks).to.have.been.calledBefore(transport.createBenchmarks);
+      expect(transport.createBenchmarks).to.have.been.calledBefore(transport.publishProject);
+    });
+
+    it('aborts before publishing and cleans up the orphan when the pre-publish draft check fails', async () => {
+      transport.listBenchmarks.resolves(EMPTY);
+      transport.createBenchmarks.resolves({}); // no id returned — create silently failed to flag
+
+      const err = await createProvisionAndPublishProject(transport, WS, CREATE_BODY, { log })
+        .then(() => null, (e) => e);
+
+      expect(err).to.be.instanceOf(MainBrandBenchmarkInvariantError);
+      expect(transport.publishProject).to.not.have.been.called;
+      expect(transport.deleteProject).to.have.been.calledOnceWith(WS, 'proj-1');
+    });
+
+    it('cleans up and rethrows when the published-view check fails after a successful publish', async () => {
+      // Draft check passes (one flagged benchmark), but the published view somehow
+      // disagrees — an upstream race the post-publish check exists to catch before
+      // the caller records this provisioning as complete.
+      transport.listBenchmarks.onCall(0).resolves(FLAGGED); // ensureOwnBrandBenchmark
+      transport.listBenchmarks.onCall(1).resolves(FLAGGED); // pre-publish assert (draft)
+      transport.listBenchmarks.onCall(2).resolves(EMPTY); // post-publish assert (published)
+
+      const err = await createProvisionAndPublishProject(transport, WS, CREATE_BODY, { log })
+        .then(() => null, (e) => e);
+
+      expect(err).to.be.instanceOf(MainBrandBenchmarkInvariantError);
+      expect(transport.publishProject).to.have.been.calledOnce;
+      expect(transport.deleteProject).to.have.been.calledOnceWith(WS, 'proj-1');
+    });
+
+    it('rejects duplicate main-brand benchmarks the same way as zero', async () => {
+      const duplicate = {
+        aio_benchmarks: [
+          { id: 'bm-1', domain: 'nba.com', main_brand: true },
+          { id: 'bm-2', domain: 'nba.com', main_brand: true },
+        ],
+      };
+      transport.listBenchmarks.resolves(duplicate);
+
+      const err = await createProvisionAndPublishProject(transport, WS, CREATE_BODY, { log })
+        .then(() => null, (e) => e);
+
+      expect(err).to.be.instanceOf(MainBrandBenchmarkInvariantError);
+      expect(err.count).to.equal(2);
+      expect(transport.publishProject).to.not.have.been.called;
+    });
   });
 });

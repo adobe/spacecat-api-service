@@ -514,7 +514,9 @@ describe('markets-subworkspace handlers', () => {
         null,
         { brandUrlSources },
       );
-      expect(transport.listBenchmarks).to.have.been.calledOnceWith(WS, 'new-proj');
+      // Called both by the blocking LLMO-7421 ensure/assert (before the URL push)
+      // and again inside attachBrandUrlsToProject (idempotent) — not exactly once.
+      expect(transport.listBenchmarks).to.have.been.calledWith(WS, 'new-proj');
       // http:// dropped; de-region social dropped; us social + region-less earned kept.
       expect(transport.createBrandUrls).to.have.been.calledOnceWith(WS, 'new-proj', 'bench-1', [
         { url: 'https://b.com', type: 'website' },
@@ -639,8 +641,83 @@ describe('markets-subworkspace handlers', () => {
     it('does not touch the brand-URL API when there are no sources', async () => {
       const transport = makeTransport();
       await handleCreateMarketSubworkspace(transport, makeBrand(), PARENT, createBody, log);
-      expect(transport.listBenchmarks).to.not.have.been.called;
+      // listBenchmarks IS still called — the LLMO-7421 benchmark invariant is
+      // blocking regardless of whether there are brand URLs to push.
       expect(transport.createBrandUrls).to.not.have.been.called;
+    });
+
+    describe('LLMO-7421: main-brand benchmark invariant is blocking', () => {
+      it('aborts before publish and does not persist the mapping row when the benchmark cannot be established', async () => {
+        const transport = makeTransport({
+          listBenchmarks: sinon.stub().resolves({ aio_benchmarks: [] }),
+          createBenchmarks: sinon.stub().resolves({}), // no id — create silently failed to flag
+        });
+        const create = sinon.stub().resolves({});
+        const dataAccess = { BrandSemrushProject: { create } };
+
+        const err = await handleCreateMarketSubworkspace(
+          transport,
+          makeBrand(),
+          PARENT,
+          createBody,
+          log,
+          null,
+          null,
+          { dataAccess },
+        ).then(() => null, (e) => e);
+
+        expect(err).to.match(/main_brand=true benchmark/);
+        expect(transport.publishProject).to.not.have.been.called;
+        expect(create).to.not.have.been.called;
+      });
+
+      it('throws and does not persist the mapping row when the post-publish view disagrees', async () => {
+        const transport = makeTransport({
+          // ensureOwnBrandBenchmark + pre-publish draft check both see one flagged
+          // benchmark; the published view (read after publish) disagrees — the
+          // upstream race the post-publish check exists to catch.
+          listBenchmarks: sinon.stub()
+            .onCall(0).resolves({ aio_benchmarks: [{ id: 'bench-1', main_brand: true }] })
+            .onCall(1)
+            .resolves({ aio_benchmarks: [{ id: 'bench-1', main_brand: true }] })
+            .onCall(2)
+            .resolves({ aio_benchmarks: [] }),
+        });
+        const create = sinon.stub().resolves({});
+        const dataAccess = { BrandSemrushProject: { create } };
+
+        const err = await handleCreateMarketSubworkspace(
+          transport,
+          makeBrand(),
+          PARENT,
+          createBody,
+          log,
+          null,
+          null,
+          { dataAccess },
+        ).then(() => null, (e) => e);
+
+        expect(err).to.match(/main_brand=true benchmark/);
+        expect(transport.publishProject).to.have.been.calledOnce;
+        expect(create).to.not.have.been.called;
+      });
+
+      it('does not block on the invariant when publishMode is skip (no published view to check yet)', async () => {
+        const transport = makeTransport();
+        const res = await handleCreateMarketSubworkspace(
+          transport,
+          makeBrand(),
+          PARENT,
+          createBody,
+          log,
+          null,
+          null,
+          { publishMode: 'skip' },
+        );
+        expect(res.status).to.equal(201);
+        expect(res.body.published).to.equal(false);
+        expect(transport.publishProject).to.not.have.been.called;
+      });
     });
 
     it('does NOT fail the create when the brand-URL push fails (best-effort)', async () => {
