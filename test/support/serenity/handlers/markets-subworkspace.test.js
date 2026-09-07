@@ -671,22 +671,19 @@ describe('markets-subworkspace handlers', () => {
         expect(create).to.not.have.been.called;
       });
 
-      it('throws and does not persist the mapping row when the post-publish view disagrees', async () => {
+      it('does not re-check the published view after publish (publish is asynchronous) and persists the mapping row', async () => {
+        // Only the pre-publish draft check runs. A published-view read taken
+        // immediately after publishProject resolves would race the async
+        // publish transition (see MainBrandBenchmarkInvariantError's doc) —
+        // asserting that no such read happens is what protects the
+        // 409-forever regression a post-publish failure used to cause here.
         const transport = makeTransport({
-          // ensureOwnBrandBenchmark + pre-publish draft check both see one flagged
-          // benchmark; the published view (read after publish) disagrees — the
-          // upstream race the post-publish check exists to catch.
-          listBenchmarks: sinon.stub()
-            .onCall(0).resolves({ aio_benchmarks: [{ id: 'bench-1', main_brand: true }] })
-            .onCall(1)
-            .resolves({ aio_benchmarks: [{ id: 'bench-1', main_brand: true }] })
-            .onCall(2)
-            .resolves({ aio_benchmarks: [] }),
+          listBenchmarks: sinon.stub().resolves({ aio_benchmarks: [{ id: 'bench-1', main_brand: true }] }),
         });
         const create = sinon.stub().resolves({});
         const dataAccess = { BrandSemrushProject: { create } };
 
-        const err = await handleCreateMarketSubworkspace(
+        const res = await handleCreateMarketSubworkspace(
           transport,
           makeBrand(),
           PARENT,
@@ -695,11 +692,14 @@ describe('markets-subworkspace handlers', () => {
           null,
           null,
           { dataAccess },
-        ).then(() => null, (e) => e);
+        );
 
-        expect(err).to.match(/main_brand=true benchmark/);
+        expect(res.status).to.equal(201);
         expect(transport.publishProject).to.have.been.calledOnce;
-        expect(create).to.not.have.been.called;
+        expect(create).to.have.been.calledOnce;
+        // ensureOwnBrandBenchmark's own read + the pre-publish assert; nothing
+        // after publish.
+        expect(transport.listBenchmarks).to.have.callCount(2);
       });
 
       it('does not block on the invariant when publishMode is skip (no published view to check yet)', async () => {

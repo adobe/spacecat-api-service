@@ -733,15 +733,21 @@ export async function handleCreateMarketSubworkspace(
   // own-brand benchmark must not publish and must not reach `upsertMappingRow`
   // (recorded as complete). A retry re-enters this handler, re-resolves the same
   // still-draft project via the leftover-draft adopt branch above, and retries
-  // idempotently (ensureOwnBrandBenchmark is safe to re-run).
+  // idempotently (ensureOwnBrandBenchmark is safe to re-run). Checked only
+  // pre-publish: publish is asynchronous (a 202 with the project transitioning
+  // to live in the background — see `publish-status.js`), so a published-view
+  // read taken immediately after the publish call below resolves would race
+  // that transition rather than confirm anything; that confirmation is
+  // deferred to the fleet reconciliation this ticket also scopes.
   await ensureOwnBrandBenchmark(
     transport,
     workspaceId,
     projectId,
     { name: body.brandDisplayName, domain: body.brandDomain, aliases: aliasNames },
     log,
+    { repairUnflagged: true },
   );
-  await assertMainBrandBenchmark(transport, workspaceId, projectId, { draft: true });
+  await assertMainBrandBenchmark(transport, workspaceId, projectId);
 
   // Push the brand's URLs (own sites + social + earned) onto this market's
   // own-brand benchmark (resolved above), region-filtered to the market. Done
@@ -853,16 +859,6 @@ export async function handleCreateMarketSubworkspace(
       }
       throw e;
     }
-  }
-
-  // Re-confirm on the PUBLISHED view (LLMO-7421): publish promotes the draft
-  // benchmark established above, but this is the last chance to catch a
-  // mid-flight upstream race before the mapping row below records this market
-  // as successfully provisioned. Only meaningful once actually published —
-  // `publishMode: 'skip'` (LLMO-5492 defer-publish) leaves the project a draft
-  // by design, so there is no published view to check yet.
-  if (published) {
-    await assertMainBrandBenchmark(transport, workspaceId, projectId, { draft: false });
   }
 
   if (dataAccess) {

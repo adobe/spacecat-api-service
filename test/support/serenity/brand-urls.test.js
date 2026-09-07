@@ -250,10 +250,29 @@ describe('brand-urls helpers', () => {
       expect(transport.createBenchmarks).to.not.have.been.called;
     });
 
-    it('deletes and recreates an unflagged own-domain benchmark, flagged (LLMO-7421)', async () => {
+    it('reuses an unflagged own-domain benchmark as-is by default (edit-time scope boundary, LLMO-7421)', async () => {
+      // repairUnflagged defaults to false: the brand-URL edit-time re-sync
+      // callers (attachBrandUrlsToProject / syncBrandUrlsAcrossMarkets) must
+      // NOT delete/recreate an already-live project's benchmark as a side
+      // effect of an unrelated edit — that repair is scoped to the
+      // provisioning call sites only, which pass repairUnflagged explicitly.
+      const transport = {
+        listBenchmarks: sandbox.stub().resolves({
+          aio_benchmarks: [{ id: 'own-1', main_brand: false, domain: 'https://www.acme.com/x' }],
+        }),
+        deleteBenchmarks: sandbox.stub(),
+        createBenchmarks: sandbox.stub(),
+      };
+      expect(await ensureOwnBrandBenchmark(transport, WS, PID, BRAND, undefined))
+        .to.equal('own-1');
+      expect(transport.deleteBenchmarks).to.not.have.been.called;
+      expect(transport.createBenchmarks).to.not.have.been.called;
+    });
+
+    it('deletes and recreates an unflagged own-domain benchmark, flagged, when repairUnflagged is set (LLMO-7421)', async () => {
       // main_brand can only be set at CREATE (live-verified) — an unflagged
       // own-domain match from an earlier, pre-LLMO-7421 run must be deleted and
-      // recreated flagged, not reused as-is.
+      // recreated flagged, not reused as-is. Provisioning call sites opt in.
       const transport = {
         listBenchmarks: sandbox.stub().resolves({
           aio_benchmarks: [{ id: 'own-1', main_brand: false, domain: 'https://www.acme.com/x' }],
@@ -261,8 +280,14 @@ describe('brand-urls helpers', () => {
         deleteBenchmarks: sandbox.stub().resolves(),
         createBenchmarks: sandbox.stub().resolves({ ids: ['own-1-flagged'], existing_count: 0 }),
       };
-      expect(await ensureOwnBrandBenchmark(transport, WS, PID, BRAND, undefined))
-        .to.equal('own-1-flagged');
+      expect(await ensureOwnBrandBenchmark(
+        transport,
+        WS,
+        PID,
+        BRAND,
+        undefined,
+        { repairUnflagged: true },
+      )).to.equal('own-1-flagged');
       expect(transport.deleteBenchmarks).to.have.been.calledOnceWith(WS, PID, ['own-1']);
       expect(transport.createBenchmarks).to.have.been.calledOnceWith(WS, PID, [
         {
@@ -299,6 +324,25 @@ describe('brand-urls helpers', () => {
       expect(await ensureOwnBrandBenchmark(transport, WS, PID, BRAND, undefined)).to.equal('own-2');
     });
 
+    it('re-lists and prefers a FLAGGED match over a domain match when create returns no id (delayed visibility)', async () => {
+      // A concurrent creator flagged the own-brand benchmark between our own read
+      // and our create call — the re-list must prefer that flagged benchmark over
+      // any unflagged domain match, not just match by domain.
+      const transport = {
+        listBenchmarks: sandbox.stub(),
+        createBenchmarks: sandbox.stub().resolves({ ids: [], existing_count: 1 }),
+      };
+      transport.listBenchmarks.onFirstCall().resolves({ aio_benchmarks: [] });
+      transport.listBenchmarks.onSecondCall().resolves({
+        aio_benchmarks: [
+          { id: 'own-unflagged', domain: 'acme.com', main_brand: false },
+          { id: 'own-flagged', domain: 'other.example', main_brand: true },
+        ],
+      });
+      expect(await ensureOwnBrandBenchmark(transport, WS, PID, BRAND, undefined))
+        .to.equal('own-flagged');
+    });
+
     it('recovers from a 409 (duplicate) by re-listing and matching by domain', async () => {
       const transport = {
         listBenchmarks: sandbox.stub(),
@@ -332,7 +376,11 @@ describe('brand-urls helpers', () => {
   });
 
   describe('assertMainBrandBenchmark (LLMO-7421)', () => {
-    it('returns the single flagged benchmark id', async () => {
+    it('returns the single flagged benchmark id, always reading the DRAFT view', async () => {
+      // Always draft: publish is asynchronous, so a published-view read taken
+      // right after publish would race that transition rather than confirm
+      // anything (see MainBrandBenchmarkInvariantError's doc) — the published
+      // view is never read by this function.
       const transport = {
         listBenchmarks: sandbox.stub().resolves({
           aio_benchmarks: [
@@ -343,21 +391,15 @@ describe('brand-urls helpers', () => {
       };
       const id = await assertMainBrandBenchmark(transport, WS, PID);
       expect(id).to.equal('main-1');
-      expect(transport.listBenchmarks).to.have.been.calledOnceWith(WS, PID, { draft: false });
-    });
-
-    it('reads the draft view when asked', async () => {
-      const transport = {
-        listBenchmarks: sandbox.stub().resolves({ aio_benchmarks: [{ id: 'main-1', main_brand: true }] }),
-      };
-      await assertMainBrandBenchmark(transport, WS, PID, { draft: true });
       expect(transport.listBenchmarks).to.have.been.calledOnceWith(WS, PID, { draft: true });
     });
 
-    it('throws MainBrandBenchmarkInvariantError when zero are flagged', async () => {
+    it('throws MainBrandBenchmarkInvariantError (a 502 with a stable code) when zero are flagged', async () => {
       const transport = { listBenchmarks: sandbox.stub().resolves({ aio_benchmarks: [] }) };
       const err = await assertMainBrandBenchmark(transport, WS, PID).then(() => null, (e) => e);
       expect(err).to.be.instanceOf(MainBrandBenchmarkInvariantError);
+      expect(err.status).to.equal(502);
+      expect(err.code).to.equal('mainBrandBenchmarkInvariant');
       expect(err.count).to.equal(0);
       expect(err.workspaceId).to.equal(WS);
       expect(err.projectId).to.equal(PID);

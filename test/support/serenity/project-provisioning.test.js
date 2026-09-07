@@ -201,11 +201,9 @@ describe('serenity project-provisioning: createProvisionAndPublishProject', () =
     it('creates a flagged own-brand benchmark when none exists, before publishing', async () => {
       // Call 0: ensureOwnBrandBenchmark's own read (nothing yet). Create succeeds
       // with an id, so no re-list is needed there. Call 1: pre-publish assert
-      // (draft) sees the newly-created flagged benchmark. Call 2: post-publish
-      // assert (published) agrees.
+      // (draft) sees the newly-created flagged benchmark.
       transport.listBenchmarks.onCall(0).resolves(EMPTY);
       transport.listBenchmarks.onCall(1).resolves(FLAGGED);
-      transport.listBenchmarks.onCall(2).resolves(FLAGGED);
 
       const id = await createProvisionAndPublishProject(transport, WS, CREATE_BODY, { log });
 
@@ -216,17 +214,22 @@ describe('serenity project-provisioning: createProvisionAndPublishProject', () =
         [sinon.match({ brand_name: 'Kings', domain: 'nba.com', main_brand: true })],
       );
       expect(transport.createBenchmarks).to.have.been.calledBefore(transport.publishProject);
+      // Exactly two reads, both draft — no post-publish read at all (publish is
+      // asynchronous; see MainBrandBenchmarkInvariantError's doc for why a
+      // published-view confirmation is deferred rather than attempted here).
+      expect(transport.listBenchmarks).to.have.callCount(2);
+      expect(transport.listBenchmarks.getCall(0)).to.have.been.calledWith(WS, 'proj-1', { draft: true });
+      expect(transport.listBenchmarks.getCall(1)).to.have.been.calledWith(WS, 'proj-1', { draft: true });
     });
 
     it('deletes and recreates an unflagged own-domain benchmark, flagged, before publishing', async () => {
       const unflagged = { aio_benchmarks: [{ id: 'bm-old', domain: 'nba.com', main_brand: false }] };
       transport.createBenchmarks.resolves({ ids: ['bm-new'] });
       // Call 0: ensureOwnBrandBenchmark's own read finds the unflagged match (no
-      // re-list needed — create succeeds with an id). Calls 1/2: pre/post-publish
-      // asserts both see the new flagged benchmark.
+      // re-list needed — create succeeds with an id). Call 1: pre-publish assert
+      // sees the new flagged benchmark.
       transport.listBenchmarks.onCall(0).resolves(unflagged);
       transport.listBenchmarks.onCall(1).resolves(FLAGGED);
-      transport.listBenchmarks.onCall(2).resolves(FLAGGED);
 
       const id = await createProvisionAndPublishProject(transport, WS, CREATE_BODY, { log });
 
@@ -239,6 +242,7 @@ describe('serenity project-provisioning: createProvisionAndPublishProject', () =
       );
       expect(transport.deleteBenchmarks).to.have.been.calledBefore(transport.createBenchmarks);
       expect(transport.createBenchmarks).to.have.been.calledBefore(transport.publishProject);
+      expect(transport.listBenchmarks).to.have.callCount(2);
     });
 
     it('aborts before publishing and cleans up the orphan when the pre-publish draft check fails', async () => {
@@ -249,24 +253,26 @@ describe('serenity project-provisioning: createProvisionAndPublishProject', () =
         .then(() => null, (e) => e);
 
       expect(err).to.be.instanceOf(MainBrandBenchmarkInvariantError);
+      expect(err.status).to.equal(502);
+      expect(err.code).to.equal('mainBrandBenchmarkInvariant');
       expect(transport.publishProject).to.not.have.been.called;
       expect(transport.deleteProject).to.have.been.calledOnceWith(WS, 'proj-1');
     });
 
-    it('cleans up and rethrows when the published-view check fails after a successful publish', async () => {
-      // Draft check passes (one flagged benchmark), but the published view somehow
-      // disagrees — an upstream race the post-publish check exists to catch before
-      // the caller records this provisioning as complete.
-      transport.listBenchmarks.onCall(0).resolves(FLAGGED); // ensureOwnBrandBenchmark
-      transport.listBenchmarks.onCall(1).resolves(FLAGGED); // pre-publish assert (draft)
-      transport.listBenchmarks.onCall(2).resolves(EMPTY); // post-publish assert (published)
+    it('does not re-check the published view after a successful publish (publish is asynchronous)', async () => {
+      // Draft check passes; publish succeeds. There is deliberately no
+      // published-view read afterward — see MainBrandBenchmarkInvariantError's
+      // doc: publish is a 202 that transitions the project to live in the
+      // background, so an immediate published-view read would race it rather
+      // than confirm anything.
+      transport.listBenchmarks.resolves(FLAGGED);
 
-      const err = await createProvisionAndPublishProject(transport, WS, CREATE_BODY, { log })
-        .then(() => null, (e) => e);
+      const id = await createProvisionAndPublishProject(transport, WS, CREATE_BODY, { log });
 
-      expect(err).to.be.instanceOf(MainBrandBenchmarkInvariantError);
+      expect(id).to.equal('proj-1');
       expect(transport.publishProject).to.have.been.calledOnce;
-      expect(transport.deleteProject).to.have.been.calledOnceWith(WS, 'proj-1');
+      expect(transport.listBenchmarks).to.have.callCount(2);
+      expect(transport.deleteProject).to.not.have.been.called;
     });
 
     it('rejects duplicate main-brand benchmarks the same way as zero', async () => {

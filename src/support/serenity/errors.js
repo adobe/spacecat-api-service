@@ -154,6 +154,10 @@ export const ERROR_CODES = Object.freeze({
   // Case-1 quota rejection (serenity-docs#72 §2): the disguised-405 signal classified by
   // isMeteredQuota, surfaced via toQuotaExceededError.
   QUOTA_EXCEEDED: 'quotaExceeded',
+  // LLMO-7421: the blocking main-brand benchmark provisioning invariant (exactly one
+  // main_brand:true) could not be established. Surfaced via
+  // brand-urls.js MainBrandBenchmarkInvariantError.
+  MAIN_BRAND_BENCHMARK_INVARIANT: 'mainBrandBenchmarkInvariant',
 });
 
 /**
