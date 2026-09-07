@@ -37,7 +37,7 @@ describe('provisionWorkspaceMember', () => {
 
   afterEach(() => sandbox.restore());
 
-  it('POSTs to the workspace-members endpoint with the IMS token on both the header and body', async () => {
+  it('POSTs to the workspace-members endpoint with the IMS token on the body and no Authorization header', async () => {
     fetchStub.resolves({
       ok: true,
       status: 200,
@@ -52,7 +52,7 @@ describe('provisionWorkspaceMember', () => {
     const [url, opts] = fetchStub.firstCall.args;
     expect(url).to.equal('https://adobe-hackathon.semrush.com/enterprise/users/api/v1/adobe-ims/workspace-members');
     expect(opts.method).to.equal('POST');
-    expect(opts.headers.authorization).to.equal(`Bearer ${IMS_TOKEN}`);
+    expect(opts.headers).to.not.have.property('authorization');
     expect(JSON.parse(opts.body)).to.deep.equal({ token: IMS_TOKEN });
 
     expect(result).to.deep.equal({

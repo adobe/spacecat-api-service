@@ -14,6 +14,7 @@ import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
+import esmock from 'esmock';
 
 import {
   indexLevelByName,
@@ -26,6 +27,7 @@ import {
   resolveServerOwnedValueInjection,
   findTagsInTree,
   assertParentWithinDimension,
+  collectSubtreeIds,
 } from '../../../src/support/serenity/tag-tree.js';
 import {
   DIMENSION,
@@ -678,6 +680,113 @@ describe('serenity tag-tree', () => {
     });
   });
 
+  // The generalized display-rename split-root guardrail (tag-display-names.md §3
+  // step 4, §5 phase 1) is dormant today — ROOT_DISPLAY_NAME is an IDENTITY
+  // PLACEHOLDER, so `rootNameOfDimension(dimension) === dimension` for all three
+  // display-renaming dimensions and the loop body in `ensureDimensionRoots` never
+  // runs. Exercising it for real means mocking `rootNameOfDimension` to actually
+  // diverge, which is exactly what happens the moment serenity-docs#407 merges and
+  // the orchestrator swaps the placeholder values in — this pins that the guardrail
+  // will fire correctly on that day, not just today's no-op shape.
+  //
+  // Parameterized across all three DISPLAY_RENAMING_DIMENSIONS (category, type,
+  // source — MysticatBot review, WP-D2): the guardrail loop body is generic over
+  // the dimension, so a bug specific to one dimension's branch (e.g. an
+  // off-by-one in which array position feeds the log message) would not
+  // necessarily show up if only `category` were ever exercised.
+  describe('ensureDimensionRoots — generalized display-rename split-root guardrail', () => {
+    const CASES = [
+      { dimension: DIMENSION.CATEGORY, slug: 'category', display: 'Category' },
+      { dimension: DIMENSION.TYPE, slug: 'type', display: 'Type' },
+      { dimension: DIMENSION.SOURCE, slug: 'source', display: 'Source' },
+    ];
+
+    /** Every OTHER root at its normal, un-renamed spelling. */
+    const OTHER_DEFAULT_ROOTS = [
+      { id: 'root-intent', name: INTENT_ROOT_NAME, children_count: 5 },
+      { id: 'root-origin', name: 'origin', children_count: 2 },
+      { id: 'root-category', name: 'category', children_count: 0 },
+      { id: 'root-type', name: 'type', children_count: 2 },
+      { id: 'root-source', name: 'source', children_count: 0 },
+    ];
+
+    /**
+     * Mocks `rootNameOfDimension` so ONLY `targetDimension` diverges to
+     * `fakeDisplayName` — every other dimension keeps resolving through the
+     * real implementation, so a test for one dimension can't accidentally
+     * exercise (or mask) another's branch of the guardrail loop.
+     */
+    async function ensureDimensionRootsRenaming(targetDimension, fakeDisplayName) {
+      const realPromptTags = await import('../../../src/support/serenity/prompt-tags.js');
+      const { ensureDimensionRoots: renamed } = await esmock(
+        '../../../src/support/serenity/tag-tree.js',
+        {
+          '../../../src/support/serenity/prompt-tags.js': {
+            rootNameOfDimension: (dimension) => (
+              dimension === targetDimension
+                ? fakeDisplayName
+                : realPromptTags.rootNameOfDimension(dimension)
+            ),
+          },
+        },
+      );
+      return renamed;
+    }
+
+    /** Root-level fixture: every other dimension default, plus `slug`/`display` rows. */
+    function rootsFixture(slug, display, { includeSlug, includeDisplay }) {
+      const others = OTHER_DEFAULT_ROOTS.filter((r) => r.name !== slug);
+      const target = [
+        ...(includeSlug ? [{ id: `root-${slug}-slug`, name: slug, children_count: 0 }] : []),
+        ...(includeDisplay ? [{ id: `root-${slug}-display`, name: display, children_count: 0 }] : []),
+      ];
+      return { '': [...others, ...target] };
+    }
+
+    CASES.forEach(({ dimension, slug, display }) => {
+      describe(`${slug} dimension`, () => {
+        it(`warns when "${slug}" and "${display}" exist as distinct root tags`, async () => {
+          const renamed = await ensureDimensionRootsRenaming(dimension, display);
+          const listProjectTags = makeListProjectTagsStub(
+            rootsFixture(slug, display, { includeSlug: true, includeDisplay: true }),
+          );
+          const createProjectTags = sinon.stub();
+          const log = fakeLog();
+          const roots = await renamed(
+            { listProjectTags, createProjectTags },
+            WS,
+            PROJECT,
+            log,
+          );
+          // Both spellings already existed — nothing to create.
+          expect(createProjectTags).to.not.have.been.called;
+          // The split is real (two different ids under the same dimension) and loud.
+          expect(log.warn).to.have.been.calledWithMatch(
+            new RegExp(`both the slug root "${slug}" and its display root "${display}" exist as distinct tags`),
+          );
+          // The canonical (display) spelling wins in the returned map.
+          expect(roots.get(slug)).to.equal(`root-${slug}-display`);
+        });
+
+        it(`stays quiet when only "${display}" exists (the migrated, common case)`, async () => {
+          const renamed = await ensureDimensionRootsRenaming(dimension, display);
+          const listProjectTags = makeListProjectTagsStub(
+            rootsFixture(slug, display, { includeSlug: false, includeDisplay: true }),
+          );
+          const createProjectTags = sinon.stub();
+          const log = fakeLog();
+          await renamed(
+            { listProjectTags, createProjectTags },
+            WS,
+            PROJECT,
+            log,
+          );
+          expect(log.warn).to.not.have.been.calledWithMatch(/display-name migration may/);
+        });
+      });
+    });
+  });
+
   describe('resolveTypeValueInjection', () => {
     it('returns the wanted value id plus EVERY id under the type root', async () => {
       const transport = {
@@ -952,6 +1061,111 @@ describe('serenity tag-tree', () => {
       expect(err).to.be.an('error');
       expect(err.status).to.equal(502);
       expect(err.message).to.match(/tag tree too large to resolve/);
+    });
+  });
+
+  describe('collectSubtreeIds', () => {
+    it('collects just its own id for a childless leaf', async () => {
+      const transport = { listProjectTags: makeListProjectTagsStub() };
+      const ids = await collectSubtreeIds(
+        transport,
+        WS,
+        PROJECT,
+        TAG_IDS.subCategoryHuman,
+        fakeLog(),
+      );
+      expect(ids).to.deep.equal([TAG_IDS.subCategoryHuman]);
+    });
+
+    it('collects a parent plus every descendant across levels, in level order', async () => {
+      const transport = { listProjectTags: makeListProjectTagsStub() };
+      const ids = await collectSubtreeIds(
+        transport,
+        WS,
+        PROJECT,
+        TAG_IDS.categoryRunningShoes,
+        fakeLog(),
+      );
+      expect(ids).to.deep.equal([TAG_IDS.categoryRunningShoes, TAG_IDS.subCategoryHuman]);
+    });
+
+    it('composes the subtree independently of whatever upstream does with a cascade delete', async () => {
+      // The composed id set is what gets sent upstream regardless of whether
+      // the batch-delete operation itself cascades, orphans, or errors on a
+      // parent with live children (category-delete.md §6 gate G1) — this
+      // module never relies on that answer.
+      const transport = { listProjectTags: makeListProjectTagsStub() };
+      const ids = await collectSubtreeIds(transport, WS, PROJECT, TAG_IDS.categoryRoot, fakeLog());
+      expect(ids).to.include.members(
+        [TAG_IDS.categoryRoot, TAG_IDS.categoryRunningShoes, TAG_IDS.subCategoryHuman],
+      );
+    });
+
+    it('collects every sibling at a level, including a sibling with its own descendants alongside a childless one', async () => {
+      // Regression guard for a per-level fan-out bug (e.g. only capturing the
+      // LAST frontier node's children into `next`) that a single-branch chain
+      // can never catch: two siblings under the root, only one of which has
+      // its own child.
+      const leafSiblingId = 'category-leaf-sibling';
+      const levels = dimensionTreeLevels({
+        [TAG_IDS.categoryRoot]: [
+          {
+            id: TAG_IDS.categoryRunningShoes,
+            name: 'Running Shoes',
+            parent_id: TAG_IDS.categoryRoot,
+            children_count: 1,
+            path: null,
+          },
+          {
+            id: leafSiblingId,
+            name: 'Leaf Sibling',
+            parent_id: TAG_IDS.categoryRoot,
+            children_count: 0,
+            path: null,
+          },
+        ],
+      });
+      const transport = { listProjectTags: makeListProjectTagsStub(levels) };
+      const ids = await collectSubtreeIds(transport, WS, PROJECT, TAG_IDS.categoryRoot, fakeLog());
+      expect(ids).to.have.members([
+        TAG_IDS.categoryRoot, TAG_IDS.categoryRunningShoes, TAG_IDS.subCategoryHuman, leafSiblingId,
+      ]);
+      expect(ids).to.have.lengthOf(4);
+    });
+
+    it('502s when the collected id count exceeds the delete-size budget', async () => {
+      const children = Array.from({ length: 2001 }, (_, i) => ({
+        id: `c${i}`, name: `C${i}`, parent_id: 'r-cat', children_count: 0,
+      }));
+      const levels = { 'r-cat': children };
+      const transport = { listProjectTags: makeListProjectTagsStub(levels) };
+      const err = await collectSubtreeIds(transport, WS, PROJECT, 'r-cat', fakeLog())
+        .then(() => null, (e) => e);
+      expect(err).to.be.an('error');
+      expect(err.status).to.equal(502);
+      expect(err.message).to.match(/tag subtree too large to delete/);
+    });
+
+    it('502s rather than walk a subtree larger than the read budget', async () => {
+      // Depth, not width, exhausts the READ budget here: a single-child chain
+      // over 200 levels deep costs 200+ reads (one per level) while the total
+      // id count stays small — this isolates the read-count cap from the
+      // separate id-count cap covered by the delete-size-budget test below.
+      const levels = {};
+      let parentId = 'r-cat';
+      for (let i = 0; i < 205; i += 1) {
+        const childId = `c${i}`;
+        levels[parentId] = [{
+          id: childId, name: `C${i}`, parent_id: parentId, children_count: 1,
+        }];
+        parentId = childId;
+      }
+      const transport = { listProjectTags: makeListProjectTagsStub(levels) };
+      const err = await collectSubtreeIds(transport, WS, PROJECT, 'r-cat', fakeLog())
+        .then(() => null, (e) => e);
+      expect(err).to.be.an('error');
+      expect(err.status).to.equal(502);
+      expect(err.message).to.match(/tag subtree too large to resolve/);
     });
   });
 

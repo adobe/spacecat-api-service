@@ -40,6 +40,7 @@ import { FixDto } from '../dto/fix.js';
 import { SuggestionDto } from '../dto/suggestion.js';
 import { isValidLocale } from '../utils/validations.js';
 import { resolveDocumentPath } from '../support/document-path-resolver.js';
+import { filterOpportunitiesByFacsComposite } from '../support/facs-composite-resolvers.js';
 import { getIMSPromiseToken, exchangePromiseToken } from '../support/utils.js';
 
 const VALIDATION_ERROR_NAME = 'ValidationError';
@@ -257,7 +258,14 @@ export class FixesController {
     }
     const effectiveLimit = Math.min(parsedLimit, MAX_SITE_FIXES_LIMIT);
 
-    const opportunities = await this.#Opportunity.allBySiteId(siteId);
+    // ReBAC composite scope (D4): when a FACS caller is scoped to specific
+    // opportunity types, narrow the site opportunities to those before deriving
+    // fixes, so a type-scoped caller cannot read other types' fixes. No-op for
+    // site-wide / non-FACS / admin callers.
+    const opportunities = filterOpportunitiesByFacsComposite(
+      context,
+      await this.#Opportunity.allBySiteId(siteId),
+    );
     const opportunityIds = opportunities.map((o) => o.getId());
 
     let fixEntities = opportunityIds.length > 0

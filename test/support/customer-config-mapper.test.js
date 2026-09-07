@@ -11,7 +11,12 @@
  */
 
 import { expect } from 'chai';
-import { convertV1ToV2 } from '../../src/support/customer-config-mapper.js';
+import {
+  convertV1ToV2,
+  DEFAULT_BRAND_REGION,
+  normalizeGlRegionSentinel,
+  sanitizeRegions,
+} from '../../src/support/customer-config-mapper.js';
 
 describe('Customer Config Mapper', () => {
   describe('convertV1ToV2', () => {
@@ -69,6 +74,12 @@ describe('Customer Config Mapper', () => {
       expect(brand.brandAliases).to.have.lengthOf(2);
       expect(brand.competitors).to.have.lengthOf(1);
       expect(brand.prompts).to.have.lengthOf(1);
+
+      // #3168: an explicit 'GL' input value (not just a missing region)
+      // must never survive into the persisted config — normalized to US.
+      expect(brand.region).to.deep.equal(['us', 'gb']);
+      expect(brand.brandAliases[1].regions).to.deep.equal(['US']);
+      expect(brand.competitors[0].regions).to.deep.equal(['US']);
       expect(brand.brandContext).to.equal('Photoshop is Adobe creative software.');
       expect(brand.mentionSentimentGuidance).to.equal('Treat factual price mentions as neutral.');
 
@@ -207,7 +218,7 @@ describe('Customer Config Mapper', () => {
       };
 
       const result = convertV1ToV2(llmoConfig, 'TestCo', 'test@org');
-      expect(result.customer.brands[0].competitors[0].regions).to.deep.equal(['gl']);
+      expect(result.customer.brands[0].competitors[0].regions).to.deep.equal(['US']);
     });
 
     it('handles category with array region', () => {
@@ -310,7 +321,7 @@ describe('Customer Config Mapper', () => {
       expect(result.customer.brands[0].region).to.include('jp');
     });
 
-    it('uses default region "gl" when no regions are specified', () => {
+    it('uses default region "US" when no regions are specified', () => {
       const llmoConfig = {
         brands: {
           aliases: [{ name: 'Test Brand' }],
@@ -320,7 +331,7 @@ describe('Customer Config Mapper', () => {
       };
 
       const result = convertV1ToV2(llmoConfig, 'TestCo', 'test@org');
-      expect(result.customer.brands[0].region).to.deep.equal(['gl']);
+      expect(result.customer.brands[0].region).to.deep.equal(['US']);
     });
 
     it('uses alias name from primaryAlias.name', () => {
@@ -418,7 +429,7 @@ describe('Customer Config Mapper', () => {
       };
 
       const result = convertV1ToV2(llmoConfig, 'TestCo', 'test@org');
-      expect(result.customer.brands[0].region).to.deep.equal(['gl']);
+      expect(result.customer.brands[0].region).to.deep.equal(['US']);
     });
 
     it('handles topics without prompts array', () => {
@@ -492,7 +503,7 @@ describe('Customer Config Mapper', () => {
       };
 
       const result = convertV1ToV2(llmoConfig, 'TestCo', 'test@org');
-      expect(result.customer.brands[0].prompts[0].regions).to.deep.equal(['gl']);
+      expect(result.customer.brands[0].prompts[0].regions).to.deep.equal(['US']);
     });
 
     it('preserves brand alias status from V1', () => {
@@ -755,6 +766,45 @@ describe('Customer Config Mapper', () => {
 
       const result = convertV1ToV2(llmoConfig, 'Fallback', 'test@org');
       expect(result.customer.brands[0].brandAliases[1].name).to.equal('Fallback');
+    });
+  });
+
+  describe('normalizeGlRegionSentinel', () => {
+    it('normalizes GL (any case, whitespace-trimmed) to DEFAULT_BRAND_REGION', () => {
+      expect(normalizeGlRegionSentinel('GL')).to.equal(DEFAULT_BRAND_REGION);
+      expect(normalizeGlRegionSentinel('gl')).to.equal(DEFAULT_BRAND_REGION);
+      expect(normalizeGlRegionSentinel('Gl')).to.equal(DEFAULT_BRAND_REGION);
+      expect(normalizeGlRegionSentinel(' gl ')).to.equal(DEFAULT_BRAND_REGION);
+    });
+
+    it('leaves other region values unchanged', () => {
+      expect(normalizeGlRegionSentinel('US')).to.equal('US');
+      expect(normalizeGlRegionSentinel('FR')).to.equal('FR');
+      expect(normalizeGlRegionSentinel('')).to.equal('');
+    });
+
+    it('passes through non-string values unchanged', () => {
+      expect(normalizeGlRegionSentinel(null)).to.equal(null);
+      expect(normalizeGlRegionSentinel(undefined)).to.equal(undefined);
+      expect(normalizeGlRegionSentinel(42)).to.equal(42);
+    });
+  });
+
+  describe('sanitizeRegions', () => {
+    it('coerces, normalizes GL, drops blanks, and dedupes', () => {
+      expect(sanitizeRegions(['GL', ' gl ', 'DE', 42, ''])).to.deep.equal([
+        'US', 'DE', '42',
+      ]);
+    });
+
+    it('dedupes an explicit GL alongside an explicit US', () => {
+      expect(sanitizeRegions(['GL', 'US', 'DE'])).to.deep.equal(['US', 'DE']);
+    });
+
+    it('returns an empty array for null/undefined/empty input', () => {
+      expect(sanitizeRegions(null)).to.deep.equal([]);
+      expect(sanitizeRegions(undefined)).to.deep.equal([]);
+      expect(sanitizeRegions([])).to.deep.equal([]);
     });
   });
 });

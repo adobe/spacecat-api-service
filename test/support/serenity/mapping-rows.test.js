@@ -15,7 +15,7 @@ import sinon from 'sinon';
 
 import {
   upsertMappingRow, tombstoneMappingRow, tombstoneAllForBrand, linkSiteToLiveRows,
-  linkSiteToRow, projectsForSite,
+  linkSiteToRow, projectsForSite, relinkSiteForRows,
 } from '../../../src/support/serenity/mapping-rows.js';
 
 const BRAND = 'brand-1';
@@ -417,6 +417,47 @@ describe('serenity mapping-rows', () => {
       expect(mine.setSiteId).to.have.been.calledOnceWith(SITE);
       expect(sibling.setSiteId).to.not.have.been.called;
       expect(allByBrandId).to.not.have.been.called;
+    });
+  });
+
+  describe('relinkSiteForRows', () => {
+    const NEW_SITE = 'site-new';
+
+    it('no-ops when dataAccess/siteId/rows are missing or empty', async () => {
+      const row = fakeRow({ siteId: 'site-old' });
+      await relinkSiteForRows({}, [row], NEW_SITE, log);
+      await relinkSiteForRows({ BrandSemrushProject: {} }, [row], '', log);
+      await relinkSiteForRows({ BrandSemrushProject: {} }, [], NEW_SITE, log);
+      await relinkSiteForRows({ BrandSemrushProject: {} }, null, NEW_SITE, log);
+
+      expect(row.setSiteId).to.not.have.been.called;
+      expect(row.save).to.not.have.been.called;
+      expect(log.error).to.not.have.been.called;
+    });
+
+    it('DELIBERATELY overwrites an existing link on every supplied row', async () => {
+      // Unlike linkSiteToRow, a re-point moves rows that already name a site.
+      const a = fakeRow({ siteId: 'site-old' });
+      const b = fakeRow({ siteId: 'site-old' });
+      await relinkSiteForRows({ BrandSemrushProject: {} }, [a, b], NEW_SITE, log);
+
+      expect(a.setSiteId).to.have.been.calledOnceWith(NEW_SITE);
+      expect(b.setSiteId).to.have.been.calledOnceWith(NEW_SITE);
+      expect(a.save).to.have.been.calledOnce;
+      expect(b.save).to.have.been.calledOnce;
+      expect(log.error).to.not.have.been.called;
+    });
+
+    it('logs the alarmed token on a partial save failure without throwing', async () => {
+      const ok = fakeRow({ siteId: 'site-old' });
+      const bad = fakeRow({ siteId: 'site-old' });
+      bad.save.rejects(new Error('boom'));
+      await relinkSiteForRows({ BrandSemrushProject: {} }, [ok, bad], NEW_SITE, log);
+
+      expect(ok.save).to.have.been.calledOnce;
+      expect(log.error).to.have.been.calledOnce;
+      expect(log.error.firstCall.args[0]).to.include('SERENITY_MAPPING_ROW_WRITE_FAILED');
+      expect(log.error.firstCall.args[1]).to.include({ op: 're-link-site' });
     });
   });
 });

@@ -16,6 +16,9 @@ import {
   INTENT_ROOT_NAME,
   ORIGIN_ROOT_NAME,
   LEGACY_ORIGIN_ROOT_NAME,
+  DIMENSION,
+  rootNameOfDimension,
+  dimensionOfRootName,
 } from '../../serenity/prompt-tags.js';
 
 /**
@@ -121,15 +124,31 @@ export function transformTopicsForFilterDimensions(raw) {
 }
 
 /**
+ * The `category` dimension's root-name alias set — its current display
+ * spelling ({@link rootNameOfDimension}, IDENTITY PLACEHOLDER today —
+ * tag-display-names.md §1 item 4) and the bare dimension key, deduped. Reused
+ * for both the extraction below and {@link KNOWN_TAG_PREFIXES}, so the two
+ * can never drift from each other.
+ */
+const CATEGORY_ROOT_NAMES = [...new Set([
+  rootNameOfDimension(DIMENSION.CATEGORY), DIMENSION.CATEGORY,
+])];
+
+/**
  * Extracts only "category__"-prefixed entries → `{ id: original tag, label }`,
  * plus `parent_id`/`parent_label` when the tag encodes a "Parent__Child"
- * hierarchy.
+ * hierarchy. Alias-tolerant ({@link CATEGORY_ROOT_NAMES}): both the display
+ * root name and the bare slug are accepted in, mirroring
+ * {@link transformOriginsToFilterDimensions}'s two-spelling tolerance.
  * @param {object} raw - Raw response from the Elements API.
  * @returns {FilterDimensionItem[]}
  */
 export function transformCategoriesToFilterDimensions(raw) {
-  return extractByPrefix(raw, 'category')
-    .map(({ original, stripped }) => ({ id: original, ...splitParent(stripped, 'category__') }));
+  return CATEGORY_ROOT_NAMES.flatMap((root) => {
+    const marker = `${root}${SEP}`;
+    return extractByPrefix(raw, root)
+      .map(({ original, stripped }) => ({ id: original, ...splitParent(stripped, marker) }));
+  });
 }
 
 /**
@@ -194,7 +213,7 @@ export function transformOriginsToFilterDimensions(raw) {
 
 const KNOWN_TAG_PREFIXES = [
   'topic__',
-  'category__',
+  ...CATEGORY_ROOT_NAMES.map((root) => `${root}${SEP}`),
   INTENT_MARKER,
   ...ORIGIN_ROOT_NAMES.map((root) => `${root}${SEP}`),
 ];
@@ -221,7 +240,14 @@ const KNOWN_TAG_PREFIXES = [
  * - `prefix__value` tags are grouped by their prefix into a dynamic key
  *   (e.g. `{ type: [{ id: 'type__branded', label: 'branded' }, ...] }`), unless
  *   `prefix` collides with an entry in `reservedResultKeys`, in which case the
- *   tag is routed to the generic `tags` array instead.
+ *   tag is routed to the generic `tags` array instead. The GROUP KEY is folded
+ *   through {@link dimensionOfRootName} first (tag-display-names.md §1 item 6,
+ *   plan WP-D2 item 8: "dynamic group keys ... stay the stable slug keys") —
+ *   `source`/`type` group under their bare dimension key regardless of
+ *   whether the wire prefix is the slug or the (currently identical) display
+ *   spelling, so the Adobe API contract does not churn as the tree renames.
+ *   The `id`/`parent_id` fields still carry the RAW wire prefix verbatim —
+ *   only the grouping key is normalized.
  * - Bare values with no `__` at all are prefix declarations (e.g. a lone
  *   `category` row announcing the dimension itself, with no value) and are
  *   ignored entirely — they are not tag data.
@@ -261,14 +287,18 @@ export function transformOtherTagsForFilterDimensions(raw, reservedResultKeys = 
       // Bare prefix declaration (e.g. "category") — not tag data, ignore.
       return;
     }
-    const prefix = value.slice(0, sepIdx);
+    const rawPrefix = value.slice(0, sepIdx);
     const rest = value.slice(sepIdx + SEP.length);
+    // Fold the GROUP KEY only (never `id`/`parent_id`, which stay wire-exact)
+    // through the alias map — identity for anything outside the taxonomy, so
+    // an arbitrary/unrecognised prefix groups under itself exactly as before.
+    const prefix = dimensionOfRootName(rawPrefix);
     if (reservedResultKeys.includes(prefix)) {
-      tags.push({ id: value, ...splitParent(rest, `${prefix}${SEP}`) });
+      tags.push({ id: value, ...splitParent(rest, `${rawPrefix}${SEP}`) });
       return;
     }
     groups[prefix] = groups[prefix] ?? [];
-    groups[prefix].push({ id: value, ...splitParent(rest, `${prefix}${SEP}`) });
+    groups[prefix].push({ id: value, ...splitParent(rest, `${rawPrefix}${SEP}`) });
   });
 
   return { ...groups, tags };

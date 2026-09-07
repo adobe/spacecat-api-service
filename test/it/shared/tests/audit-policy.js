@@ -62,7 +62,9 @@ export default function auditPolicyTests(getHttpClient, resetData, seedAuditScop
       });
       expect(res.status).to.equal(200);
       expect(res.body.version).to.equal(1);
-      expect(res.body.exclusionGlobs).to.deep.equal(['/checkout/*']);
+      // SITES-49858: wrpc_upsert_audit_policy roots bare-path globs at the site
+      // base_url on write, so the stored/returned glob is fully qualified.
+      expect(res.body.exclusionGlobs).to.deep.equal([`${SITE_1_BASE_URL}/checkout/*`]);
     });
 
     it('inclusions add unions into manualUrls and bumps the version', async () => {
@@ -79,7 +81,9 @@ export default function auditPolicyTests(getHttpClient, resetData, seedAuditScop
     it('exclusions/delete removes a glob via set-difference', async () => {
       const http = getHttpClient();
       const res = await http.admin.post(`/sites/${SITE_1_ID}/audit-policy/exclusions/delete`, {
-        values: ['/checkout/*'],
+        // The stored glob was rooted at base_url on add (SITES-49858); delete by
+        // that fully-qualified form so the set-difference matches.
+        values: [`${SITE_1_BASE_URL}/checkout/*`],
         reason: 'remove checkout exclusion',
       });
       expect(res.status).to.equal(200);

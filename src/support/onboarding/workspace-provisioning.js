@@ -23,13 +23,29 @@ const WORKSPACE_MEMBERS_PATH = '/enterprise/users/api/v1/adobe-ims/workspace-mem
  * (`POST /enterprise/users/api/v1/adobe-ims/workspace-members`) to grant the
  * calling user admin access to their organization's Semrush workspace.
  *
- * The caller's Adobe IMS access token IS the credential — Semrush validates it
- * directly against Adobe IMS and resolves the user's email and Adobe
- * Organization ID from it server-side. We send the same token on both the
- * `Authorization` header and the JSON body's `token` field: the header is how
- * every other Semrush gateway call in this codebase authenticates
- * (`rest-transport.js`'s `authToken`), and the body field is this specific
- * API's documented contract.
+ * No `Authorization` header is sent on this call — deliberately, and only for
+ * this endpoint. This is the one workspace-provisioning path where the calling
+ * customer may not exist in Semrush yet (that's the point of the call — it's
+ * what creates them there). Semrush's authenticating proxy in front of every
+ * *other* gateway endpoint tries to authenticate an incoming `Authorization`
+ * header against an existing Semrush user and 401s when that user doesn't
+ * exist yet, which is always true for a brand-new customer here. Per Semrush,
+ * this endpoint is intentionally reachable anonymously so it can run before
+ * that account exists.
+ *
+ * The caller's Adobe IMS access token still IS the credential: it's sent in
+ * the JSON body's `token` field, and Semrush independently validates it
+ * against the IMS profile server-side (a trusted source it can't forge) to
+ * resolve the user's email and Adobe Organization ID. Per Semrush, once we
+ * have S2S in place, this call will instead be a service-to-service call
+ * authenticated as "LLMO", carrying the user's email and organization ID
+ * directly instead of an IMS token in the body — this body-token shape is an
+ * interim workaround for the lack of S2S today.
+ *
+ * Every other Semrush gateway call in this codebase authenticates via the
+ * `Authorization` header (`rest-transport.js`'s `authToken`) because those
+ * calls are for customers who already have a Semrush account — do not carry
+ * this no-header behavior over to any other Semrush call.
  *
  * @param {Record<string, string|undefined>} env - Runtime env (context.env);
  *   resolves the User Manager gateway origin via `usersBaseUrl` (`SEMRUSH_USERS_BASE_URL`,
@@ -51,7 +67,6 @@ export async function provisionWorkspaceMember(env, imsToken) {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        authorization: `Bearer ${imsToken}`,
       },
       body: JSON.stringify({ token: imsToken }),
       // Caps the upstream call so a hung Semrush connection doesn't pin the

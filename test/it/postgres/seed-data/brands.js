@@ -14,7 +14,7 @@
  * Baseline brands for IT tests.
  *
  * BRAND_1 belongs to ORG_1 (accessible org) and is Semrush-managed
- * (`semrush_workspace_id` set), with its primary site SITE_1. This anchors the
+ * (`semrush_sub_workspace_id` set), with its primary site SITE_1. This anchors the
  * PATCH /sites URL-immutability guard IT: changing SITE_1's baseURL must 403
  * because the site backs a Semrush-managed brand whose tracked domain lives on
  * its Semrush projects (no upstream domain-update path).
@@ -34,7 +34,11 @@ export const brands = [
     // project/model/prompt/market — not just an unknown workspace that 404s.
     // Import the shared constant (not a literal) so a mock-seed change updates
     // both sides in lock-step.
-    semrush_workspace_id: SERENITY_MOCK_WORKSPACE_ID,
+    // Data-service renamed brands.semrush_workspace_id -> semrush_sub_workspace_id
+    // (dropped the old column + its sync trigger). serenity brand resolution reads
+    // getSemrushSubWorkspaceId() (brand-provisioning.js), so set the sub-workspace
+    // column directly.
+    semrush_sub_workspace_id: SERENITY_MOCK_WORKSPACE_ID,
     status: 'active',
     origin: 'human',
     regions: ['us'],

@@ -204,8 +204,10 @@ export const CONSUMER_1_CLIENT_ID = '111111111111111111111111';
 export const CONSUMER_1_TECHNICAL_ACCOUNT_ID = '111111111111111111111111@techacct.adobe.com';
 export const CONSUMER_1_IMS_ORG_ID = ORG_1_IMS_ORG_ID;
 
-// CONSUMER_2 — ACTIVE S2S consumer holding site:readAll + organization:readAll.
-// Used to exercise the readAll capability path through GET /sites and /organizations.
+// CONSUMER_2 — ACTIVE S2S consumer holding site:readAll + organization:readAll +
+// trialUser:read + entitlement:create. Used to exercise the readAll capability path
+// through GET /sites and /organizations, and the entitlement:create grant path through
+// the entitlement/site-enrollment POST routes (SITES-50526).
 export const CONSUMER_2_ID = '11111111-1111-4111-b112-222222222222';
 export const CONSUMER_2_CLIENT_ID = '222222222222222222222222';
 export const CONSUMER_2_TECHNICAL_ACCOUNT_ID = '222222222222222222222222@techacct.adobe.com';

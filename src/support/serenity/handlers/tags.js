@@ -31,6 +31,7 @@ import {
   findTagsInTree,
   assertParentPlacement,
   assertParentWithinDimension,
+  collectSubtreeIds,
 } from '../tag-tree.js';
 import { republish } from '../brand-urls.js';
 
@@ -844,4 +845,183 @@ export async function handleUpdateTagSubworkspace(
       geoTargetId, languageCode, tagId: id, name, parentId: updatedParentId,
     },
   };
+}
+
+/**
+ * Validates the DELETE query's `(geoTargetId, languageCode)` market slice.
+ * Shared by both handler families -- there is no body on a DELETE, so the
+ * slice travels as query params, same convention as the other slice-scoped
+ * GETs (e.g. handleListTags).
+ *
+ * @param {object} query - the raw query params.
+ * @returns {{ geoTargetId: number, languageCode: string }}
+ */
+function requireSliceQuery(query) {
+  const geoTargetId = normalizeGeoTargetId(Number(query?.geoTargetId));
+  if (geoTargetId === null) {
+    throw new ErrorWithStatusCode('geoTargetId must be a positive integer', 400);
+  }
+  const languageCode = normalizeLanguageCode(query?.languageCode);
+  if (languageCode === null) {
+    throw new ErrorWithStatusCode(
+      'languageCode must match ^[a-z]{2,3}(-[a-z]{2,4})?$',
+      400,
+    );
+  }
+  return { geoTargetId, languageCode };
+}
+
+/**
+ * Deletes a tag and its whole subtree (category-delete.md §4). Shared by both
+ * handler families once the project id is resolved.
+ *
+ * The guard mirrors {@link buildUpdatePayload}'s three refusals, in the same
+ * order, for the same reasons -- a DIMENSION ROOT can never be deleted (it
+ * would take its whole vocabulary with it), and a SERVER-OWNED dimension's
+ * value is never client-deletable (its vocabulary is authored by the server).
+ * An UNRESOLVABLE id is a 404, not a no-op: the id-keyed-route convention
+ * means "already gone" is answered the same way whether this call or an
+ * earlier one did the deleting (see {@link collectSubtreeIds}'s note on
+ * idempotent re-runs).
+ *
+ * Unlike PATCH, a `category` descendant WITH children is not refused -- it is
+ * a normal cascade delete. The whole subtree is composed HERE, in one upstream
+ * batch call, rather than left to whatever upstream does with a
+ * parent-with-children delete (unconfirmed either way -- see category-delete.md
+ * §6 gate G1). A publish follows so the delete is live, not stuck in draft.
+ *
+ * Investigated and rejected: the vendored `model.BatchDeleteRequest` type also
+ * exposes `cascade?: boolean` and `all?: boolean` fields. Neither has a
+ * description in the upstream swagger (`spec/projectengine_swagger_public.yaml`,
+ * spacecat-shared) -- completely undocumented, unverified semantics on a
+ * production, no-undo delete path. Not adopted without a live-verified
+ * contract; {@link collectSubtreeIds}'s client-side composition stays the
+ * source of truth until one exists.
+ *
+ * @param {SerenityTransport} transport
+ * @param {string} semrushWorkspaceId
+ * @param {string} projectId
+ * @param {string} tagId - the delete target's id.
+ * @param {object} [log] - logger.
+ * @returns {Promise<{ deletedIds: string[] }>}
+ */
+async function deleteResolvedTag(transport, semrushWorkspaceId, projectId, tagId, log) {
+  // Two reads, not one redundant one: findTagsInTree resolves THIS id's own
+  // position/kind (root? server-owned? unknown?), while collectSubtreeIds below
+  // walks its DESCENDANTS. Neither can answer the other's question.
+  const found = await findTagsInTree(transport, semrushWorkspaceId, projectId, [tagId], log);
+  const target = /** @type {import('../tag-tree.js').TagPosition} */ (found.get(tagId));
+  if (target.kind === 'unknown') {
+    const err = new ErrorWithStatusCode('No tag with this id on this market', 404);
+    err.code = ERROR_CODES.TAG_NOT_FOUND;
+    throw err;
+  }
+  if (target.kind === 'root') {
+    throw new ErrorWithStatusCode(
+      `a dimension root (${ALL_DIMENSIONS.join(', ')}) cannot be deleted`,
+      400,
+    );
+  }
+  if (isServerOwnedDimension(/** @type {string} */ (target.rootName))) {
+    throw new ErrorWithStatusCode(
+      `a value of the server-owned "${target.rootName}" dimension cannot be deleted`,
+      400,
+    );
+  }
+  const deletedIds = await collectSubtreeIds(transport, semrushWorkspaceId, projectId, tagId, log);
+  await transport.deleteProjectTags(semrushWorkspaceId, projectId, deletedIds);
+  await republish(transport, semrushWorkspaceId, projectId, log);
+  return { deletedIds };
+}
+
+/**
+ * DELETE /serenity/tags/:tagId (flat mode) -- delete a category (or
+ * sub-category) and its whole subtree, preserving every carrying prompt
+ * (category-delete.md). The market's project id comes from the persisted
+ * `BrandSemrushProject` mapping, same resolution as handleUpdateTag.
+ *
+ * @param {SerenityTransport} transport
+ * @param {object} dataAccess - data-access layer (BrandSemrushProject).
+ * @param {string} brandId - brand UUID.
+ * @param {string} semrushWorkspaceId - the org's (parent) workspace id.
+ * @param {string} tagId - upstream tag id to delete.
+ * @param {object} query - query params ({ geoTargetId, languageCode }).
+ * @param {object} log - logger.
+ * @returns {Promise<{status: number, deletedIds: string[]}>} deletedIds is unread by
+ *   the controller (which always returns 204 with no body) — kept for the log line above
+ *   and for test introspection, not a consumed contract.
+ */
+export async function handleDeleteTag(
+  transport,
+  dataAccess,
+  brandId,
+  semrushWorkspaceId,
+  tagId,
+  query,
+  log,
+) {
+  const id = requireTagId(tagId);
+  const { geoTargetId, languageCode } = requireSliceQuery(query);
+  const row = await dataAccess.BrandSemrushProject.findBySlice(
+    brandId,
+    geoTargetId,
+    languageCode,
+  );
+  if (!row) {
+    throw marketNotFound();
+  }
+  const projectId = row.getSemrushProjectId();
+  const { deletedIds } = await deleteResolvedTag(
+    transport,
+    semrushWorkspaceId,
+    projectId,
+    id,
+    log,
+  );
+  log?.info?.('handleDeleteTag: deleted tag subtree', {
+    brandId, geoTargetId, languageCode, tagId: id, deletedIds,
+  });
+  return { status: 204, deletedIds };
+}
+
+/**
+ * DELETE /serenity/tags/:tagId (subworkspace mode) -- the market's project is
+ * resolved live from the brand's own subworkspace listing, same resolution as
+ * handleUpdateTagSubworkspace. See {@link handleDeleteTag} for the delete
+ * semantics this shares.
+ *
+ * @param {SerenityTransport} transport
+ * @param {string} workspaceId - the brand's subworkspace id.
+ * @param {string} tagId - upstream tag id to delete.
+ * @param {object} query - query params ({ geoTargetId, languageCode }).
+ * @param {object} log - logger.
+ * @returns {Promise<{status: number, deletedIds: string[]}>} deletedIds is unread by
+ *   the controller (which always returns 204 with no body) — kept for the log line above
+ *   and for test introspection, not a consumed contract.
+ */
+export async function handleDeleteTagSubworkspace(
+  transport,
+  workspaceId,
+  tagId,
+  query,
+  log,
+) {
+  const id = requireTagId(tagId);
+  const { geoTargetId, languageCode } = requireSliceQuery(query);
+  const project = await resolveProject(transport, workspaceId, geoTargetId, languageCode, log);
+  if (!project) {
+    throw marketNotFound();
+  }
+  const projectId = String(project.id);
+  const { deletedIds } = await deleteResolvedTag(
+    transport,
+    workspaceId,
+    projectId,
+    id,
+    log,
+  );
+  log?.info?.('handleDeleteTagSubworkspace: deleted tag subtree', {
+    geoTargetId, languageCode, tagId: id, deletedIds,
+  });
+  return { status: 204, deletedIds };
 }

@@ -22,17 +22,27 @@ import { projectsForSite } from './mapping-rows.js';
 
 /**
  * Propagates a brand's own primary site's `baseURL` change onto Semrush: for every live
- * market project mapped to this site, re-points the project's tracked `primary_url` AND its
- * `domain` (the registrable-domain grouping key — Semrush normalizes whatever is sent to the
- * eTLD+1 via the Public Suffix List, so a same-domain edit is a no-op on this field and a
- * cross-domain edit moves it too; live-verified against adobe-hackathon.semrush.com
- * 2026-08-18 that a changed `domain` is accepted, persists, and a subsequent publish settles
- * cleanly with no project recreation), the own-brand benchmark's `domain`/`primary_url` (one
- * value upstream — see `brand-urls.js`'s `benchmarkTrackedUrl` JSDoc — sent as a full-body PUT
- * since a field omitted from that PUT is CLEARED upstream, not preserved, see
- * `rest-transport.js`'s `updateBenchmark` JSDoc — so this reads the benchmark first to carry
- * its `brand_name`/`brand_aliases` forward unchanged while always moving `primary_url` to the
- * new identity), and republishes.
+ * market project mapped to this site, re-points the project's tracked `primary_url` and the
+ * own-brand benchmark's `domain`/`primary_url` (one value upstream — see `brand-urls.js`'s
+ * `benchmarkTrackedUrl` JSDoc — sent as a full-body PUT since a field omitted from that PUT is
+ * CLEARED upstream, not preserved, see `rest-transport.js`'s `updateBenchmark` JSDoc — so this
+ * reads the benchmark first to carry its `brand_name`/`brand_aliases` forward unchanged while
+ * always moving `primary_url` to the new identity), and republishes.
+ *
+ * The `domain` field sent to `updateProject` below is NOT actually propagated by Semrush once
+ * a project has been published at least once — live-verified 2026-09-01 against
+ * www.semrush.com (the `adobe-hackathon.semrush.com` host an earlier, incorrect version of this
+ * comment cited is now decommissioned; see semrush-project-domain-immutable-once-published in
+ * project memory): a PATCH that changes `domain` on an already-published project is accepted
+ * (200) and even echoed back in that response, but is silently dropped from every subsequent
+ * read, including after a republish. Only `primary_url` and the benchmark's `domain`/
+ * `primary_url` genuinely move in place. So for a project that was published BEFORE this call
+ * (the common case — brand primary sites are provisioned live), this function still moves the
+ * tracked `primary_url` correctly but leaves the project's `domain` on its original value: a
+ * cross-domain rename desyncs `domain` from `primary_url`/the SpaceCat site the same way the
+ * Add Market siteId/brandDomain precedence bug did. Fixing that (detect the case, or fall back
+ * to delete+recreate when the project has zero prompts) is tracked separately — this comment
+ * only corrects the factual claim; the behavior below is unchanged.
  *
  * Scope: a brand's sub-workspace can hold multiple market projects, and a Site can be
  * shared by more than one of them (two locale variants of the same market both on one
@@ -54,10 +64,16 @@ import { projectsForSite } from './mapping-rows.js';
  *   - the brand's own identity, for `ensureOwnBrandBenchmark`'s `brand` param.
  * @param {string} params.newBaseURL - the site's new `baseURL`, as submitted.
  * @param {object} [params.log]
+ * @param {Array<any>} [params.rows] - pre-resolved live `BrandSemrushProject` rows to
+ *   re-point, when the caller already read them (e.g. the brand primary-site re-point in
+ *   brands.js, which reads the rows against the OLD siteId, propagates here, THEN re-links
+ *   them to the new site). When omitted, the rows are looked up by `siteId` via
+ *   `projectsForSite` (the site-rename path in sites.js).
  * @returns {Promise<{projectsUpdated: number}>}
  */
 export async function propagateSiteUrlToSemrush({
   dataAccess, transport, workspaceId, brandId, siteId, brandIdentity, newBaseURL, log,
+  rows: rowsParam,
 }) {
   const newIdentity = siteIdentityFromUrlString(newBaseURL);
   const newDomain = hostnameFromUrlString(newBaseURL);
@@ -70,7 +86,7 @@ export async function propagateSiteUrlToSemrush({
     throw new Error(`site-url-propagation: could not derive a URL identity from "${newBaseURL}"`);
   }
 
-  const rows = await projectsForSite(dataAccess, brandId, siteId);
+  const rows = rowsParam ?? await projectsForSite(dataAccess, brandId, siteId);
   if (rows.length === 0) {
     // No live project mapped to this site yet (e.g. the mapping row's siteId link is
     // still pending a best-effort write). Not an error — the caller still persists the

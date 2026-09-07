@@ -44,7 +44,11 @@ import { provisionDimensionTree, ensureServerOwnedValue } from '../tag-tree.js';
 import { classifyBrandedTag, needlesFromNames } from '../branded-classifier.js';
 import { classifyPromptIntents, AI_GEN_CLASSIFY_MAX, computeWriteDeadline } from '../intent-classification.js';
 import {
-  collectBrandUrlEntries, attachBrandUrlsToProject, primaryDomainSet, primaryIdentitySet,
+  collectBrandUrlEntries,
+  attachBrandUrlsToProject,
+  ensureOwnBrandBenchmark,
+  primaryDomainSet,
+  primaryIdentitySet,
 } from '../brand-urls.js';
 import { resolveProjects } from '../resolve-projects.js';
 import {
@@ -295,11 +299,14 @@ function validateCreateBody(body) {
  * Generates topics + prompts for (domain, country) via the AI-SEO service
  * (transport.getBrandTopics) and attaches them to the project. Keeps the top
  * `topicCap` topics by search volume (0 = keep all) and tags every prompt with
- * the standard closed-dimension values ({@link STANDARD_PROMPT_TAG_VALUES}, minus
- * its seeded `intent` default), the producing `source/semrush` value, plus a
- * branded / non-branded `type` value derived from `brandNames` (brand name +
- * aliases) and a per-prompt server-classified `intent` value (serenity-docs#32,
- * replacing the seeded `Informational` default). Returns the topic/prompt counts.
+ * the standard closed-dimension values ({@link STANDARD_PROMPT_TAG_VALUES} —
+ * today just its seeded `intent` default, since the `origin` entry it used to
+ * carry is retired, tag-display-names.md §3 — minus that seeded `intent`
+ * default, which is classified per prompt below instead), the producing
+ * `source/semrush` value, plus a branded / non-branded `type` value derived
+ * from `brandNames` (brand name + aliases) and a per-prompt server-classified
+ * `intent` value (serenity-docs#32, replacing the seeded `Informational`
+ * default). Returns the topic/prompt counts.
  * A generation that yields nothing is a clean no-op (no upstream write).
  *
  * The generated topic name is NOT attached. Under the dimension-root model a
@@ -728,13 +735,28 @@ export async function handleCreateMarketSubworkspace(
     );
   }
 
-  // Push the brand's URLs (own sites + social + earned) onto this market's
-  // own-brand benchmark (created on demand when Semrush hasn't provisioned one),
-  // region-filtered to the market. Done before publish so the URLs are part of
-  // the same published version. Best-effort: URL enrichment must never abort the
-  // brand create — a benchmark/URL hiccup is logged and skipped, not propagated,
-  // so the whole block (INCLUDING the project listing the skip set needs) sits
-  // inside the try.
+  // Resolve the own-brand benchmark before best-effort URL enrichment. Semrush
+  // may have auto-created it from customer-cased brand_names, so project creation
+  // is also the blocking point that repairs those stored aliases before publish.
+  const ownBrand = {
+    name: hasText(body.brandDisplayName) ? body.brandDisplayName : body.brandNames[0],
+    domain: body.brandDomain,
+    primaryUrl,
+    aliases: aliasNames,
+  };
+  // Benchmark identity is a correctness step, not enrichment. In particular,
+  // mixed-case aliases on Semrush's auto-created benchmark need a blocking
+  // withhold/re-add repair before the project can be published.
+  const ownBrandBenchmarkId = await ensureOwnBrandBenchmark(
+    transport,
+    workspaceId,
+    projectId,
+    ownBrand,
+    log,
+    { repairAliasCase: true },
+  );
+
+  // URL attachment remains best-effort.
   try {
     // Skip EVERY market's primary domain, not just this one's: a market-mirror
     // brand's other-market primary must not surface as a website URL here either
@@ -763,13 +785,9 @@ export async function handleCreateMarketSubworkspace(
       workspaceId,
       projectId,
       brandUrlEntries,
-      {
-        name: body.brandDisplayName,
-        domain: body.brandDomain,
-        primaryUrl,
-        aliases: aliasNames,
-      },
+      ownBrand,
       log,
+      ownBrandBenchmarkId,
     );
   } catch (e) {
     // Best-effort, but DELIBERATELY non-self-healing: the brand is left live with

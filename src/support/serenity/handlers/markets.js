@@ -12,7 +12,7 @@
 
 // @ts-check
 
-import { hasText, isValidUUID, siteIdentityFromUrlString } from '@adobe/spacecat-shared-utils';
+import { hasText, isValidUUID } from '@adobe/spacecat-shared-utils';
 
 import { ErrorWithStatusCode } from '../../utils.js';
 import {
@@ -20,7 +20,7 @@ import {
 } from '../errors.js';
 import { normalizeLanguageCode, normalizeGeoTargetId } from '../validation.js';
 import { resolveLocation } from '../locations.js';
-import { resolveSiteIdentity } from '../site-linkage.js';
+import { resolveSiteIdentity, resolveMarketIdentity, logMarketCreated } from '../site-linkage.js';
 import { createProvisionAndPublishProject, CreateNoProjectIdError } from '../project-provisioning.js';
 import { alertQuotaRejection } from '../quota-alerts.js';
 
@@ -383,29 +383,29 @@ export async function handleCreateMarket(
     ? String(body.name)
     : defaultMarketName(body.market, languageCode);
 
-  // brandDomain OR siteId (LLMO-6405 Phase 2): when the caller supplied a Site
-  // UUID instead of a raw domain, derive the Semrush project domain from it. The
-  // flat handler holds full `dataAccess` (incl. Site), so it self-derives — the
-  // subworkspace handler cannot (narrowed dataAccess) and relies on the controller.
-  // A supplied-but-unresolvable siteId is a hard 400 (never silently proceeds).
-  // Both values come from ONE input — a caller-threaded url, a caller-supplied
-  // brandDomain, or the Site behind body.siteId — because a project domained to
-  // one url while tracking another is worse than one tracking its apex: it looks
-  // deliberate. `domain` stays host-only (a path there is a hard 400 upstream);
-  // `primaryUrl` keeps whatever subdomain or subpath the source carried.
-  let brandDomain;
-  let primaryUrl;
-  if (hasText(body.brandDomain)) {
-    brandDomain = body.brandDomain;
-    primaryUrl = siteIdentityFromUrlString(
-      hasText(body.primaryUrl) ? body.primaryUrl : body.brandDomain,
-    );
-  } else {
-    const identity = await resolveSiteIdentity(dataAccess, body.siteId, log);
-    brandDomain = identity?.domain ?? null;
-    primaryUrl = identity?.primaryUrl ?? null;
-  }
-  if (!hasText(brandDomain)) {
+  // siteId is authoritative over brandDomain (LLMO-6405 Phase 2, siteId-first):
+  // when the caller supplies a Site UUID, its resolved identity ALWAYS wins,
+  // even alongside a caller-supplied brandDomain that differs from it — a
+  // mismatch is the normal, intended Add Market shape and is never compared or
+  // rejected. brandDomain is only consulted when no siteId was supplied. The
+  // flat handler holds full `dataAccess` (incl. Site), so it self-derives here
+  // — the subworkspace handler cannot (narrowed dataAccess) and relies on the
+  // controller doing the same siteId-first resolution before either mode
+  // dispatches. A supplied-but-unresolvable siteId is a hard 400 below (never
+  // silently falls back to brandDomain). `domain` stays host-only (a path there
+  // is a hard 400 upstream); `primaryUrl` keeps whatever subdomain or subpath
+  // the source carried.
+  const siteIdSupplied = hasText(body.siteId);
+  const siteIdentity = siteIdSupplied
+    ? await resolveSiteIdentity(dataAccess, body.siteId, log)
+    : null;
+  const { domain: brandDomain, primaryUrl } = resolveMarketIdentity(
+    siteIdentity,
+    siteIdSupplied,
+    body.brandDomain,
+    body.primaryUrl,
+  );
+  if (!brandDomain || !hasText(brandDomain)) {
     return {
       status: 400,
       body: {
@@ -472,7 +472,7 @@ export async function handleCreateMarket(
       // A `brandDomain`-only create records none: flat mode resolves no Site from
       // a raw domain, and inventing the brand's anchor would assert a per-market
       // fact nobody stated.
-      ...(hasText(body.siteId) ? { siteId: body.siteId } : {}),
+      ...(siteIdSupplied ? { siteId: body.siteId } : {}),
     });
   } catch (e) {
     log?.error?.(
@@ -494,6 +494,20 @@ export async function handleCreateMarket(
       },
     };
   }
+
+  // This path never generates prompts — the sub-workspace path is the only
+  // one that does, so it always reports generatePrompts:false here.
+  logMarketCreated(log, {
+    brandId,
+    geoTargetId: location.geoTargetId,
+    languageCode,
+    siteId: siteIdSupplied ? body.siteId : null,
+    brandDomain,
+    primaryUrl,
+    semrushWorkspaceId,
+    semrushProjectId,
+    generatePrompts: false,
+  });
 
   return {
     status: 201,
@@ -767,7 +781,8 @@ export async function listTagsForProject(transport, semrushWorkspaceId, projectI
  *   every item, as every pre-existing caller does.
  * @returns {Promise<{ items: Array<{
  *   id: string, name: string, parentId: string | null,
- *   childrenCount: number, path: Array<{ id: string, name: string }> | null,
+ *   childrenCount: number, promptsCount: number,
+ *   path: Array<{ id: string, name: string }> | null,
  * }> }>}
  */
 export async function listProjectTagTree(
@@ -797,6 +812,7 @@ export async function listProjectTagTree(
           name: typeof t.name === 'string' ? t.name : '',
           parentId: typeof t.parent_id === 'string' && t.parent_id ? t.parent_id : null,
           childrenCount: typeof t.children_count === 'number' ? t.children_count : 0,
+          promptsCount: typeof t.prompts_count === 'number' ? t.prompts_count : 0,
           path: Array.isArray(t.path)
             ? t.path.map((p) => ({
               id: typeof p?.id === 'string' ? p.id : '',

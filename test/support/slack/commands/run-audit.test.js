@@ -1175,4 +1175,340 @@ describe('RunAuditCommand', () => {
       );
     });
   });
+
+  describe('Offsite structured logging (LLMO-6973)', () => {
+    const OFFSITE_AUDIT_TYPES = [
+      'offsite-brand-presence',
+      'cited-analysis',
+      'reddit-analysis',
+      'youtube-analysis',
+      'wikipedia-analysis',
+    ];
+
+    // Mirrors the mapping in run-audit.js (and spacecat-audit-worker's own AUDIT enum) —
+    // used here to prove the log lines carry the correct short taxonomy value per type,
+    // not a hardcoded/single value.
+    const OFFSITE_AUDIT_LOG_TYPE = {
+      'offsite-brand-presence': 'brand-presence',
+      'cited-analysis': 'cited',
+      'reddit-analysis': 'reddit',
+      'youtube-analysis': 'youtube',
+      'wikipedia-analysis': 'wikipedia',
+    };
+
+    it('emits a structured audit_orchestration_start line for each offsite audit type', async () => {
+      dataAccessStub.Site.findByBaseURL.resolves({ getId: () => '123' });
+
+      for (const auditType of OFFSITE_AUDIT_TYPES) {
+        context.log.info.resetHistory();
+        dataAccessStub.Configuration.findLatest.resolves(createDefaultConfigurationMock(auditType, ['LLMO']));
+
+        const command = RunAuditCommand(context);
+        // eslint-disable-next-line no-await-in-loop
+        await command.handleExecution(['validsite.com', `audit:${auditType}`], slackContext);
+
+        expect(context.log.info).to.have.been.calledWith(
+          sinon.match(`domain=offsite audit=${OFFSITE_AUDIT_LOG_TYPE[auditType]} event=audit_orchestration_start outcome=start auditType=${auditType} baseURL=validsite.com`),
+        );
+      }
+    });
+
+    it('puts domain and audit before event/outcome on the start line, for two distinct offsite types', async () => {
+      dataAccessStub.Site.findByBaseURL.resolves({ getId: () => '123' });
+
+      for (const [auditType, expectedAudit] of [['cited-analysis', 'cited'], ['wikipedia-analysis', 'wikipedia']]) {
+        context.log.info.resetHistory();
+        dataAccessStub.Configuration.findLatest.resolves(createDefaultConfigurationMock(auditType, ['LLMO']));
+
+        const command = RunAuditCommand(context);
+        // eslint-disable-next-line no-await-in-loop
+        await command.handleExecution(['validsite.com', `audit:${auditType}`], slackContext);
+
+        const call = context.log.info.getCalls().find(
+          (c) => c.args[0].includes('event=audit_orchestration_start'),
+        );
+        expect(call, `no audit_orchestration_start line logged for ${auditType}`).to.not.be.undefined;
+        expect(call.args[0]).to.match(
+          new RegExp(`domain=offsite audit=${expectedAudit} event=audit_orchestration_start outcome=start`),
+        );
+      }
+    });
+
+    it('does not add structured fields to the start log line for a non-offsite audit type', async () => {
+      dataAccessStub.Site.findByBaseURL.resolves({ getId: () => '123' });
+      dataAccessStub.Configuration.findLatest.resolves(createDefaultConfigurationMock('lhs-mobile', ['LLMO']));
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['validsite.com'], slackContext);
+
+      expect(context.log.info).to.have.been.calledWith(
+        'run-audit: baseURL="validsite.com", auditType="undefined", auditData="undefined"',
+      );
+      expect(context.log.info).to.not.have.been.calledWithMatch(/event=audit_orchestration_start/);
+    });
+
+    it('falls back to the raw auditType for audit= when a new offsite type has no OFFSITE_AUDIT_LOG_TYPE mapping', async () => {
+      // A type that isOffsiteAuditType treats as offsite (so the structured-logging path
+      // runs) but that OFFSITE_AUDIT_LOG_TYPE has no entry for — simulating a new offsite
+      // audit type added to OFFSITE_AUDIT_TYPES without a matching entry here.
+      const RunAuditCommandWithUnmappedType = await esmock(
+        '../../../../src/support/slack/commands/run-audit.js',
+        {
+          '@adobe/spacecat-shared-tier-client': { default: mockTierClient },
+          '../../../../src/support/utils.js': {
+            isOffsiteAuditType: (auditType) => auditType === 'new-offsite-analysis',
+            triggerAuditForSite: sinon.stub().resolves(),
+          },
+        },
+      );
+      dataAccessStub.Site.findByBaseURL.resolves(null);
+
+      const command = RunAuditCommandWithUnmappedType(context);
+      await command.handleExecution(['unknownsite.com', 'audit:new-offsite-analysis'], slackContext);
+
+      expect(context.log.warn).to.have.been.calledWith(
+        'No site found with base URL domain=offsite audit=new-offsite-analysis event=audit_orchestration_start outcome=skip reason=site_not_found',
+      );
+    });
+
+    it('logs a structured, dashboard-visible warning when the site is not found for an offsite audit type', async () => {
+      dataAccessStub.Site.findByBaseURL.resolves(null);
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['unknownsite.com', 'audit:cited-analysis'], slackContext);
+
+      expect(context.log.warn).to.have.been.calledWith(
+        'No site found with base URL domain=offsite audit=cited event=audit_orchestration_start outcome=skip reason=site_not_found',
+      );
+      expect(context.log.error).to.not.have.been.called;
+      expect(slackContext.say).to.have.been.calledWith(":x: No site found with base URL 'https://unknownsite.com'.");
+    });
+
+    it('maps the audit= field correctly for a second offsite audit type on the site-not-found line', async () => {
+      dataAccessStub.Site.findByBaseURL.resolves(null);
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['unknownsite.com', 'audit:wikipedia-analysis'], slackContext);
+
+      expect(context.log.warn).to.have.been.calledWith(
+        'No site found with base URL domain=offsite audit=wikipedia event=audit_orchestration_start outcome=skip reason=site_not_found',
+      );
+    });
+
+    it('does not log a site-not-found line when the site is not found for a non-offsite audit type', async () => {
+      dataAccessStub.Site.findByBaseURL.resolves(null);
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['unknownsite.com'], slackContext);
+
+      expect(context.log.error).to.not.have.been.called;
+      expect(context.log.warn).to.not.have.been.calledWithMatch(/reason=site_not_found/);
+    });
+
+    it('logs a structured, dashboard-visible warning when an offsite audit type is not entitled', async () => {
+      const site = { getId: () => '123' };
+      dataAccessStub.Site.findByBaseURL.resolves(site);
+      dataAccessStub.Configuration.findLatest.resolves(createDefaultConfigurationMock('cited-analysis', ['LLMO']));
+      mockTierClient.createForSite.resolves({
+        checkValidEntitlement: sinon.stub().resolves({ siteEnrollment: null }),
+      });
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['validsite.com', 'audit:cited-analysis'], slackContext);
+
+      expect(context.log.warn).to.have.been.calledWith(
+        'Site not entitled for this audit type domain=offsite audit=cited event=audit_orchestration_start outcome=skip siteId=123 reason=not_entitled',
+      );
+      expect(context.log.error).to.not.have.been.called;
+      expect(sqsStub.sendMessage.called).to.be.false;
+    });
+
+    it('does not log a not-entitled structured line for a non-offsite audit type', async () => {
+      dataAccessStub.Site.findByBaseURL.resolves({ getId: () => '123' });
+      dataAccessStub.Configuration.findLatest.resolves(createDefaultConfigurationMock('lhs-mobile', ['LLMO']));
+      mockTierClient.createForSite.resolves({
+        checkValidEntitlement: sinon.stub().resolves({ siteEnrollment: null }),
+      });
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['validsite.com'], slackContext);
+
+      expect(context.log.warn).to.not.have.been.calledWithMatch(/reason=not_entitled/);
+    });
+
+    it('logs a structured, dashboard-visible warning when the handler is disabled for an offsite audit type', async () => {
+      const site = { getId: () => '123' };
+      dataAccessStub.Site.findByBaseURL.resolves(site);
+      dataAccessStub.Configuration.findLatest.resolves({
+        isHandlerEnabledForSite: () => true,
+        isHandlerDisabledForSite: () => true,
+        getHandlers: () => ({ 'reddit-analysis': { productCodes: ['LLMO'] } }),
+      });
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['validsite.com', 'audit:reddit-analysis'], slackContext);
+
+      expect(context.log.warn).to.have.been.calledWith(
+        'Handler disabled for this site domain=offsite audit=reddit event=audit_orchestration_start outcome=skip siteId=123 reason=handler_disabled',
+      );
+      expect(context.log.error).to.not.have.been.called;
+      expect(sqsStub.sendMessage.called).to.be.false;
+    });
+
+    it('does not log a handler-disabled structured line for a non-offsite audit type', async () => {
+      const site = { getId: () => '123' };
+      dataAccessStub.Site.findByBaseURL.resolves(site);
+      dataAccessStub.Configuration.findLatest.resolves({
+        isHandlerEnabledForSite: () => true,
+        isHandlerDisabledForSite: () => true,
+        getHandlers: () => ({ 'lhs-mobile': { productCodes: ['LLMO'] } }),
+      });
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['validsite.com'], slackContext);
+
+      expect(context.log.warn).to.not.have.been.calledWithMatch(/reason=handler_disabled/);
+    });
+
+    it('logs a structured success line on successful dispatch for offsite-brand-presence (matching jobs-dispatcher wording)', async () => {
+      const site = { getId: () => '123' };
+      dataAccessStub.Site.findByBaseURL.resolves(site);
+      dataAccessStub.Configuration.findLatest.resolves(createDefaultConfigurationMock('offsite-brand-presence', ['LLMO']));
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['validsite.com', 'audit:offsite-brand-presence'], slackContext);
+
+      expect(context.log.info).to.have.been.calledWith(
+        'Queued offsite-brand-presence for site domain=offsite audit=brand-presence event=audit_orchestration_spacecat_request_dispatched outcome=success peer=spacecat-audit-worker direction=outbound siteId=123',
+      );
+    });
+
+    it('logs a structured success line on successful dispatch for the other offsite audit types', async () => {
+      const site = { getId: () => '123' };
+      dataAccessStub.Site.findByBaseURL.resolves(site);
+
+      for (const auditType of ['cited-analysis', 'reddit-analysis', 'youtube-analysis', 'wikipedia-analysis']) {
+        context.log.info.resetHistory();
+        dataAccessStub.Configuration.findLatest.resolves(createDefaultConfigurationMock(auditType, ['LLMO']));
+
+        const command = RunAuditCommand(context);
+        // eslint-disable-next-line no-await-in-loop
+        await command.handleExecution(['validsite.com', `audit:${auditType}`], slackContext);
+
+        expect(context.log.info).to.have.been.calledWith(
+          `Queued offsite analysis for site domain=offsite audit=${OFFSITE_AUDIT_LOG_TYPE[auditType]} event=audit_orchestration_spacecat_request_dispatched outcome=success peer=spacecat-audit-worker direction=outbound siteId=123`,
+        );
+      }
+    });
+
+    it('follows the canonical domain, audit, event, outcome, peer, direction, siteId field order on the dispatched-success line', async () => {
+      const site = { getId: () => '123' };
+      dataAccessStub.Site.findByBaseURL.resolves(site);
+      dataAccessStub.Configuration.findLatest.resolves(createDefaultConfigurationMock('reddit-analysis', ['LLMO']));
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['validsite.com', 'audit:reddit-analysis'], slackContext);
+
+      expect(context.log.info).to.have.been.calledWith(
+        sinon.match(/domain=offsite audit=reddit event=audit_orchestration_spacecat_request_dispatched outcome=success peer=spacecat-audit-worker direction=outbound siteId=123/),
+      );
+    });
+
+    it('logs a single structured failure line and replies, without re-throwing into the generic outer catch, when the SQS send fails for an offsite audit type', async () => {
+      const site = { getId: () => '123' };
+      dataAccessStub.Site.findByBaseURL.resolves(site);
+      dataAccessStub.Configuration.findLatest.resolves(createDefaultConfigurationMock('youtube-analysis', ['LLMO']));
+      const sendError = new Error('SQS unavailable');
+      sendError.name = 'SqsError';
+      sqsStub.sendMessage.rejects(sendError);
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['validsite.com', 'audit:youtube-analysis'], slackContext);
+
+      expect(context.log.error).to.have.been.calledWith(
+        'Failed to queue offsite analysis for site domain=offsite audit=youtube event=audit_orchestration_spacecat_request_dispatched outcome=failure peer=spacecat-audit-worker direction=outbound siteId=123 reason=sqs_send_failed errorName=SqsError errorMessage="SQS unavailable"',
+      );
+      // The offsite dispatch failure is not re-thrown, so the generic outer catch's
+      // unstructured "Error running audit..." line must not also fire for the same failure
+      // (catch-log-throw would otherwise double-count this as two ERROR lines).
+      expect(context.log.error).to.not.have.been.calledWith(
+        sinon.match(/Error running audit youtube-analysis for site/),
+      );
+      expect(context.log.error).to.have.been.calledOnce;
+      expect(slackContext.say).to.have.been.calledWith(':nuclear-warning: Oops! Something went wrong: SQS unavailable');
+    });
+
+    it('swallows a broken Slack reply after the SQS send fails, without escaping to the generic outer catch', async () => {
+      const site = { getId: () => '123' };
+      dataAccessStub.Site.findByBaseURL.resolves(site);
+      dataAccessStub.Configuration.findLatest.resolves(createDefaultConfigurationMock('youtube-analysis', ['LLMO']));
+      const sendError = new Error('SQS unavailable');
+      sendError.name = 'SqsError';
+      sqsStub.sendMessage.rejects(sendError);
+      slackContext.say = sinon.stub().rejects(new Error('Slack is down'));
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['validsite.com', 'audit:youtube-analysis'], slackContext);
+
+      expect(context.log.error).to.have.been.calledWith(
+        'Failed to queue offsite analysis for site domain=offsite audit=youtube event=audit_orchestration_spacecat_request_dispatched outcome=failure peer=spacecat-audit-worker direction=outbound siteId=123 reason=sqs_send_failed errorName=SqsError errorMessage="SQS unavailable"',
+      );
+      // A second, unstructured "Error running audit..." line from the outer catch would
+      // mean the broken Slack reply escaped the inner catch instead of being swallowed.
+      expect(context.log.error).to.have.been.calledOnce;
+    });
+
+    it('sanitizes and quotes an error field whose value contains whitespace, "=", or a double quote', async () => {
+      const site = { getId: () => '123' };
+      dataAccessStub.Site.findByBaseURL.resolves(site);
+      dataAccessStub.Configuration.findLatest.resolves(createDefaultConfigurationMock('cited-analysis', ['LLMO']));
+      const sendError = new Error('bad response: status=500 body="oops"');
+      sendError.name = 'SqsError';
+      sqsStub.sendMessage.rejects(sendError);
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['validsite.com', 'audit:cited-analysis'], slackContext);
+
+      expect(context.log.error).to.have.been.calledWith(
+        sinon.match(/errorMessage="bad response: status=500 body='oops'"/),
+      );
+    });
+
+    it('stamps origin: api-service into the dispatched auditContext for an offsite audit type', async () => {
+      const site = { getId: () => '123' };
+      dataAccessStub.Site.findByBaseURL.resolves(site);
+      dataAccessStub.Configuration.findLatest.resolves(createDefaultConfigurationMock('wikipedia-analysis', ['LLMO']));
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['validsite.com', 'audit:wikipedia-analysis'], slackContext);
+
+      expect(sqsStub.sendMessage).to.have.been.calledOnce;
+      expect(sqsStub.sendMessage.firstCall.args[1].auditContext).to.include({ origin: 'api-service' });
+    });
+
+    it('does NOT stamp origin into the dispatched auditContext for a non-offsite audit type (message payload unchanged)', async () => {
+      const site = { getId: () => '123' };
+      dataAccessStub.Site.findByBaseURL.resolves(site);
+      dataAccessStub.Configuration.findLatest.resolves(createDefaultConfigurationMock('lhs-mobile', ['LLMO']));
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['validsite.com'], slackContext);
+
+      expect(sqsStub.sendMessage).to.have.been.calledOnce;
+      expect(sqsStub.sendMessage.firstCall.args[1].auditContext).to.not.have.property('origin');
+      // Byte-for-byte: the message payload for a non-offsite audit type is exactly what
+      // it was before LLMO-6973 — no extra keys anywhere in the auditContext.
+      expect(sqsStub.sendMessage.firstCall.args[1]).to.deep.equal({
+        type: 'lhs-mobile',
+        siteId: '123',
+        auditContext: {
+          slackContext: {
+            channelId: undefined,
+            threadTs: undefined,
+          },
+        },
+        data: undefined,
+      });
+    });
+  });
 });

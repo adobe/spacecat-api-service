@@ -22,7 +22,7 @@ import { Readable } from 'stream';
 import { parse } from 'csv';
 
 import { Blocks, Elements, Message } from 'slack-block-builder';
-import { isAuditForAllUrls } from '../../support/utils.js';
+import { isAuditForAllUrls } from '../../support/audit-run-scope.js';
 
 export const BACKTICKS = '```';
 export const BOT_MENTION_REGEX = /^<@[^>]+>\s+/;
