@@ -21,6 +21,7 @@ import {
   handleCreatePrompts,
   handleUpdatePrompt,
   handleBulkDeletePrompts,
+  capUpdateTagIds,
   makePromptTagInjector,
   normalizePromptInput,
   makeIntentInjector,
@@ -687,6 +688,50 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
     expect(result.created[0].tagIds).to.not.include(TAG_IDS.originHuman);
   });
 
+  // Regression: deleting `deriveSource` didn't just restore `origin` — it also
+  // reverted the `source` dimension's fold, so a Track-flow per-item
+  // `source: 'llm-generated'` override (a valid SOURCE_VALUES entry, accepted
+  // by normalizePromptInput's per-item override validator) now stamps a literal
+  // `llm-generated` source tag instead of the old `ai-onboarding` fold target.
+  // This path had zero coverage before (review finding).
+  it('stamps a literal llm-generated source tag for a per-item override, independent of origin', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([project]);
+    const transport = {
+      listProjectTags: makeListProjectTagsStub(dimensionTreeLevels({
+        [TAG_IDS.sourceRoot]: [
+          {
+            id: 'source-llm-generated',
+            name: 'llm-generated',
+            parent_id: TAG_IDS.sourceRoot,
+            path: [{ id: TAG_IDS.sourceRoot, name: 'source' }],
+          },
+        ],
+      })),
+      createPromptsWithMetadata: sinon.stub().resolves({
+        page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'chat prompt' }],
+      }),
+      publishProject: sinon.stub().resolves(),
+    };
+
+    const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      prompts: [{
+        text: 'chat prompt',
+        geoTargetId: 2840,
+        languageCode: 'en',
+        tagIds: ['tag-cat-1'],
+        source: 'llm-generated',
+      }],
+    }, fakeLog());
+
+    expect(result.created[0].tagIds).to.include.members([
+      'source-llm-generated',
+      TAG_IDS.originHuman,
+    ]);
+  });
+
   // LLMO-5492 — deferred publish: with { publish: false } the prompt is still
   // created upstream but the project is NOT published, so the finalize step can
   // batch a single populate-then-publish. Positional args after body/log:
@@ -1344,6 +1389,84 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
     expect(transport.deletePromptsByIds).to.have.callCount(0);
     expect(transport.createPromptsWithMetadata).to.have.callCount(0);
     expect(transport.publishProject).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en');
+  });
+
+  // capUpdateTagIds regression: a client echoing its prompt's full existing tag
+  // list back on PATCH (the documented edit-form pattern) must not have a
+  // closed-dimension id (origin/source — never re-derived on UPDATE) silently
+  // dropped by the MAX_TAG_IDS cap when the echoed list is at/beyond it.
+  it('preserves origin/source ids beyond MAX_TAG_IDS when a client echoes its full existing tag list', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(project);
+
+    // 52 open (unresolvable/customer) ids -- one more than MAX_TAG_IDS -- plus
+    // the two closed-dimension ids a real prompt would already carry, echoed
+    // back verbatim as the PATCH body's full next state.
+    const openIds = Array.from({ length: 52 }, (_, i) => `custom-cat-${i}`);
+    const echoedTagIds = [...openIds, TAG_IDS.originHuman, TAG_IDS.sourceConfig];
+
+    const transport = {
+      listProjectTags: makeListProjectTagsStub(),
+      patchPrompt: sinon.stub().resolves({ id: 'sem-1', name: 'next', is_updated: true }),
+      updatePromptTagsByIds: sinon.stub().resolves(null),
+      publishProject: sinon.stub().resolves(),
+    };
+
+    const result = await handleUpdatePrompt(
+      transport,
+      dataAccess,
+      BRAND,
+      WORKSPACE,
+      'sem-1',
+      {
+        geoTargetId: 2840, languageCode: 'en', text: 'next', tagIds: echoedTagIds,
+      },
+      fakeLog(),
+    );
+
+    expect(result.status).to.equal(200);
+    // Both closed-dimension ids survive; only the OPEN ids are capped at 50, so
+    // the final set is 50 open + originHuman + sourceConfig + intent = 53.
+    expect(result.body.tagIds).to.include.members([TAG_IDS.originHuman, TAG_IDS.sourceConfig]);
+    expect(result.body.tagIds.filter((id) => id.startsWith('custom-cat-'))).to.have.lengthOf(50);
+    const [writtenPrompt] = transport.updatePromptTagsByIds.firstCall.args[2];
+    expect(writtenPrompt.references)
+      .to.include.members([TAG_IDS.originHuman, TAG_IDS.sourceConfig]);
+  });
+
+  describe('capUpdateTagIds', () => {
+    it('returns the input unchanged (no tree walk) when at or under MAX_TAG_IDS', async () => {
+      const transport = { listProjectTags: sinon.stub().rejects(new Error('should not be called')) };
+      const tagIds = ['a', 'b', TAG_IDS.originHuman];
+      const result = await capUpdateTagIds(transport, WORKSPACE, 'proj-1', tagIds, fakeLog());
+      expect(result).to.equal(tagIds);
+    });
+
+    it('exempts closed-dimension ids from the cap and caps only the open remainder', async () => {
+      const transport = { listProjectTags: makeListProjectTagsStub() };
+      const open = Array.from({ length: 51 }, (_, i) => `open-${i}`);
+      const tagIds = [...open, TAG_IDS.originHuman, TAG_IDS.sourceConfig];
+
+      const result = await capUpdateTagIds(transport, WORKSPACE, 'proj-1', tagIds, fakeLog());
+
+      expect(result).to.include.members([TAG_IDS.originHuman, TAG_IDS.sourceConfig]);
+      expect(result.filter((id) => id.startsWith('open-'))).to.have.lengthOf(50);
+      expect(result).to.have.lengthOf(52);
+    });
+
+    it('treats an unresolvable/unknown id as open (capped), not managed', async () => {
+      const transport = { listProjectTags: makeListProjectTagsStub() };
+      const open = Array.from({ length: 51 }, (_, i) => `open-${i}`);
+      const tagIds = [...open, 'stale-deleted-id'];
+
+      const result = await capUpdateTagIds(transport, WORKSPACE, 'proj-1', tagIds, fakeLog());
+
+      expect(result).to.have.lengthOf(50);
+      expect(result).to.not.include('stale-deleted-id');
+    });
   });
 
   // Guards the documented always-reclassify invariant: an unchanged-text edit

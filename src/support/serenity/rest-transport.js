@@ -370,13 +370,15 @@ export function createSerenityTransport({ env, imsToken }) {
   // layer wraps it and calls it once per attempt).
   const projects = createSerenityProjectEngineTransport(projectEngineOptions);
 
-  // Raw Project Engine client, ONLY for GET /v1/workspaces/{id}/brand-topics: the
-  // facade does not expose a brand-topics method yet (it is in-spec — the future
-  // 29th facade method — but unshipped as of 1.14.0), so this one call keeps the
-  // raw client + the local `unwrap`. Same options as the facade above.
-  // TODO(LLMO): once @adobe/spacecat-shared-project-engine-client ships a brand-topics facade
-  // method, retire `projectsRaw` and route brand-topics through `projects` like the other 28 ops
-  // (this is the only remaining raw Project Engine caller in this file).
+  // Raw Project Engine client, for the ops the facade does not expose yet — both
+  // in-spec (the underlying generated `paths` type has the operation) but
+  // unshipped as a named facade method: GET /v1/workspaces/{id}/brand-topics
+  // (unshipped as of 1.14.0) and DELETE .../aio/tags (`deleteProjectTags`,
+  // expected in spacecat-shared#1903/1.21.0 but still missing). Same options as
+  // the facade above.
+  // TODO(LLMO): once @adobe/spacecat-shared-project-engine-client ships facade
+  // methods for brand-topics and tag-delete, retire `projectsRaw` and route both
+  // through `projects` like the other facade ops.
   const projectsRaw = createSerenityProjectEngineApiClient(projectEngineOptions);
 
   // Typed User Manager client over the sub-workspace lifecycle gateway (same
@@ -893,11 +895,24 @@ export function createSerenityTransport({ env, imsToken }) {
      * prompt before removing the tag record; never deletes a prompt (category-
      * delete.md §3). 204 on success.
      *
+     * FACADE GAP: `deleteProjectTags` was expected to ship as a named facade
+     * method in spacecat-shared#1903 (released as 1.21.0, this repo's pinned
+     * version) — it did not; the currently-published client exposes no such
+     * method (only `get`/`post` are wrapped for this path), even though the
+     * underlying generated `paths` type DOES declare the `delete` operation
+     * (`aio-delete-tags`). Routed through the raw client + local `unwrap`
+     * (same escape hatch as `getBrandTopics` above) until a future
+     * spacecat-shared release adds the facade method.
+     *
      * No `prompt_id` query is sent — the vendored contract's declared-required
      * `prompt_id` is corrected optional (spacecat-shared CR25): a live batch
      * delete with no `prompt_id` at all 204s and deletes exactly the requested
      * ids, and every delete this proxy composes is project-wide (a whole tag
-     * subtree), never scoped to one prompt.
+     * subtree), never scoped to one prompt. The generated operation type still
+     * declares `prompt_id` required (the CR25 "corrected optional" half also
+     * hasn't shipped), so the init below is cast past that stale requirement —
+     * the cast changes what TYPESCRIPT accepts, not what is SENT: there is no
+     * `query` key on the object, so nothing is added to the request URL.
      *
      * @param {string} semrushWorkspaceId
      * @param {string} projectId
@@ -905,14 +920,15 @@ export function createSerenityTransport({ env, imsToken }) {
      *   composed by the caller — see tag-tree.js collectSubtreeIds).
      */
     async deleteProjectTags(semrushWorkspaceId, projectId, tagIds) {
-      return projects.deleteProjectTags(
-        {
+      return unwrap('DELETE', await projectsRaw.DELETE(
+        '/v2/workspaces/{id}/projects/{project_id}/aio/tags',
+        /** @type {any} */ ({
           params: {
             path: { id: semrushWorkspaceId, project_id: projectId },
           },
           body: { ids: tagIds },
-        },
-      );
+        }),
+      ));
     },
 
     /**

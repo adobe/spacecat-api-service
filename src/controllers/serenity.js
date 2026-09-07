@@ -582,6 +582,17 @@ function SerenityController(context, log, env) {
       // `workspaceId`/`parentWorkspaceId` give it the sub-workspace and org parent
       // it needs.
       const body = ctx.data || {};
+      // Deliberately diverges from the v2/Postgres path's `deriveV2PromptOrigin`
+      // (prompts-storage.js), which reuses this SAME `isServicePrincipal`
+      // classifier but then honours a service principal's declared body
+      // `origin` (defaulting to `human` when absent/invalid). This proxy route
+      // has no such body-origin write surface — `origin` is a closed,
+      // server-owned dimension here (see makePromptTagInjector) — so a service
+      // principal is unconditionally `ai`, matching origin-dimension.md §3's
+      // "Serenity AI generation, service, ai" row. That is safe only because no
+      // non-AI service principal is expected to front this route; if one ever
+      // does (e.g. an S2S integration proxying human-authored prompts), it
+      // would be silently mislabeled `ai` with no way to declare `human`.
       const originValue = isServicePrincipal(ctx?.attributes?.authInfo)
         ? ORIGIN_VALUE.AI
         : ORIGIN_VALUE.HUMAN;

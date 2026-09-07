@@ -26,6 +26,7 @@ import {
   makeIntentInjector,
   validateDeferPublish,
   parseUpdatePromptBody,
+  capUpdateTagIds,
   mapLimit,
   publishAffected,
   reconcilePublishErrors,
@@ -399,6 +400,13 @@ export async function handleUpdatePromptSubworkspace(
   }
   const projectId = String(project.id);
 
+  // capUpdateTagIds guards against sanitizeTagIds' create-time cap strategy
+  // (see the flat-mode twin handleUpdatePrompt / capUpdateTagIds' docblock): a
+  // client echoing its prompt's full existing tag list at/beyond MAX_TAG_IDS
+  // would otherwise risk a closed-dimension id (origin/source — never
+  // re-derived on UPDATE) being silently dropped by a flat positional slice.
+  const cappedTagIds = await capUpdateTagIds(transport, workspaceId, projectId, nextTagIds, log);
+
   // Recompute the type AND intent tags from the NEW text BEFORE any upstream write
   // (see the flat-mode twin handleUpdatePrompt): the unified layer must run before
   // the rename so a classification failure aborts cleanly with the prompt untouched
@@ -414,7 +422,7 @@ export async function handleUpdatePromptSubworkspace(
   );
   const injectComputedIntent = makeIntentInjector(transport, workspaceId, intentByText, log);
   let typed = await injectComputedTags(projectId, {
-    text: nextText, geoTargetId, tagIds: nextTagIds,
+    text: nextText, geoTargetId, tagIds: cappedTagIds,
   });
   typed = await injectComputedIntent(projectId, typed);
 

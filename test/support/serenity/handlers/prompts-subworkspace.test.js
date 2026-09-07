@@ -545,6 +545,28 @@ describe('prompts-subworkspace handlers', () => {
       expect(result.body.error).to.equal('marketNotFound');
     });
 
+    // capUpdateTagIds regression (twin of the flat-mode test): echoing a
+    // prompt's full existing tag list back on PATCH must not have a
+    // closed-dimension id (origin/source — never re-derived on UPDATE)
+    // silently dropped by MAX_TAG_IDS when the echoed list is at/beyond it.
+    it('preserves origin/source ids beyond MAX_TAG_IDS when a client echoes its full existing tag list', async () => {
+      const transport = makeTransport();
+      const openIds = Array.from({ length: 52 }, (_, i) => `custom-cat-${i}`);
+      const echoedTagIds = [...openIds, TAG_IDS.originHuman, TAG_IDS.sourceConfig];
+
+      const result = await handleUpdatePromptSubworkspace(transport, WS, 'old-id', {
+        text: 'new', tagIds: echoedTagIds, geoTargetId: 2840, languageCode: 'en',
+      }, log);
+
+      expect(result.status).to.equal(200);
+      const [writtenPrompt] = transport.updatePromptTagsByIds.firstCall.args[2];
+      expect(writtenPrompt.references).to.include.members(
+        [TAG_IDS.originHuman, TAG_IDS.sourceConfig],
+      );
+      expect(writtenPrompt.references.filter((id) => id.startsWith('custom-cat-')))
+        .to.have.lengthOf(50);
+    });
+
     it('404s promptNotFound when the upstream patchPrompt 404s (no tag write)', async () => {
       const transport = makeTransport({
         patchPrompt: sinon.stub().rejects(new SerenityTransportError(404, 'gone')),
