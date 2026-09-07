@@ -1,3 +1,10 @@
+# [1.795.0](https://github.com/adobe/spacecat-api-service/compare/v1.794.1...v1.795.0) (2026-09-07)
+
+
+### Features
+
+* **serenity:** surface per-prompt executions on the topic-prompts element ([#3207](https://github.com/adobe/spacecat-api-service/issues/3207)) ([0e058e7](https://github.com/adobe/spacecat-api-service/commit/0e058e7fcad85568498954c3c360adb2856c98a5))
+
 ## [1.794.1](https://github.com/adobe/spacecat-api-service/compare/v1.794.0...v1.794.1) (2026-09-07)
 
 
