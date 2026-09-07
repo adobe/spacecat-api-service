@@ -761,7 +761,7 @@ export async function handleCreateMarketSubworkspace(
     primaryUrl,
     aliases: aliasNames,
   };
-  const ownBrandBenchmarkId = await ensureOwnBrandBenchmark(
+  await ensureOwnBrandBenchmark(
     transport,
     workspaceId,
     projectId,
@@ -769,7 +769,10 @@ export async function handleCreateMarketSubworkspace(
     log,
     { repairUnflagged: true, repairAliasCase: true },
   );
-  await assertMainBrandBenchmark(transport, workspaceId, projectId);
+  // The authoritative id: assertMainBrandBenchmark re-reads and requires
+  // exactly one flagged benchmark, so it (not ensureOwnBrandBenchmark's own
+  // return value) is the single source of truth callers below should use.
+  const ownBrandBenchmarkId = await assertMainBrandBenchmark(transport, workspaceId, projectId);
 
   // URL attachment remains best-effort. The benchmark itself is already
   // guaranteed to exist and be flagged by this point.

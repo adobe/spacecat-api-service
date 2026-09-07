@@ -602,6 +602,39 @@ describe('brand-urls helpers', () => {
       expect(transport.deleteBenchmarks).to.have.been.calledBefore(transport.createBenchmarks);
     });
 
+    it('repairUnflagged wins over repairAliasCase on an unflagged domain match (the real production call shape)', async () => {
+      // handlers/markets-subworkspace.js passes BOTH options together. On this
+      // branch the two must NOT both fire: repairUnflagged's delete+recreate
+      // already writes correctly-cased aliases from `brand.name`/`brand.aliases`
+      // in the create body, so repairAliasCase's withhold/re-add PUT dance must
+      // be skipped — running it on a benchmark about to be deleted would be
+      // wasted work at best, and racing the delete at worst.
+      const transport = {
+        listBenchmarks: sandbox.stub().resolves({
+          aio_benchmarks: [{
+            id: 'own-1',
+            main_brand: false,
+            domain: 'https://www.acme.com/x',
+            brand_aliases: ['Acme', 'ACME Corp'],
+          }],
+        }),
+        deleteBenchmarks: sandbox.stub().resolves(),
+        createBenchmarks: sandbox.stub().resolves({ ids: ['own-1-flagged'], existing_count: 0 }),
+        updateBenchmark: sandbox.stub(),
+      };
+      expect(await ensureOwnBrandBenchmark(
+        transport,
+        WS,
+        PID,
+        BRAND,
+        undefined,
+        { repairUnflagged: true, repairAliasCase: true },
+      )).to.equal('own-1-flagged');
+      expect(transport.deleteBenchmarks).to.have.been.calledOnceWith(WS, PID, ['own-1']);
+      expect(transport.createBenchmarks).to.have.been.calledOnce;
+      expect(transport.updateBenchmark).to.not.have.been.called;
+    });
+
     it('creates the own-brand benchmark, flagged, when the project has none', async () => {
       const transport = {
         listBenchmarks: sandbox.stub().resolves({ aio_benchmarks: [] }),

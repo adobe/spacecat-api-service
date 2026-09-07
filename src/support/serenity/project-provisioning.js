@@ -202,11 +202,22 @@ export async function createProvisionAndPublishProject(
       ? createBody.brand_name_display
       : createBody?.brand_names?.[0],
     domain: createBody?.domain,
+    // The market's tracked url, not just its host — matches the PATCH above and
+    // the sub-workspace path's `ownBrand.primaryUrl` (markets-subworkspace.js).
+    // Falls back to `domain` inside ensureOwnBrandBenchmark when absent, but a
+    // subpath/subdomain market must carry its real tracked url here or the
+    // own-brand benchmark's `primary_url` silently scores it against its bare
+    // host — omitting this was a merge-integration miss (LLMO-7421 review).
+    primaryUrl: trackedUrl || undefined,
     aliases: hasText(createBody?.brand_name_display)
       ? createBody?.brand_names
       : createBody?.brand_names?.slice(1),
   };
   try {
+    // repairAliasCase is deliberately NOT requested here: createBody's aliases
+    // are fully caller-controlled (unlike the sub-workspace path, which repairs
+    // mixed-case aliases Semrush may have auto-provisioned from customer input),
+    // so there is nothing upstream-cased to reconcile on this path.
     await ensureOwnBrandBenchmark(
       transport,
       semrushWorkspaceId,

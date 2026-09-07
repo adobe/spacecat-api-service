@@ -515,9 +515,12 @@ describe('markets-subworkspace handlers', () => {
         null,
         { brandUrlSources },
       );
-      // Called both by the blocking LLMO-7421 ensure/assert (before the URL push)
-      // and again inside attachBrandUrlsToProject (idempotent) — not exactly once.
-      expect(transport.listBenchmarks).to.have.been.calledWith(WS, 'new-proj');
+      // Exactly two reads: the blocking LLMO-7421 ensure + assert, both draft.
+      // attachBrandUrlsToProject does NOT re-list — it reuses the already-resolved
+      // ownBrandBenchmarkId (passed as its existingBenchmarkId arg), so a third
+      // read here would mean that reuse silently broke.
+      expect(transport.listBenchmarks).to.have.callCount(2);
+      expect(transport.listBenchmarks).to.have.been.calledWith(WS, 'new-proj', { draft: true });
       // http:// dropped; de-region social dropped; us social + region-less earned kept.
       expect(transport.createBrandUrls).to.have.been.calledOnceWith(WS, 'new-proj', 'bench-1', [
         { url: 'https://b.com', type: 'website' },
@@ -642,8 +645,10 @@ describe('markets-subworkspace handlers', () => {
     it('resolves the own-brand benchmark without writing brand URLs when there are no sources', async () => {
       const transport = makeTransport();
       await handleCreateMarketSubworkspace(transport, makeBrand(), PARENT, createBody, log);
-      // listBenchmarks IS still called — the LLMO-7421 benchmark invariant is
-      // blocking regardless of whether there are brand URLs to push.
+      // listBenchmarks IS still called (exactly twice: ensure + assert) — the
+      // LLMO-7421 benchmark invariant is blocking regardless of whether there
+      // are brand URLs to push.
+      expect(transport.listBenchmarks).to.have.callCount(2);
       expect(transport.listBenchmarks).to.have.been.calledWith(WS, 'new-proj', { draft: true });
       expect(transport.createBrandUrls).to.not.have.been.called;
     });

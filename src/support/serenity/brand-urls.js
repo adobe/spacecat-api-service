@@ -546,10 +546,12 @@ export async function ensureOwnBrandBenchmark(
 
   if (domainMatch) {
     // repairUnflagged is set: main_brand can only be set at create, so delete
-    // and recreate it flagged. Brand URLs/aliases attached to it are re-pushed
-    // by the caller after this resolves (attachBrandUrlsToProject writes
-    // verbatim and the upstream skips duplicates), so nothing here needs to
-    // snapshot/restore them itself.
+    // and recreate it flagged. Aliases are rebuilt from `brand.name`/
+    // `brand.aliases` in the create body below (the same source Semrush's own
+    // provisioning read), and brand URLs (not aliases) attached to the deleted
+    // benchmark are re-pushed by the caller after this resolves
+    // (attachBrandUrlsToProject writes verbatim and the upstream skips
+    // duplicates) — nothing here needs to snapshot/restore either.
     try {
       await transport.deleteBenchmarks(workspaceId, projectId, [String(domainMatch.id)]);
     } catch (e) {

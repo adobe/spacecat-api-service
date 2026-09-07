@@ -222,6 +222,25 @@ describe('serenity project-provisioning: createProvisionAndPublishProject', () =
       expect(transport.listBenchmarks.getCall(1)).to.have.been.calledWith(WS, 'proj-1', { draft: true });
     });
 
+    it('creates the own-brand benchmark on the market TRACKED url, not its bare host', async () => {
+      // A merge-integration miss caught in review: the flat path's `brand` object
+      // must carry `primaryUrl` like the sub-workspace path's `ownBrand` does, or
+      // a subpath/subdomain market's own-brand benchmark silently scores it
+      // against its bare host instead of the url it actually tracks.
+      transport.listBenchmarks.onCall(0).resolves(EMPTY);
+      transport.listBenchmarks.onCall(1).resolves(FLAGGED);
+
+      await createProvisionAndPublishProject(transport, WS, CREATE_BODY, {
+        primaryUrl: 'nba.com/kings', log,
+      });
+
+      expect(transport.createBenchmarks).to.have.been.calledOnceWith(
+        WS,
+        'proj-1',
+        [sinon.match({ domain: 'nba.com', primary_url: 'nba.com/kings', main_brand: true })],
+      );
+    });
+
     it('deletes and recreates an unflagged own-domain benchmark, flagged, before publishing', async () => {
       const unflagged = { aio_benchmarks: [{ id: 'bm-old', domain: 'nba.com', main_brand: false }] };
       transport.createBenchmarks.resolves({ ids: ['bm-new'] });
