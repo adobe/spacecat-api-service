@@ -11921,7 +11921,7 @@ AiVisibilitySourceDomainsResponse:
 SerenityPrompt:
   type: object
   description: A single Serenity prompt.
-  required: [semrushPromptId, geoTargetId, languageCode, text, tags]
+  required: [semrushPromptId, geoTargetId, languageCode, text]
   properties:
     semrushPromptId:
       type: string
@@ -12000,7 +12000,7 @@ SerenityPromptTag:
     dimension root and its own `name` names its dimension upstream. Names are
     passed through exactly as upstream holds them, so the intent root reads
     `$abv_tags$intent`. The dimension is `intent`.
-  required: [id, name, parentId, path, compatibility]
+  required: [id, name]
   properties:
     id:
       type: string
@@ -12039,10 +12039,26 @@ SerenityPromptListResponse:
   properties:
     items:
       type: array
-      items: { $ref: '#/SerenityPrompt' }
+      items: { $ref: '#/SerenityEditablePrompt' }
     total: { type: integer }
     page: { type: integer }
     limit: { type: integer }
+
+SerenityEditablePrompt:
+  allOf:
+    - { $ref: '#/SerenityPrompt' }
+    - type: object
+      required: [tags]
+      properties:
+        tags:
+          type: array
+          items: { $ref: '#/SerenityEditablePromptTag' }
+
+SerenityEditablePromptTag:
+  allOf:
+    - { $ref: '#/SerenityPromptTag' }
+    - type: object
+      required: [parentId, path, compatibility]
 
 SerenityPromptInput:
   type: object
@@ -12102,6 +12118,7 @@ SerenityCreatePromptsRequest:
 
 SerenityCreatePromptsResponse:
   type: object
+  additionalProperties: false
   required: [created, skipped, failed, published]
   properties:
     created:
@@ -12133,6 +12150,12 @@ SerenityCreatePromptsResponse:
         unless the request set `deferPublish: true`, in which case the prompts
         were written as drafts and the caller must publish separately
         (serenity-docs#32).
+    pendingClassificationCount:
+      type: integer
+      minimum: 0
+    requeuedJobId:
+      type: [string, 'null']
+      format: uuid
 
 SerenityPromptsJobAccepted:
   type: object
@@ -12290,6 +12313,7 @@ SerenityBulkTagsAccepted:
 
 SerenityBulkTagsResult:
   type: object
+  additionalProperties: false
   required:
     [matchedCount, processedCount, updatedCount, unchangedCount, failureCount, failuresPage, publish]
   properties:
@@ -12723,6 +12747,7 @@ SerenityTagListResponse:
 
 SerenityTagImpact:
   type: object
+  additionalProperties: false
   required: [tagId, name, path, descendantCount, affectedPromptCount, complete, revision]
   properties:
     tagId: { type: string }

@@ -32,7 +32,7 @@ import {
 } from '../tag-tree.js';
 import {
   DIMENSION, ORIGIN_VALUE, INTENT_VALUE, PROXY_CREATE_SOURCE_VALUE,
-  canonicalizeSource, SOURCE_VALUES, deriveSource,
+  canonicalizeSource, SOURCE_VALUES,
 } from '../prompt-tags.js';
 import { classifyPromptIntents } from '../intent-classification.js';
 import { logPromptDeleteEvent } from '../prompt-delete-log.js';
@@ -956,10 +956,25 @@ export async function reconcilePublishErrors(
  * @returns {string[]}
  */
 function sanitizeTagIds(raw) {
-  return validateTagIds(raw, {
-    maximum: MAX_PROMPT_TAG_IDS,
-    tooLargeCode: ERROR_CODES.TAG_LIMIT_EXCEEDED,
-  });
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  const valid = [...new Set(raw
+    .map((value) => String(value ?? '').trim())
+    .filter((value) => isValidTagIdFormat(value)))];
+  if (valid.length > MAX_PROMPT_TAG_IDS) {
+    const error = new ErrorWithStatusCode(
+      'Prompt tag limit would be exceeded; no changes were applied',
+      409,
+    );
+    error.code = ERROR_CODES.TAG_LIMIT_EXCEEDED;
+    /** @type {any} */ (error).details = {
+      attemptedCount: valid.length,
+      maxPromptTagIds: MAX_PROMPT_TAG_IDS,
+    };
+    throw error;
+  }
+  return valid;
 }
 
 /**
@@ -1080,25 +1095,15 @@ export async function createOnePrompt(transport, semrushWorkspaceId, projectId, 
  * always safe to recompute. A non-function `classifyPromptType` (defensive) skips
  * the `type` step.
  *
- * **`origin` NO LONGER GETS ITS OWN TAG** (tag-display-names.md §3 — the
- * dimension is retired by remap into `source`). `originValue` SURVIVES as an
- * OPTION, though, because it is still the only carrier of the CREATE-time
- * authorship fact on the Serenity-proxy path: there is no Postgres row here to
- * read `origin` back from, so `originValue` feeds {@link deriveSource} below as
- * the `origin` half of `derived_source(source, origin)` — it is never written
- * as a tag of its own again. Deleting `originValue` along with the old
- * `origin`-tag branch would silently relabel every service-principal proxy
- * create from the `ai-onboarding` slug to `config`'s, because the injector
- * would have no way left to tell the two apart.
+ * `origin` and `source` are independent live dimensions. `originValue` is the
+ * CREATE-time authorship fact (`human` or `ai`), while `sourceValue` is the
+ * producing system. Neither is folded into or substituted for the other.
  *
  * **`source`** — the PRODUCING SYSTEM (source-dimension.md), a fact about
  * CREATION, not a classification:
  *   - on CREATE (`sourceValue` set — the constant `config` for this proxy dialog,
  *     the value the same prompt gets in Postgres on the v2 path, or a validated
- *     per-item override), the EFFECTIVE value injected is
- *     `deriveSource(itemSource, originValue)` (tag-display-names.md §3), not the
- *     raw slug — this is where `origin/ai` + `source/config` folds into
- *     `ai-onboarding`, and where `llm-generated` folds into it too. Any
+ *     per-item override), the canonical source slug is injected independently. Any
  *     caller-supplied tag id beneath the `source` root is stripped (by RESOLVED
  *     ID, never by name — a customer category may legitimately be called
  *     `gsc`) and the derived value injected. The dimension has no client write
@@ -1122,11 +1127,11 @@ export async function createOnePrompt(transport, semrushWorkspaceId, projectId, 
  * @param {string} semrushWorkspaceId
  * @param {((text: string, geoTargetId: number) => string) | undefined} classifyPromptType
  * @param {object} [log]
- * @param {{ originValue?: string, sourceValue?: string }} [options] - `originValue`
- *   is the CREATE-time `origin` fact (`ai`/`human`), fed into
- *   {@link deriveSource} — it is NEVER written as its own tag (tag-display-names.md
- *   §3). `sourceValue` is the batch-default `source` slug to derive from on
- *   CREATE. Omit both on UPDATE so `source` is left untouched.
+ * @param {{ originValue?: string, sourceValue?: string,
+ *   normalizeCustomerTags?: boolean }} [options] - `originValue`
+ *   is the CREATE-time `origin` fact (`ai`/`human`). `sourceValue` is the
+ *   independent batch-default producing-system slug. Omit both on UPDATE so
+ *   existing origin/source selections remain untouched.
  * @returns {(projectId: string, input: { text: string, geoTargetId: number,
  *   tagIds: string[], source?: string }) =>
  *   Promise<{ text: string, geoTargetId: number, tagIds: string[] }>}
@@ -1138,31 +1143,36 @@ export function makePromptTagInjector(
   log,
   options = {},
 ) {
-  const { originValue, sourceValue } = options;
+  const { originValue, sourceValue, normalizeCustomerTags = false } = options;
   /** @type {Map<string, Promise<{ computedId: string, typeTagIds: string[] }>>} */
   const typeCache = new Map();
+  /** @type {Map<string, Promise<{ computedId: string, valueTagIds: string[] }>>} */
+  const originCache = new Map();
   /** @type {Map<string, Promise<{ computedId: string, valueTagIds: string[] }>>} */
   const sourceCache = new Map();
   const taxonomyCache = new Map();
   return async function injectComputedTags(projectId, input) {
-    let snapshotPromise = taxonomyCache.get(projectId);
-    if (!snapshotPromise) {
-      snapshotPromise = readTagTreeSnapshot(
+    let tagIds = input.tagIds;
+    if (normalizeCustomerTags) {
+      let snapshotPromise = taxonomyCache.get(projectId);
+      if (!snapshotPromise) {
+        snapshotPromise = readTagTreeSnapshot(
+          transport,
+          semrushWorkspaceId,
+          projectId,
+          log,
+        );
+        taxonomyCache.set(projectId, snapshotPromise);
+      }
+      tagIds = await normalizePromptTagSelection(
         transport,
         semrushWorkspaceId,
         projectId,
+        input.tagIds,
         log,
+        await snapshotPromise,
       );
-      taxonomyCache.set(projectId, snapshotPromise);
     }
-    let tagIds = await normalizePromptTagSelection(
-      transport,
-      semrushWorkspaceId,
-      projectId,
-      input.tagIds,
-      log,
-      await snapshotPromise,
-    );
 
     // type — every write (safe to recompute from the text).
     if (typeof classifyPromptType === 'function') {
@@ -1183,9 +1193,23 @@ export function makePromptTagInjector(
       tagIds = [...tagIds.filter((id) => !typeTagIds.includes(id)), computedId];
     }
 
-    // `origin` no longer gets its own tag (tag-display-names.md §3) — every
-    // writer that used to stamp one has stopped. `originValue` survives ONLY
-    // as an input to `deriveSource` below, never as a tag id of its own.
+    if (originValue) {
+      const key = `${projectId} ${originValue}`;
+      let pending = originCache.get(key);
+      if (!pending) {
+        pending = resolveServerOwnedValueInjection(
+          transport,
+          semrushWorkspaceId,
+          projectId,
+          DIMENSION.ORIGIN,
+          originValue,
+          log,
+        );
+        originCache.set(key, pending);
+      }
+      const { computedId, valueTagIds } = await pending;
+      tagIds = [...tagIds.filter((id) => !valueTagIds.includes(id)), computedId];
+    }
 
     // source — CREATE only, same create/update asymmetry `origin` used to
     // carry. Per-item `input.source` (Track flow, LLMO-6556) overrides the
@@ -1194,18 +1218,10 @@ export function makePromptTagInjector(
     // `normalizePromptInput` yields a valid slug or `undefined`, so "absent
     // means use the batch default" is exactly the nullish-coalesce contract.
     //
-    // The EFFECTIVE value injected is `deriveSource(rawSource, originValue)`
-    // (tag-display-names.md §3), not the raw slug: on the Serenity-proxy path
-    // there is no Postgres row to read `origin` back from, so `originValue` —
-    // set only on CREATE, e.g. `human` for this proxy dialog, or `ai` for a
-    // service-principal caller acting on the AI-onboarding path — is the sole
-    // surviving carrier of that fact, and it is what lets `config`+`ai` (and
-    // `llm-generated`, regardless of origin) fold into the `ai-onboarding`
-    // slug instead of landing under `config`. Cache is keyed on (projectId,
-    // DERIVED value) so a mixed-surface batch resolves each producer's tag
-    // independently. Stripped by resolved id, never by name.
+    // Source remains independent from authorship. Cache is keyed on the
+    // canonical producing-system value and stripped by resolved id.
     const rawSource = input.source ?? sourceValue;
-    const itemSource = rawSource ? deriveSource(rawSource, originValue) : null;
+    const itemSource = rawSource ? canonicalizeSource(rawSource) : null;
     if (itemSource) {
       const key = `${projectId} ${itemSource}`;
       let pending = sourceCache.get(key);
@@ -1448,9 +1464,8 @@ export async function handleCreatePrompts(
     projectsBySlice.set(`${p.getGeoTargetId()}:${p.getLanguageCode()}`, p);
   }
 
-  // CREATE: user-authenticated write → `originValue` = `human` feeds
-  // `deriveSource` below (tag-display-names.md §3 — `origin` no longer gets
-  // its own tag). The producing `source` is the constant `config` — this
+  // CREATE: user-authenticated write stamps independent `origin=human` and
+  // `source=config` values. The producing `source` matches what
   // human create dialog is what the same prompt gets in Postgres on the v2
   // path (source-dimension.md §1).
   const injectComputedTags = makePromptTagInjector(
@@ -1458,7 +1473,11 @@ export async function handleCreatePrompts(
     semrushWorkspaceId,
     classifyPromptType,
     log,
-    { originValue: ORIGIN_VALUE.HUMAN, sourceValue: PROXY_CREATE_SOURCE_VALUE },
+    {
+      originValue: ORIGIN_VALUE.HUMAN,
+      sourceValue: PROXY_CREATE_SOURCE_VALUE,
+      normalizeCustomerTags: true,
+    },
   );
   // Unified layer (serenity-docs#32): batch-classify every distinct text ONCE
   // under the shared request deadline, then thread the resolved map into each
@@ -1502,8 +1521,7 @@ export async function handleCreatePrompts(
     const projectId = project.getSemrushProjectId();
     try {
       // Unified layer: strip caller-supplied type/source/intent, then inject the
-      // computed type + the derived `source` (tag-display-names.md §3 — `origin`
-      // no longer gets its own tag, so it is never stripped or injected here) and
+      // computed type + independent `origin`/`source` values and
       // the classified intent (serenity-docs#32). The two injectors act on
       // disjoint dimensions, so chaining composes cleanly.
       let typed = await injectComputedTags(projectId, input);
@@ -1745,6 +1763,7 @@ export async function handleUpdatePrompt(
     semrushWorkspaceId,
     classifyPromptType,
     log,
+    { normalizeCustomerTags: true },
   );
   const intentByText = await classifyPromptIntents(
     [nextText],

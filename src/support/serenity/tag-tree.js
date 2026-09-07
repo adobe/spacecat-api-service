@@ -230,6 +230,12 @@ export async function ensureChildren(
 
   // createProjectTags resolves to a LIST of the created nodes, in request order.
   const nodes = Array.isArray(echoed) ? echoed : [];
+  if (nodes.some((node) => node
+    && typeof node.name === 'string'
+    && missing.includes(node.name)
+    && !(typeof node.id === 'string' && node.id))) {
+    throw new ErrorWithStatusCode('upstream created the tag but echoed no id', 502);
+  }
   for (const node of nodes) {
     if (node && typeof node.id === 'string' && node.id && typeof node.name === 'string') {
       existing.set(node.name, node.id);
@@ -290,7 +296,7 @@ const LEGACY_SOURCE_ROOT_NAME = 'source';
  * The dimensions whose ROOT may carry a display rename (tag-display-names.md
  * §1 item 4) — `category`, `type`, `source`. `intent` is excluded (its root is
  * `$abv_tags$intent` forever, no display rename) and `origin` is excluded
- * (retired by remap, not renamed) — both already have their OWN dedicated
+ * because its root name remains unchanged — both already have their OWN dedicated
  * split-root guardrails above/below, so they are deliberately not folded into
  * this generalized one.
  */

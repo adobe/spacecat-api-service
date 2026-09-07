@@ -199,16 +199,19 @@ export async function handleCreatePromptsSubworkspace(
   const deferPublish = validateDeferPublish(body);
 
   const projectsBySlice = await buildSliceProjectMap(transport, workspaceId, log);
-  // CREATE: user-authenticated write → `originValue` = `human` feeds
-  // `deriveSource` (tag-display-names.md §3 — `origin` no longer gets its own
-  // tag) and producing `source` is the constant `config` (see the flat-mode
+  // CREATE: user-authenticated write stamps independent `origin=human` and
+  // `source=config` values (see the flat-mode
   // twin handleCreatePrompts, source-dimension.md §1).
   const injectComputedTags = makePromptTagInjector(
     transport,
     workspaceId,
     classifyPromptType,
     log,
-    { originValue: ORIGIN_VALUE.HUMAN, sourceValue: PROXY_CREATE_SOURCE_VALUE },
+    {
+      originValue: ORIGIN_VALUE.HUMAN,
+      sourceValue: PROXY_CREATE_SOURCE_VALUE,
+      normalizeCustomerTags: true,
+    },
   );
   // Unified layer (serenity-docs#32): batch-classify every distinct text ONCE
   // under the shared request deadline, then thread the resolved map into each
@@ -252,8 +255,7 @@ export async function handleCreatePromptsSubworkspace(
     const projectId = String(project.id);
     try {
       // Unified layer: strip caller-supplied type/source/intent, then inject the
-      // computed type + the derived `source` (tag-display-names.md §3 — `origin`
-      // no longer gets its own tag, so it is never stripped or injected here) and
+      // computed type + independent `origin`/`source` values and
       // the classified intent (serenity-docs#32). The injectors act on disjoint
       // dimensions.
       let typed = await injectComputedTags(projectId, input);
@@ -430,7 +432,13 @@ export async function handleUpdatePromptSubworkspace(
   // (serenity-docs#31, #32). No `originValue`: origin is never re-derived on edit
   // (origin-dimension.md §3 item 3); the stored origin the caller echoes rides
   // through the replace-mode tag write untouched.
-  const injectComputedTags = makePromptTagInjector(transport, workspaceId, classifyPromptType, log);
+  const injectComputedTags = makePromptTagInjector(
+    transport,
+    workspaceId,
+    classifyPromptType,
+    log,
+    { normalizeCustomerTags: true },
+  );
   const intentByText = await classifyPromptIntents(
     [nextText],
     {

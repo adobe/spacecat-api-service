@@ -24,7 +24,7 @@ import { resolveProject } from '../subworkspace-projects.js';
 import {
   ALL_DIMENSIONS, SERVER_OWNED_DIMENSIONS,
   isClosedDimension, isServerOwnedDimension, closedValuesOf, isDimensionRootName,
-  MAX_TAG_NAME_LEN,
+  MAX_TAG_NAME_LEN, dimensionOfRootName,
 } from '../prompt-tags.js';
 import {
   ensureServerOwnedValue,
@@ -293,36 +293,36 @@ function requireCreatedId(id) {
   if (!id) {
     throw new ErrorWithStatusCode('upstream created the tag but echoed no id', 502);
   }
+  return id;
+}
 
-  async function readTagDto(
+async function readTagDto(
+  transport,
+  semrushWorkspaceId,
+  projectId,
+  id,
+  fallback,
+  log,
+) {
+  const snapshot = await readTagTreeSnapshot(
     transport,
     semrushWorkspaceId,
     projectId,
-    id,
-    fallback,
     log,
-  ) {
-    const snapshot = await readTagTreeSnapshot(
-      transport,
-      semrushWorkspaceId,
-      projectId,
-      log,
-    );
-    const item = snapshot.byId.get(id);
-    if (!item) {
-      return fallback;
-    }
-    return {
-      id: item.id,
-      name: item.name,
-      parentId: item.parentId,
-      path: item.fullPath.slice(0, -1),
-      compatibility: item.compatibility,
-      childrenCount: item.childrenCount,
-      promptsCount: item.promptsCount,
-    };
+  );
+  const item = snapshot.byId.get(id);
+  if (!item) {
+    return fallback;
   }
-  return id;
+  return {
+    id: item.id,
+    name: item.name,
+    parentId: item.parentId,
+    path: item.fullPath.slice(0, -1),
+    compatibility: item.compatibility,
+    childrenCount: item.childrenCount,
+    promptsCount: item.promptsCount,
+  };
 }
 
 /**
@@ -767,18 +767,18 @@ function parseUpdateTagBody(body) {
  *   parent: import('../tag-tree.js').TagPosition }>} `parent` mirrors `target`
  *   when no re-parent was requested; the callers ignore it in that case.
  */
-async function resolveUpdateTargets(
-  transport,
-  semrushWorkspaceId,
-  projectId,
-  tagId,
-  parentId,
-  log,
-) {
-  const wanted = parentId === undefined ? [tagId] : [tagId, parentId];
-  const found = await findTagsInTree(transport, semrushWorkspaceId, projectId, wanted, log);
-  const target = /** @type {import('../tag-tree.js').TagPosition} */ (found.get(tagId));
-  return { target, parent: /** @type {any} */ (found.get(parentId ?? tagId)) };
+function positionFromSnapshot(item) {
+  if (!item) {
+    return {
+      kind: 'unknown', parentId: null, rootName: null, ancestorIds: [],
+    };
+  }
+  return {
+    kind: item.depth === 1 ? 'root' : 'descendant',
+    parentId: item.parentId,
+    rootName: dimensionOfRootName(item.rootName),
+    ancestorIds: item.fullPath.slice(0, -1).map((part) => part.id),
+  };
 }
 
 /**
@@ -903,14 +903,8 @@ export async function handleUpdateTag(
       );
     }
   }
-  const { target, parent } = await resolveUpdateTargets(
-    transport,
-    semrushWorkspaceId,
-    projectId,
-    id,
-    parsed.parentId,
-    log,
-  );
+  const target = positionFromSnapshot(snapshotTarget);
+  const parent = positionFromSnapshot(snapshotParent ?? snapshotTarget);
   const { name, parentIdToSend } = buildUpdatePayload(parsed, target, id);
   if (parsed.parentId !== undefined) {
     // A re-parent may move a tag within its dimension, never across one — and
@@ -993,14 +987,8 @@ export async function handleUpdateTagSubworkspace(
       );
     }
   }
-  const { target, parent } = await resolveUpdateTargets(
-    transport,
-    workspaceId,
-    projectId,
-    id,
-    parsed.parentId,
-    log,
-  );
+  const target = positionFromSnapshot(snapshotTarget);
+  const parent = positionFromSnapshot(snapshotParent ?? snapshotTarget);
   const { name, parentIdToSend } = buildUpdatePayload(parsed, target, id);
   if (parsed.parentId !== undefined) {
     // A re-parent may move a tag within its dimension, never across one — and

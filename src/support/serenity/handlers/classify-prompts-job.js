@@ -26,12 +26,10 @@ import {
   makeIntentInjector,
   mapLimit,
   publishAffected,
-  listAllProjectPrompts,
-  assertPromptTagLimit,
   BULK_CREATE_CONCURRENCY,
 } from './prompts.js';
-import { DIMENSION, ORIGIN_VALUE } from '../prompt-tags.js';
-import { readTagTreeSnapshot, resolveIntentValueInjection } from '../tag-tree.js';
+import { ORIGIN_VALUE, PROXY_CREATE_SOURCE_VALUE } from '../prompt-tags.js';
+import { resolveIntentValueInjection } from '../tag-tree.js';
 import { buildSliceProjectMap, sliceKey } from '../subworkspace-projects.js';
 
 /** @typedef {import('../rest-transport.js').SerenityTransport} SerenityTransport */
@@ -192,7 +190,11 @@ async function createAndClassify(context, job, transport, metadata) {
     semrushWorkspaceId,
     classifyPromptType,
     log,
-    { originValue: ORIGIN_VALUE.HUMAN },
+    {
+      originValue: ORIGIN_VALUE.HUMAN,
+      sourceValue: PROXY_CREATE_SOURCE_VALUE,
+      normalizeCustomerTags: true,
+    },
   );
 
   // No time budget (serenity-docs#33): retries with backoff until resolved or
@@ -316,8 +318,8 @@ async function createAndClassify(context, job, transport, metadata) {
  * @param {SerenityTransport} transport
  * @param {object} metadata - `{ semrushWorkspaceId, items: [{ projectId,
  *   promptId, text, tagIds }] }` — `tagIds` is the FULL desired tag set minus
- *   `intent` (caller tags + server type/source; `origin` no longer gets its
- *   own tag, tag-display-names.md §3), matching the edit handlers'
+ *   `intent` (caller tags plus independent server-managed type/origin/source),
+ *   matching the edit handlers'
  *   "recompute the whole set, then replace" contract.
  * @returns {Promise<object>} the job result.
  */
@@ -347,11 +349,6 @@ async function reclassifyExisting(context, job, transport, metadata) {
   }
 
   await Promise.all([...itemsByProject.entries()].map(async ([projectId, projectItems]) => {
-    const [snapshot, currentPrompts] = await Promise.all([
-      readTagTreeSnapshot(transport, semrushWorkspaceId, projectId, log),
-      listAllProjectPrompts(transport, semrushWorkspaceId, projectId),
-    ]);
-    const currentById = new Map(currentPrompts.map((prompt) => [String(prompt.id), prompt]));
     const patchItems = [];
     for (const item of projectItems) {
       const trimmedText = String(item.text || '').trim();
@@ -368,16 +365,9 @@ async function reclassifyExisting(context, job, transport, metadata) {
           intentValue,
           log,
         );
-        const current = currentById.get(String(item.promptId));
-        const preservedCustomerIds = (Array.isArray(current?.tags) ? current.tags : [])
-          .map((tag) => (typeof tag === 'string' ? tag : String(tag?.id ?? '')))
-          .filter((id) => {
-            const node = snapshot.byId.get(id);
-            return node?.rootName === DIMENSION.CATEGORY || node?.rootName === DIMENSION.TAG;
-          });
-        const references = [...new Set([...baseTagIds, ...preservedCustomerIds, computedId])];
-        assertPromptTagLimit(references);
-        patchItems.push({ id: item.promptId, references, replace: true });
+        patchItems.push({
+          id: item.promptId, references: [...baseTagIds, computedId], replace: true,
+        });
         patched.push({ semrushPromptId: item.promptId, projectId, intent: intentValue });
       }
     }

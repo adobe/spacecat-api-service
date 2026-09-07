@@ -269,7 +269,9 @@ describe('serenity tag-tree', () => {
       };
       const log = fakeLog();
       const roots = await ensureDimensionRoots(transport, WS, PROJECT, log);
-      expect([...roots.keys()]).to.include.members(['category', 'intent', 'origin', 'type', 'source']);
+      expect([...roots.keys()]).to.include.members([
+        'category', 'tag', 'intent', 'origin', 'type', 'source',
+      ]);
       // The producing-system `source` root resolves, distinct from the `origin` root.
       expect(roots.get('source')).to.equal(TAG_IDS.sourceRoot);
       expect(transport.createProjectTags).to.not.have.been.called;
@@ -315,6 +317,7 @@ describe('serenity tag-tree', () => {
       // dimension's VALUES as bogus root-level tags.
       const rootLevel = (extra = []) => ([
         { id: 'r-category', name: 'category', children_count: 0 },
+        { id: 'r-tag', name: 'tag', children_count: 0 },
         { id: 'r-intent', name: INTENT_ROOT_NAME, children_count: 5 },
         { id: 'r-origin', name: 'origin', children_count: 2 },
         { id: 'r-type', name: 'type', children_count: 2 },
@@ -333,6 +336,7 @@ describe('serenity tag-tree', () => {
       };
       const roots = await ensureDimensionRoots(transport, WS, PROJECT, fakeLog());
       expect(roots.get(DIMENSION.INTENT)).to.equal('r-intent');
+      expect(roots.get(DIMENSION.TAG)).to.equal('r-tag');
       expect(roots.get('source')).to.equal('r-source-other');
     });
 
@@ -373,6 +377,7 @@ describe('serenity tag-tree', () => {
       const legacyLevels = {
         '': [
           { id: 'root-category', name: 'category', children_count: 0 },
+          { id: 'root-tag', name: 'tag', children_count: 0 },
           { id: 'root-intent', name: INTENT_ROOT_NAME, children_count: 5 },
           { id: 'root-source', name: 'source', children_count: 2 },
           { id: 'root-type', name: 'type', children_count: 2 },
@@ -417,6 +422,7 @@ describe('serenity tag-tree', () => {
       const bothLevels = {
         '': [
           { id: 'root-category', name: 'category', children_count: 0 },
+          { id: 'root-tag', name: 'tag', children_count: 0 },
           { id: 'root-intent', name: INTENT_ROOT_NAME, children_count: 5 },
           { id: 'root-origin', name: 'origin', children_count: 2 },
           { id: 'root-source', name: 'source', children_count: 2 },
@@ -472,6 +478,7 @@ describe('serenity tag-tree', () => {
       const listProjectTags = makeListProjectTagsStub({
         '': [
           { id: 'r-cat', name: 'category', children_count: 0 },
+          { id: 'r-tag', name: 'tag', children_count: 0 },
           { id: 'r-int', name: INTENT_ROOT_NAME, children_count: 0 },
           { id: 'r-org', name: 'origin', children_count: 0 },
         ],
@@ -602,6 +609,7 @@ describe('serenity tag-tree', () => {
     const midRenameLevels = () => ({
       '': [
         { id: 'root-category', name: 'category', children_count: 0 },
+        { id: 'root-tag', name: 'tag', children_count: 0 },
         { id: 'root-intent', name: INTENT_ROOT_NAME, children_count: 5 },
         { id: 'root-source', name: 'source', children_count: 2 },
         { id: 'root-type', name: 'type', children_count: 2 },
@@ -706,6 +714,7 @@ describe('serenity tag-tree', () => {
       { id: 'root-intent', name: INTENT_ROOT_NAME, children_count: 5 },
       { id: 'root-origin', name: 'origin', children_count: 2 },
       { id: 'root-category', name: 'category', children_count: 0 },
+      { id: 'root-tag', name: 'tag', children_count: 0 },
       { id: 'root-type', name: 'type', children_count: 2 },
       { id: 'root-source', name: 'source', children_count: 0 },
     ];
