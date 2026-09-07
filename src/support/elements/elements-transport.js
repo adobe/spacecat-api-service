@@ -19,11 +19,9 @@ const ELEMENTS_API_PATH = '/enterprise/pages/api/v3/workspaces';
 const EXTERNAL_ELEMENTS_API_PATH = '/apis/v4-raw/external-api/v1/workspaces';
 
 export const ELEMENTS_PURPOSE_BRAND_CLAIMS = 'brand_claims';
-export const ELEMENTS_PURPOSE_HALLUCINATION_DETECTION = 'hallucination_detection';
 
 const TECHNICAL_AUTH_PURPOSES = new Set([
   ELEMENTS_PURPOSE_BRAND_CLAIMS,
-  ELEMENTS_PURPOSE_HALLUCINATION_DETECTION,
 ]);
 // Verified against a real Semrush-provisioned brand: individual Stats-per-URL
 // calls were timing out at 15s roughly half the time; 30s was needed for them
@@ -92,12 +90,12 @@ function buildHeaders(imsToken) {
 }
 
 function externalBaseUrl(env) {
-  const raw = typeof env?.SEMRUSH_BRAND_CLAIMS_HALLUCINATION_DETECTION_ELEMENTS_BASE_URL === 'string'
-    ? env.SEMRUSH_BRAND_CLAIMS_HALLUCINATION_DETECTION_ELEMENTS_BASE_URL.trim()
-    : env?.SEMRUSH_BRAND_CLAIMS_HALLUCINATION_DETECTION_ELEMENTS_BASE_URL;
+  const raw = typeof env?.SEMRUSH_BRAND_CLAIMS_BASE_URL === 'string'
+    ? env.SEMRUSH_BRAND_CLAIMS_BASE_URL.trim()
+    : env?.SEMRUSH_BRAND_CLAIMS_BASE_URL;
   if (!hasText(raw)) {
     throw new ErrorWithStatusCode(
-      'SEMRUSH_BRAND_CLAIMS_HALLUCINATION_DETECTION_ELEMENTS_BASE_URL is not configured',
+      'SEMRUSH_BRAND_CLAIMS_BASE_URL is not configured',
       503,
     );
   }
@@ -106,13 +104,13 @@ function externalBaseUrl(env) {
     parsed = new URL(raw);
   } catch {
     throw new ErrorWithStatusCode(
-      'SEMRUSH_BRAND_CLAIMS_HALLUCINATION_DETECTION_ELEMENTS_BASE_URL is invalid',
+      'SEMRUSH_BRAND_CLAIMS_BASE_URL is invalid',
       503,
     );
   }
   if (parsed.protocol !== 'https:') {
     throw new ErrorWithStatusCode(
-      'SEMRUSH_BRAND_CLAIMS_HALLUCINATION_DETECTION_ELEMENTS_BASE_URL must use HTTPS',
+      'SEMRUSH_BRAND_CLAIMS_BASE_URL must use HTTPS',
       503,
     );
   }
@@ -120,12 +118,12 @@ function externalBaseUrl(env) {
 }
 
 function technicalApiKey(env) {
-  const key = typeof env?.SEMRUSH_BRAND_CLAIMS_HALLUCINATION_DETECTION_ELEMENTS_API_KEY === 'string'
-    ? env.SEMRUSH_BRAND_CLAIMS_HALLUCINATION_DETECTION_ELEMENTS_API_KEY.trim()
-    : env?.SEMRUSH_BRAND_CLAIMS_HALLUCINATION_DETECTION_ELEMENTS_API_KEY;
+  const key = typeof env?.SEMRUSH_BRAND_CLAIMS_API_KEY === 'string'
+    ? env.SEMRUSH_BRAND_CLAIMS_API_KEY.trim()
+    : env?.SEMRUSH_BRAND_CLAIMS_API_KEY;
   if (!hasText(key)) {
     throw new ErrorWithStatusCode(
-      'SEMRUSH_BRAND_CLAIMS_HALLUCINATION_DETECTION_ELEMENTS_API_KEY is not configured',
+      'SEMRUSH_BRAND_CLAIMS_API_KEY is not configured',
       503,
     );
   }
@@ -356,8 +354,8 @@ function createTechnicalElementsTransport({ env }) {
     async fetchElement(workspaceId, elementId, payload, callOpts = {}) {
       const url = `${root}${EXTERNAL_ELEMENTS_API_PATH}/${enc(workspaceId)}/products/ai/elements/${enc(elementId)}`;
       return request(url, buildTechnicalHeaders(apiKey), { render_data: payload }, {
-        // Brand Claims and Hallucination Detection share a small per-credential pool. Never replay
-        // technical-account requests: retries would amplify concurrent background-job traffic.
+        // Brand Claims owns this stopgap credential and its small per-credential pool. Never
+        // replay technical-account requests: retries would amplify concurrent background traffic.
         maxRetries: 0,
         timeoutMs: callOpts.timeoutMs,
         workspaceId,
@@ -389,7 +387,7 @@ export async function createElementsTransportForPurpose({
   maxRetries = DEFAULT_MAX_RETRIES,
   retryBaseDelayMs = DEFAULT_RETRY_BASE_DELAY_MS,
 }) {
-  const useTechnicalAuth = env?.SEMRUSH_BRAND_CLAIMS_HALLUCINATION_DETECTION_ELEMENTS_STOPGAP_ENABLED === 'true'
+  const useTechnicalAuth = env?.SEMRUSH_BRAND_CLAIMS_TECHNICAL_AUTH_ENABLED === 'true'
     && TECHNICAL_AUTH_PURPOSES.has(purpose);
 
   if (useTechnicalAuth) {

@@ -62,12 +62,11 @@ Content-Type: application/json
 { ...element-specific payload }
 ```
 
-The temporary technical-account exception for the code-owned `brand_claims` and
-`hallucination_detection` purposes uses the external route. The response-feed handler is statically
-bound to `brand_claims`; there is currently no Hallucination Detection call site.
+The temporary technical-account exception is limited to the code-owned `brand_claims` purpose.
+The response-feed handler is statically bound to that purpose.
 
 ```
-POST {SEMRUSH_BRAND_CLAIMS_HALLUCINATION_DETECTION_ELEMENTS_BASE_URL}/apis/v4-raw/external-api/v1/workspaces/{workspaceId}/products/ai/elements/{elementId}
+POST {SEMRUSH_BRAND_CLAIMS_BASE_URL}/apis/v4-raw/external-api/v1/workspaces/{workspaceId}/products/ai/elements/{elementId}
 Authorization: Apikey <technical-api-key>
 Content-Type: application/json
 
@@ -269,12 +268,12 @@ Generic Semrush Elements APIs authenticate via the caller's **IMS access token**
 `requireImsBearer` throws `ErrorWithStatusCode(401)` if the header is missing or if the caller used a
 non-IMS auth method (e.g. scoped API key).
 
-There is one temporary exception: when `SEMRUSH_BRAND_CLAIMS_HALLUCINATION_DETECTION_ELEMENTS_STOPGAP_ENABLED` is exactly `true`,
-the code-owned `brand_claims` and reserved `hallucination_detection` purposes use the external API
-with a Vault-injected technical-account API key. Generic Elements handlers cannot select this mode,
-and request query, header, and body values cannot choose the purpose. Enabled technical mode fails
-closed with HTTP 503 if its base URL or key is missing or invalid, without falling back to IMS.
-Technical-account 429 responses are not retried because both purposes share one credential rate pool.
+There is one temporary exception: when `SEMRUSH_BRAND_CLAIMS_TECHNICAL_AUTH_ENABLED` is exactly `true`,
+the code-owned `brand_claims` purpose uses the external API with a Vault-injected technical-account
+API key. Generic Elements handlers cannot select this mode, and request query, header, and body
+values cannot choose the purpose. Enabled technical mode fails closed with HTTP 503 if its base URL
+or key is missing or invalid, without falling back to IMS. Technical-account 429 responses are not
+retried because Brand Claims owns one credential rate pool.
 
 ---
 
@@ -482,12 +481,11 @@ Upstream error bodies are **never forwarded to clients** — they are logged ser
 | Variable | Source | Used by |
 |---|---|---|
 | `SEMRUSH_PROJECTS_BASE_URL` | Vault `dx_mysticat/<env>/api-service` | Internal IMS Elements API base host (e.g. `https://www.semrush.com`) |
-| `SEMRUSH_BRAND_CLAIMS_HALLUCINATION_DETECTION_ELEMENTS_STOPGAP_ENABLED` | Environment configuration | Exact string `true` enables the temporary technical-account route for the code-owned `brand_claims` and `hallucination_detection` purposes only |
-| `SEMRUSH_BRAND_CLAIMS_HALLUCINATION_DETECTION_ELEMENTS_BASE_URL` | Vault `dx_mysticat/<env>/api-service` | HTTPS origin for the external Elements API (e.g. `https://api.semrush.com`) |
-| `SEMRUSH_BRAND_CLAIMS_HALLUCINATION_DETECTION_ELEMENTS_API_KEY` | Vault `dx_mysticat/<env>/api-service` | Temporary technical-account API key; never store it in source or local documentation |
+| `SEMRUSH_BRAND_CLAIMS_TECHNICAL_AUTH_ENABLED` | Environment configuration | Exact string `true` enables the temporary technical-account route for the code-owned `brand_claims` purpose only |
+| `SEMRUSH_BRAND_CLAIMS_BASE_URL` | Vault `dx_mysticat/<env>/api-service` | HTTPS origin for the external Elements API (e.g. `https://api.semrush.com`) |
+| `SEMRUSH_BRAND_CLAIMS_API_KEY` | Vault `dx_mysticat/<env>/api-service` | Temporary technical-account API key; never store it in source or local documentation |
 
-The long variable namespace is intentional: this credential is owned jointly by **Brand Claims** and
-**Hallucination Detection**, not by Elements or ABV generally. Other ABV capabilities may hold their
+The long variable namespace is intentional: this credential is owned by **Brand Claims**, not by Elements or ABV generally. Other ABV capabilities may hold their
 own Semrush API keys and must use distinct purpose-owned names. Broad names such as
 `SEMRUSH_ELEMENTS_TECHNICAL_API_KEY` are deliberately ignored and must never be introduced as aliases.
 

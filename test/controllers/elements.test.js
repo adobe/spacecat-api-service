@@ -2022,10 +2022,10 @@ describe('ElementsController', () => {
 
     it('binds purpose to brand_claims regardless of request input', async () => {
       const ctx = fakeContext({
-        url: feedUrl('?from=2026-08-24&to=2026-08-24&purpose=hallucination_detection'),
+        url: feedUrl('?from=2026-08-24&to=2026-08-24&purpose=other_abv_purpose'),
       });
-      ctx.data = { purpose: 'hallucination_detection' };
-      ctx.pathInfo.headers['x-elements-purpose'] = 'hallucination_detection';
+      ctx.data = { purpose: 'other_abv_purpose' };
+      ctx.pathInfo.headers['x-elements-purpose'] = 'other_abv_purpose';
 
       await ElementsController(ctx, fakeLog(), ENV).listResponseFeed(ctx);
 
@@ -2256,7 +2256,7 @@ describe('ElementsController', () => {
 
     it('fails closed with a safe 503 when technical authentication is misconfigured', async () => {
       createElementsTransportForPurposeStub.rejects(
-        new ErrorWithStatusCode('SEMRUSH_BRAND_CLAIMS_HALLUCINATION_DETECTION_ELEMENTS_API_KEY is not configured', 503),
+        new ErrorWithStatusCode('SEMRUSH_BRAND_CLAIMS_API_KEY is not configured', 503),
       );
       const ctx = fakeContext({ url: feedUrl('?from=2026-08-24&to=2026-08-24') });
       const res = await ElementsController(ctx, fakeLog(), ENV).listResponseFeed(ctx);
@@ -2264,7 +2264,7 @@ describe('ElementsController', () => {
       expect(res.status).to.equal(503);
       expect(await readBody(res)).to.deep.equal({
         error: 'configurationError',
-        message: 'SEMRUSH_BRAND_CLAIMS_HALLUCINATION_DETECTION_ELEMENTS_API_KEY is not configured',
+        message: 'SEMRUSH_BRAND_CLAIMS_API_KEY is not configured',
       });
       expect(serviceStub.getResponseFeed).to.not.have.been.called;
       expect(exchangePromiseTokenStub).to.not.have.been.called;
