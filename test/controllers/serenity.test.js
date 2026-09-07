@@ -3147,17 +3147,31 @@ describe('SerenityController', () => {
         expect(body).to.not.have.property('metadata');
       });
 
-      it('surfaces the error envelope for a FAILED job', async () => {
+      it('sanitizes a FAILED job error to the documented public envelope', async () => {
         const controller = SerenityController({ env: {} }, fakeLog(), {});
-        const error = { code: 'NEEDS_REAUTH', message: 'Promise token exchange rejected' };
+        const error = {
+          code: 'NEEDS_REAUTH',
+          message: 'Promise token exchange rejected',
+          details: { promiseToken: 'secret', upstreamStatus: 401 },
+        };
         const response = await controller.getPromptsJobStatus(
           ctxWithJob(makeAsyncJob({ status: 'FAILED', result: null, error })),
         );
         expect(response.status).to.equal(200);
         const body = await readBody(response);
         expect(body).to.deep.equal({
-          jobId: JOB, jobType: 'classifyPrompts', status: 'FAILED', result: null, error,
+          jobId: JOB,
+          jobType: 'classifyPrompts',
+          status: 'FAILED',
+          result: null,
+          error: {
+            code: 'jobFailed',
+            message: 'Promise token exchange rejected',
+            retryable: false,
+          },
         });
+        expect(JSON.stringify(body)).not.to.include('NEEDS_REAUTH');
+        expect(JSON.stringify(body)).not.to.include('promiseToken');
       });
 
       it('404s when the job does not exist', async () => {

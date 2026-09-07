@@ -12204,14 +12204,17 @@ SerenityPromptsJobStatus:
         - { $ref: '#/SerenityTagImpact' }
         - { type: 'null' }
     error:
-      description: The failure envelope once FAILED; null otherwise.
+      description: The sanitized public failure envelope once FAILED; null otherwise.
       oneOf:
         - type: object
+          additionalProperties: false
+          required: [code, message, retryable]
           properties:
-            code: { type: string }
+            code:
+              type: string
+              enum: [invalidRequest, promptNotFound, serenityUpstreamError, tagLimitExceeded, incompatibleTagTaxonomy, jobFailed]
             message: { type: string }
             retryable: { type: boolean }
-            details: { type: object }
         - { type: 'null' }
 
 SerenityUpdatePromptRequest:
