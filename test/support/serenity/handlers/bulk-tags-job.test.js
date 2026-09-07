@@ -11,14 +11,28 @@
  */
 
 import { expect } from 'chai';
+import { createHash } from 'node:crypto';
 import sinon from 'sinon';
 import {
+  acceptBulkTags,
   applyBulkTagOperation,
   bulkTagsHandler,
   matchesBulkTagFacets,
   pageBulkFailures,
   parseBulkTagsBody,
 } from '../../../../src/support/serenity/handlers/bulk-tags-job.js';
+
+function requestHash(body) {
+  return createHash('sha256').update(JSON.stringify({
+    operation: body.operation,
+    tagIds: [...new Set(body.tagIds)].sort(),
+    filter: {
+      search: body.filter.search ?? null,
+      tagIds: [...new Set(body.filter.tagIds)].sort(),
+      tagFilterMode: body.filter.tagFilterMode,
+    },
+  })).digest('base64url');
+}
 
 function workerTransport(prompts, update = sinon.stub().resolves()) {
   const roots = [{ id: 'tag-root', name: 'tag', children_count: 1 }];
@@ -140,6 +154,69 @@ describe('bulkTagsHandler worker accounting', () => {
     const result = await bulkTagsHandler({ env: {}, log: {} }, workerJob(['one']), 'token', transport);
     expect(result).to.deep.include({
       matchedCount: 1, processedCount: 1, updatedCount: 1, unchangedCount: 0, failureCount: 0,
+    });
+
+    describe('acceptBulkTags idempotency', () => {
+      const body = {
+        geoTargetId: 1,
+        languageCode: 'en',
+        operation: 'assign',
+        tagIds: ['family'],
+        filter: { tagFilterMode: 'faceted-v1' },
+      };
+
+      it('replays a matching unexpired key without traversing or dispatching', async () => {
+        const hash = requestHash(body);
+        const existing = {
+          getId: () => '11111111-1111-4111-8111-111111111111',
+          getStatus: () => 'IN_PROGRESS',
+          getMetadata: () => ({
+            requestHash: hash, idempotencyExpiresAt: Date.now() + 60_000, matchedCount: 4,
+          }),
+        };
+        const findById = sinon.stub().resolves(existing);
+        const replay = await acceptBulkTags({
+          context: { dataAccess: { AsyncJob: { findById } } },
+          transport: { listProjectTags: sinon.stub() },
+          brandId: 'brand',
+          orgId: 'org',
+          workspaceId: 'ws',
+          projectId: 'project',
+          body,
+          callerId: 'caller',
+          idempotencyKey: 'same-key',
+          log: {},
+        });
+        expect(replay).to.deep.equal({
+          status: 200,
+          body: {
+            jobId: existing.getId(),
+            jobType: 'bulkTags',
+            status: 'IN_PROGRESS',
+            matchedCount: 4,
+            replayed: true,
+          },
+        });
+        expect(findById).to.have.been.calledOnce;
+      });
+
+      it('rejects a reused key whose request fingerprint differs', async () => {
+        const existing = {
+          getMetadata: () => ({ requestHash: 'different', idempotencyExpiresAt: Date.now() + 60_000 }),
+        };
+        await expect(acceptBulkTags({
+          context: { dataAccess: { AsyncJob: { findById: sinon.stub().resolves(existing) } } },
+          transport: {},
+          brandId: 'brand',
+          orgId: 'org',
+          workspaceId: 'ws',
+          projectId: 'project',
+          body,
+          callerId: 'caller',
+          idempotencyKey: 'same-key',
+          log: {},
+        })).to.be.rejected.then((error) => expect(error.code).to.equal('idempotencyConflict'));
+      });
     });
     expect(transport.updatePromptTagsByIds).to.have.been.calledOnce;
     expect(transport.publishProject).to.have.been.calledOnceWith('ws', 'project');

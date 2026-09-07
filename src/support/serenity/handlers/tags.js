@@ -1099,7 +1099,7 @@ async function listAffectedPromptIds(
   throw error;
 }
 
-async function buildTagImpact(transport, semrushWorkspaceId, projectId, tagId, log) {
+export async function buildTagImpact(transport, semrushWorkspaceId, projectId, tagId, log) {
   const snapshot = await readTagTreeSnapshot(
     transport,
     semrushWorkspaceId,

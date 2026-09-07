@@ -165,7 +165,7 @@ export function parseBulkTagsBody(body) {
   };
 }
 
-async function acceptBulkTags({
+export async function acceptBulkTags({
   context,
   transport,
   brandId,
