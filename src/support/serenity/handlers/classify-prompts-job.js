@@ -152,6 +152,10 @@ async function createAndClassify(context, job, transport, metadata) {
   // async worker stamps the submitting principal rather than the job runner.
   const {
     brandId, semrushWorkspaceId, callerId = 'unknown', authMode,
+    // Fail-safe for jobs enqueued by a pre-deploy build (before this field
+    // existed on the wire) — every CURRENT enqueue site always sets
+    // `originValue` explicitly (see serenity.js's createPrompts). Once the
+    // queue has drained past this deploy, this default is never exercised.
     originValue = ORIGIN_VALUE.HUMAN,
   } = metadata;
   const inputs = Array.isArray(metadata.prompts) ? metadata.prompts : [];
@@ -185,6 +189,12 @@ async function createAndClassify(context, job, transport, metadata) {
   }
 
   const classifyPromptType = await buildPromptTypeClassifier(dataAccess, brandId);
+  // `sourceValue` is a second, deliberate behavior change riding alongside the
+  // origin restoration: the base branch passed `originValue` alone here, so
+  // `itemSource` resolved to null and no `source` tag was ever attached to an
+  // async-imported prompt. Passing `PROXY_CREATE_SOURCE_VALUE` brings this
+  // path in line with the sync create paths (source-dimension.md's write-path
+  // table) — every async-created prompt now carries `source/config` too.
   const injectComputedTags = makePromptTagInjector(
     transport,
     semrushWorkspaceId,
