@@ -1,3 +1,10 @@
+## [1.794.1](https://github.com/adobe/spacecat-api-service/compare/v1.794.0...v1.794.1) (2026-09-07)
+
+
+### Bug Fixes
+
+* honor admin organizationId override on FACS access-mapping reads ([#3195](https://github.com/adobe/spacecat-api-service/issues/3195)) ([5b0e66f](https://github.com/adobe/spacecat-api-service/commit/5b0e66f581829261b20297957286289c2ce433a9))
+
 # [1.794.0](https://github.com/adobe/spacecat-api-service/compare/v1.793.4...v1.794.0) (2026-09-07)
 
 
