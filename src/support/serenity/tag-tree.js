@@ -168,6 +168,8 @@ export async function indexLevelByName(transport, semrushWorkspaceId, projectId,
  *   spellings that, if already present at this level, resolve a wanted name
  *   without creating it. Defaults to "no aliases" — every pre-existing caller
  *   is unaffected.
+ * @param {Map<string, string>} [initialExisting] - a level index already read
+ *   by the caller, reused to avoid a duplicate upstream read.
  * @returns {Promise<{ byName: Map<string, string>, createdNames: string[] }>}
  *   `byName` maps every wanted name (and any literal tree name it did not ask
  *   for) to its tag id.

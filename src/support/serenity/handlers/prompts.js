@@ -38,6 +38,11 @@ import { classifyPromptIntents } from '../intent-classification.js';
 import { logPromptDeleteEvent } from '../prompt-delete-log.js';
 
 /** @typedef {import('../rest-transport.js').SerenityTransport} SerenityTransport */
+/**
+ * @typedef {NonNullable<Awaited<
+ *   ReturnType<SerenityTransport['listPromptsByTags']>
+ * >['items']>[number]} SerenityPrompt
+ */
 
 // TWIN FILE: the slice→project orchestration here is paralleled by the
 // subworkspace-mode handlers in prompts-subworkspace.js. The duplication is
@@ -65,6 +70,17 @@ export const BULK_CREATE_CONCURRENCY = 8;
 // handler would faithfully build per-project Maps + upstream payloads for all
 // of them. Defense-in-depth, not a correctness gate.
 export const BULK_PROMPTS_MAX_ITEMS = 500;
+
+/**
+ * @typedef {{
+ *   tagIds?: string[],
+ *   search?: string,
+ *   sort?: string,
+ *   order?: string,
+ * }} PromptListOptions
+ */
+
+/** @typedef {typeof ERROR_CODES[keyof typeof ERROR_CODES]} TagValidationErrorCode */
 
 // Server-owned prompt-authorship metadata (LLMO-6289, serenity-docs prompt-
 // authorship-metadata spec). The four keys stamped on Semrush's Adobe-owned
@@ -446,7 +462,7 @@ export async function handleListPrompts(
   }
   return {
     items: items
-      .map((item) => buildPromptDto(geoTargetId, languageCode, item))
+      .map((item) => buildPromptDto(geoTargetId, languageCode, item, undefined))
       .filter(Boolean),
     total,
     page,
@@ -454,6 +470,15 @@ export async function handleListPrompts(
   };
 }
 
+/**
+ * @param {unknown} raw
+ * @param {{
+ *   maximum?: number,
+ *   tooLargeCode?: TagValidationErrorCode,
+ *   required?: boolean,
+ * }} [options]
+ * @returns {string[]}
+ */
 export function validateTagIds(raw, {
   maximum = MAX_PROMPT_TAG_IDS,
   tooLargeCode = ERROR_CODES.TAG_LIMIT_EXCEEDED,
@@ -507,6 +532,13 @@ export function assertPromptTagLimit(tagIds) {
   }
 }
 
+/**
+ * @param {SerenityTransport} transport
+ * @param {string} semrushWorkspaceId
+ * @param {string} projectId
+ * @param {PromptListOptions} [options]
+ * @returns {Promise<SerenityPrompt[]>}
+ */
 export async function listAllProjectPrompts(
   transport,
   semrushWorkspaceId,
@@ -631,6 +663,22 @@ export async function normalizePromptTagSelection(
   return result;
 }
 
+/**
+ * @param {SerenityTransport} transport
+ * @param {string} semrushWorkspaceId
+ * @param {string} projectId
+ * @param {{
+ *   geoTargetId: number,
+ *   languageCode: string,
+ *   page: number,
+ *   limit: number,
+ *   search?: string,
+ *   sort?: string,
+ *   order?: string,
+ *   tagIds: string[],
+ * }} options
+ * @param {object} [log]
+ */
 export async function listFacetedPrompts(
   transport,
   semrushWorkspaceId,

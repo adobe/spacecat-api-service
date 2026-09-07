@@ -146,7 +146,7 @@ export async function handleListPromptsSubworkspace(transport, workspaceId, quer
   }
   return {
     items: items
-      .map((item) => buildPromptDto(geoTargetId, languageCode, item))
+      .map((item) => buildPromptDto(geoTargetId, languageCode, item, undefined))
       .filter(Boolean),
     total,
     page,

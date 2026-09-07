@@ -759,20 +759,13 @@ function parseUpdateTagBody(body) {
 }
 
 /**
- * Resolves a PATCH's target and, when the caller supplied one, its prospective
- * parent — in a SINGLE tree walk against one snapshot. Walking twice would both
- * double the sequential upstream reads and let the parent move between the two
- * traversals, so the ancestry proved for it need not still hold.
- *
- * @param {SerenityTransport} transport
- * @param {string} semrushWorkspaceId
- * @param {string} projectId
- * @param {string} tagId - the PATCH target's id.
- * @param {string | undefined} parentId - the requested parent, when re-parenting.
- * @param {object} [log] - logger.
- * @returns {Promise<{ target: import('../tag-tree.js').TagPosition,
- *   parent: import('../tag-tree.js').TagPosition }>} `parent` mirrors `target`
- *   when no re-parent was requested; the callers ignore it in that case.
+ * @param {{
+ *   depth: number,
+ *   parentId: string | null,
+ *   rootName: string,
+ *   fullPath: Array<{ id: string }>,
+ * } | undefined} item
+ * @returns {import('../tag-tree.js').TagPosition}
  */
 function positionFromSnapshot(item) {
   if (!item) {
@@ -831,7 +824,12 @@ function buildUpdatePayload(parsed, target, tagId) {
     err.code = ERROR_CODES.TAG_NOT_FOUND;
     throw err;
   }
-  if (isServerOwnedDimension(/** @type {string} */ (target.rootName))) {
+  if (!target.rootName) {
+    const error = new ErrorWithStatusCode('Unable to determine the tag dimension', 503);
+    error.code = ERROR_CODES.TAG_TREE_READ_INCOMPLETE;
+    throw error;
+  }
+  if (isServerOwnedDimension(target.rootName)) {
     throw new ErrorWithStatusCode(
       `a value of the server-owned "${target.rootName}" dimension cannot be renamed or re-parented`,
       400,
@@ -902,7 +900,8 @@ export async function handleUpdateTag(
     throw incompatibleTaxonomyError(incompatible);
   }
   if (snapshotTarget?.rootName === 'tag') {
-    const nextParent = snapshotParent ?? snapshot.byId.get(snapshotTarget.parentId);
+    const nextParent = snapshotParent
+      ?? (snapshotTarget.parentId ? snapshot.byId.get(snapshotTarget.parentId) : undefined);
     if (!nextParent || nextParent.rootName !== 'tag' || nextParent.depth > 2) {
       throw new ErrorWithStatusCode(
         'plain tags may only be authored at depth 2 or 3 beneath the "tag" root',
@@ -986,7 +985,8 @@ export async function handleUpdateTagSubworkspace(
     throw incompatibleTaxonomyError(incompatible);
   }
   if (snapshotTarget?.rootName === 'tag') {
-    const nextParent = snapshotParent ?? snapshot.byId.get(snapshotTarget.parentId);
+    const nextParent = snapshotParent
+      ?? (snapshotTarget.parentId ? snapshot.byId.get(snapshotTarget.parentId) : undefined);
     if (!nextParent || nextParent.rootName !== 'tag' || nextParent.depth > 2) {
       throw new ErrorWithStatusCode(
         'plain tags may only be authored at depth 2 or 3 beneath the "tag" root',
@@ -1057,38 +1057,11 @@ function requireSliceQuery(query) {
 }
 
 /**
- * Deletes a tag and its whole subtree (category-delete.md §4). Shared by both
- * handler families once the project id is resolved.
- *
- * The guard mirrors {@link buildUpdatePayload}'s three refusals, in the same
- * order, for the same reasons -- a DIMENSION ROOT can never be deleted (it
- * would take its whole vocabulary with it), and a SERVER-OWNED dimension's
- * value is never client-deletable (its vocabulary is authored by the server).
- * An UNRESOLVABLE id is a 404, not a no-op: the id-keyed-route convention
- * means "already gone" is answered the same way whether this call or an
- * earlier one did the deleting (see {@link collectSubtreeIds}'s note on
- * idempotent re-runs).
- *
- * Unlike PATCH, a `category` descendant WITH children is not refused -- it is
- * a normal cascade delete. The whole subtree is composed HERE, in one upstream
- * batch call, rather than left to whatever upstream does with a
- * parent-with-children delete (unconfirmed either way -- see category-delete.md
- * §6 gate G1). A publish follows so the delete is live, not stuck in draft.
- *
- * Investigated and rejected: the vendored `model.BatchDeleteRequest` type also
- * exposes `cascade?: boolean` and `all?: boolean` fields. Neither has a
- * description in the upstream swagger (`spec/projectengine_swagger_public.yaml`,
- * spacecat-shared) -- completely undocumented, unverified semantics on a
- * production, no-undo delete path. Not adopted without a live-verified
- * contract; {@link collectSubtreeIds}'s client-side composition stays the
- * source of truth until one exists.
- *
  * @param {SerenityTransport} transport
  * @param {string} semrushWorkspaceId
  * @param {string} projectId
- * @param {string} tagId - the delete target's id.
- * @param {object} [log] - logger.
- * @returns {Promise<{ deletedIds: string[] }>}
+ * @param {string[]} subtreeIds
+ * @returns {Promise<string[]>}
  */
 async function listAffectedPromptIds(
   transport,
@@ -1190,6 +1163,21 @@ async function buildTagImpact(transport, semrushWorkspaceId, projectId, tagId, l
   };
 }
 
+/**
+ * Deletes a tag and its whole subtree in one upstream batch call. It refuses
+ * dimension roots, server-owned values, and unknown tags before collecting the
+ * descendant ids, then publishes the resulting draft mutation. When supplied,
+ * `ifMatch` must match a complete impact snapshot to prevent deleting a
+ * subtree that changed after the caller inspected it.
+ *
+ * @param {SerenityTransport} transport
+ * @param {string} semrushWorkspaceId
+ * @param {string} projectId
+ * @param {string} tagId - the delete target's id.
+ * @param {object} [log] - logger.
+ * @param {string} [ifMatch] - expected tag-impact revision.
+ * @returns {Promise<{ deletedIds: string[] }>}
+ */
 async function deleteResolvedTag(
   transport,
   semrushWorkspaceId,
@@ -1202,8 +1190,8 @@ async function deleteResolvedTag(
   // position/kind (root? server-owned? unknown?), while collectSubtreeIds below
   // walks its DESCENDANTS. Neither can answer the other's question.
   const found = await findTagsInTree(transport, semrushWorkspaceId, projectId, [tagId], log);
-  const target = /** @type {import('../tag-tree.js').TagPosition} */ (found.get(tagId));
-  if (target.kind === 'unknown') {
+  const target = found.get(tagId);
+  if (!target || target.kind === 'unknown') {
     const err = new ErrorWithStatusCode('No tag with this id on this market', 404);
     err.code = ERROR_CODES.TAG_NOT_FOUND;
     throw err;
@@ -1371,8 +1359,7 @@ export async function handleTagImpact(
     id,
     log,
   );
-  const body = { ...impact };
-  delete body.deletedIds;
+  const { deletedIds: _, ...body } = impact;
   return { status: 200, body };
 }
 
@@ -1396,7 +1383,6 @@ export async function handleTagImpactSubworkspace(
     id,
     log,
   );
-  const body = { ...impact };
-  delete body.deletedIds;
+  const { deletedIds: _, ...body } = impact;
   return { status: 200, body };
 }

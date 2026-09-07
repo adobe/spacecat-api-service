@@ -2158,6 +2158,7 @@ function SerenityController(context, log, env) {
         return notFound(`Job not found: ${jobId}`);
       }
       const metadata = job.getMetadata?.() ?? {};
+      /** @type {'classifyPrompts' | 'bulkTags' | 'tagImpact'} */
       let publicJobType = 'classifyPrompts';
       if (metadata.jobType === BULK_TAGS_JOB_TYPE) {
         publicJobType = BULK_TAGS_PUBLIC_JOB_TYPE;
@@ -2165,10 +2166,13 @@ function SerenityController(context, log, env) {
         publicJobType = 'tagImpact';
       }
       const query = parsedQuery(ctx);
+      const failureLimit = typeof query.failureLimit === 'number'
+        ? query.failureLimit
+        : undefined;
       const status = job.getStatus();
       const rawResult = status === 'COMPLETED' ? job.getResult?.() ?? null : null;
       const result = publicJobType === BULK_TAGS_PUBLIC_JOB_TYPE && rawResult
-        ? pageBulkFailures(rawResult, query.failureCursor, query.failureLimit)
+        ? pageBulkFailures(rawResult, query.failureCursor, failureLimit)
         : rawResult;
       const error = status === 'FAILED' ? job.getError?.() ?? null : null;
       return createResponse(

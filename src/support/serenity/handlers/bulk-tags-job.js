@@ -33,6 +33,8 @@ import {
 } from './markets.js';
 import { normalizeGeoTargetId, normalizeLanguageCode } from '../validation.js';
 
+/** @typedef {Awaited<ReturnType<typeof readTagTreeSnapshot>>['items'][number]} TagTreeItem */
+
 export const BULK_TAGS_JOB_TYPE = 'serenity-bulk-tags';
 export const BULK_TAGS_PUBLIC_JOB_TYPE = 'bulkTags';
 export const BULK_FAILURE_PAGE_LIMIT = 100;
@@ -209,13 +211,18 @@ async function acceptBulkTags({
     }
   }
   const snapshot = await readTagTreeSnapshot(transport, workspaceId, projectId, log);
-  const selected = parsed.tagIds.map((id) => snapshot.byId.get(id));
-  if (selected.some((item) => !item || item.depth === 1)) {
-    throw codedError(
-      'One or more mutation tagIds are unknown in this project',
-      400,
-      ERROR_CODES.INVALID_TAG_FILTER,
-    );
+  /** @type {TagTreeItem[]} */
+  const selected = [];
+  for (const id of parsed.tagIds) {
+    const item = snapshot.byId.get(id);
+    if (!item || item.depth === 1) {
+      throw codedError(
+        'One or more mutation tagIds are unknown in this project',
+        400,
+        ERROR_CODES.INVALID_TAG_FILTER,
+      );
+    }
+    selected.push(item);
   }
   const incompatible = selected.filter((item) => item.compatibility?.state === 'readOnly');
   if (incompatible.length > 0) {

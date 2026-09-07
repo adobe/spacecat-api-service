@@ -785,11 +785,13 @@ export async function listTagsForProject(transport, semrushWorkspaceId, projectI
  *   requested. Callers that only need to test membership (e.g. resolve-or-
  *   create) pass this to avoid paginating the whole tree; omit it to collect
  *   every item, as every pre-existing caller does.
+ * @param {{ page?: number, limit?: number, explicit?: boolean }} [paging] -
+ *   explicit upstream pagination for the nested tree endpoint.
  * @returns {Promise<{ items: Array<{
  *   id: string, name: string, parentId: string | null,
  *   childrenCount: number, promptsCount: number,
  *   path: Array<{ id: string, name: string }> | null,
- * }> }>}
+ * }>, page: number, limit: number, total: number, complete: boolean }>}
  */
 export async function listProjectTagTree(
   transport,
@@ -797,11 +799,13 @@ export async function listProjectTagTree(
   projectId,
   parentId,
   log,
-  stopWhen,
-  paging,
+  stopWhen = undefined,
+  paging = {},
 ) {
-  const requestedPage = Number.isInteger(paging?.page) && paging.page > 0 ? paging.page : 1;
-  const requestedLimit = Number.isInteger(paging?.limit) && paging.limit > 0
+  const requestedPage = typeof paging.page === 'number'
+    && Number.isInteger(paging.page) && paging.page > 0 ? paging.page : 1;
+  const requestedLimit = typeof paging.limit === 'number'
+    && Number.isInteger(paging.limit) && paging.limit > 0
     ? Math.min(paging.limit, 100)
     : 100;
   if (paging?.explicit) {
