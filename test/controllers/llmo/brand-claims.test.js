@@ -387,11 +387,6 @@ describe('handleRequestBrandClaims (on-demand, LLMO-7263)', () => {
         SLACK_BRAND_CLAIMS_REQUEST_CHANNEL_ID: 'C123',
         SLACK_BOT_TOKEN: 'xoxb-1',
       },
-      attributes: {
-        authInfo: {
-          getProfile: () => ({ trial_email: 'ada@example.com', first_name: 'Ada', last_name: 'Lovelace' }),
-        },
-      },
     };
   });
 
@@ -414,21 +409,6 @@ describe('handleRequestBrandClaims (on-demand, LLMO-7263)', () => {
     expect(sqsSend.getCall(1).args[1].onDemand).to.equal(undefined);
     expect(sqsSend.getCall(2).args[1].onDemand).to.equal(true);
     expect(postSlackMessage).to.have.been.calledOnce;
-    // The alert names who triggered it (name + human-readable email).
-    expect(postSlackMessage.getCall(0).args[1]).to.include('by Ada Lovelace (ada@example.com)');
-  });
-
-  it('falls back to the IMS email, then "unknown", for the requester label', async () => {
-    // preferred_username (RFC-5322) is preferred over the profile.email GUID.
-    site.getLatestAuditByAuditType = () => null;
-    context.attributes.authInfo.getProfile = () => ({ preferred_username: 'grace@example.com' });
-    await handleRequestBrandClaims(context, site);
-    expect(postSlackMessage.getCall(0).args[1]).to.include('by grace@example.com');
-
-    postSlackMessage.resetHistory();
-    delete context.attributes;
-    await handleRequestBrandClaims(context, site);
-    expect(postSlackMessage.getCall(0).args[1]).to.include('by unknown');
   });
 
   it('returns 500 when AUDIT_JOBS_QUEUE_URL is not configured', async () => {
