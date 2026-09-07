@@ -259,7 +259,7 @@ curl -X DELETE "${API_BASE}/organizations/${ORG_ID}/feature-flags/llmo/serenity_
 
 ## Endpoint surface
 
-All endpoints require `Authorization: Bearer <ims_user_token>` and `organization:read` (GET) or `organization:write` (mutating) capability. The `:brandId` path param is UUID-only on this surface — name-based brand lookup is rejected with 400. The slice key for everything is `(brandId, geoTargetId, languageCode)`; the upstream workspace id and per-project upstream identifier are resolved server-side and never leak into request/response shapes.
+All `/serenity/*` endpoints require `Authorization: Bearer <ims_user_token>` and `organization:read` (GET) or `organization:write` (mutating) capability. (The S2S brand-markets read documented at the end of this section is the exception: it is reachable without an IMS user token, though it still requires `organization:read`.) The `:brandId` path param is UUID-only on this surface — name-based brand lookup is rejected with 400. The slice key for everything is `(brandId, geoTargetId, languageCode)`; the upstream workspace id and per-project upstream identifier are resolved server-side and never leak into request/response shapes.
 
 | Method | Path | Purpose | OperationId |
 |---|---|---|---|
@@ -286,6 +286,12 @@ Two **org-level** catalogue routes are brand-independent (prefixed with `/v2/org
 |---|---|---|---|
 | GET | `/serenity/models` | Global AI-model catalog (`GET /v1/ai_models`) | `listSerenityOrgModels` |
 | GET | `/serenity/languages` | Supported Semrush language catalog (`GET /v1/languages`) | `listSerenityOrgLanguages` |
+
+### S2S brand markets read (`GET /v2/orgs/:spaceCatId/brands/:brandId/markets`)
+
+A separate, S2S-authenticated route reads a brand's markets straight from the `brand_to_semrush_projects` table (`BrandSemrushProject.allByBrandId`), bypassing the IMS-gated `/serenity/*` surface above entirely. It exists for consumers that need a brand's configured markets without an IMS user token — DRS is the first caller. The response is `{ markets: [{ region, languageCode, geoTargetId }] }`; a row whose `geoTargetId` isn't a whole country, or whose `languageCode` is blank, is skipped rather than mislabeled.
+
+This differs from `GET /serenity/markets` in three ways: it carries no live/draft `status` (that only exists in the upstream Semrush listing, which this route never calls), no `siteId` (the market-mirror Site link is a `/serenity/*` concern), and it only ever reports whole countries (the flat table has no sub-national representation, whereas the IMS-gated route resolves markets live from Semrush and can surface sub-national slices). Soft-deleted (`deletedAt`) rows are excluded.
 
 ## The onboarding flow
 

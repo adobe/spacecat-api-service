@@ -281,7 +281,7 @@ return accepted('Audit queued successfully');
 
 **Files**:
 - `src/controllers/slack.js` - Main controller
-- `src/support/slack/commands/` - Command handlers (36 commands)
+- `src/support/slack/commands/` - Command handlers
 - `src/support/slack/actions/` - Action handlers (17 actions)
 
 Architecture:
@@ -535,12 +535,13 @@ Most complex domain:
 ### Slack Commands
 **Location**: `src/support/slack/commands/`
 
-36 commands for operations:
+Commands for operations (see `src/support/slack/commands.js` for the full, current list):
 - Site management: `/add-site`, `/update-site`, `/remove-site`
 - Audit operations: `/run-audit`, `/run-audit-for-all-sites`
 - Organization setup: `/add-slack-channel`, `/configure-slack`
 - Debugging: `/site-info`, `/audit-info`
 - LLMO: `/brand-profile`, `/llmo-onboard`, `enable-brand-claims`, `disable-brand-claims`
+- Geo-experiments: `/trigger-impact-measurement`, `/check-impact-measurement`, `/get-experiment`
 
 ## Common Utilities
 

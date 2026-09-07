@@ -97,6 +97,7 @@ export const INTERNAL_ROUTES = [
   'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/deploy',
   'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/plan',
   'GET /sites/:siteId/llmo/cdn-onboard/cloudfront/permissions',
+  'GET /sites/:siteId/llmo/cdn-onboard/cloudfront/template',
   'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/log-delivery',
   'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/log-rescan',
   'PUT /sites/:siteId/llmo/opportunities-reviewed',
@@ -275,6 +276,15 @@ const routeRequiredCapabilities = {
   // Organizations
   'GET /organizations': CAP_ORG_READ_ALL,
   'GET /organizations/by-product-code/:productCode': CAP_ORG_READ_ALL,
+  // Mapped (not INTERNAL_ROUTES) so readOnlyAdminWrapper takes its read fast-path instead of
+  // the ownership check (this route has no siteId/organizationId path param to own). Reusing
+  // CAP_ORG_READ_ALL lets an S2S consumer pass this wrapper, but getByAccessMapSheet only
+  // calls hasAdminReadAccess() - no hasS2SCapability check - so S2S still gets 403 there;
+  // this route is intentionally admin-only end-to-end, unlike its by-product-code sibling.
+  // See the INVARIANT comment on getByAccessMapSheet in organizations.js: do not add a
+  // hasS2SCapability(CAP_ORG_READ_ALL) fallback there - this mapping's only purpose is the
+  // readOnlyAdminWrapper read fast-path, not S2S opt-in.
+  'GET /organizations/by-access-map-sheet/:productCode': CAP_ORG_READ_ALL,
   'POST /organizations': 'organization:write',
   'GET /organizations/:organizationId': 'organization:read',
   'GET /organizations/by-ims-org-id/:imsOrgId': 'organization:read',
@@ -285,6 +295,7 @@ const routeRequiredCapabilities = {
   'GET /organizations/:organizationId/brands': 'brand:read',
   'GET /v2/orgs/:spaceCatId/brands': 'organization:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId': 'organization:read',
+  'GET /v2/orgs/:spaceCatId/brands/:brandId/markets': 'organization:read',
   'GET /v2/orgs/:spaceCatId/categories': 'organization:read',
   'POST /v2/orgs/:spaceCatId/categories': 'organization:write',
   'PATCH /v2/orgs/:spaceCatId/categories/:categoryId': 'organization:write',
@@ -720,6 +731,7 @@ const routeRequiredCapabilities = {
   'GET /sites/:siteId/llmo/edge-optimize-status': 'site:read',
   'GET /sites/:siteId/llmo/probes/edge-optimize': 'site:read',
   'GET /sites/:siteId/llmo/brand-claims': 'site:read',
+  'POST /sites/:siteId/llmo/brand-claims/request': 'site:write',
   'GET /sites/:siteId/llmo/strategy/demo/brand-presence': 'site:read',
   'GET /sites/:siteId/llmo/strategy/demo/recommendations': 'site:read',
   'GET /llmo/agentic-traffic/global': 'report:read',

@@ -4529,6 +4529,44 @@ describe('LlmoController', () => {
     });
   });
 
+  describe('requestBrandClaims', () => {
+    let reqCtx;
+
+    beforeEach(() => {
+      reqCtx = {
+        ...mockContext,
+        params: { siteId: TEST_SITE_ID },
+        env: { ...mockEnv, AUDIT_JOBS_QUEUE_URL: 'audit-q' },
+        sqs: { sendMessage: sinon.stub().resolves() },
+        data: {},
+      };
+    });
+
+    it('validates LLMO access, triggers the audit, and returns 202', async () => {
+      const result = await controller.requestBrandClaims(reqCtx);
+      expect(result.status).to.equal(202);
+      expect(reqCtx.sqs.sendMessage).to.have.been.calledOnce;
+    });
+
+    it('returns 403 when LLMO access validation fails', async () => {
+      const controllerDenied = controllerWithAccessDenied(mockContext);
+      const result = await controllerDenied.requestBrandClaims(reqCtx);
+      expect(result.status).to.equal(403);
+    });
+
+    it('returns 404 when the site is not found', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+      const result = await controller.requestBrandClaims(reqCtx);
+      expect(result.status).to.equal(404);
+    });
+
+    it('returns 400 when site resolution throws', async () => {
+      mockDataAccess.Site.findById.rejects(new Error('db boom'));
+      const result = await controller.requestBrandClaims(reqCtx);
+      expect(result.status).to.equal(400);
+    });
+  });
+
   describe('getDemoBrandPresence', () => {
     let demoContext;
     let mockGetSignedUrl;
