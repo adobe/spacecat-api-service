@@ -5973,6 +5973,8 @@ site-llmo-cloudflare-target-host:
         $ref: './responses.yaml#/404'
       '500':
         $ref: './responses.yaml#/500'
+      '501':
+        description: CDN auto-routing is not supported for subpath sites
     security:
       - session_token: [ ]
 
