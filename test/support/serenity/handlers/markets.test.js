@@ -1309,6 +1309,7 @@ describe('handlers/markets.js — handleListTags / handleListModels', () => {
     await expect(handleListTags(transport, dataAccess, BRAND, WORKSPACE, {
       geoTargetId: 2840, languageCode: 'en',
     }, log)).to.be.rejected.then((error) => {
+      expect(error.status).to.equal(503);
       expect(error.code).to.equal('tagTreeReadIncomplete');
     });
 

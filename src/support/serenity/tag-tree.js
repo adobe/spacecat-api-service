@@ -230,10 +230,9 @@ export async function ensureChildren(
 
   // createProjectTags resolves to a LIST of the created nodes, in request order.
   const nodes = Array.isArray(echoed) ? echoed : [];
-  if (nodes.some((node) => node
-    && typeof node.name === 'string'
-    && missing.includes(node.name)
-    && !(typeof node.id === 'string' && node.id))) {
+  if (!Array.isArray(echoed)
+    || nodes.length === 0
+    || nodes.some((node) => !(node && typeof node.id === 'string' && node.id))) {
     throw new ErrorWithStatusCode('upstream created the tag but echoed no id', 502);
   }
   for (const node of nodes) {
@@ -575,7 +574,9 @@ export async function findTagsInTree(transport, semrushWorkspaceId, projectId, t
         visited.add(node.id);
         reads += 1;
         if (reads > MAX_TREE_READS) {
-          throw new ErrorWithStatusCode('tag tree too large to resolve', 502);
+          const error = new ErrorWithStatusCode('Unable to read the complete tag tree', 503);
+          error.code = ERROR_CODES.TAG_TREE_READ_INCOMPLETE;
+          throw error;
         }
         // Sequential by design: stop as soon as every wanted id is placed rather
         // than fanning out every node's children concurrently.
@@ -667,6 +668,7 @@ export async function readTagTreeSnapshot(
           : [...parent.fullPath, { id: child.id, name: child.name }];
         const node = {
           ...child,
+          parentId: child.parentId ?? parent.id,
           rootName: fullPath[0]?.name ?? parent.rootName,
           rootId: fullPath[0]?.id ?? parent.rootId,
           depth: fullPath.length,
@@ -785,7 +787,9 @@ export async function collectSubtreeIds(transport, semrushWorkspaceId, projectId
     for (const nodeId of frontier) {
       reads += 1;
       if (reads > MAX_TREE_READS) {
-        throw new ErrorWithStatusCode('tag subtree too large to resolve', 502);
+        const error = new ErrorWithStatusCode('Unable to read the complete tag subtree', 503);
+        error.code = ERROR_CODES.TAG_TREE_READ_INCOMPLETE;
+        throw error;
       }
       // Sequential by design — see findTagsInTree for the same rationale.
       // eslint-disable-next-line no-await-in-loop

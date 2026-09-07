@@ -1930,7 +1930,7 @@ describe('markets-subworkspace — defensive branch coverage', () => {
     ).then(() => null, (e) => e);
 
     expect(err.status).to.equal(502);
-    expect(err.message).to.match(/did not persist the tag\(s\)/);
+    expect(err.message).to.match(/upstream created the tag but echoed no id/);
     // Nothing was attached — the seam fails before any prompt write is built.
     expect(transport.createPromptsWithMetadata).to.have.not.been.called;
   });
@@ -1959,7 +1959,7 @@ describe('markets-subworkspace — defensive branch coverage', () => {
     ).then(() => null, (e) => e);
 
     expect(err.status).to.equal(502);
-    expect(err.message).to.match(/did not persist the tag\(s\): non-branded/);
+    expect(err.message).to.match(/upstream created the tag but echoed no id/);
     expect(transport.createPromptsWithMetadata).to.have.not.been.called;
   });
 });

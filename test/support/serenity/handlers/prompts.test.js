@@ -2479,28 +2479,26 @@ describe('handlers/prompts.js — unified type classification (serenity-docs#31)
         }],
       }, fakeLog(), classifyByBrandMention);
 
-      // The registered roots are created at the root level (`origin` remains
-      // an independent live dimension, though nothing is minted beneath it
-      // by this write path any more), then `branded` beneath the
-      // freshly-minted `type` root, then `config` beneath the `source` root —
-      // the create path stamps the derived SOURCE (via `deriveSource`, not a
-      // separate `origin` tag) as well as the computed type.
+      // The registered roots are created at the root level, then `branded` beneath the
+      // freshly-minted `type` root, then independent `origin=human` and
+      // `source=config` values beneath their respective roots.
       expect(createProjectTags.firstCall.args[2]).to.deep.equal([
         'category', 'tag', INTENT_ROOT_NAME, 'origin', 'type', 'source',
       ]);
       expect(createProjectTags.firstCall.args[3]).to.deep.equal({});
       expect(createProjectTags.secondCall.args[2]).to.deep.equal(['branded']);
       expect(createProjectTags.secondCall.args[3]).to.deep.equal({ parentId: 'created::type' });
-      // source injection mints the derived `config` beneath `source` next (no
-      // `origin`-root create in between any more)...
-      expect(createProjectTags.thirdCall.args[2]).to.deep.equal(['config']);
-      expect(createProjectTags.thirdCall.args[3]).to.deep.equal({ parentId: 'created::source' });
-      // ...then intent injection mints the default `Informational` beneath `intent`.
-      expect(createProjectTags.getCall(3).args[2]).to.deep.equal(['Informational']);
-      expect(createProjectTags.getCall(3).args[3])
+      expect(createProjectTags.thirdCall.args[2]).to.deep.equal(['human']);
+      expect(createProjectTags.thirdCall.args[3]).to.deep.equal({ parentId: 'created::origin' });
+      expect(createProjectTags.getCall(3).args[2]).to.deep.equal(['config']);
+      expect(createProjectTags.getCall(3).args[3]).to.deep.equal({ parentId: 'created::source' });
+      // Intent remains an independent classified dimension.
+      expect(createProjectTags.getCall(4).args[2]).to.deep.equal(['Informational']);
+      expect(createProjectTags.getCall(4).args[3])
         .to.deep.equal({ parentId: `created::${INTENT_ROOT_NAME}` });
       expect(result.created[0].tagIds).to.deep.equal([
         'tag-cat-1', 'created:created::type:branded',
+        'created:created::origin:human',
         'created:created::source:config', `created:created::${INTENT_ROOT_NAME}:Informational`,
       ]);
     });

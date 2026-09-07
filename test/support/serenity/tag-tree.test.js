@@ -189,7 +189,7 @@ describe('serenity tag-tree', () => {
       expect(log.warn).to.have.been.calledWithMatch(/echoed fewer nodes than requested/);
     });
 
-    it('ignores a malformed created node rather than mapping a name to an empty id', async () => {
+    it('fails closed when a nominal create success echoes no usable id', async () => {
       const listProjectTags = sinon.stub();
       listProjectTags.onFirstCall().resolves({ items: [] });
       listProjectTags.onSecondCall().resolves({
@@ -199,11 +199,18 @@ describe('serenity tag-tree', () => {
         listProjectTags,
         createProjectTags: sinon.stub().resolves([{ id: '', name: 'category' }]),
       };
-      const { byName } = await ensureChildren(transport, WS, PROJECT, '', ['category'], fakeLog());
-      expect(byName.get('category')).to.equal('real');
+      await expect(ensureChildren(
+        transport,
+        WS,
+        PROJECT,
+        '',
+        ['category'],
+        fakeLog(),
+      )).to.be.rejectedWith(/upstream created the tag but echoed no id/);
+      expect(listProjectTags).to.have.been.calledOnce;
     });
 
-    it('tolerates a non-array create response by re-reading the level', async () => {
+    it('fails closed on a non-array create response', async () => {
       const listProjectTags = sinon.stub();
       listProjectTags.onFirstCall().resolves({ items: [] });
       listProjectTags.onSecondCall().resolves({
@@ -213,21 +220,26 @@ describe('serenity tag-tree', () => {
         listProjectTags,
         createProjectTags: sinon.stub().resolves(null),
       };
-      const { byName } = await ensureChildren(transport, WS, PROJECT, '', ['category'], fakeLog());
-      expect(byName.get('category')).to.equal('r-cat');
+      await expect(ensureChildren(
+        transport,
+        WS,
+        PROJECT,
+        '',
+        ['category'],
+        fakeLog(),
+      )).to.be.rejectedWith(/upstream created the tag but echoed no id/);
+      expect(listProjectTags).to.have.been.calledOnce;
     });
 
-    it('502s when the create answers 2xx but the draft re-read still lacks the name', async () => {
-      // The live draft-layer failure: a 201 that echoes nothing and changes nothing.
-      // Returning a map with a hole here is what let a caller answer 200 with an
-      // `undefined` tag id and `created: true`.
+    it('502s with the stable missing-echo error when create returns an empty list', async () => {
       const listProjectTags = sinon.stub().resolves({ items: [] });
       const transport = { listProjectTags, createProjectTags: sinon.stub().resolves([]) };
       const err = await ensureChildren(transport, WS, PROJECT, '', ['category'], fakeLog())
         .then(() => null, (e) => e);
       expect(err).to.be.an('error');
       expect(err.status).to.equal(502);
-      expect(err.message).to.match(/did not persist the tag\(s\): category/);
+      expect(err.message).to.match(/upstream created the tag but echoed no id/);
+      expect(listProjectTags).to.have.been.calledOnce;
     });
 
     it('resolves rather than fails when a concurrent writer minted the names first', async () => {
@@ -497,7 +509,7 @@ describe('serenity tag-tree', () => {
         .then(() => null, (e) => e);
       expect(err).to.be.an('error');
       expect(err.status).to.equal(502);
-      expect(err.message).to.match(/did not persist the tag\(s\): type/);
+      expect(err.message).to.match(/upstream created the tag but echoed no id/);
     });
 
     it('resolves the three closed vocabularies concurrently, one level read each', async () => {
@@ -1068,8 +1080,8 @@ describe('serenity tag-tree', () => {
       const err = await findTagsInTree(transport, WS, PROJECT, ['no-such-tag'], fakeLog())
         .then(() => null, (e) => e);
       expect(err).to.be.an('error');
-      expect(err.status).to.equal(502);
-      expect(err.message).to.match(/tag tree too large to resolve/);
+      expect(err.status).to.equal(503);
+      expect(err.code).to.equal('tagTreeReadIncomplete');
     });
   });
 
@@ -1155,7 +1167,7 @@ describe('serenity tag-tree', () => {
       expect(err.message).to.match(/tag subtree too large to delete/);
     });
 
-    it('502s rather than walk a subtree larger than the read budget', async () => {
+    it('fails closed rather than return a partial subtree beyond the read budget', async () => {
       // Depth, not width, exhausts the READ budget here: a single-child chain
       // over 200 levels deep costs 200+ reads (one per level) while the total
       // id count stays small — this isolates the read-count cap from the
@@ -1173,8 +1185,8 @@ describe('serenity tag-tree', () => {
       const err = await collectSubtreeIds(transport, WS, PROJECT, 'r-cat', fakeLog())
         .then(() => null, (e) => e);
       expect(err).to.be.an('error');
-      expect(err.status).to.equal(502);
-      expect(err.message).to.match(/tag subtree too large to resolve/);
+      expect(err.status).to.equal(503);
+      expect(err.code).to.equal('tagTreeReadIncomplete');
     });
   });
 

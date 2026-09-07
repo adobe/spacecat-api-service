@@ -262,7 +262,7 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
 
       expect(err, 'the handler must reject').to.not.equal(null);
       expect(err.status).to.equal(502);
-      expect(err.message).to.match(/did not persist the tag\(s\)/);
+      expect(err.message).to.match(/upstream created the tag but echoed no id/);
       // The roots were attempted; the category itself never was.
       expect(transport.createProjectTags).to.have.been.calledOnce;
       expect(transport.createProjectTags.firstCall.args[2])
@@ -1488,9 +1488,19 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
         },
         fakeLog(),
       );
-      // One root-level read (which places the `category` root) plus one read of
-      // that root's children (which places the target). Never a second walk.
-      expect(transport.listProjectTags).to.have.been.calledTwice;
+      const parentIds = transport.listProjectTags.getCalls()
+        .map((call) => call.args[2].parentId);
+      expect(parentIds).to.have.lengthOf(6);
+      [
+        '',
+        TAG_IDS.categoryRoot,
+        TAG_IDS.categoryRunningShoes,
+        TAG_IDS.intentRoot,
+        TAG_IDS.originRoot,
+        TAG_IDS.typeRoot,
+      ].forEach((parentId) => {
+        expect(parentIds.filter((value) => value === parentId)).to.have.lengthOf(1);
+      });
     });
 
     it('re-parents a sub-category onto another category within the dimension', async () => {
@@ -1676,8 +1686,8 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
         fakeLog(),
       ).then(() => null, (e) => e);
 
-      expect(err.status).to.equal(502);
-      expect(err.message).to.match(/tag tree too large to resolve/);
+      expect(err.status).to.equal(503);
+      expect(err.code).to.equal('tagTreeReadIncomplete');
     });
   });
 
