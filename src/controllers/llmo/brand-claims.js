@@ -175,7 +175,8 @@ export async function handleBrandClaims(context) {
  * 'unknown' when no profile is available.
  *
  * @param {object} context - Request context (attributes.authInfo).
- * @returns {string} e.g. "Ada Lovelace (ada@example.com)", "ada@example.com", or "unknown".
+ * @returns {string|null} e.g. "Ada Lovelace (ada@example.com)" or "ada@example.com";
+ *   null when no identity is available (the alert then omits the "by ..." clause).
  */
 function getRequesterLabel(context) {
   try {
@@ -189,11 +190,11 @@ function getRequesterLabel(context) {
     if (name && email) {
       return `${name} (${email})`;
     }
-    return name || email || 'unknown';
+    return name || email || null;
   } catch {
     // Best-effort label only — never let requester lookup throw into the (already
     // queued) run or the Slack alert.
-    return 'unknown';
+    return null;
   }
 }
 
@@ -277,9 +278,11 @@ export async function handleRequestBrandClaims(context, site) {
   const slackToken = env?.SLACK_BOT_TOKEN;
   if (slackChannel && slackToken) {
     try {
+      const requester = getRequesterLabel(context);
+      const requestedBy = requester ? ` by ${requester}` : '';
       await postSlackMessage(
         slackChannel,
-        `:rocket: On-demand Brand Claims requested for *${site.getBaseURL()}* (${site.getId()}) by ${getRequesterLabel(context)}.`,
+        `:rocket: On-demand Brand Claims requested for *${site.getBaseURL()}* (${site.getId()})${requestedBy}.`,
         slackToken,
       );
     } catch (slackError) {

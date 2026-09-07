@@ -412,16 +412,19 @@ describe('handleRequestBrandClaims (on-demand, LLMO-7263)', () => {
     expect(postSlackMessage.getCall(0).args[1]).to.include('by Ada Lovelace (ada@example.com)');
   });
 
-  it('falls back to preferred_username, then "unknown", for the requester label', async () => {
+  it('uses preferred_username when there is no name, and omits "by" when no identity is available', async () => {
     // preferred_username (RFC-5322) is preferred over the profile.email GUID.
     context.attributes.authInfo.getProfile = () => ({ preferred_username: 'grace@example.com' });
     await handleRequestBrandClaims(context, site);
     expect(postSlackMessage.getCall(0).args[1]).to.include('by grace@example.com');
 
+    // No profile → drop the "by ..." clause entirely (no "by unknown").
     postSlackMessage.resetHistory();
     delete context.attributes;
     await handleRequestBrandClaims(context, site);
-    expect(postSlackMessage.getCall(0).args[1]).to.include('by unknown');
+    const text = postSlackMessage.getCall(0).args[1];
+    expect(text).to.not.include(' by ');
+    expect(text).to.include('(site-1).');
   });
 
   it('returns 500 when AUDIT_JOBS_QUEUE_URL is not configured', async () => {
