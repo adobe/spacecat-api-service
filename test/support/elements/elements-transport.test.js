@@ -36,7 +36,7 @@ const TECHNICAL_API_KEY = 'technical-api-key';
 const TECHNICAL_ENV = {
   ...ENV,
   SEMRUSH_BRAND_CLAIMS_TECHNICAL_AUTH_ENABLED: 'true',
-  SEMRUSH_BRAND_CLAIMS_API_KEY: TECHNICAL_API_KEY,
+  SEMRUSH_TMP_API_KEY: TECHNICAL_API_KEY,
 };
 const EXPECTED_EXTERNAL_URL = `${EXTERNAL_BASE_URL}/apis/v4-raw/external-api/v1/workspaces/`
   + `${WORKSPACE_ID}/products/ai/elements/${ELEMENT_ID}`;
@@ -218,7 +218,7 @@ describe('createElementsTransport', () => {
       }
 
       expect(err.status).to.equal(503);
-      expect(err.message).to.contain('SEMRUSH_BRAND_CLAIMS_API_KEY');
+      expect(err.message).to.contain('SEMRUSH_TMP_API_KEY');
       unrelatedKeys.forEach((key) => expect(err.message).to.not.contain(key));
       expect(resolveImsToken).to.not.have.been.called;
       expect(fetchStub).to.not.have.been.called;
@@ -262,8 +262,8 @@ describe('createElementsTransport', () => {
     });
 
     [
-      [{ SEMRUSH_BRAND_CLAIMS_API_KEY: undefined }, 'SEMRUSH_BRAND_CLAIMS_API_KEY'],
-      [{ SEMRUSH_BRAND_CLAIMS_API_KEY: '   ' }, 'SEMRUSH_BRAND_CLAIMS_API_KEY'],
+      [{ SEMRUSH_TMP_API_KEY: undefined }, 'SEMRUSH_TMP_API_KEY'],
+      [{ SEMRUSH_TMP_API_KEY: '   ' }, 'SEMRUSH_TMP_API_KEY'],
     ].forEach(([envOverride, variable]) => {
       it(`fails closed with 503 for invalid ${variable} configuration`, async () => {
         const resolveImsToken = sinon.stub().resolves(IMS_TOKEN);

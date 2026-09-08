@@ -25,7 +25,7 @@ export const ELEMENTS_CREDENTIAL_PROFILE_BRAND_CLAIMS = 'brand_claims';
 const BRAND_CLAIMS_CREDENTIAL_PROFILE = Object.freeze({
   id: ELEMENTS_CREDENTIAL_PROFILE_BRAND_CLAIMS,
   enabledEnvVar: 'SEMRUSH_BRAND_CLAIMS_TECHNICAL_AUTH_ENABLED',
-  apiKeyEnvVar: 'SEMRUSH_BRAND_CLAIMS_API_KEY',
+  apiKeyEnvVar: 'SEMRUSH_TMP_API_KEY',
 });
 
 // Purpose ownership is code-controlled: callers cannot select a credential profile or key.

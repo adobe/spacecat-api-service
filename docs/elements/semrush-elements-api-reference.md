@@ -270,14 +270,14 @@ non-IMS auth method (e.g. scoped API key).
 
 There is one temporary `brand_claims` credential profile. When
 `SEMRUSH_BRAND_CLAIMS_TECHNICAL_AUTH_ENABLED` is exactly `true`, that profile uses the external REST
-API with the Vault-injected `SEMRUSH_BRAND_CLAIMS_API_KEY`. Unknown or unmapped purposes remain
+API with the Vault-injected `SEMRUSH_TMP_API_KEY`. Unknown or unmapped purposes remain
 IMS-only; there is no default technical profile. Generic Elements handlers cannot select this mode,
 and request query, header, and body values cannot choose the purpose, profile, or key.
 
 Enabled technical mode fails closed with HTTP 503 when its API key is missing or blank,
 without falling back to IMS or another ABV key. The external host is fixed at
 `https://api.semrush.com`; there is no base-URL configuration for this route. Technical-account 429
-responses are not retried because both mapped purposes share one credential rate pool.
+responses are not retried because the generic credential has one shared rate pool.
 
 ---
 
@@ -486,20 +486,21 @@ Upstream error bodies are **never forwarded to clients** — they are logged ser
 |---|---|---|
 | `SEMRUSH_PROJECTS_BASE_URL` | Vault `dx_mysticat/<env>/api-service` | Internal IMS Elements API base host (e.g. `https://www.semrush.com`) |
 | `SEMRUSH_BRAND_CLAIMS_TECHNICAL_AUTH_ENABLED` | Environment configuration | Exact string `true` enables the temporary external route for the `brand_claims` profile |
-| `SEMRUSH_BRAND_CLAIMS_API_KEY` | Vault `dx_mysticat/<env>/api-service` | Temporary Brand Claims Elements REST `Apikey` credential; never store it in source or local documentation |
+| `SEMRUSH_TMP_API_KEY` | Vault `dx_mysticat/<env>/api-service` | Generic Semrush REST `Apikey` credential; never store it in source or local documentation |
 
-Unknown purposes have no default profile and remain IMS-only. Other ABV capabilities may hold their
-own Semrush API keys, but they require a separately declared code-owned profile and purpose mapping
-before they can use technical auth. Broad names such as `SEMRUSH_ELEMENTS_TECHNICAL_API_KEY` and
-`SEMRUSH_ABV_SHARED_ELEMENTS_API_KEY` are deliberately ignored and are not aliases.
+Unknown purposes have no default profile and remain IMS-only. The generic key is not a generic
+fallback: another capability can use it only after receiving an explicit code-owned purpose/profile
+mapping and rollout flag. Broad aliases such as `SEMRUSH_ELEMENTS_TECHNICAL_API_KEY` and
+`SEMRUSH_ABV_SHARED_ELEMENTS_API_KEY` are deliberately ignored.
 
 The external origin is the fixed Semrush gateway `https://api.semrush.com`; it is not a secret or an
 environment-dependent deployment target, so this stopgap does not add a configurable base URL.
 
 This temporary Elements REST `Apikey` seam is related to, but distinct from, the Semrush AI
 Visibility gRPC OAuth/Bearer provider in #3064/#3099. It intentionally has no code dependency on or
-credential reuse with that provider. Configure the Brand Claims key before setting the enable flag.
-An enabled mapped purpose fails closed with HTTP 503 when the key is missing; it never falls back to
+credential reuse with that provider. Configure the generic Semrush key before setting the Brand
+Claims enable flag. An enabled mapped purpose fails closed with HTTP 503 when the key is missing;
+it never falls back to
 caller IMS or another key. Generic Elements endpoints remain IMS-only. When proper Elements S2S is
 available, replace the technical branch behind `createElementsTransportForPurpose`; callers retain
 the generic `fetchElement(workspaceId, elementId, payload)` contract.
