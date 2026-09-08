@@ -42,6 +42,7 @@ import { dimensionOfRootName, isServerOwnedDimension } from '../prompt-tags.js';
 export const BULK_TAGS_JOB_TYPE = 'serenity-bulk-tags';
 export const BULK_TAGS_PUBLIC_JOB_TYPE = 'bulkTags';
 export const BULK_FAILURE_PAGE_LIMIT = 100;
+const MAX_PUBLISH_RECOVERY_DEPTH = 5;
 
 function codedError(message, status, code, details) {
   const error = new ErrorWithStatusCode(message, status);
@@ -164,6 +165,91 @@ function acceptedJobResponse(job, replayed) {
       replayed,
       ...(['SUCCEEDED', 'PARTIAL_FAILURE'].includes(outcome) ? { outcome } : {}),
     },
+  };
+}
+
+/**
+ * Enqueues a publish-only follow-up while transferring the current job's
+ * already-exchanged promise token. The depth cap prevents a persistent upstream
+ * publish failure from creating an unbounded job chain.
+ *
+ * @param {object} context
+ * @param {object} job
+ * @param {object} metadata
+ * @returns {Promise<string | null>}
+ */
+async function requeuePublishRecovery(context, job, metadata) {
+  const recoveryDepth = Number.isInteger(metadata.publishRecoveryDepth)
+    ? metadata.publishRecoveryDepth
+    : 0;
+  if (recoveryDepth >= MAX_PUBLISH_RECOVERY_DEPTH) {
+    context.log?.warn?.(
+      `[serenity-bulk-tags] Publish recovery depth ${recoveryDepth} reached max `
+      + `${MAX_PUBLISH_RECOVERY_DEPTH} for job ${job.getId()}`,
+    );
+    return null;
+  }
+  const recoveryJob = await createAndEnqueueJob(context, {
+    jobType: BULK_TAGS_JOB_TYPE,
+    promiseToken: metadata.promiseToken,
+    promisePair: metadata.promisePair,
+    metadata: {
+      brandId: metadata.brandId,
+      workspaceId: metadata.workspaceId,
+      projectId: metadata.projectId,
+      publishRecoveryPending: true,
+      publishRecoveryDepth: recoveryDepth + 1,
+    },
+  });
+  return recoveryJob.getId();
+}
+
+/**
+ * Executes a publish-only recovery job. It deliberately skips taxonomy and
+ * prompt-corpus reads so an earlier successful draft mutation can be published
+ * without reapplying or widening the original operation.
+ *
+ * @param {object} context
+ * @param {object} job
+ * @param {object} metadata
+ * @param {SerenityTransport} transport
+ * @returns {Promise<object>}
+ */
+async function recoverFailedPublish(context, job, metadata, transport) {
+  const publishErrors = await publishAffected(
+    transport,
+    metadata.workspaceId,
+    metadata.projectId ? [metadata.projectId] : [],
+    context.log,
+  );
+  if (publishErrors.length === 0) {
+    return {
+      outcome: 'SUCCEEDED',
+      matchedCount: 0,
+      updatedCount: 0,
+      unchangedCount: 0,
+      failureCount: 0,
+      failures: [],
+      publish: { state: 'SUCCEEDED', error: null },
+    };
+  }
+  const requeuedJobId = await requeuePublishRecovery(context, job, metadata);
+  return {
+    outcome: 'PARTIAL_FAILURE',
+    matchedCount: 0,
+    updatedCount: 0,
+    unchangedCount: 0,
+    failureCount: 0,
+    failures: [],
+    publish: {
+      state: 'FAILED',
+      error: {
+        code: ERROR_CODES.SERENITY_UPSTREAM_ERROR,
+        message: 'The project could not be published',
+        retryable: requeuedJobId !== null,
+      },
+    },
+    ...(requeuedJobId ? { requeuedJobId } : {}),
   };
 }
 
@@ -515,6 +601,9 @@ export async function bulkTagsHandler(context, job, accessToken, injectedTranspo
   const metadata = job.getMetadata() ?? {};
   const transport = injectedTransport
     ?? createSerenityTransport({ env: context.env, imsToken: accessToken });
+  if (metadata.publishRecoveryPending === true) {
+    return recoverFailedPublish(context, job, metadata, transport);
+  }
   const snapshot = await readTagTreeSnapshot(
     transport,
     metadata.workspaceId,
@@ -633,13 +722,13 @@ export async function bulkTagsHandler(context, job, accessToken, injectedTranspo
   if (updatedCount > 0) {
     invalidateTagCacheForProject(metadata.workspaceId, metadata.projectId);
   }
-  const isPublishRecovery = metadata.publishRecoveryPending === true;
   /** @type {{
    *   state: 'SKIPPED' | 'SUCCEEDED' | 'FAILED',
    *   error: null | { code: string, message: string, retryable: boolean },
    * }} */
   let publish = { state: 'SKIPPED', error: null };
-  if (updatedCount > 0 || isPublishRecovery) {
+  let requeuedJobId = null;
+  if (updatedCount > 0) {
     const publishErrors = await publishAffected(
       transport,
       metadata.workspaceId,
@@ -648,25 +737,16 @@ export async function bulkTagsHandler(context, job, accessToken, injectedTranspo
     );
     if (publishErrors.length === 0) {
       publish = { state: 'SUCCEEDED', error: null };
-      if (isPublishRecovery && typeof job.setMetadata === 'function') {
-        const nextMetadata = { ...metadata };
-        delete nextMetadata.publishRecoveryPending;
-        job.setMetadata(nextMetadata);
-        await job.save?.();
-      }
     } else {
+      requeuedJobId = await requeuePublishRecovery(context, job, metadata);
       publish = {
         state: 'FAILED',
         error: {
           code: ERROR_CODES.SERENITY_UPSTREAM_ERROR,
           message: 'The project could not be published',
-          retryable: true,
+          retryable: requeuedJobId !== null,
         },
       };
-      if (typeof job.setMetadata === 'function') {
-        job.setMetadata({ ...metadata, publishRecoveryPending: true });
-        await job.save?.();
-      }
     }
   }
   return {
@@ -679,6 +759,7 @@ export async function bulkTagsHandler(context, job, accessToken, injectedTranspo
     failureCount: failures.length,
     failures,
     publish,
+    ...(requeuedJobId ? { requeuedJobId } : {}),
   };
 }
 

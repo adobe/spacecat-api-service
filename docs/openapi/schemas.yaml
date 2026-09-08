@@ -12335,6 +12335,12 @@ SerenityBulkTagsResult:
   required:
     [outcome, matchedCount, updatedCount, unchangedCount, failureCount, failuresPage, publish]
   properties:
+    requeuedJobId:
+      type: string
+      format: uuid
+      description: |
+        Follow-up publish-only recovery job created when prompt mutations landed
+        but the project publish failed. Absent when no recovery was queued.
     outcome:
       type: string
       enum: [SUCCEEDED, PARTIAL_FAILURE]
@@ -12373,8 +12379,8 @@ SerenityBulkTagsResult:
           type: string
           enum: [SUCCEEDED, FAILED, SKIPPED]
           description: |
-            `SKIPPED` means no prompt update landed and the job did not carry an
-            explicit prior-failed-publish recovery marker.
+            `SKIPPED` means no prompt update landed. A publish-only recovery job
+            reports `SUCCEEDED` or `FAILED` without reapplying prompt mutations.
         error:
           oneOf:
             - type: object

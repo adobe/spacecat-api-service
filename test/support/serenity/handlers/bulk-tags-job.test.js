@@ -78,19 +78,43 @@ function serverOwnedTransport(dimension, prompts = []) {
 
 function workerJob(_promptIds, overrides = {}) {
   let metadata = {
+    brandId: 'brand',
     workspaceId: 'ws',
     projectId: 'project',
     tagIds: ['family'],
     operation: 'assign',
     normalizedFilter: { groups: [], candidateIds: [] },
+    promiseToken: { promise_token: 'promise-token' },
+    promisePair: 'SEMRUSH',
     ...overrides,
   };
   return {
+    getId: () => 'current-job',
     getMetadata: () => metadata,
     setMetadata: (next) => {
       metadata = next;
     },
     save: sinon.stub().resolves(),
+  };
+}
+
+function recoveryContext() {
+  const recoveryJob = {
+    getId: () => '11111111-1111-4111-8111-111111111111',
+    remove: sinon.stub().resolves(),
+  };
+  return {
+    context: {
+      env: { SERENITY_JOB_RUNNER_QUEUE_URL: 'queue-url' },
+      log: { warn: sinon.stub(), error: sinon.stub() },
+      dataAccess: {
+        AsyncJob: {
+          create: sinon.stub().resolves(recoveryJob),
+        },
+      },
+      sqs: { sendMessage: sinon.stub().resolves() },
+    },
+    recoveryJob,
   };
 }
 
@@ -410,20 +434,20 @@ describe('bulkTagsHandler worker accounting', () => {
     expect(result.publish).to.deep.equal({ state: 'SKIPPED', error: null });
   });
 
-  it('publishes an unchanged recovery job only when metadata marks a prior failed publish', async () => {
+  it('runs a publish-only recovery without rereading taxonomy or prompts', async () => {
     const transport = workerTransport([{ id: 'one', tags: [{ id: 'family' }] }]);
-    const job = workerJob(['one'], { publishRecoveryPending: true });
+    const job = workerJob([], { publishRecoveryPending: true, publishRecoveryDepth: 1 });
 
     const result = await bulkTagsHandler({ env: {}, log: {} }, job, 'token', transport);
 
     expect(result).to.deep.include({
-      outcome: 'SUCCEEDED', updatedCount: 0, unchangedCount: 1, failureCount: 0,
+      outcome: 'SUCCEEDED', updatedCount: 0, unchangedCount: 0, failureCount: 0,
     });
+    expect(transport.listProjectTags).not.to.have.been.called;
+    expect(transport.listPromptsByTags).not.to.have.been.called;
     expect(transport.updatePromptTagsByIds).not.to.have.been.called;
     expect(transport.publishProject).to.have.been.calledOnceWith('ws', 'project');
     expect(result.publish).to.deep.equal({ state: 'SUCCEEDED', error: null });
-    expect(job.getMetadata()).not.to.have.property('publishRecoveryPending');
-    expect(job.save).to.have.been.calledOnce;
   });
 
   it('does not publish a zero-match job', async () => {
@@ -582,9 +606,10 @@ describe('bulkTagsHandler worker accounting', () => {
     const transport = workerTransport([{ id: 'one', tags: [] }]);
     transport.publishProject.rejects(new Error('publish failed'));
     const job = workerJob(['one']);
+    const { context } = recoveryContext();
 
     const result = await bulkTagsHandler(
-      { env: {}, log: {} },
+      context,
       job,
       'token',
       transport,
@@ -599,8 +624,46 @@ describe('bulkTagsHandler worker accounting', () => {
         retryable: true,
       },
     });
-    expect(job.getMetadata().publishRecoveryPending).to.equal(true);
-    expect(job.save).to.have.been.calledOnce;
+    expect(result.requeuedJobId).to.equal('11111111-1111-4111-8111-111111111111');
+    expect(context.dataAccess.AsyncJob.create).to.have.been.calledOnceWith(
+      sinon.match({
+        status: 'IN_PROGRESS',
+        metadata: sinon.match({
+          jobType: 'serenity-bulk-tags',
+          brandId: 'brand',
+          workspaceId: 'ws',
+          projectId: 'project',
+          publishRecoveryPending: true,
+          publishRecoveryDepth: 1,
+          promiseToken: { promise_token: 'promise-token' },
+          promisePair: 'SEMRUSH',
+        }),
+      }),
+    );
+    expect(context.sqs.sendMessage).to.have.been.calledOnceWith(
+      'queue-url',
+      {
+        jobId: '11111111-1111-4111-8111-111111111111',
+        type: 'serenity-bulk-tags',
+      },
+    );
+  });
+
+  it('bounds publish-only recovery requeues', async () => {
+    const transport = workerTransport([]);
+    transport.publishProject.rejects(new Error('publish failed'));
+    const job = workerJob([], {
+      publishRecoveryPending: true,
+      publishRecoveryDepth: 5,
+    });
+    const { context } = recoveryContext();
+
+    const result = await bulkTagsHandler(context, job, 'token', transport);
+
+    expect(result.publish.error.retryable).to.equal(false);
+    expect(result).not.to.have.property('requeuedJobId');
+    expect(context.dataAccess.AsyncJob.create).not.to.have.been.called;
+    expect(context.sqs.sendMessage).not.to.have.been.called;
   });
 
   it('force-refreshes worker taxonomy validation instead of trusting an acceptance cache', async () => {

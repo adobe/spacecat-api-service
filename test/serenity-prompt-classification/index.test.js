@@ -45,12 +45,14 @@ describe('serenity-prompt-classification worker entry', () => {
   let run;
 
   let classifyPromptsHandlerStub;
+  let bulkTagsHandlerStub;
 
   beforeEach(async () => {
     sandbox = sinon.createSandbox();
     exchangeAndPersistStub = sandbox.stub();
     invalidateStub = sandbox.stub().resolves();
     classifyPromptsHandlerStub = sandbox.stub().resolves({ created: [] });
+    bulkTagsHandlerStub = sandbox.stub().resolves({ outcome: 'SUCCEEDED' });
 
     ({ NeedsReauthError } = await import('../../src/support/serenity/async-job-runner.js'));
 
@@ -63,6 +65,10 @@ describe('serenity-prompt-classification worker entry', () => {
       '../../src/support/serenity/handlers/classify-prompts-job.js': {
         classifyPromptsHandler: classifyPromptsHandlerStub,
         CLASSIFY_PROMPTS_JOB_TYPE: 'serenity-classify-prompts',
+      },
+      '../../src/support/serenity/handlers/bulk-tags-job.js': {
+        bulkTagsHandler: bulkTagsHandlerStub,
+        BULK_TAGS_JOB_TYPE: 'serenity-bulk-tags',
       },
     }));
   });
@@ -144,6 +150,24 @@ describe('serenity-prompt-classification worker entry', () => {
 
     expect(job.getStatus()).to.equal('COMPLETED');
     expect(invalidateStub).to.not.have.been.called;
+    expect(job.save).to.have.been.called;
+  });
+
+  it('transfers token ownership when a bulk publish recovery job is requeued', async () => {
+    const job = makeJob();
+    const context = makeContext(job);
+    exchangeAndPersistStub.resolves('access-token');
+    bulkTagsHandlerStub.resolves({
+      outcome: 'PARTIAL_FAILURE',
+      requeuedJobId: 'bulk-publish-recovery',
+    });
+
+    await run({ jobId: 'job-123', type: 'serenity-bulk-tags' }, context);
+
+    expect(bulkTagsHandlerStub).to.have.been.calledOnceWith(context, job, 'access-token');
+    expect(job.getStatus()).to.equal('COMPLETED');
+    expect(job.getResult().requeuedJobId).to.equal('bulk-publish-recovery');
+    expect(invalidateStub).not.to.have.been.called;
     expect(job.save).to.have.been.called;
   });
 
