@@ -2269,7 +2269,7 @@ describe('listLanguageCatalog', () => {
     const log = fakeLog();
     await listLanguageCatalog(transport, log);
     expect(log.warn).to.have.been.calledWithMatch(
-      'listLanguageCatalog: dropped entries missing code — upstream field shape may have changed',
+      'listLanguageCatalog: dropped entries missing code or id — upstream field shape may have changed',
       { droppedCount: 1 },
     );
   });
@@ -2334,24 +2334,35 @@ describe('handlers/markets.js — defensive branch coverage', () => {
   // Line 799: `id: hasText(l.id)?String(l.id):null` — the null branch fires
   // when a language item has a blank or missing `id` field. listLanguageCatalog
   // keeps such rows (they have a valid name) and maps id to null.
-  it('listLanguageCatalog maps a language item with missing id to null', async () => {
+  it('listLanguageCatalog drops entries with a missing or blank id — they can never resolve', async () => {
     const transport = {
       listLanguages: sinon.stub().resolves({
         items: [
-          { name: 'English', code: 'en' }, // no id at all
-          { id: '', name: 'French', code: 'fr' }, // blank id — hasText('') is false
+          { name: 'English', code: 'en' }, // no id at all → dropped
+          { id: '', name: 'French', code: 'fr' }, // blank id — hasText('') is false → dropped
           { id: 'l-de', name: 'German', code: 'de' }, // normal
         ],
       }),
     };
     const result = await listLanguageCatalog(transport);
-    // All three have names+codes so none are dropped. id-less/blank-id rows get null.
-    const english = result.items.find((l) => l.name === 'English');
-    const french = result.items.find((l) => l.name === 'French');
-    const german = result.items.find((l) => l.name === 'German');
-    expect(english.id).to.equal(null);
-    expect(french.id).to.equal(null);
-    expect(german.id).to.equal('l-de');
+    expect(result.items).to.deep.equal([{ id: 'l-de', name: 'German', code: 'de' }]);
+  });
+
+  it('warns when entries are dropped for missing id (not just missing code)', async () => {
+    const transport = {
+      listLanguages: sinon.stub().resolves({
+        items: [
+          { id: 'l-en', name: 'English', code: 'en' },
+          { name: 'French', code: 'fr' }, // no id → dropped, should warn
+        ],
+      }),
+    };
+    const log = fakeLog();
+    await listLanguageCatalog(transport, log);
+    expect(log.warn).to.have.been.calledWithMatch(
+      'listLanguageCatalog: dropped entries missing code or id — upstream field shape may have changed',
+      { droppedCount: 1 },
+    );
   });
 
   // Line 871: `const ctx = logCtx || {}` in syncModelsForProject — the `|| {}`

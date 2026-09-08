@@ -12627,11 +12627,11 @@ SerenityModelListResponse:
 
 SerenityLanguage:
   type: object
-  required: [name, code]
+  required: [id, name, code]
   properties:
     id:
-      type: [string, 'null']
-      description: Semrush language catalog id (null when the catalog omits it). A null id is never resolvable — createProject will 400 unknownLanguage for this entry's code regardless of what the catalog otherwise reports.
+      type: string
+      description: Semrush language catalog id. An entry the upstream catalog returned without a usable id is dropped from this list entirely (LLMO-7420) — it could never resolve at createProject time, so it is never offered as an option.
     name:
       type: string
       description: English language name as Semrush spells it. Metadata/fallback text only — not a resolution key (LLMO-7420).

@@ -1025,6 +1025,13 @@ export async function listGlobalModelCatalog(transport) {
  * upstream English display name, metadata/fallback text only. Tolerant of a
  * 404/405 catalog (returns an empty list) so a transient upstream gap
  * degrades to "no filter" rather than an error.
+ *
+ * Only entries with BOTH a usable `id` and `code` are returned — an entry
+ * missing either can never resolve via {@link resolveLanguageId} (its
+ * `byCode` map admits only entries with both), so surfacing it as a picker
+ * option would let a caller pick a language that then hard-fails
+ * `unknownLanguage` at create time. This keeps the two functions' notion of
+ * "resolvable" in sync.
  * @param {SerenityTransport} transport
  * @param {any} [log] - logger, used to surface a dropped-entries warning.
  */
@@ -1041,21 +1048,16 @@ export async function listLanguageCatalog(transport, log) {
     }
   }
   const usable = rawItems.filter((l) => l && typeof l === 'object' && hasText(l.name));
-  const withCode = usable.filter((l) => hasText(l.code));
-  if (withCode.length < usable.length) {
+  const resolvable = usable.filter((l) => hasText(l.code) && hasText(l.id));
+  if (resolvable.length < usable.length) {
     log?.warn?.(
-      'listLanguageCatalog: dropped entries missing code — upstream field shape may have changed',
-      { droppedCount: usable.length - withCode.length },
+      'listLanguageCatalog: dropped entries missing code or id — upstream field shape may have changed',
+      { droppedCount: usable.length - resolvable.length },
     );
   }
-  // Pre-existing asymmetry, intentionally not tightened here: an entry with a `code` but no
-  // usable `id` still appears in this catalog listing (id: null), but resolveLanguageId's
-  // byCode map only admits entries where BOTH id and code are present, so such an entry can
-  // never actually resolve. A caller offering this list as picker options can surface a
-  // language that then 400s unknownLanguage at create time.
-  const items = withCode
+  const items = resolvable
     .map((l) => ({
-      id: hasText(l.id) ? String(l.id) : null,
+      id: String(l.id),
       name: String(l.name),
       code: String(l.code),
     }))
