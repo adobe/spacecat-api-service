@@ -33,9 +33,16 @@ import { resolveElementModel } from '../constants.js';
  *  - Date range → `filters.simple.start_date`/`end_date` (YYYY-MM-DD) when provided;
  *    omitted → the element applies its own default window.
  *  - `comparison_data_formatting: 'join'` matches the live MFE (NOT 'union').
- *  - Brand scoping comes from targeting the brand's sub-workspace (resolved in the
- *    controller), so `CBF_brand`/`CBF_brand_urls` (which the MFE also sends) are not
- *    duplicated here.
+ *  - Brand scoping needs `CBF_brand` (the brand display name) — the sub-workspace ALONE
+ *    is NOT enough. This file previously claimed the opposite ("the sub-workspace already
+ *    scopes the brand, so CBF_brand is not duplicated here"); that premise is FALSE for
+ *    this element and was disproven live: topic "3 ft Bean Bag" (Lovesac, chatgpt,
+ *    2026-08-17..2026-08-23) scored visibility 14.29 / mentions 1 off a ChatGPT answer
+ *    that named Pottery Barn and never mentioned Lovesac, while the Brand Presence MFE —
+ *    which DOES send `CBF_brand` — correctly showed 0. Without the filter the element
+ *    counts ANY tracked brand appearing in the topic's responses, so competitor mentions
+ *    inflate the brand's mentions/visibility/citations. The column is `CBF_brand`, NOT
+ *    `CBF_ws_brand`. `CBF_brand_urls` remains un-sent (it scopes URL lists, not mentions).
  */
 
 /**
@@ -64,16 +71,29 @@ function toNumberOrNull(value) {
  * @param {string} [params.projectId] - Single Semrush project id to scope to (`CBF_project`).
  * @param {string[]} [params.projectIds] - Multiple Semrush project ids to OR together
  *   (`CBF_project`); takes precedence over `projectId` when both are given.
+ * @param {string} [params.brandName] - Brand display name to scope mentions/visibility/
+ *   citations to this brand (`CBF_brand`). Omitted → brand-agnostic (counts any tracked
+ *   brand in the topic's responses). Sent as the brand's display name; exact-name matching
+ *   is what the live probe covered — whether Semrush also resolves aliases is [unverified].
  * @returns {object} Semrush element request payload.
  */
 export function buildTopicPromptsPayload({
-  topic, model, platform, startDate, endDate, projectId, projectIds,
+  topic, model, platform, startDate, endDate, projectId, projectIds, brandName,
 } = {}) {
   const resolvedModel = resolveElementModel(model || platform);
 
   const advancedFilters = [
     { op: 'or', filters: [{ op: 'eq', val: resolvedModel, col: 'CBF_model' }] },
   ];
+  // Brand scoping: restrict mentions/visibility/citations to THIS brand via CBF_brand.
+  // Without it the element counts ANY tracked brand in the topic's responses, so a
+  // competitor mentioned in an answer where the brand is absent inflates the numbers
+  // (verified live against the Brand Presence MFE, which sends this filter — see the
+  // module header). Wrapped in a single-value `or` block to match the CBF_model/
+  // CBF_topic/CBF_project shape below; functionally identical to the MFE's bare `eq`.
+  if (brandName) {
+    advancedFilters.push({ op: 'or', filters: [{ op: 'eq', val: brandName, col: 'CBF_brand' }] });
+  }
   // Topic scoping: the bare topic name on CBF_topic (verified live). Absent → all topics.
   if (topic) {
     advancedFilters.push({ op: 'or', filters: [{ op: 'eq', val: topic, col: 'CBF_topic' }] });

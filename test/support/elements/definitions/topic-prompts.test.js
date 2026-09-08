@@ -69,6 +69,15 @@ describe('topic-prompts definitions', () => {
       expect(findFilterVal(buildTopicPromptsPayload(), 'CBF_topic')).to.be.undefined;
     });
 
+    it('scopes to the brand via a CBF_brand or-block when brandName is provided', () => {
+      expect(findFilterVal(buildTopicPromptsPayload({ brandName: 'Lovesac' }), 'CBF_brand'))
+        .to.equal('Lovesac');
+    });
+
+    it('omits CBF_brand when brandName is not provided (brand-agnostic, unchanged)', () => {
+      expect(findFilterVal(buildTopicPromptsPayload(), 'CBF_brand')).to.be.undefined;
+    });
+
     it('includes CBF_project (in an or-block) when projectId is provided', () => {
       expect(findFilterVal(buildTopicPromptsPayload({ projectId: 'proj-42' }), 'CBF_project'))
         .to.equal('proj-42');

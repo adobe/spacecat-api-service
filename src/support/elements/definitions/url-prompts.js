@@ -35,6 +35,10 @@ import { resolveElementModel, isAllPlatforms } from '../constants.js';
  *    controller). The live MFE also sends `CBF_brand`, but the url-inspector sibling
  *    definitions (owned-urls / domain-urls / cited-domains) do not duplicate it —
  *    the sub-workspace already scopes the brand — so it is omitted here too.
+ *    CAVEAT: this shared "sub-workspace makes CBF_brand redundant" premise was DISPROVEN
+ *    live for PROMPTS_BY_TOPIC (see topic-prompts.js — competitor mentions inflated the
+ *    brand's numbers until CBF_brand was added). It is UNVERIFIED for this element; worth
+ *    re-checking against the MFE before trusting the counts here.
  *  - Market scope → the element's TOP-LEVEL `project_id` (like owned-urls), NOT a
  *    `CBF_project` advanced filter (verified live 2026-07-30: `CBF_project` is a silent
  *    no-op; a bogus top-level `project_id` → HTTP 422). The element takes ONE project id

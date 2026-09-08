@@ -17,7 +17,6 @@ import { hasText, isNonEmptyObject, isValidUUID } from '@adobe/spacecat-shared-u
 import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
 
 import { getBrandIdentity, getBrandBySite } from '../support/brands-storage.js';
-import { resolveBrandUuid } from '../support/prompts-storage.js';
 import { createElementsTransport } from '../support/elements/elements-transport.js';
 import { ElementsTransportError } from '../support/elements/errors.js';
 import { createElementsService } from '../support/elements/elements-service.js';
@@ -434,11 +433,14 @@ async function authorizeOrg(ctx) {
  *
  * @param {object} ctx - Request context.
  * @param {object} log - Logger (for the misconfiguration alert).
- * @returns {Promise<{workspaceId: string, brandUuid: string} | {error: Response}>}
- *   the brand's sub-workspace id and resolved Postgres brand UUID on success, or a
+ * @returns {Promise<{workspaceId: string, brandUuid: string, brand: object} | {error: Response}>}
+ *   the brand's sub-workspace id, resolved Postgres brand UUID and brand identity
+ *   (`{ id, name }`) on success, or a
  *   Response on failure (400 non-UUID brandId, 403 no access, 404 org/brand not found
  *   or brand has no sub-workspace, 409 sub-workspace misconfigured as the parent).
- *   `brandUuid` lets callers run the project-ownership guard (see listUrlPrompts).
+ *   `brandUuid` lets callers run the project-ownership guard (see listUrlPrompts);
+ *   `brand.name` is the `CBF_brand` value used to brand-scope elements that are not
+ *   scoped by the sub-workspace alone (see topic-prompts.js).
  */
 async function authorizeBrandSubWorkspace(ctx, log) {
   const spaceCatId = ctx?.params?.spaceCatId;
@@ -454,7 +456,12 @@ async function authorizeBrandSubWorkspace(ctx, log) {
   if (!postgrestClient?.from) {
     return { error: createResponse({ error: 'configurationError', message: 'PostgREST client not available' }, 503) };
   }
-  const brandUuid = await resolveBrandUuid(spaceCatId, brandId, postgrestClient);
+  // getBrandIdentity (rather than resolveBrandUuid) so callers also get the brand's
+  // display NAME for `CBF_brand` scoping. Equivalent lookup here: the non-UUID brandId
+  // path is already rejected above, so resolveBrandUuid's name-ilike fallback is
+  // unreachable and both resolve `brands` by organization_id + id.
+  const brand = await getBrandIdentity(spaceCatId, brandId, postgrestClient);
+  const brandUuid = brand?.id;
   if (!brandUuid) {
     return { error: notFound(`Brand not found for organization: ${brandId}`) };
   }
@@ -499,7 +506,7 @@ async function authorizeBrandSubWorkspace(ctx, log) {
       ),
     };
   }
-  return { workspaceId, brandUuid };
+  return { workspaceId, brandUuid, brand };
 }
 
 export default function ElementsController(context, log, env) {
@@ -1126,7 +1133,9 @@ export default function ElementsController(context, log, env) {
    * (78864493) fetched across ALL topics, grouped by topic and aggregated
    * server-side (promptCount, brandMentions/citations, avg visibility/position/sentiment).
    *
-   * Brand-scoped via the brand's Semrush **sub-workspace** (like {@link listTopicPrompts}).
+   * Brand-scoped by the brand's Semrush **sub-workspace** AND a `CBF_brand` filter on the
+   * brand's display name (like {@link listTopicPrompts}) — the sub-workspace alone leaves
+   * competitor mentions in the counts, see topic-prompts.js.
    * Caller-supplied projectId(s) (optional) scope to `CBF_project`; absent → all of the
    * brand's markets.
    * Returns the full topic list (`{ topics, totalCount }`); the table paginates client-side.
@@ -1142,7 +1151,7 @@ export default function ElementsController(context, log, env) {
         return auth.error;
       }
       const { brandId } = ctx?.params ?? {};
-      const { workspaceId } = auth;
+      const { workspaceId, brand } = auth;
       const query = extractQuery(ctx);
 
       // Date range is optional; when present it must be a valid, ordered YYYY-MM-DD pair.
@@ -1173,11 +1182,20 @@ export default function ElementsController(context, log, env) {
         return ownershipError;
       }
 
+      // Brand-scope the element to this brand's mentions (CBF_brand); without it the
+      // per-topic aggregates count any tracked brand in the topic's responses. A brand
+      // with no display name falls back to the old brand-agnostic (inflated) counts —
+      // warn so that is traceable rather than silent.
+      if (!hasText(brand?.name)) {
+        log.warn('elements: brand has no display name - listTopics falls back to brand-agnostic counts', { brandId });
+      }
+
       const topics = await service.getTopics(workspaceId, {
         model: query.model || query.platform,
         startDate: hasText(startDate) ? startDate : undefined,
         endDate: hasText(endDate) ? endDate : undefined,
         projectIds,
+        brandName: brand?.name,
       });
 
       return cachedOk({ topics, totalCount: topics.length });
@@ -1193,8 +1211,11 @@ export default function ElementsController(context, log, env) {
    * PROMPTS_BY_TOPIC element (78864493), scoped by `CBF_topic` = the topic NAME
    * (`:topicId` is the URL-encoded topic name, not a UUID — Semrush topics have no id).
    *
-   * Brand-scoped via the brand's Semrush **sub-workspace** (like {@link listPrompts} —
-   * projects/prompts live only there). Caller-supplied projectId(s) (optional) scope
+   * Brand-scoped by the brand's Semrush **sub-workspace** (like {@link listPrompts} —
+   * projects/prompts live only there) AND by a `CBF_brand` filter on the brand's display
+   * name: without the latter the element counts ANY tracked brand mentioned in the topic's
+   * responses, so competitors inflate mentions/visibility/citations (see topic-prompts.js).
+   * Caller-supplied projectId(s) (optional) scope
    * to `CBF_project`; absent → all of the brand's markets. Pagination is
    * client-side (Semrush has no server-side paging); `totalCount` is the full count.
    *
@@ -1210,7 +1231,7 @@ export default function ElementsController(context, log, env) {
         return auth.error;
       }
       const { brandId, topicId } = ctx?.params ?? {};
-      const { workspaceId } = auth;
+      const { workspaceId, brand } = auth;
 
       // :topicId is the URL-encoded topic NAME. enrichPathInfo already decodes path
       // params, but decode defensively in case a caller double-encodes.
@@ -1253,12 +1274,20 @@ export default function ElementsController(context, log, env) {
         return ownershipError;
       }
 
+      // Brand-scope the element to this brand's mentions (CBF_brand); see the payload
+      // builder's header for why the sub-workspace alone is not sufficient. A brand with
+      // no display name falls back to brand-agnostic counts — warn rather than fail.
+      if (!hasText(brand?.name)) {
+        log.warn('elements: brand has no display name - listTopicPrompts falls back to brand-agnostic counts', { brandId });
+      }
+
       const allPrompts = await service.getTopicPrompts(workspaceId, {
         topic,
         model: query.model || query.platform,
         startDate: hasText(startDate) ? startDate : undefined,
         endDate: hasText(endDate) ? endDate : undefined,
         projectIds,
+        brandName: brand?.name,
       });
 
       // Client-side pagination (mirrors listOwnedUrls); totalCount is the full count.
@@ -1284,7 +1313,8 @@ export default function ElementsController(context, log, env) {
    *
    * Brand-scoped via the brand's Semrush **sub-workspace** (like {@link listTopicPrompts});
    * the brand is NOT sent as a filter (`CBF_brand` is redundant with sub-workspace scoping —
-   * see url-prompts.js). Pagination is client-side; `totalCount` is the full count.
+   * see url-prompts.js; note that premise proved FALSE for the topics elements above).
+   * Pagination is client-side; `totalCount` is the full count.
    *
    * Query params: `url` (required, the cited URL), `startDate`/`endDate` (required,
    * YYYY-MM-DD), `model`/`platform` (optional, default search-gpt), `projectId`

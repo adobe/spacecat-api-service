@@ -830,11 +830,11 @@ describe('ElementsController', () => {
       expect(params.enrichUserIntent).to.equal(true);
     });
 
-    it('resolves the brand uuid via resolveBrandUuid before querying', async () => {
+    it('resolves the brand identity via getBrandIdentity before querying', async () => {
       const ctx = fakeContext({ url: promptsUrl() });
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       await ctrl.listPrompts(ctx);
-      expect(resolveBrandUuidStub).to.have.been.calledWith(ORG_ID, BRAND_ID, sinon.match.object);
+      expect(getBrandIdentityStub).to.have.been.calledWith(ORG_ID, BRAND_ID, sinon.match.object);
       expect(resolveBrandWorkspaceStub)
         .to.have.been.calledWith(sinon.match.object, ORG_ID, BRAND_ID);
     });
@@ -874,7 +874,7 @@ describe('ElementsController', () => {
     });
 
     it('404s when the brand does not resolve for the org', async () => {
-      resolveBrandUuidStub.resolves(null);
+      getBrandIdentityStub.resolves(null);
       const ctx = fakeContext({ url: promptsUrl() });
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       const res = await ctrl.listPrompts(ctx);
