@@ -608,7 +608,149 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     expect(result.body.error).to.equal('unknownLanguage');
   });
 
-  // Branch coverage: ICU DisplayNames returns the input verbatim for unknown
+  // LLMO-7309: Semrush tracks Chinese as two script catalogs, returned live as
+  // `Chinese Simplified` / `Chinese Traditional` (space-separated). The app
+  // offers them as `zh-Hans` / `zh-Hant`, whose Intl English names are
+  // `Simplified Chinese` / `Traditional Chinese` (reversed word order) — so
+  // resolution matches on a word-order-independent normalized key.
+  it('resolves `zh-Hans` to the Chinese Simplified catalog row', async () => {
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(null);
+    dataAccess.BrandSemrushProject.create.resolves();
+    dataAccess.Site.findById.resolves({ getBaseURL: () => 'https://cuhk.edu.hk' });
+    const transport = {
+      listLanguages: sinon.stub().resolves({
+        items: [
+          { id: 'lang-zh-hant', name: 'Chinese Traditional' },
+          { id: 'lang-zh-hans', name: 'Chinese Simplified' },
+        ],
+      }),
+      createProject: sinon.stub().resolves({ id: 'proj-hk-zh' }),
+      updateProject: sinon.stub().resolves(),
+      publishProject: sinon.stub().resolves(),
+    };
+    clearLanguageCache();
+
+    const result = await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
+      market: 'HK', languageCode: 'zh-Hans', siteId: '00000000-0000-4000-8000-0000000000cc', brandNames: ['CUHK'],
+    }, fakeLog());
+
+    expect(result.status).to.equal(201);
+    expect(transport.createProject.firstCall.args[1].language_id).to.equal('lang-zh-hans');
+    expect(result.body.languageCode).to.equal('zh-hans');
+  });
+
+  it('resolves `zh-Hant` to the Chinese Traditional catalog row', async () => {
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(null);
+    dataAccess.BrandSemrushProject.create.resolves();
+    dataAccess.Site.findById.resolves({ getBaseURL: () => 'https://cuhk.edu.hk' });
+    const transport = {
+      listLanguages: sinon.stub().resolves({
+        items: [
+          { id: 'lang-zh-hant', name: 'Chinese Traditional' },
+          { id: 'lang-zh-hans', name: 'Chinese Simplified' },
+        ],
+      }),
+      createProject: sinon.stub().resolves({ id: 'proj-hk-zh' }),
+      updateProject: sinon.stub().resolves(),
+      publishProject: sinon.stub().resolves(),
+    };
+    clearLanguageCache();
+
+    const result = await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
+      market: 'HK', languageCode: 'zh-Hant', siteId: '00000000-0000-4000-8000-0000000000cc', brandNames: ['CUHK'],
+    }, fakeLog());
+
+    expect(result.status).to.equal(201);
+    expect(transport.createProject.firstCall.args[1].language_id).to.equal('lang-zh-hant');
+    expect(result.body.languageCode).to.equal('zh-hant');
+  });
+
+  // Back-compat: a market persisted as bare `zh` (before the split) still
+  // resolves — the token-subset fallback maps "chinese" to the alphabetically
+  // -first superset row, i.e. Simplified.
+  it('resolves a legacy bare `zh` to Chinese Simplified (token-subset fallback)', async () => {
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(null);
+    dataAccess.BrandSemrushProject.create.resolves();
+    dataAccess.Site.findById.resolves({ getBaseURL: () => 'https://cuhk.edu.hk' });
+    const transport = {
+      listLanguages: sinon.stub().resolves({
+        items: [
+          { id: 'lang-zh-hant', name: 'Chinese Traditional' },
+          { id: 'lang-zh-hans', name: 'Chinese Simplified' },
+        ],
+      }),
+      createProject: sinon.stub().resolves({ id: 'proj-hk-zh' }),
+      updateProject: sinon.stub().resolves(),
+      publishProject: sinon.stub().resolves(),
+    };
+    clearLanguageCache();
+
+    const result = await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
+      market: 'HK', languageCode: 'zh', siteId: '00000000-0000-4000-8000-0000000000cc', brandNames: ['CUHK'],
+    }, fakeLog());
+
+    expect(result.status).to.equal(201);
+    expect(transport.createProject.firstCall.args[1].language_id).to.equal('lang-zh-hans');
+  });
+
+  // A parenthetical catalog form must also resolve — the normalizer strips
+  // punctuation, so `zh-Hant` "Traditional Chinese" matches "Chinese (Traditional)".
+  it('resolves `zh-Hant` when the catalog uses a parenthetical qualifier', async () => {
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(null);
+    dataAccess.BrandSemrushProject.create.resolves();
+    dataAccess.Site.findById.resolves({ getBaseURL: () => 'https://cuhk.edu.hk' });
+    const transport = {
+      listLanguages: sinon.stub().resolves({
+        items: [
+          { id: 'lang-zh-hant', name: 'Chinese (Traditional)' },
+          { id: 'lang-zh-hans', name: 'Chinese (Simplified)' },
+        ],
+      }),
+      createProject: sinon.stub().resolves({ id: 'proj-hk-zh' }),
+      updateProject: sinon.stub().resolves(),
+      publishProject: sinon.stub().resolves(),
+    };
+    clearLanguageCache();
+
+    const result = await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
+      market: 'HK', languageCode: 'zh-Hant', siteId: '00000000-0000-4000-8000-0000000000cc', brandNames: ['CUHK'],
+    }, fakeLog());
+
+    expect(result.status).to.equal(201);
+    expect(transport.createProject.firstCall.args[1].language_id).to.equal('lang-zh-hant');
+  });
+
+  // An EXACT catalog name must win over the token-subset fallback: a real bare
+  // `Chinese` row resolves legacy `zh` directly rather than via the superset scan.
+  it('prefers an exact `Chinese` catalog row for legacy `zh`', async () => {
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(null);
+    dataAccess.BrandSemrushProject.create.resolves();
+    dataAccess.Site.findById.resolves({ getBaseURL: () => 'https://cuhk.edu.hk' });
+    const transport = {
+      listLanguages: sinon.stub().resolves({
+        items: [
+          { id: 'lang-zh-hans', name: 'Chinese Simplified' },
+          { id: 'lang-zh', name: 'Chinese' },
+        ],
+      }),
+      createProject: sinon.stub().resolves({ id: 'proj-hk-zh' }),
+      updateProject: sinon.stub().resolves(),
+      publishProject: sinon.stub().resolves(),
+    };
+    clearLanguageCache();
+
+    const result = await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
+      market: 'HK', languageCode: 'zh', siteId: '00000000-0000-4000-8000-0000000000cc', brandNames: ['CUHK'],
+    }, fakeLog());
+
+    expect(result.status).to.equal(201);
+    expect(transport.createProject.firstCall.args[1].language_id).to.equal('lang-zh');
+  });
   // tags. The handler guards against that and returns null from
   // isoToEnglishName, which surfaces as 400 unknownLanguage.
   it('400s when the language tag is not a real language (ICU returns it unchanged)', async () => {
