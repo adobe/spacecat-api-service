@@ -64,6 +64,8 @@ function defaultDateRange() {
  *  - Brand scoping comes from the request targeting the brand's sub-workspace (resolved in
  *    the controller); the MFE also passes `CBF_brand` (name), but the sub-workspace already
  *    scopes to the brand, so we don't duplicate it here.
+ *    CAVEAT: that premise was DISPROVEN live for PROMPTS_BY_TOPIC (see topic-prompts.js);
+ *    it is UNVERIFIED for this element and deserves its own MFE reconciliation.
  *
  * @param {object} [params]
  * @param {string} [params.model] - AI model filter value (Semrush engine name or UI
