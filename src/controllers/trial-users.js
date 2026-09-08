@@ -146,11 +146,21 @@ function TrialUsersController(ctx) {
         return createResponse({ message: `Trial user with this email already exists ${existingTrialUser.getId()}` }, 409);
       }
 
-      env.IMS_CLIENT_ID = env.EMAIL_IMS_CLIENT_ID;
-      env.IMS_CLIENT_SECRET = env.EMAIL_IMS_CLIENT_SECRET;
-      env.IMS_CLIENT_CODE = env.EMAIL_IMS_CLIENT_CODE;
-      env.IMS_SCOPE = env.EMAIL_IMS_SCOPE;
-      const imsClient = ImsClient.createFrom(context);
+      if (!env.EMAIL_IMS_CLIENT_ID) {
+        return internalServerError('EMAIL_IMS_CLIENT_ID is not configured');
+      }
+      // Use a local env copy for the email-specific IMS credentials.
+      // Do NOT mutate context.env: it is reused across warm Lambda invocations,
+      // so writing IMS_CLIENT_ID here would leak the email client's credentials
+      // into later requests that expect the default client.
+      const emailEnv = {
+        ...env,
+        IMS_CLIENT_ID: env.EMAIL_IMS_CLIENT_ID,
+        IMS_CLIENT_SECRET: env.EMAIL_IMS_CLIENT_SECRET,
+        IMS_CLIENT_CODE: env.EMAIL_IMS_CLIENT_CODE,
+        IMS_SCOPE: env.EMAIL_IMS_SCOPE,
+      };
+      const imsClient = ImsClient.createFrom({ ...context, env: emailEnv });
       const imsTokenPayload = await imsClient.getServiceAccessToken();
       const postOfficeEndpoint = env.ADOBE_POSTOFFICE_ENDPOINT;
       const emailTemplateName = env.EMAIL_LLMO_TEMPLATE;
@@ -160,7 +170,8 @@ function TrialUsersController(ctx) {
         method: 'POST',
         headers: {
           Accept: 'application/xml',
-          Authorization: `IMS ${imsTokenPayload.access_token}`,
+          Authorization: `Bearer ${imsTokenPayload.access_token}`,
+          'x-api-key': env.EMAIL_IMS_CLIENT_ID,
           'Content-Type': 'application/xml',
         },
         body: emailPayload,
