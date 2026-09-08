@@ -25,7 +25,7 @@
     "build": "hedy -v --test-bundle",
     "deploy": "hedy -v --deploy --aws-deploy-bucket=spacecat-prod-deploy --pkgVersion=latest",
     "deploy-stage": "hedy -v --deploy --aws-deploy-bucket=spacecat-stage-deploy --pkgVersion=latest",
-    "deploy-dev": "hedy -v --deploy --pkgVersion=latest$CI_BUILD_NUM -l latest --aws-deploy-bucket=spacecat-dev-deploy --cleanup-ci=24h",
+    "deploy-dev": "hedy -v --deploy --pkgVersion=latest$CI_BUILD_NUM -l annhammo --aws-deploy-bucket=spacecat-dev-deploy --cleanup-ci=24h",
     "deploy-secrets": "hedy --aws-update-secrets --params-file=secrets/secrets.env",
     "build:worker": "hedy -v --test-bundle --entryFile=src/serenity-prompt-classification/index.js --name=spacecat-services/serenity-job-runner",
     "deploy:worker": "hedy -v --deploy --entryFile=src/serenity-prompt-classification/index.js --name=spacecat-services/serenity-job-runner --aws-deploy-bucket=spacecat-prod-deploy --pkgVersion=latest -p AWS_ENV=prod",
