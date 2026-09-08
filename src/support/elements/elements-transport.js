@@ -20,19 +20,17 @@ const EXTERNAL_ELEMENTS_BASE_URL = 'https://api.semrush.com';
 const EXTERNAL_ELEMENTS_API_PATH = '/apis/v4-raw/external-api/v1/workspaces';
 
 export const ELEMENTS_PURPOSE_BRAND_CLAIMS = 'brand_claims';
-export const ELEMENTS_PURPOSE_HALLUCINATION_DETECTION = 'hallucination_detection';
-export const ELEMENTS_CREDENTIAL_PROFILE_ABV_SHARED_ELEMENTS = 'abv_shared_elements';
+export const ELEMENTS_CREDENTIAL_PROFILE_BRAND_CLAIMS = 'brand_claims';
 
-const ABV_SHARED_ELEMENTS_CREDENTIAL_PROFILE = Object.freeze({
-  id: ELEMENTS_CREDENTIAL_PROFILE_ABV_SHARED_ELEMENTS,
-  enabledEnvVar: 'SEMRUSH_ABV_SHARED_ELEMENTS_TECHNICAL_AUTH_ENABLED',
-  apiKeyEnvVar: 'SEMRUSH_ABV_SHARED_ELEMENTS_API_KEY',
+const BRAND_CLAIMS_CREDENTIAL_PROFILE = Object.freeze({
+  id: ELEMENTS_CREDENTIAL_PROFILE_BRAND_CLAIMS,
+  enabledEnvVar: 'SEMRUSH_BRAND_CLAIMS_TECHNICAL_AUTH_ENABLED',
+  apiKeyEnvVar: 'SEMRUSH_BRAND_CLAIMS_API_KEY',
 });
 
 // Purpose ownership is code-controlled: callers cannot select a credential profile or key.
 const CREDENTIAL_PROFILE_BY_PURPOSE = Object.freeze({
-  [ELEMENTS_PURPOSE_BRAND_CLAIMS]: ABV_SHARED_ELEMENTS_CREDENTIAL_PROFILE,
-  [ELEMENTS_PURPOSE_HALLUCINATION_DETECTION]: ABV_SHARED_ELEMENTS_CREDENTIAL_PROFILE,
+  [ELEMENTS_PURPOSE_BRAND_CLAIMS]: BRAND_CLAIMS_CREDENTIAL_PROFILE,
 });
 // Verified against a real Semrush-provisioned brand: individual Stats-per-URL
 // calls were timing out at 15s roughly half the time; 30s was needed for them
@@ -340,8 +338,8 @@ function createTechnicalElementsTransport({ env, credentialProfile }) {
     async fetchElement(workspaceId, elementId, payload, callOpts = {}) {
       const url = `${EXTERNAL_ELEMENTS_BASE_URL}${EXTERNAL_ELEMENTS_API_PATH}/${enc(workspaceId)}/products/ai/elements/${enc(elementId)}`;
       return request(url, buildTechnicalHeaders(apiKey), { render_data: payload }, {
-        // This shared profile has a small per-credential pool. Never replay technical-account
-        // requests: retries would amplify concurrent background traffic across its purposes.
+        // The Brand Claims profile has a small per-credential pool. Never replay technical-account
+        // requests: retries would amplify concurrent background traffic across its workload.
         maxRetries: 0,
         timeoutMs: callOpts.timeoutMs,
         workspaceId,
