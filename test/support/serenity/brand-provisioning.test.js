@@ -533,6 +533,7 @@ describe('provisionBrandSubworkspaceBare', () => {
   let resolveWorkspaceId;
   let ensureSubworkspace;
   let deleteAllProjects;
+  let emptyWorkspaceBestEffort;
 
   beforeEach(() => {
     resolveWorkspaceId = sinon.stub().resolves(PARENT_WS);
@@ -544,6 +545,15 @@ describe('provisionBrandSubworkspaceBare', () => {
       return NEW_WS;
     });
     deleteAllProjects = sinon.stub().resolves();
+    // emptyWorkspaceBestEffort now lives in workspace-lifecycle.js (LLMO-7418, shared with the
+    // async provisioning worker) — this is the seam this file's cleanup calls through, so it is
+    // what these tests mock, not deleteAllProjects (which brand-provisioning.js no longer calls
+    // directly for cleanup; it still imports it for emptyProvisionedWorkspace elsewhere, hence
+    // both are provided in the module override below). The mocked stub itself must never throw —
+    // matching the real function's documented "never throws" contract — so its own
+    // swallow-and-log behavior is tested where it is DEFINED (workspace-lifecycle.test.js), not
+    // re-tested here through a call chain that no longer reaches it.
+    emptyWorkspaceBestEffort = sinon.stub().resolves();
   });
 
   async function loadBareModule() {
@@ -556,6 +566,7 @@ describe('provisionBrandSubworkspaceBare', () => {
       '../../../src/support/serenity/workspace-lifecycle.js': {
         ensureSubworkspace,
         deleteAllProjects,
+        emptyWorkspaceBestEffort,
       },
     });
   }
@@ -569,7 +580,7 @@ describe('provisionBrandSubworkspaceBare', () => {
     expect(ensureSubworkspace.firstCall.args[0]).to.equal(TRANSPORT);
     expect(ensureSubworkspace.firstCall.args[2]).to.equal(PARENT_WS);
     // Success → no cleanup.
-    expect(deleteAllProjects).to.not.have.been.called;
+    expect(emptyWorkspaceBestEffort).to.not.have.been.called;
     // The Brand collection is threaded through so the claim filter can run, and the
     // created-vs-adopted callback so failure compensation can gate on provenance.
     // createReadiness 'skip' (LLMO-6569): bare create makes no project/prompts, so it skips the
@@ -602,7 +613,7 @@ describe('provisionBrandSubworkspaceBare', () => {
       expect(e.status).to.equal(502);
       expect(e.message).to.equal('Semrush provisioning returned no sub-workspace id');
     }
-    expect(deleteAllProjects).to.not.have.been.called;
+    expect(emptyWorkspaceBestEffort).to.not.have.been.called;
   });
 
   it('empties the captured sub-workspace when ensureSubworkspace throws after creating it', async () => {
@@ -619,10 +630,11 @@ describe('provisionBrandSubworkspaceBare', () => {
     } catch (e) {
       expect(e.status).to.equal(502);
     }
-    // The orphaned (empty) sub-workspace's projects are emptied; the shell is left in place.
-    // The org parent is threaded through as the assertNotParent guard input.
-    expect(deleteAllProjects).to.have.been.calledOnceWithExactly(TRANSPORT, NEW_WS, PARENT_WS);
-    expect(log.info).to.have.been.called;
+    // The orphaned (empty) sub-workspace's projects are emptied via the shared
+    // emptyWorkspaceBestEffort primitive; the shell is left in place. The org parent is threaded
+    // through as the assertNotParent guard input, and the phase names this call site.
+    expect(emptyWorkspaceBestEffort)
+      .to.have.been.calledOnceWithExactly(TRANSPORT, NEW_WS, PARENT_WS, log, 'bare-brand-create');
   });
 
   it('does NOT attempt a cleanup when ensureSubworkspace throws before creating the sub-workspace', async () => {
@@ -634,30 +646,7 @@ describe('provisionBrandSubworkspaceBare', () => {
     } catch (e) {
       expect(e.status).to.equal(500);
     }
-    expect(deleteAllProjects).to.not.have.been.called;
-  });
-
-  it('swallows a cleanup failure (logs at error) and re-throws the original error', async () => {
-    ensureSubworkspace = sinon.stub().callsFake(async (transport, brand, ...rest) => {
-      brand.setSemrushSubWorkspaceId(NEW_WS);
-      notifyCreated(rest, NEW_WS);
-      throw new SerenityTransportError(502, 'settle timeout');
-    });
-    deleteAllProjects = sinon.stub().rejects(new Error('cleanup network error'));
-    const { provisionBrandSubworkspaceBare } = await loadBareModule();
-    const log = { info: sinon.stub(), error: sinon.stub() };
-    try {
-      await provisionBrandSubworkspaceBare(buildContext(), bareParams, log);
-      expect.fail('should have thrown');
-    } catch (e) {
-      // The ORIGINAL error is re-thrown, not the release failure.
-      expect(e.status).to.equal(502);
-    }
-    expect(log.error).to.have.been.called;
-    const [msg, meta] = log.error.firstCall.args;
-    expect(msg).to.include('failed to empty');
-    expect(meta.semrushWorkspaceId).to.equal(NEW_WS);
-    expect(meta.error).to.equal('cleanup network error');
+    expect(emptyWorkspaceBestEffort).to.not.have.been.called;
   });
 
   it('throws 400 when brandName is missing', async () => {
