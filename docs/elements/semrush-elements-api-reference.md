@@ -500,7 +500,6 @@ This temporary Elements REST `Apikey` seam is related to, but distinct from, the
 Visibility gRPC OAuth/Bearer provider in #3064/#3099. It intentionally has no code dependency on or
 credential reuse with that provider. Configure the generic Semrush key before setting the Brand
 Claims enable flag. An enabled mapped purpose fails closed with HTTP 503 when the key is missing;
-it never falls back to
-caller IMS or another key. Generic Elements endpoints remain IMS-only. When proper Elements S2S is
+it never falls back to caller IMS or another key. Generic Elements endpoints remain IMS-only. When proper Elements S2S is
 available, replace the technical branch behind `createElementsTransportForPurpose`; callers retain
 the generic `fetchElement(workspaceId, elementId, payload)` contract.

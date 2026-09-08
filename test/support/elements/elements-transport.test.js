@@ -17,7 +17,6 @@ import sinon from 'sinon';
 import {
   createElementsTransport,
   createElementsTransportForPurpose,
-  ELEMENTS_CREDENTIAL_PROFILE_BRAND_CLAIMS,
   ELEMENTS_PURPOSE_BRAND_CLAIMS,
 } from '../../../src/support/elements/elements-transport.js';
 import { ElementsTransportError } from '../../../src/support/elements/errors.js';
@@ -114,9 +113,8 @@ describe('createElementsTransport', () => {
       ...extra,
     });
 
-    it('exports stable literal purpose and profile identifiers', () => {
+    it('exports the stable Brand Claims purpose identifier', () => {
       expect(ELEMENTS_PURPOSE_BRAND_CLAIMS).to.equal('brand_claims');
-      expect(ELEMENTS_CREDENTIAL_PROFILE_BRAND_CLAIMS).to.equal('brand_claims');
     });
 
     it('uses the Brand Claims profile wire contract', async () => {
@@ -218,7 +216,8 @@ describe('createElementsTransport', () => {
       }
 
       expect(err.status).to.equal(503);
-      expect(err.message).to.contain('SEMRUSH_TMP_API_KEY');
+      expect(err.message).to.equal('Technical authentication is not configured for this capability');
+      expect(err.message).to.not.contain('SEMRUSH_TMP_API_KEY');
       unrelatedKeys.forEach((key) => expect(err.message).to.not.contain(key));
       expect(resolveImsToken).to.not.have.been.called;
       expect(fetchStub).to.not.have.been.called;
@@ -261,16 +260,13 @@ describe('createElementsTransport', () => {
       expect(fetchStub.firstCall.args[1].body).to.equal(JSON.stringify({ original: true }));
     });
 
-    [
-      [{ SEMRUSH_TMP_API_KEY: undefined }, 'SEMRUSH_TMP_API_KEY'],
-      [{ SEMRUSH_TMP_API_KEY: '   ' }, 'SEMRUSH_TMP_API_KEY'],
-    ].forEach(([envOverride, variable]) => {
-      it(`fails closed with 503 for invalid ${variable} configuration`, async () => {
+    [undefined, '', '   '].forEach((apiKey) => {
+      it(`fails closed with a safe 503 for invalid API key ${JSON.stringify(apiKey)}`, async () => {
         const resolveImsToken = sinon.stub().resolves(IMS_TOKEN);
         let err;
         try {
           await makePurposeTransport({
-            env: { ...TECHNICAL_ENV, ...envOverride },
+            env: { ...TECHNICAL_ENV, SEMRUSH_TMP_API_KEY: apiKey },
             resolveImsToken,
           });
         } catch (e) {
@@ -278,7 +274,8 @@ describe('createElementsTransport', () => {
         }
 
         expect(err.status).to.equal(503);
-        expect(err.message).to.contain(variable);
+        expect(err.message).to.equal('Technical authentication is not configured for this capability');
+        expect(err.message).to.not.contain('SEMRUSH_TMP_API_KEY');
         expect(err.message).to.not.contain(TECHNICAL_API_KEY);
         expect(resolveImsToken).to.not.have.been.called;
         expect(fetchStub).to.not.have.been.called;
