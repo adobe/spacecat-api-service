@@ -14,10 +14,11 @@ import {
   hasText, isNonEmptyObject, isValidUUID, isValidUrl, isNonEmptyArray,
 } from '@adobe/spacecat-shared-utils';
 import {
-  badRequest, internalServerError, notFound, ok, accepted,
+  badRequest, internalServerError, ok, accepted,
 } from '@adobe/spacecat-shared-http-utils';
 import { AsyncJob } from '@adobe/spacecat-shared-data-access';
 import { ErrorWithStatusCode } from '../support/utils.js';
+import { loadJobScopedToCaller } from '../support/async-job-access.js';
 import { getHeader } from '../support/http-headers.js';
 import {
   MISSING_X_PROMISE_TOKEN_MESSAGE,
@@ -331,17 +332,33 @@ function PreflightController(ctx, log, env) {
     }
 
     try {
-      const job = await dataAccess.AsyncJob.findById(jobId);
+      // Scope the read to the caller: preflight-only jobType filter + ownership of
+      // the job's site. Without this, any caller with any job UUID could read
+      // another tenant's job (IDOR), including token-bearing job types.
+      const { job, error: accessError } = await loadJobScopedToCaller(ctx, {
+        jobId,
+        allowedJobTypes: ['preflight'],
+        resolveOwnerSiteId: (j) => j.getMetadata()?.payload?.siteId,
+      });
 
-      if (!job) {
-        log.error(`Job with ID ${jobId} not found`);
-        return notFound(`Job with ID ${jobId} not found`);
+      if (accessError) {
+        return accessError;
       }
 
-      log.debug(`getPreflightJobStatusAndResult returning job: ${JSON.stringify(job)}`);
+      // Never log the full job record — a token-bearing job's metadata could leak
+      // into logs and survive any response-level scoping.
+      log.debug(`getPreflightJobStatusAndResult jobId=${jobId} status=${job.getStatus()}`);
 
       // Emit the terminal-state observability log (shared with the Mystique path).
       logPreflightOutcome(log, PREFLIGHT_PROCESS_AUDW, job);
+
+      // Preflight-shaped metadata allowlist. Retains `metadata.payload` (a superset
+      // of what the ASO preflight MFE reads: payload.{step,reason,errorCode,...}),
+      // plus jobType/tags, but never any top-level token field (e.g. promiseToken).
+      // Preflight jobs carry no token — it travels on the SQS message, not the
+      // record — so returning the payload leaks nothing. Metadata is guaranteed
+      // present: loadJobScopedToCaller admitted this job by its metadata.jobType.
+      const metadata = job.getMetadata();
 
       return ok({
         jobId: job.getId(),
@@ -355,7 +372,11 @@ function PreflightController(ctx, log, env) {
         resultType: job.getResultType(),
         result: job.getResult(),
         error: job.getError(),
-        metadata: job.getMetadata(),
+        metadata: {
+          jobType: metadata.jobType,
+          tags: metadata.tags,
+          payload: metadata.payload,
+        },
       });
     } catch (error) {
       log.error(`Failed to get preflight job status: ${error.message}`);
