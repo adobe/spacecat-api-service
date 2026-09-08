@@ -273,6 +273,26 @@ describe('UpdateSitesAuditsCommand', () => {
   });
 
   describe('CSV bulk operations', () => {
+    it('refuses a CSV whose url_private is not a Slack-hosted URL (VULN-39365)', async () => {
+      // The bot token must never be sent to an attacker-controlled host. toggle-site-audit
+      // does not use the shared fetchFile helper, so it needs its own guard and its own test.
+      const args = ['disable', 'demo'];
+      const command = ToggleSiteAuditCommand(contextMock);
+
+      slackContextMock.files = [{
+        name: 'sites.csv',
+        url_private: 'https://attacker.example.com/collect',
+      }];
+
+      await command.handleExecution(args, slackContextMock);
+
+      expect(slackContextMock.say.calledWith(sinon.match(/not a Slack-hosted https URL/))).to.be.true;
+      // The decisive assertion: no outbound request carrying the token was made at all.
+      expect(fetchStub.called).to.be.false;
+      // And the rejected (attacker-controlled) URL is not echoed back into Slack.
+      expect(slackContextMock.say.calledWith(sinon.match(/attacker\.example\.com/))).to.be.false;
+    });
+
     it('should show deprecation when enable is requested with CSV profile', async () => {
       const args = ['enable', 'demo'];
       const command = ToggleSiteAuditCommand(contextMock);

@@ -491,7 +491,14 @@ const wrappedMain = wrap(run)
     routeCapabilities: routeRequiredCapabilities,
     internalRoutes: INTERNAL_ROUTES,
   })
-  .with(authWrapper, { authHandlers: AUTH_HANDLERS })
+  .with(authWrapper, {
+    authHandlers: AUTH_HANDLERS,
+    // Declare the bypass explicitly rather than inheriting the shared library's default, so
+    // this service owns the list of routes it leaves unauthenticated. POST /slack/events is
+    // authenticated instead by slackSignatureWrapper above, which runs before this wrapper.
+    // Harmless no-op against shared versions predating the option (they use the same default).
+    anonymousEndpoints: ['POST /slack/events'],
+  })
   .with(s2sAuthWrapper, { routeCapabilities: routeRequiredCapabilities });
 
 export const main = wrappedMain

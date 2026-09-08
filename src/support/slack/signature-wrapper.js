@@ -12,6 +12,7 @@
 
 import crypto from 'crypto';
 import { Response } from '@adobe/fetch';
+import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
 import { hasText } from '@adobe/spacecat-shared-utils';
 
 /**
@@ -58,6 +59,13 @@ const TIMESTAMP_HEADER = 'x-slack-request-timestamp';
 // authenticated by RouteScopedLegacyApiKeyHandler, not a request signed by Slack.
 const SLACK_SIGNED_PATHS = new Set(['/slack/events', 'slack/events']);
 
+// CORS preflight is answered by `run()` in src/index.js with a 204 before any route handler is
+// reached, and carries no body to sign. Excluding it keeps that behaviour intact rather than
+// turning every preflight into a 401. Every other method on the guarded suffix is verified --
+// deliberately wider than the single `POST` the router exposes today, so that re-adding a route
+// on this path cannot silently create an unverified entry point.
+const UNVERIFIED_METHODS = new Set(['OPTIONS']);
+
 /**
  * Constant-time comparison of the received signature against the expected one.
  * Both operands are known to be 67 ASCII chars ("v0=" + 64 hex) because the caller has already
@@ -75,9 +83,15 @@ function signaturesMatch(received, expected) {
 /**
  * Computes the Slack v0 signature for a raw body.
  *
+ * The HMAC is taken over the UTF-8 encoding of the decoded body text. This matches Slack's own
+ * Bolt SDK, which signs `` `${version}:${timestamp}:${body}` `` with `body` as a string
+ * (`@slack/bolt/dist/receivers/verify-request.js`). Slack payloads are UTF-8 JSON or
+ * form-urlencoded, so the decode/encode round-trip is lossless; a body that is not valid UTF-8
+ * is not a legitimate Slack payload and fails closed on the signature comparison.
+ *
  * @param {string} signingSecret - the Slack app signing secret.
  * @param {string} timestamp - the raw `x-slack-request-timestamp` value (unix seconds).
- * @param {string} rawBody - the exact request body bytes, as text.
+ * @param {string} rawBody - the request body, as text.
  * @returns {string} the `v0=<hex>` signature.
  */
 export function computeSlackSignature(signingSecret, timestamp, rawBody) {
@@ -86,14 +100,18 @@ export function computeSlackSignature(signingSecret, timestamp, rawBody) {
 }
 
 /**
- * True when the route is one Slack signs. Tolerates a suffix with or without a leading slash
- * (production sets it with one; some test harnesses do not).
+ * True when the request must carry a valid Slack signature: the route is one Slack signs, and
+ * the method is one that can carry a signed body. Tolerates a suffix with or without a leading
+ * slash (production sets it with one; some test harnesses do not).
  *
  * @param {object} context - the universal context.
  * @returns {boolean}
  */
 function isSlackSignedRoute(context) {
-  return SLACK_SIGNED_PATHS.has(context?.pathInfo?.suffix || '');
+  if (!SLACK_SIGNED_PATHS.has(context?.pathInfo?.suffix || '')) {
+    return false;
+  }
+  return !UNVERIFIED_METHODS.has((context?.pathInfo?.method || '').toUpperCase());
 }
 
 /**
@@ -115,9 +133,25 @@ export function slackSignatureWrapper(fn) {
     const signature = headers[SIGNATURE_HEADER];
     const timestamp = headers[TIMESTAMP_HEADER];
 
-    const unauthorized = (reason) => {
-      // Log the reason, never the signature, body or secret.
-      log.warn(`Slack signature verification failed: ${reason}`);
+    // Emits a 401 plus a diagnosable log line. `reason` is a stable label for alerting;
+    // `detail` carries non-sensitive context so on-call can tell a stripped header (e.g. a CDN
+    // dropping X-Slack-Signature) apart from clock skew or an oversized body WITHOUT having to
+    // reproduce. Never logs the signature, the signing secret or any part of the body.
+    const unauthorized = (reason, detail = {}) => {
+      const fields = {
+        reason,
+        method: context?.pathInfo?.method,
+        suffix: context?.pathInfo?.suffix,
+        traceId: context?.traceId,
+        hasSignatureHeader: hasText(signature),
+        hasTimestampHeader: hasText(timestamp),
+        ...detail,
+      };
+      const rendered = Object.entries(fields)
+        .filter(([, v]) => v !== undefined)
+        .map(([k, v]) => `${k}=${v}`)
+        .join(' ');
+      log.warn(`Slack signature verification failed: ${rendered}`);
       return new Response('Unauthorized', {
         status: 401,
         headers: { 'x-error': 'slack signature verification failed' },
@@ -128,26 +162,30 @@ export function slackSignatureWrapper(fn) {
     // Fail closed on misconfiguration. An unsigned-but-accepted request is exactly the
     // vulnerability being fixed, so a missing secret must never degrade to "allow".
     if (!hasText(signingSecret)) {
-      return unauthorized('SLACK_SIGNING_SECRET is not configured');
+      return unauthorized('secret_not_configured');
     }
 
     if (!hasText(signature) || !hasText(timestamp)) {
-      return unauthorized('missing signature or timestamp header');
+      // Split so on-call can see WHICH header is absent -- a CDN/proxy stripping one of them
+      // is a realistic production failure and looks nothing like a forged request.
+      return unauthorized('missing_header');
     }
 
     if (!SIGNATURE_PATTERN.test(signature)) {
-      return unauthorized('malformed signature header');
+      return unauthorized('malformed_signature');
     }
 
     // Slack sends unix seconds. Reject anything non-numeric outright rather than letting
     // Number() coerce (e.g. '' -> 0, '  12 ' -> 12) into a value that could pass the window.
     if (!/^\d+$/.test(timestamp)) {
-      return unauthorized('malformed timestamp header');
+      return unauthorized('malformed_timestamp');
     }
 
     const nowSeconds = Math.floor(Date.now() / 1000);
-    if (Math.abs(nowSeconds - Number(timestamp)) > MAX_TIMESTAMP_SKEW_SECONDS) {
-      return unauthorized('timestamp outside the allowed replay window');
+    const skewSeconds = nowSeconds - Number(timestamp);
+    if (Math.abs(skewSeconds) > MAX_TIMESTAMP_SKEW_SECONDS) {
+      // Surfacing the delta distinguishes genuine replay from server clock drift.
+      return unauthorized('stale_timestamp', { skewSeconds, maxSkewSeconds: MAX_TIMESTAMP_SKEW_SECONDS });
     }
 
     // Content-Length is an honest-client hint only (a forger can omit or lie about it); the
@@ -155,7 +193,7 @@ export function slackSignatureWrapper(fn) {
     // a declared-oversized body without buffering it.
     const contentLength = Number(request.headers.get('content-length'));
     if (Number.isFinite(contentLength) && contentLength > MAX_BODY_BYTES) {
-      return unauthorized('request body too large');
+      return unauthorized('body_too_large', { declaredBytes: contentLength, maxBytes: MAX_BODY_BYTES });
     }
 
     let rawBody;
@@ -163,16 +201,19 @@ export function slackSignatureWrapper(fn) {
       // clone() so the body remains readable by multipartFormData / bodyData downstream.
       rawBody = await request.clone().text();
     } catch (e) {
-      return unauthorized(`could not read request body: ${e.message}`);
+      return unauthorized('body_unreadable', { error: cleanupHeaderValue(e.message) });
     }
 
-    if (Buffer.byteLength(rawBody, 'utf8') > MAX_BODY_BYTES) {
-      return unauthorized('request body too large');
+    const bodyBytes = Buffer.byteLength(rawBody, 'utf8');
+    if (bodyBytes > MAX_BODY_BYTES) {
+      return unauthorized('body_too_large', { bodyBytes, maxBytes: MAX_BODY_BYTES });
     }
 
     const expected = computeSlackSignature(signingSecret, timestamp, rawBody);
     if (!signaturesMatch(signature, expected)) {
-      return unauthorized('signature mismatch');
+      // bodyBytes is the single most useful field here: a mismatch with a plausible body size
+      // usually means a body-rewriting proxy, not a forgery.
+      return unauthorized('signature_mismatch', { bodyBytes });
     }
 
     return fn(request, context);

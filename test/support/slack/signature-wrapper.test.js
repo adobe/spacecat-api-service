@@ -132,6 +132,27 @@ describe('slackSignatureWrapper', () => {
       expect(next).to.have.not.been.called;
     });
 
+    it('lets an OPTIONS preflight through unverified', async () => {
+      // CORS preflight carries no body to sign and is answered with a 204 by run(); turning it
+      // into a 401 would be a gratuitous behaviour change.
+      const context = buildContext({}, { pathInfo: { method: 'OPTIONS', suffix: '/slack/events', headers: {} } });
+
+      const result = await slackSignatureWrapper(next)(buildRequest('{}'), context);
+
+      expect(result).to.equal('downstream-called');
+    });
+
+    it('still guards non-POST, non-preflight methods on the Slack suffix', async () => {
+      // Deliberately wider than the single POST route the router exposes today, so re-adding a
+      // route on this path cannot silently create an unverified entry point.
+      const context = buildContext({}, { pathInfo: { method: 'GET', suffix: '/slack/events', headers: {} } });
+
+      const result = await slackSignatureWrapper(next)(buildRequest('{}'), context);
+
+      expect(result.status).to.equal(401);
+      expect(next).to.have.not.been.called;
+    });
+
     it('tolerates a context with no pathInfo', async () => {
       const result = await slackSignatureWrapper(next)(buildRequest('{}'), { log, env: {} });
 
@@ -259,6 +280,34 @@ describe('slackSignatureWrapper', () => {
       expect(result).to.equal('downstream-called');
     });
 
+    it('accepts a timestamp at the exact past edge of the replay window', async () => {
+      const edge = `${nowSeconds() - MAX_TIMESTAMP_SKEW_SECONDS}`;
+      const { request, context } = signedDelivery('{}', { timestamp: edge });
+
+      expect(await slackSignatureWrapper(next)(request, context)).to.equal('downstream-called');
+    });
+
+    it('accepts a timestamp at the exact future edge of the replay window', async () => {
+      const edge = `${nowSeconds() + MAX_TIMESTAMP_SKEW_SECONDS}`;
+      const { request, context } = signedDelivery('{}', { timestamp: edge });
+
+      expect(await slackSignatureWrapper(next)(request, context)).to.equal('downstream-called');
+    });
+
+    it('rejects a timestamp one second past the window', async () => {
+      const stale = `${nowSeconds() - MAX_TIMESTAMP_SKEW_SECONDS - 1}`;
+      const { request, context } = signedDelivery('{}', { timestamp: stale });
+
+      expectUnauthorized(await slackSignatureWrapper(next)(request, context));
+    });
+
+    it('rejects a timestamp one second beyond the future window', async () => {
+      const ahead = `${nowSeconds() + MAX_TIMESTAMP_SKEW_SECONDS + 1}`;
+      const { request, context } = signedDelivery('{}', { timestamp: ahead });
+
+      expectUnauthorized(await slackSignatureWrapper(next)(request, context));
+    });
+
     it('rejects a body larger than the cap before hashing it', async () => {
       const body = 'x'.repeat(MAX_BODY_BYTES + 1);
       const { request, context } = signedDelivery(body);
@@ -313,8 +362,11 @@ describe('slackSignatureWrapper', () => {
       await slackSignatureWrapper(next)(request, context);
 
       const logged = log.warn.getCalls().map((c) => c.args.join(' ')).join('\n');
-      expect(logged).to.contain('signature mismatch');
+      expect(logged).to.contain('reason=signature_mismatch');
+      // Diagnostic fields are safe to log; the secret, the signature and the body are not.
+      expect(logged).to.contain('bodyBytes=');
       expect(logged).to.not.contain(SIGNING_SECRET);
+      expect(logged).to.not.contain('attacker-guess');
       expect(logged).to.not.contain('do-not-log-me');
       expect(logged).to.not.contain('v0=');
     });
