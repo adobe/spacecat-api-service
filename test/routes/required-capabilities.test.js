@@ -32,10 +32,6 @@ describe('routeRequiredCapabilities', () => {
   entries.forEach(([key, value]) => {
     describe(`"${key}"`, () => {
       const parts = key.split(' ');
-      // A route maps to either a single capability string or an array of acceptable
-      // capabilities (the consumer needs at least one) - see s2sAuthWrapper's
-      // routeCapabilities contract. Normalize to an array so every capability is validated.
-      const capabilities = Array.isArray(value) ? value : [value];
 
       it('key should have exactly two parts: METHOD and path', () => {
         expect(parts).to.have.lengthOf(2, `Expected "<METHOD> <path>" but got "${key}"`);
@@ -56,27 +52,19 @@ describe('routeRequiredCapabilities', () => {
         expect(path).to.match(PATH_REGEX, `Path "${path}" contains invalid characters in "${key}"`);
       });
 
-      it('should have a non-empty array of capabilities', () => {
-        expect(capabilities).to.have.length.greaterThan(0, `No capabilities defined for "${key}"`);
+      it('should have a value in the format "entity:action"', () => {
+        const valueParts = value.split(':');
+        expect(valueParts).to.have.lengthOf(2, `Expected "entity:action" but got "${value}" for "${key}"`);
       });
 
-      capabilities.forEach((capability) => {
-        describe(`capability "${capability}"`, () => {
-          it('should have a value in the format "entity:action"', () => {
-            const valueParts = capability.split(':');
-            expect(valueParts).to.have.lengthOf(2, `Expected "entity:action" but got "${capability}" for "${key}"`);
-          });
+      it('should have a non-empty entity name', () => {
+        const [entity] = value.split(':');
+        expect(entity).to.have.length.greaterThan(0, `Entity name is empty for "${key}"`);
+      });
 
-          it('should have a non-empty entity name', () => {
-            const [entity] = capability.split(':');
-            expect(entity).to.have.length.greaterThan(0, `Entity name is empty for "${key}"`);
-          });
-
-          it(`should have an allowed action (${ALLOWED_ACTIONS.join(', ')})`, () => {
-            const [, action] = capability.split(':');
-            expect(ALLOWED_ACTIONS).to.include(action, `Invalid action "${action}" in value "${capability}" for "${key}"`);
-          });
-        });
+      it(`should have an allowed action (${ALLOWED_ACTIONS.join(', ')})`, () => {
+        const [, action] = value.split(':');
+        expect(ALLOWED_ACTIONS).to.include(action, `Invalid action "${action}" in value "${value}" for "${key}"`);
       });
     });
   });

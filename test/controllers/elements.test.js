@@ -152,6 +152,7 @@ function fakeContext({
   postgrestClient = { from: sinon.stub() },
   log = fakeLog(),
   invocationId = 'req-1',
+  s2sConsumer = undefined,
 } = {}) {
   const BrandSemrushProject = withBrandSemrushProject
     ? { allByBrandId: sinon.stub().resolves(brandSemrushProjects) }
@@ -184,6 +185,7 @@ function fakeContext({
     _spacecatBrands: spacecatBrands,
     log,
     invocation: { id: invocationId },
+    s2sConsumer,
   };
 }
 
@@ -208,8 +210,6 @@ describe('ElementsController', () => {
   let resolveBrandWorkspaceStub;
   let isSerenityActiveForBrandStub;
   let accessControlHasAccessStub;
-  let accessControlHasAdminAccessStub;
-  let accessControlHasS2SCapabilityStub;
   let serviceStub;
   let createElementsServiceStub;
   let createElementsTransportStub;
@@ -229,8 +229,6 @@ describe('ElementsController', () => {
     // the existing cases exercise the surface rather than the gate.
     isSerenityActiveForBrandStub = sinon.stub().resolves(true);
     accessControlHasAccessStub = sinon.stub().resolves(true);
-    accessControlHasAdminAccessStub = sinon.stub().returns(false);
-    accessControlHasS2SCapabilityStub = sinon.stub().resolves({ allowed: false });
 
     getBrandIdentityStub = sinon.stub().resolves({ id: BRAND_ID, name: 'Adobe Brand' });
     getBrandBySiteStub = sinon.stub().resolves(null);
@@ -265,11 +263,7 @@ describe('ElementsController', () => {
 
     const MockAccessControlUtil = {
       default: {
-        fromContext: () => ({
-          hasAccess: accessControlHasAccessStub,
-          hasAdminAccess: accessControlHasAdminAccessStub,
-          hasS2SCapability: accessControlHasS2SCapabilityStub,
-        }),
+        fromContext: () => ({ hasAccess: accessControlHasAccessStub }),
       },
     };
 
@@ -421,18 +415,20 @@ describe('ElementsController', () => {
   // ─── S2S consumer access ──────────────────────────────────────────────────
 
   describe('S2S consumer access', () => {
-    it('bypasses org-membership check when the S2S consumer holds organization:readAll', async () => {
-      accessControlHasS2SCapabilityStub.resolves({ allowed: true });
-      accessControlHasAccessStub.resolves(false);
+    // authorizeOrgAccess makes its decision solely via the pre-existing, unmodified
+    // accessControl.hasAccess(organization) call - identical to a regular session-token
+    // user (e.g. an S2S JWT carrying a `tenants` claim naming the target org passes
+    // hasAccess() via authInfo.hasOrganization(), exactly like a human user would). The
+    // only S2S-specific addition is the [s2s]/[acl] audit-log observation below.
+
+    it('grants access when hasAccess() succeeds for an S2S consumer', async () => {
       const ctx = fakeContext({ isS2SConsumer: true, authType: 'jwt', bearer: null });
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
       expect(res.status).to.equal(200);
-      expect(accessControlHasAccessStub).to.not.have.been.called;
     });
 
-    it('returns 403 when the S2S consumer lacks organization:readAll and has no org membership', async () => {
-      accessControlHasS2SCapabilityStub.resolves({ allowed: false, reason: 'missing-capability' });
+    it('returns 403 when hasAccess() denies an S2S consumer', async () => {
       accessControlHasAccessStub.resolves(false);
       const ctx = fakeContext({ isS2SConsumer: true, authType: 'jwt', bearer: null });
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
@@ -440,18 +436,7 @@ describe('ElementsController', () => {
       expect(res.status).to.equal(403);
     });
 
-    it('admins bypass without consulting hasS2SCapability', async () => {
-      accessControlHasAdminAccessStub.returns(true);
-      accessControlHasAccessStub.resolves(false);
-      const ctx = fakeContext();
-      const ctrl = ElementsController(ctx, fakeLog(), ENV);
-      const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
-      expect(res.status).to.equal(200);
-      expect(accessControlHasS2SCapabilityStub).to.not.have.been.called;
-    });
-
     it('skips IMS token resolution and builds an S2S transport for an S2S consumer', async () => {
-      accessControlHasS2SCapabilityStub.resolves({ allowed: true });
       const ctx = fakeContext({ isS2SConsumer: true, authType: 'jwt', bearer: null });
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
@@ -472,37 +457,59 @@ describe('ElementsController', () => {
       );
     });
 
-    it('logs a [s2s] audit line with clientId/consumerId/capability/requestId on a granted read', async () => {
-      accessControlHasS2SCapabilityStub.resolves({
-        allowed: true, clientId: 'client-abc', consumerId: 'consumer-123',
-      });
+    it('logs a [s2s] audit line with clientId/consumerId/organizationId/requestId on a granted read', async () => {
+      const s2sConsumer = { getClientId: () => 'client-abc', getId: () => 'consumer-123' };
       const ctx = fakeContext({
-        isS2SConsumer: true, authType: 'jwt', bearer: null, invocationId: 'req-audit-1',
+        isS2SConsumer: true,
+        authType: 'jwt',
+        bearer: null,
+        invocationId: 'req-audit-1',
+        s2sConsumer,
       });
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
       expect(res.status).to.equal(200);
       expect(ctx.log.info).to.have.been.calledWithMatch(
-        /^\[s2s\] .*granted clientId=client-abc consumerId=consumer-123 capability=organization:readAll/,
+        /^\[s2s\] .*granted clientId=client-abc consumerId=consumer-123 organizationId=/,
       );
       expect(ctx.log.info).to.have.been.calledWithMatch(/requestId=req-audit-1/);
     });
 
-    it('logs an [acl] denial line with reason/clientId/consumerId when an S2S consumer is denied', async () => {
-      accessControlHasS2SCapabilityStub.resolves({
-        allowed: false, reason: 'missing-capability', clientId: 'client-abc', consumerId: 'consumer-123',
-      });
+    it('logs an [acl] denial line with clientId/consumerId when an S2S consumer is denied', async () => {
+      const s2sConsumer = { getClientId: () => 'client-abc', getId: () => 'consumer-123' };
       accessControlHasAccessStub.resolves(false);
       const ctx = fakeContext({
-        isS2SConsumer: true, authType: 'jwt', bearer: null, invocationId: 'req-audit-2',
+        isS2SConsumer: true,
+        authType: 'jwt',
+        bearer: null,
+        invocationId: 'req-audit-2',
+        s2sConsumer,
       });
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
       expect(res.status).to.equal(403);
       expect(ctx.log.info).to.have.been.calledWithMatch(
-        /^\[acl\] Denied .*reason=missing-capability clientId=client-abc consumerId=consumer-123/,
+        /^\[acl\] Denied .*reason=no-org-access clientId=client-abc consumerId=consumer-123/,
       );
       expect(ctx.log.info).to.have.been.calledWithMatch(/requestId=req-audit-2/);
+    });
+
+    it('falls back to "n/a" in the audit log when context.s2sConsumer is not set', async () => {
+      const ctx = fakeContext({ isS2SConsumer: true, authType: 'jwt', bearer: null });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
+      expect(res.status).to.equal(200);
+      expect(ctx.log.info).to.have.been.calledWithMatch(
+        /^\[s2s\] .*granted clientId=n\/a consumerId=n\/a/,
+      );
+    });
+
+    it('does not log [s2s]/[acl] lines for a regular (non-S2S) user', async () => {
+      const ctx = fakeContext();
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      await ctrl.listUrlInspectorFilterDimensions(ctx);
+      expect(ctx.log.info).to.not.have.been.calledWithMatch(/^\[s2s\]/);
+      expect(ctx.log.info).to.not.have.been.calledWithMatch(/^\[acl\]/);
     });
 
     it('does not log an [acl] denial line for a regular (non-S2S) user lacking org access', async () => {
@@ -1216,7 +1223,6 @@ describe('ElementsController', () => {
     });
 
     it('returns 200 { hasAccess: true } immediately for an S2S consumer, without probing upstream', async () => {
-      accessControlHasS2SCapabilityStub.resolves({ allowed: true });
       const ctx = fakeContext({
         url: accessUrl(), isS2SConsumer: true, authType: 'jwt', bearer: null,
       });

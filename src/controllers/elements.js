@@ -34,7 +34,6 @@ import { ResponseFeedDto } from '../dto/response-feed.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { ErrorWithStatusCode, resolveSemrushImsToken } from '../support/utils.js';
 import { X_PROMISE_TOKEN_HEADER, PROMISE_TOKEN_REQUIRED_ERROR_CODE } from '../utils/constants.js';
-import { CAP_ORG_READ_ALL } from '../routes/capability-constants.js';
 
 const MAX_ERR_MSG_LEN = 500;
 const BEARER_PREFIX = 'Bearer ';
@@ -375,31 +374,32 @@ async function authorizeOrgAccess(ctx) {
     return { error: notFound(`Organization not found: ${spaceCatId}`) };
   }
   const accessControl = AccessControlUtil.fromContext(ctx);
-  // S2S consumers holding organization:readAll can read elements data for any
-  // organization/brand, bypassing the per-org membership check below (dual-layer
-  // S2S pattern: Layer 1 in required-capabilities.js gates entry to the route,
-  // this is Layer 2, the controller-level capability check).
-  const isAdmin = accessControl.hasAdminAccess();
-  const isS2SConsumer = ctx?.attributes?.authInfo?.isS2SConsumer?.() ?? false;
-  const s2sResult = isAdmin
-    ? { allowed: false }
-    : await accessControl.hasS2SCapability(CAP_ORG_READ_ALL);
   const log = ctx?.log;
   const requestId = ctx?.invocation?.id || 'unknown';
   const route = `${ctx?.pathInfo?.method || 'GET'} ${ctx?.pathInfo?.suffix || 'elements-route'}`;
-  if (!isAdmin && !s2sResult.allowed && !await accessControl.hasAccess(organization)) {
-    // Only an S2S caller's denial is an ACL audit event - a regular user simply lacking
-    // org membership is the expected, unremarkable path (hasS2SCapability returns
-    // reason=not-s2s for them) and would otherwise flood the log on every such request.
-    if (isS2SConsumer) {
-      log?.info(`[acl] Denied ${route} - reason=${s2sResult.reason} clientId=${s2sResult.clientId || 'n/a'} consumerId=${s2sResult.consumerId || 'n/a'} requestId=${requestId}`);
+  const isS2SConsumer = ctx?.attributes?.authInfo?.isS2SConsumer?.() ?? false;
+
+  // Unchanged from the existing S2S auth flow: hasAccess() already handles admins
+  // (hasAdminReadAccess()) and org membership via the JWT's own `tenants` claim - the SAME
+  // check used for human session tokens. An S2S consumer issued a per-request,
+  // customer-scoped token (its `tenants` claim naming the org) passes through here exactly
+  // like a regular user; Layer 1 (required-capabilities.js) already gated entry to the route
+  // on brand:read. Nothing new is added to the authorization decision itself here - this
+  // only adds an audit-log observation around the existing, unmodified check.
+  const granted = await accessControl.hasAccess(organization);
+  if (isS2SConsumer) {
+    const clientId = ctx?.s2sConsumer?.getClientId?.() || 'n/a';
+    const consumerId = ctx?.s2sConsumer?.getId?.() || 'n/a';
+    if (granted) {
+      // Audit trail for S2S reads (READALL_CAPABILITY_DESIGN.md): log clientId, consumerId,
+      // the org granted, and requestId on every successful S2S pass.
+      log?.info(`[s2s] ${route} granted clientId=${clientId} consumerId=${consumerId} organizationId=${spaceCatId} requestId=${requestId}`);
+    } else {
+      log?.info(`[acl] Denied ${route} - reason=no-org-access clientId=${clientId} consumerId=${consumerId} requestId=${requestId}`);
     }
-    return { error: forbidden('User does not have access to this organization') };
   }
-  if (s2sResult.allowed) {
-    // Audit trail for cross-tenant reads (READALL_CAPABILITY_DESIGN.md): every successful
-    // Layer 2 pass by an S2S consumer must log clientId, consumerId, capability, and requestId.
-    log?.info(`[s2s] ${route} granted clientId=${s2sResult.clientId || 'n/a'} consumerId=${s2sResult.consumerId || 'n/a'} capability=${CAP_ORG_READ_ALL} organizationId=${spaceCatId} requestId=${requestId}`);
+  if (!granted) {
+    return { error: forbidden('User does not have access to this organization') };
   }
   return { organization };
 }
@@ -759,9 +759,10 @@ export default function ElementsController(context, log, env) {
       }
       // This probe forwards the CALLER'S OWN IMS token to check THEIR access to the linked
       // Semrush workspace - it has no meaning for an S2S consumer, which authenticates with a
-      // JWT (not IMS) and, once past authorizeOrg's organization:readAll check above, is already
-      // permitted to read any customer's data. Short-circuit here rather than falling through to
-      // resolveElementsImsToken/requireImsBearer, which would reject the S2S JWT with a 401.
+      // JWT (not IMS) and, once past authorizeOrg's org-scoped organization:read check above,
+      // is already confirmed to own this specific organization. Short-circuit here rather than
+      // falling through to resolveElementsImsToken/requireImsBearer, which would reject the S2S
+      // JWT with a 401.
       if (ctx?.attributes?.authInfo?.isS2SConsumer?.()) {
         return ok({ hasAccess: true });
       }

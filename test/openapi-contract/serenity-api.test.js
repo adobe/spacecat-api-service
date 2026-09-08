@@ -815,13 +815,7 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
               isSerenityActiveForBrand: () => Promise.resolve(true),
             },
             '../../src/support/access-control-util.js': {
-              default: {
-                fromContext: () => ({
-                  hasAccess: () => Promise.resolve(true),
-                  hasAdminAccess: () => false,
-                  hasS2SCapability: () => Promise.resolve({ allowed: false }),
-                }),
-              },
+              default: { fromContext: () => ({ hasAccess: () => Promise.resolve(true) }) },
             },
             // authorizeBrandSubWorkspace (used by listTopicPrompts) resolves the brand
             // UUID via prompts-storage before resolving the sub-workspace.
