@@ -95,7 +95,7 @@ export function primaryUrlPatchBody(primaryUrl) {
  * (LLMO-7421): exactly one `main_brand: true` benchmark must exist in the DRAFT
  * before publish, or Brand Presence has no customer baseline. Checked only
  * pre-publish, not after — publish is asynchronous (see
- * `brand-urls.js` `MainBrandBenchmarkInvariantError`), so a published-view read
+ * `errors.js` `MainBrandBenchmarkInvariantError`), so a published-view read
  * taken immediately after `publishProject` resolves would race that transition
  * and cannot soundly confirm the invariant here; that confirmation is deferred
  * to the fleet reconciliation this ticket also scopes. A pre-publish failure
@@ -118,7 +118,7 @@ export function primaryUrlPatchBody(primaryUrl) {
  * @param {string} [opts.caller] - name used to prefix the failure logs.
  * @returns {Promise<string>} the new project's id.
  * @throws {CreateNoProjectIdError} when create returns no id.
- * @throws {import('./brand-urls.js').MainBrandBenchmarkInvariantError} when the
+ * @throws {import('./errors.js').MainBrandBenchmarkInvariantError} when the
  *   pre-publish benchmark invariant cannot be established, after a best-effort
  *   cleanup delete.
  * @throws when the publish fails, after a best-effort cleanup delete. A failed

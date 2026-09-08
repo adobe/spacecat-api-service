@@ -27,8 +27,7 @@ import {
 } from '../../../../src/support/serenity/handlers/markets-subworkspace.js';
 import { clearTagCache } from '../../../../src/support/serenity/handlers/markets.js';
 import { SerenityTransportError } from '../../../../src/support/serenity/rest-transport.js';
-import { ERROR_CODES } from '../../../../src/support/serenity/errors.js';
-import { MainBrandBenchmarkInvariantError } from '../../../../src/support/serenity/brand-urls.js';
+import { ERROR_CODES, MainBrandBenchmarkInvariantError } from '../../../../src/support/serenity/errors.js';
 import { TAG_IDS, dimensionTreeLevels, makeListProjectTagsStub } from '../fixtures/tag-tree.js';
 
 use(chaiAsPromised);
@@ -767,7 +766,7 @@ describe('markets-subworkspace handlers', () => {
         expect(transport.listBenchmarks).to.have.callCount(2);
       });
 
-      it('does not block on the invariant when publishMode is skip (no published view to check yet)', async () => {
+      it('still checks the benchmark invariant even when publishMode is skip (no publish, but the gate still runs)', async () => {
         const transport = makeTransport();
         const res = await handleCreateMarketSubworkspace(
           transport,

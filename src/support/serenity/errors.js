@@ -156,9 +156,59 @@ export const ERROR_CODES = Object.freeze({
   QUOTA_EXCEEDED: 'quotaExceeded',
   // LLMO-7421: the blocking main-brand benchmark provisioning invariant (exactly one
   // main_brand:true) could not be established. Surfaced via
-  // brand-urls.js MainBrandBenchmarkInvariantError.
+  // MainBrandBenchmarkInvariantError, below.
   MAIN_BRAND_BENCHMARK_INVARIANT: 'mainBrandBenchmarkInvariant',
 });
+
+/**
+ * Thrown by `brand-urls.js` `assertMainBrandBenchmark` when a project's DRAFT
+ * benchmark state does not carry exactly one `main_brand: true` benchmark. A
+ * blocking pre-publish provisioning invariant (LLMO-7421): without exactly
+ * one, Brand Presence has no customer baseline, so the caller must not
+ * publish.
+ *
+ * Deliberately scoped to the DRAFT view only — publish is asynchronous
+ * (`publish-status.js`: a 202 with the project transitioning to `live` in the
+ * background, no completion webhook), so a published-view read taken
+ * immediately after `publishProject` resolves races that transition and would
+ * spuriously fail even when provisioning succeeded. Confirming the invariant
+ * on the PUBLISHED view is deferred to the fleet reconciliation this ticket
+ * also scopes (out of scope for this change) rather than attempted here
+ * unsoundly.
+ *
+ * Extends `ErrorWithStatusCode` so it maps through the controller's existing
+ * `mapError` (`ErrorWithStatusCode` branch) to a stable `mainBrandBenchmarkInvariant`
+ * token instead of falling through to a generic, unactionable 500 — see
+ * `ERROR_CODES.MAIN_BRAND_BENCHMARK_INVARIANT` above. 502: the failure means
+ * the upstream project's benchmark state doesn't (yet) satisfy the invariant
+ * we require, which a caller may retry.
+ *
+ * Co-located here with `ERROR_CODES` rather than in `brand-urls.js` (its only
+ * throw site) for discoverability — this is the error-catalog module, and a
+ * reader grepping for `mainBrandBenchmarkInvariant` should find both the code
+ * and the error class that carries it in one place (MysticatBot review).
+ */
+export class MainBrandBenchmarkInvariantError extends ErrorWithStatusCode {
+  /**
+   * @param {string} workspaceId
+   * @param {string} projectId
+   * @param {object} [opts]
+   * @param {number} [opts.count=0] - the number of `main_brand: true`
+   *   benchmarks actually found (0 = none, 2+ = duplicates).
+   */
+  constructor(workspaceId, projectId, { count = 0 } = {}) {
+    // Client-facing message deliberately generic (LLMO-7421 review): the
+    // stable `mainBrandBenchmarkInvariant` code is all a client needs to
+    // decide retry. workspaceId/projectId/count stay on the error instance
+    // for the controller to log server-side — see `mapError`.
+    super('Main-brand benchmark invariant not satisfied; retry the request', 502);
+    this.name = 'MainBrandBenchmarkInvariantError';
+    this.code = ERROR_CODES.MAIN_BRAND_BENCHMARK_INVARIANT;
+    this.workspaceId = workspaceId;
+    this.projectId = projectId;
+    this.count = count;
+  }
+}
 
 /**
  * Case-1 quota rejection (serenity-docs#72 §2): the disguised 405 surfaced on a metered write.

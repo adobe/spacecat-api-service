@@ -206,7 +206,7 @@ function mapError(e, log, reqCtx = {}) {
       // The client-facing message is deliberately generic (LLMO-7421 review) —
       // log the workspace/project/count detail server-side only, via the
       // error's own properties.
-      log.error(`Serenity controller error ${JSON.stringify(reqCtx)}`, e);
+      log?.error?.(`Serenity controller error ${JSON.stringify(reqCtx)}`, e);
     }
     return createResponse(
       { error: errorToken, message: safeError(e.message) },

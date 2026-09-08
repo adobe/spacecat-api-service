@@ -18,7 +18,7 @@ import {
   CreateNoProjectIdError,
   primaryUrlPatchBody,
 } from '../../../src/support/serenity/project-provisioning.js';
-import { MainBrandBenchmarkInvariantError } from '../../../src/support/serenity/brand-urls.js';
+import { MainBrandBenchmarkInvariantError } from '../../../src/support/serenity/errors.js';
 
 const WS = 'workspace-1';
 const CREATE_BODY = {

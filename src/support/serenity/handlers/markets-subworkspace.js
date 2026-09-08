@@ -535,7 +535,14 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
  *   `require` throws on failure (the default markets endpoint, and — since
  *   SITES-49206 — every create, including an empty-units project: Semrush no
  *   longer enforces AI limits, so there is no quota 405 left to tolerate);
- *   `skip` does not publish at all (LLMO-5492 defer-publish).
+ *   `skip` does not publish at all (LLMO-5492 defer-publish). The main-brand
+ *   benchmark invariant (LLMO-7421) still runs regardless of `publishMode` —
+ *   see the `assertMainBrandBenchmark` call below — but only confirms the
+ *   DRAFT state AT THIS CALL. A `skip` caller that later triggers its OWN
+ *   publish (outside this function) must re-run `ensureOwnBrandBenchmark` +
+ *   `assertMainBrandBenchmark` immediately before that publish, since project
+ *   state can drift between the two calls; this function does not, and
+ *   cannot, guarantee the invariant still holds at a publish it never makes.
  * @param {any} [options.dataAccess] - when supplied, upserts the
  *   `brand_to_semrush_projects` mapping row for this project (best-effort,
  *   never fails the create). Omit for a `brand` that is not yet a persisted

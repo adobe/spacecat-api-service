@@ -14,9 +14,8 @@
 
 import { hasText, siteIdentityFromUrlString } from '@adobe/spacecat-shared-utils';
 
-import { ErrorWithStatusCode } from '../utils.js';
 import {
-  isSemrushTransportError, isMeteredQuota, toQuotaExceededError, ERROR_CODES,
+  isSemrushTransportError, isMeteredQuota, toQuotaExceededError, MainBrandBenchmarkInvariantError,
 } from './errors.js';
 import { benchmarkAliases } from './aliases.js';
 import { resolveProjects } from './resolve-projects.js';
@@ -389,50 +388,6 @@ export function collectBrandUrlEntries(sources, market, primaryDomains, primaryI
 }
 
 /**
- * Thrown by {@link assertMainBrandBenchmark} when a project's DRAFT benchmark
- * state does not carry exactly one `main_brand: true` benchmark. A blocking
- * pre-publish provisioning invariant (LLMO-7421): without exactly one, Brand
- * Presence has no customer baseline, so the caller must not publish.
- *
- * Deliberately scoped to the DRAFT view only — publish is asynchronous
- * (`publish-status.js`: a 202 with the project transitioning to `live` in the
- * background, no completion webhook), so a published-view read taken
- * immediately after `publishProject` resolves races that transition and would
- * spuriously fail even when provisioning succeeded. Confirming the invariant
- * on the PUBLISHED view is deferred to the fleet reconciliation this ticket
- * also scopes (out of scope for this change) rather than attempted here
- * unsoundly.
- *
- * Extends `ErrorWithStatusCode` so it maps through the controller's existing
- * `mapError` (`ErrorWithStatusCode` branch) to a stable `mainBrandBenchmarkInvariant`
- * token instead of falling through to a generic, unactionable 500 — see
- * `ERROR_CODES.MAIN_BRAND_BENCHMARK_INVARIANT`. 502: the failure means the
- * upstream project's benchmark state doesn't (yet) satisfy the invariant we
- * require, which a caller may retry.
- */
-export class MainBrandBenchmarkInvariantError extends ErrorWithStatusCode {
-  /**
-   * @param {string} workspaceId
-   * @param {string} projectId
-   * @param {object} [opts]
-   * @param {number} [opts.count=0] - the number of `main_brand: true`
-   *   benchmarks actually found (0 = none, 2+ = duplicates).
-   */
-  constructor(workspaceId, projectId, { count = 0 } = {}) {
-    // Client-facing message deliberately generic (LLMO-7421 review): the
-    // stable `mainBrandBenchmarkInvariant` code is all a client needs to
-    // decide retry. workspaceId/projectId/count stay on the error instance
-    // for the controller to log server-side — see `mapError`.
-    super('Main-brand benchmark invariant not satisfied; retry the request', 502);
-    this.name = 'MainBrandBenchmarkInvariantError';
-    this.code = ERROR_CODES.MAIN_BRAND_BENCHMARK_INVARIANT;
-    this.workspaceId = workspaceId;
-    this.projectId = projectId;
-    this.count = count;
-  }
-}
-
-/**
  * Ensures the project has a benchmark to hang brand URLs on, and returns its id.
  *
  * Brand URLs can only be created *under a benchmark*. Semrush is meant to
@@ -571,7 +526,7 @@ export async function ensureOwnBrandBenchmark(
       // correctness problem — greppable token so it's alertable rather than
       // silently accumulating.
       log?.warn?.('brand-urls: SERENITY_BENCHMARK_DELETE_DIVERGENCE — could not delete unflagged own-domain benchmark before recreate; stale benchmark left behind', {
-        workspaceId, projectId, benchmarkId: domainMatch.id, error: e?.message,
+        workspaceId, projectId, benchmarkId: domainMatch.id, error: e?.message, status: e?.status,
       });
     }
   }

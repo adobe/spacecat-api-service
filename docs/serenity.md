@@ -295,7 +295,7 @@ This differs from `GET /serenity/markets` in three ways: it carries no live/draf
 
 ## The onboarding flow
 
-`POST /serenity/markets` writes a row to `brand_to_semrush_projects` **only after all three upstream calls succeed**. The order is strict and the `findBySlice` 409 gate runs before any upstream call so safe retries are free:
+`POST /serenity/markets` writes a row to `brand_to_semrush_projects` **only after every blocking step below succeeds — create, the primary_url PATCH, the main-brand benchmark invariant, and publish**. The order is strict and the `findBySlice` 409 gate runs before any upstream call so safe retries are free:
 
 ```
 1. validate body                                  -> 400 on missing/invalid fields

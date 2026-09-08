@@ -25,12 +25,11 @@ import {
   normalizeBenchmarkDomain,
   ensureOwnBrandBenchmark,
   assertMainBrandBenchmark,
-  MainBrandBenchmarkInvariantError,
   attachBrandUrlsToProject,
   syncBrandUrlsAcrossMarkets,
 } from '../../../src/support/serenity/brand-urls.js';
 import { SerenityTransportError } from '../../../src/support/serenity/rest-transport.js';
-import { ERROR_CODES } from '../../../src/support/serenity/errors.js';
+import { MainBrandBenchmarkInvariantError, ERROR_CODES } from '../../../src/support/serenity/errors.js';
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -609,11 +608,12 @@ describe('brand-urls helpers', () => {
       // as data pollution (SERENITY_BENCHMARK_DELETE_DIVERGENCE), not a
       // correctness problem.
       const warn = sandbox.stub();
+      const deleteError = Object.assign(new Error('delete failed'), { status: 404 });
       const transport = {
         listBenchmarks: sandbox.stub().resolves({
           aio_benchmarks: [{ id: 'own-1', main_brand: false, domain: 'https://www.acme.com/x' }],
         }),
-        deleteBenchmarks: sandbox.stub().rejects(new Error('delete failed')),
+        deleteBenchmarks: sandbox.stub().rejects(deleteError),
         createBenchmarks: sandbox.stub().resolves({ ids: ['own-1-flagged'], existing_count: 0 }),
       };
       expect(await ensureOwnBrandBenchmark(
@@ -627,7 +627,38 @@ describe('brand-urls helpers', () => {
       expect(transport.createBenchmarks).to.have.been.calledOnce;
       expect(warn).to.have.been.calledWithMatch(
         'brand-urls: SERENITY_BENCHMARK_DELETE_DIVERGENCE',
-        sinon.match({ benchmarkId: 'own-1', error: 'delete failed' }),
+        sinon.match({ benchmarkId: 'own-1', error: 'delete failed', status: 404 }),
+      );
+    });
+
+    it('logs and returns the unflagged id as-is when repairUnflagged is set but brand name is missing (MysticatBot review)', async () => {
+      // repairUnflagged can only recreate the benchmark with a brand_name — with
+      // none available, the create body would have nothing to flag with, so
+      // the function falls back to the still-unflagged domain match instead of
+      // attempting delete+recreate. That fallback must be logged
+      // (SERENITY_BENCHMARK_REPAIR_SKIPPED_INSUFFICIENT_METADATA), or it looks
+      // identical to a successful repair in production.
+      const warn = sandbox.stub();
+      const transport = {
+        listBenchmarks: sandbox.stub().resolves({
+          aio_benchmarks: [{ id: 'own-1', main_brand: false, domain: 'https://www.acme.com/x' }],
+        }),
+        deleteBenchmarks: sandbox.stub(),
+        createBenchmarks: sandbox.stub(),
+      };
+      expect(await ensureOwnBrandBenchmark(
+        transport,
+        WS,
+        PID,
+        { name: '', domain: 'https://acme.com' },
+        { warn },
+        { repairUnflagged: true },
+      )).to.equal('own-1');
+      expect(transport.deleteBenchmarks).to.not.have.been.called;
+      expect(transport.createBenchmarks).to.not.have.been.called;
+      expect(warn).to.have.been.calledWithMatch(
+        'brand-urls: SERENITY_BENCHMARK_REPAIR_SKIPPED_INSUFFICIENT_METADATA',
+        sinon.match({ workspaceId: WS, projectId: PID, benchmarkId: 'own-1' }),
       );
     });
 
