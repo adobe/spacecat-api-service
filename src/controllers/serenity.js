@@ -256,9 +256,11 @@ function mapError(e, log, reqCtx = {}) {
       message: 'Upstream request failed',
     }, 502);
   }
-  // Not an upstream error: keep the Error as the second argument — the stack
-  // is the useful part here — and carry the tenant ids in the message.
-  log.error(`Serenity controller error ${JSON.stringify(reqCtx)}`, err);
+  // Not an upstream error: reqCtx passed as a structured field (not
+  // JSON.stringify'd into the message string), matching the benchmark
+  // invariant branch above — a caller-controlled reqCtx value can't be
+  // mistaken for log-format control characters this way (MysticatBot review).
+  log.error('Serenity controller error', { reqCtx, error: err });
   return createResponse(
     { error: 'internalServerError', message: 'Internal server error' },
     500,
