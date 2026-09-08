@@ -30,6 +30,7 @@ import {
 import { retrievePageAuthentication } from '@adobe/spacecat-shared-ims-client';
 import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
 import AccessControlUtil from '../support/access-control-util.js';
+import { CAP_SITE_READ_ALL } from '../routes/capability-constants.js';
 import { getCookieValue, getIMSPromiseToken, ErrorWithStatusCode } from '../support/utils.js';
 import { PROMISE_BASED_AUTHORING_TYPES } from '../utils/constants.js';
 
@@ -203,7 +204,11 @@ function ScrapeJobController(context) {
     }
 
     const accessControlUtil = AccessControlUtil.fromContext(requestContext);
-    if (!await accessControlUtil.hasAccess(site)) {
+    const isAdmin = accessControlUtil.hasAdminReadAccess();
+    const s2sResult = isAdmin
+      ? { allowed: false, reason: 'admin-bypass' }
+      : await accessControlUtil.hasS2SCapability(CAP_SITE_READ_ALL);
+    if (!isAdmin && !s2sResult.allowed && !await accessControlUtil.hasAccess(site)) {
       return forbidden('User does not have access to this site');
     }
 
