@@ -114,6 +114,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} redirectsController - ASO dispatcher redirect-overlay controller.
  * @param {Object} auditPolicyController - Audit policy + audit scope controller.
  * @param {Object} promptSuggestionSchedulesController - LLMO prompt-suggestion schedule controller.
+ * @param {Object} oaeValidationController - The OAE validation controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -185,6 +186,7 @@ export default function getRouteHandlers(
   redirectsController,
   auditPolicyController,
   promptSuggestionSchedulesController,
+  oaeValidationController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -336,6 +338,8 @@ export default function getRouteHandlers(
     'GET /projects/by-project-name/:projectName/sites': projectsController.getSitesByProjectName,
     'POST /preflight/jobs': preflightController.createPreflightJob,
     'GET /preflight/jobs/:jobId': preflightController.getPreflightJobStatusAndResult,
+    'POST /oae-validation/jobs': oaeValidationController.createValidationJob,
+    'GET /oae-validation/jobs/:jobId': oaeValidationController.getValidationJob,
     'POST /sites/detect/jobs': siteDetectionController.createSiteDetectionJob,
     'GET /sites/detect/jobs/:jobId': siteDetectionController.getSiteDetectionJobStatus,
     'GET /sites': sitesController.getAll,

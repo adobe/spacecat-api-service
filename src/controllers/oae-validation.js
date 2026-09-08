@@ -1,0 +1,157 @@
+/*
+ * Copyright 2026 Adobe. All rights reserved.
+ * This file is licensed to you under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License. You may obtain a copy
+ * of the License at http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed under
+ * the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTATIONS
+ * OF ANY KIND, either express or implied. See the License for the specific language
+ * governing permissions and limitations under the License.
+ */
+
+import crypto from 'crypto';
+import {
+  isNonEmptyObject, isNonEmptyArray, isValidUUID, hasText,
+} from '@adobe/spacecat-shared-utils';
+import {
+  accepted, badRequest, internalServerError, notFound, ok,
+} from '@adobe/spacecat-shared-http-utils';
+
+// Dispatch type import-worker's HANDLERS map routes on -- always this constant, regardless of
+// which validator (`validationType`) the job actually runs. Kept as a plain string (not a shared
+// import) since spacecat-api-service does not depend on spacecat-import-worker's source.
+const OAE_VALIDATION_IMPORT_TYPE = 'oae-validation';
+
+/**
+ * Creates an OAE validation controller instance.
+ * @param {Object} ctx - The context object containing dataAccess and sqs
+ * @param {Object} ctx.dataAccess - The data access layer for database operations
+ * @param {Object} ctx.sqs - The SQS client instance
+ * @param {Object} log - The logger instance
+ * @param {Object} env - The environment configuration object
+ * @returns {Object} The OAE validation controller instance
+ * @throws {Error} If context, dataAccess, sqs, or env is not provided
+ */
+function OaeValidationController(ctx, log, env) {
+  if (!isNonEmptyObject(ctx)) {
+    throw new Error('Context required');
+  }
+  const { dataAccess, sqs } = ctx;
+
+  if (!isNonEmptyObject(dataAccess)) {
+    throw new Error('Data access required');
+  }
+
+  if (!isNonEmptyObject(sqs)) {
+    throw new Error('SQS client required');
+  }
+
+  if (!isNonEmptyObject(env)) {
+    throw new Error('Environment object required');
+  }
+
+  /**
+   * Validates the request data for job creation.
+   * @param {Object} data - The request data object
+   * @throws {Error} If data is invalid or missing required fields
+   */
+  function validateRequestData(data) {
+    if (!isNonEmptyObject(data)) {
+      throw new Error('Invalid request: missing application/json data');
+    }
+    if (!isValidUUID(data.siteId)) {
+      throw new Error('Invalid request: siteId must be a valid UUID');
+    }
+    if (!hasText(data.type)) {
+      throw new Error('Invalid request: type is required');
+    }
+    if (!isNonEmptyArray(data.suggestionIds)) {
+      throw new Error('Invalid request: suggestionIds must be a non-empty array');
+    }
+    if (!data.suggestionIds.every((id) => isValidUUID(id))) {
+      throw new Error('Invalid request: all suggestionIds must be valid UUIDs');
+    }
+  }
+
+  /**
+   * Creates a new OAE validation job and dispatches it to spacecat-import-worker.
+   * @param {Object} context - The request context
+   * @param {Object} context.data - { siteId, type, suggestionIds }
+   * @returns {Promise<Object>} The HTTP response object
+   */
+  const createValidationJob = async (context) => {
+    const { data } = context;
+    try {
+      validateRequestData(data);
+    } catch (error) {
+      log.error(`Invalid request data: ${error.message}`);
+      return badRequest(error.message);
+    }
+
+    const { siteId, type, suggestionIds } = data;
+    const jobId = crypto.randomUUID();
+
+    try {
+      const configuration = await dataAccess.Configuration.findLatest();
+      await sqs.sendMessage(configuration.getQueues().imports, {
+        type: OAE_VALIDATION_IMPORT_TYPE,
+        jobId,
+        siteId,
+        validationType: type,
+        suggestionIds,
+      });
+    } catch (error) {
+      log.error(`Failed to queue OAE validation job: ${error.message}`);
+      return internalServerError(error.message);
+    }
+
+    log.info(`[oae-validation] queued job=${jobId} siteId=${siteId} type=${type} suggestions=${suggestionIds.length}`);
+
+    return accepted({ jobId });
+  };
+
+  /**
+   * Gets the full per-suggestion data for a job.
+   * @param {Object} context - The request context
+   * @param {Object} context.params - { jobId }
+   * @returns {Promise<Object>} The HTTP response object
+   */
+  const getValidationJob = async (context) => {
+    const jobId = context.params?.jobId;
+
+    if (!isValidUUID(jobId)) {
+      log.error(`Invalid jobId: ${jobId}`);
+      return badRequest('Invalid jobId');
+    }
+
+    try {
+      const rows = await dataAccess.OaeValidation.allByJobId(jobId);
+
+      if (rows.length === 0) {
+        return notFound('Job not found');
+      }
+
+      return ok({
+        jobId,
+        suggestions: rows.map((row) => ({
+          suggestionId: row.getSuggestionId(),
+          status: row.getStatus(),
+          outcome: row.getOutcome(),
+          completedAt: row.getCompletedAt(),
+          metadata: row.getMetadata(),
+        })),
+      });
+    } catch (error) {
+      log.error(`Failed to get OAE validation job: ${error.message}`);
+      return internalServerError(error.message);
+    }
+  };
+
+  return {
+    createValidationJob,
+    getValidationJob,
+  };
+}
+
+export default OaeValidationController;
