@@ -2866,8 +2866,6 @@ function BrandsController(ctx, log, env) {
             siteId: baseSiteId,
             brandId: brandUuid,
             orgId: spaceCatId,
-            // @ts-ignore tier not yet in the published drs-client type; pending the
-            // release of the spacecat-shared companion fix (LLMO-7366, PR #1915)
             tier: isPaying ? 'PAID' : 'FREE_TRIAL',
           });
           scheduleId = schedule?.scheduleId;
