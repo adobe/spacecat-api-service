@@ -349,6 +349,11 @@ export async function handleCreatePromptsSubworkspace(
   const affectedProjectIds = [];
   /** @type {Map<string, Array<{ semrushPromptId: string, tagIds: string[] }>>} */
   const updatesByProject = new Map();
+  // Collapsed by upstream prompt id, LAST ROW WINS — see the flat twin
+  // handleCreatePrompts for why (duplicate ids in one atomic replace batch are
+  // undefined upstream, and `updated` must not count one prompt twice).
+  /** @type {Map<string, { projectId: string, entry: any }>} */
+  const updatedById = new Map();
   for (const r of results) {
     if (r.created) {
       // `rollbackProjectId` is internal bookkeeping for reconcilePublishErrors' rollback below;
@@ -358,16 +363,22 @@ export async function handleCreatePromptsSubworkspace(
     } else if (r.updated) {
       // NO `rollbackProjectId` — the quota rollback DELETEs, and an updated prompt
       // pre-existed this request.
-      updated.push(r.updated);
-      affectedProjectIds.push(r.affectedProjectId);
-      const pending = updatesByProject.get(r.affectedProjectId) ?? [];
-      pending.push({ semrushPromptId: r.updated.semrushPromptId, tagIds: r.updated.tagIds });
-      updatesByProject.set(r.affectedProjectId, pending);
+      updatedById.set(r.updated.semrushPromptId, {
+        projectId: r.affectedProjectId,
+        entry: r.updated,
+      });
     } else if (r.skipped) {
       skipped.push(r.skipped);
     } else if (r.failed) {
       failed.push(r.failed);
     }
+  }
+  for (const { projectId, entry } of updatedById.values()) {
+    updated.push(entry);
+    affectedProjectIds.push(projectId);
+    const pending = updatesByProject.get(projectId) ?? [];
+    pending.push({ semrushPromptId: entry.semrushPromptId, tagIds: entry.tagIds });
+    updatesByProject.set(projectId, pending);
   }
 
   // One batched replace-mode tag write per project.

@@ -284,6 +284,34 @@ describe('prompts-subworkspace handlers', () => {
     // batched tag write throws". The twin resolves its workspace id differently
     // (`workspaceId` vs `semrushWorkspaceId`), so a copy-paste divergence in this
     // catch block would otherwise go undetected.
+    // Lockstep with the flat twin's collapse test.
+    it('collapses two rows with the same text into ONE replace item, last row winning', async () => {
+      const transport = makeTransport({
+        listPromptsByTags: sinon.stub().resolves({
+          items: [{ id: 'sem-existing', name: 'p', tags: [] }],
+        }),
+        updatePromptTagsByIds: sinon.stub().resolves(),
+        patchPromptsMetadataBatch: sinon.stub().resolves(),
+      });
+
+      const result = await handleCreatePromptsSubworkspace(transport, WS, {
+        prompts: [
+          {
+            text: 'p', tagIds: ['tag-first'], geoTargetId: 2840, languageCode: 'en',
+          },
+          {
+            text: 'p', tagIds: ['tag-last'], geoTargetId: 2840, languageCode: 'en',
+          },
+        ],
+      }, log);
+
+      expect(result.updated).to.have.length(1);
+      const [, , items] = transport.updatePromptTagsByIds.firstCall.args;
+      expect(items).to.have.length(1);
+      expect(items[0].references).to.include('tag-last');
+      expect(items[0].references).to.not.include('tag-first');
+    });
+
     it('moves updates into `failed` when the batched tag write throws', async () => {
       const transport = makeTransport({
         listPromptsByTags: sinon.stub().resolves({

@@ -1251,15 +1251,33 @@ function tagDimensionOf(tag) {
  * this replaces, so collapsing to the first — the one the UI already shows —
  * heals the duplicate without changing what anyone sees.
  *
+ * CONTRACT THIS RESTS ON: the dimension is read from the tag's root breadcrumb
+ * (`path[0]`), so the unfiltered `listPromptsByTags` response must carry the same
+ * `path` shape `buildPromptDto` consumes. It does today. If that ever drifts,
+ * `tagDimensionOf` falls back to the tag's own leaf name, no dimension matches,
+ * and the replace silently strips authorship — the exact relabel this exists to
+ * prevent. That failure is open and quiet, so it is logged rather than left to be
+ * discovered in the data.
+ *
  * @param {any} item - the upstream prompt item.
+ * @param {any} [log]
+ * @param {string} [projectId] - log context only.
  * @returns {string[]}
  */
-function carryOverTagIdsOf(item) {
+function carryOverTagIdsOf(item, log, projectId) {
   const tags = buildTagsOf(item);
-  return [DIMENSION.ORIGIN, DIMENSION.SOURCE]
+  const carried = [DIMENSION.ORIGIN, DIMENSION.SOURCE]
     .map((dimension) => tags.find((t) => t.id && tagDimensionOf(t) === dimension))
     .filter(Boolean)
     .map((t) => /** @type {{ id: string }} */ (t).id);
+  // Narrow on purpose: a prompt that genuinely carries no tags is unremarkable, but
+  // one WITH tags that resolves neither dimension is the breadcrumb-drift signature.
+  if (carried.length === 0 && tags.length > 0) {
+    log?.warn?.('serenity upsert: stored prompt resolved no origin/source tag — authorship will be dropped by the replace', {
+      projectId, semrushPromptId: item?.id, tagCount: tags.length,
+    });
+  }
+  return carried;
 }
 
 /** Paging cap, so a mis-paging upstream cannot spin a Lambda. 20k prompts. */
@@ -1304,7 +1322,10 @@ export async function buildExistingPromptIndex(transport, semrushWorkspaceId, pr
       const text = String(item?.name ?? '').trim();
       const id = item?.id ? String(item.id) : '';
       if (text && id) {
-        const entry = { semrushPromptId: id, carryOverTagIds: carryOverTagIdsOf(item) };
+        const entry = {
+          semrushPromptId: id,
+          carryOverTagIds: carryOverTagIdsOf(item, log, projectId),
+        };
         if (!byText.has(text)) {
           byText.set(text, entry);
         }
@@ -1655,6 +1676,15 @@ export async function handleCreatePrompts(
   const affectedProjectIds = [];
   /** @type {Map<string, Array<{ semrushPromptId: string, tagIds: string[] }>>} */
   const updatesByProject = new Map();
+  // Collapsed by upstream prompt id, LAST ROW WINS. Two rows carrying the same text
+  // resolve to the SAME stored prompt, so without this the replace batch would carry
+  // two items for one id — and upstream tie-breaking within a single atomic batch is
+  // not pinned by the vendor contract, so the surviving tag set would be arbitrary.
+  // Collapsing here rather than just before the write also keeps `updated` honest:
+  // one prompt changed is one entry, not two. Mirrors the create path, where upstream
+  // folds a repeated text into `existing_count`.
+  /** @type {Map<string, { projectId: string, entry: any }>} */
+  const updatedById = new Map();
   for (const r of results) {
     if (r.created) {
       // `rollbackProjectId` is internal bookkeeping for reconcilePublishErrors' rollback below;
@@ -1665,16 +1695,22 @@ export async function handleCreatePrompts(
       // NO `rollbackProjectId`: reconcilePublishErrors rolls a quota-rejected
       // project back by DELETING what this request staged, and an updated prompt
       // pre-existed the request.
-      updated.push(r.updated);
-      affectedProjectIds.push(r.affectedProjectId);
-      const pending = updatesByProject.get(r.affectedProjectId) ?? [];
-      pending.push({ semrushPromptId: r.updated.semrushPromptId, tagIds: r.updated.tagIds });
-      updatesByProject.set(r.affectedProjectId, pending);
+      updatedById.set(r.updated.semrushPromptId, {
+        projectId: r.affectedProjectId,
+        entry: r.updated,
+      });
     } else if (r.skipped) {
       skipped.push(r.skipped);
     } else if (r.failed) {
       failed.push(r.failed);
     }
+  }
+  for (const { projectId, entry } of updatedById.values()) {
+    updated.push(entry);
+    affectedProjectIds.push(projectId);
+    const pending = updatesByProject.get(projectId) ?? [];
+    pending.push({ semrushPromptId: entry.semrushPromptId, tagIds: entry.tagIds });
+    updatesByProject.set(projectId, pending);
   }
 
   // One batched replace-mode tag write per project — the upstream write takes an

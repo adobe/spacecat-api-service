@@ -3866,6 +3866,41 @@ describe('handlers/prompts.js — create is an upsert (existing text replaces ta
     expect(references).to.not.include(TAG_IDS.sourceConfig);
   });
 
+  it('collapses two rows carrying the same text into ONE replace item, last row winning', async () => {
+    // Both rows resolve to the SAME stored prompt. Sending two items for one id in a
+    // single atomic replace batch has no pinned upstream tie-break, so the surviving
+    // tag set would be arbitrary — and `updated` would count one prompt as two.
+    const { transport, dataAccess } = setup([storedPrompt()]);
+
+    const result = await runImport(transport, dataAccess, [
+      importRow('best shoes', ['cat-first']),
+      importRow('best shoes', ['cat-last']),
+    ]);
+
+    expect(result.updated).to.have.lengthOf(1);
+    const [, , items] = transport.updatePromptTagsByIds.firstCall.args;
+    expect(items).to.have.lengthOf(1);
+    expect(items[0].references).to.include('cat-last');
+    expect(items[0].references).to.not.include('cat-first');
+  });
+
+  it('warns when a stored prompt has tags but resolves no origin/source to carry over', async () => {
+    // Breadcrumb drift: without `path`, the dimension cannot be read, the carry-over
+    // silently misses, and the replace strips authorship. Fails open — so it must log.
+    const log = fakeLog();
+    const { transport, dataAccess } = setup([
+      storedPrompt({ tags: [{ id: 'orphan', name: 'ai' }] }),
+    ]);
+
+    await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      prompts: [importRow('best shoes', ['cat-new'])],
+    }, log);
+
+    expect(log.warn).to.have.been.calledWithMatch(
+      sinon.match(/resolved no origin\/source tag/),
+    );
+  });
+
   it('still CREATES a text the project does not hold', async () => {
     const { transport, dataAccess } = setup([storedPrompt({ name: 'something else' })]);
 
