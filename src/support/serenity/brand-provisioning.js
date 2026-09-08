@@ -18,7 +18,7 @@ import { ErrorWithStatusCode, resolveSemrushImsToken } from '../utils.js';
 import { createSerenityTransport } from './rest-transport.js';
 import { isSemrushTransportError } from './errors.js';
 import { resolveWorkspaceId } from './workspace-resolver.js';
-import { deleteAllProjects, ensureSubworkspace } from './workspace-lifecycle.js';
+import { deleteAllProjects, emptyWorkspaceBestEffort, ensureSubworkspace } from './workspace-lifecycle.js';
 import { handleCreateMarketSubworkspace } from './handlers/markets-subworkspace.js';
 import { isSerenityDeferPublishEnabled } from './defer-publish-active.js';
 import { computeWriteDeadline } from './intent-classification.js';
@@ -31,33 +31,9 @@ import { resolveCallerId } from './handlers/prompts.js';
 // and the synchronous create within budget.
 export const MAX_TOPICS_ON_CREATE = 5;
 
-/**
- * Empties a sub-workspace this service provisioned, best-effort. Deletes every project and leaves
- * the (now-empty) shell in place — production never deletes a sub-workspace, and the shell carries
- * no resource allocation to reclaim (see `workspace-lifecycle.js`).
- *
- * Never throws: every caller is already on an error path, so a failure here is logged at ERROR
- * (with the workspace id, for manual recovery) and swallowed rather than masking the original
- * error. The log messages are fixed literals with the call site in the structured `phase` field,
- * so one grep finds every occurrence of this failure class across all provisioning paths.
- *
- * @param {object} transport
- * @param {string} workspaceId - the sub-workspace to empty.
- * @param {string|undefined} parentWorkspaceId - the org parent; the assertNotParent guard input.
- * @param {object} [log]
- * @param {string} [phase] - which provisioning path is cleaning up (structured log dimension).
- * @returns {Promise<void>}
- */
-async function emptyWorkspaceBestEffort(transport, workspaceId, parentWorkspaceId, log, phase) {
-  try {
-    await deleteAllProjects(transport, workspaceId, parentWorkspaceId);
-    log?.info?.('serenity: emptied sub-workspace', { semrushWorkspaceId: workspaceId, phase });
-  } catch (emptyErr) {
-    log?.error?.('serenity: failed to empty sub-workspace', {
-      semrushWorkspaceId: workspaceId, phase, error: emptyErr?.message,
-    });
-  }
-}
+// emptyWorkspaceBestEffort moved to workspace-lifecycle.js (LLMO-7418) so the async provisioning
+// worker (handlers/provision-workspace-job.js) shares the exact same cleanup primitive instead of
+// a second, drifting copy — imported above.
 
 /**
  * Serenity-first provisioning for a brand created in Semrush-prompts mode

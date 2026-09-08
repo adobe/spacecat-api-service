@@ -54,6 +54,7 @@ describe('serenity-prompt-classification worker entry', () => {
   let semrushMarketGenerationHandlerStub;
   let claimJobLeaseStub;
   let clearJobLeaseStub;
+  let provisionWorkspaceHandlerStub;
 
   beforeEach(async () => {
     sandbox = sinon.createSandbox();
@@ -65,6 +66,7 @@ describe('serenity-prompt-classification worker entry', () => {
       .resolves({ promptCount: 3, published: true });
     claimJobLeaseStub = sandbox.stub().resolves(true);
     clearJobLeaseStub = sandbox.stub();
+    provisionWorkspaceHandlerStub = sandbox.stub().resolves({ provisioningStatus: 'ready' });
 
     ({
       NeedsReauthError,
@@ -95,6 +97,10 @@ describe('serenity-prompt-classification worker entry', () => {
       '../../src/support/serenity/handlers/semrush-market-generation-job.js': {
         semrushMarketGenerationHandler: semrushMarketGenerationHandlerStub,
         SEMRUSH_MARKET_GENERATION_JOB_TYPE: 'serenity-generate-semrush-market',
+      },
+      '../../src/support/serenity/handlers/provision-workspace-job.js': {
+        provisionWorkspaceHandler: provisionWorkspaceHandlerStub,
+        PROVISION_WORKSPACE_JOB_TYPE: 'serenity-provision-workspace',
       },
     }));
   });
@@ -182,6 +188,22 @@ describe('serenity-prompt-classification worker entry', () => {
     expect(invalidateStub).to.have.been.called;
   });
 
+  it('dispatches serenity-provision-workspace to provisionWorkspaceHandler (LLMO-7352/LLMO-7418)', async () => {
+    // The stored jobType must match the message type: the runner drops a mismatched delivery
+    // outright (a guard main added), so a job built with the default classify type would never
+    // reach the handler at all.
+    const job = makeJob('IN_PROGRESS', 'serenity-provision-workspace');
+    const context = makeContext(job);
+    exchangeAndPersistStub.resolves('access-token');
+
+    await run({ jobId: 'job-123', type: 'serenity-provision-workspace' }, context);
+
+    expect(provisionWorkspaceHandlerStub).to.have.been.calledOnceWith(context, job, 'access-token');
+    expect(job.getStatus()).to.equal('COMPLETED');
+    expect(job.getResult()).to.deep.equal({ provisioningStatus: 'ready' });
+    expect(invalidateStub).to.have.been.called;
+  });
+
   it('does not invalidate the promise token when the handler self-requeued (token ownership transferred)', async () => {
     const job = makeJob();
     const context = makeContext(job);
@@ -224,6 +246,20 @@ describe('serenity-prompt-classification worker entry', () => {
     });
     expect(invalidateStub).to.have.been.called;
     expect(job.save).to.have.been.called;
+  });
+
+  it('redacts the promise token from the failure log (LLMO-7418 external-review finding)', async () => {
+    const job = makeJob();
+    const context = makeContext(job);
+    exchangeAndPersistStub.resolves('access-token');
+    classifyPromptsHandlerStub.rejects(new Error('classification blew up'));
+
+    await run({ jobId: 'job-123', type: 'serenity-classify-prompts' }, context);
+
+    expect(context.log.error).to.have.been.calledOnce;
+    const [, loggedFields] = context.log.error.firstCall.args;
+    expect(loggedFields.metadata).to.not.have.property('promiseToken');
+    expect(loggedFields.metadata).to.not.have.property('promisePair');
   });
 
   it('marks plain TypeError and RangeError application bugs non-retryable', async () => {

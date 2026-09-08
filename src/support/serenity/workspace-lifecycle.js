@@ -77,8 +77,12 @@ const normalizeWorkspaceStatus = (status) => (typeof status === 'string' ? statu
 // "is this workspace terminally dead", used by BOTH the settle poll (`pollUntilCreated`) and the
 // family-adoption filter (`findAdoptableFamilyMatch`) so the two can never disagree about what a
 // given upstream status string means.
-const isWorkspaceReady = (status) => WORKSPACE_READY_STATUSES.has(normalizeWorkspaceStatus(status));
-const isWorkspaceTerminalFailure = (status) => (
+// Exported (LLMO-7418): the async provisioning worker (handlers/provision-workspace-job.js)
+// interprets its own poll result against these same two predicates.
+export const isWorkspaceReady = (status) => (
+  WORKSPACE_READY_STATUSES.has(normalizeWorkspaceStatus(status))
+);
+export const isWorkspaceTerminalFailure = (status) => (
   WORKSPACE_TERMINAL_FAILURE_STATUSES.has(normalizeWorkspaceStatus(status))
 );
 
@@ -111,7 +115,12 @@ function assertNotParent(workspaceId, parentWorkspaceId) {
 // other untitled one and is not something adoption could ever disambiguate. Every
 // path reaching here validates the name earlier (brand create 400s without one),
 // so this is defensive-only.
-function subworkspaceTitle(brand) {
+//
+// Exported (LLMO-7418): the async provisioning worker resolves a brand's title
+// independently of `ensureSubworkspace`, and must use the exact same convention or
+// its `createOrAdoptSubworkspaceCandidate` calls would silently target a different
+// title than the synchronous paths use for the same brand.
+export function subworkspaceTitle(brand) {
   const name = brand?.getName?.();
   if (!hasText(name)) {
     throw new ErrorWithStatusCode(
@@ -459,6 +468,111 @@ export async function deleteAllProjects(transport, workspaceId, parentWorkspaceI
 }
 
 /**
+ * Empties a sub-workspace this service provisioned, best-effort. Deletes every project and leaves
+ * the (now-empty) shell in place — production never deletes a sub-workspace, and the shell carries
+ * no resource allocation to reclaim (see the module header).
+ *
+ * Never throws: every caller is already on an error/cleanup path, so a failure here is logged at
+ * ERROR (with the workspace id, for manual recovery) and swallowed rather than masking the
+ * original error or failure classification. The log messages are fixed literals with the call
+ * site in the structured `phase` field, so one grep finds every occurrence of this failure class
+ * across every provisioning path that calls it (synchronous brand-create, and — LLMO-7418 — the
+ * async provisioning worker).
+ *
+ * Shared here (not duplicated per caller) so every provisioning path that can leave a freshly
+ * created, unreferenced workspace behind uses the exact same cleanup primitive.
+ *
+ * @param {SerenityTransport} transport
+ * @param {string} workspaceId - the sub-workspace to empty.
+ * @param {string|undefined} parentWorkspaceId - the org parent; the assertNotParent guard input.
+ * @param {object} [log]
+ * @param {string} [phase] - which provisioning path is cleaning up (structured log dimension).
+ * @returns {Promise<void>}
+ */
+export async function emptyWorkspaceBestEffort(
+  transport,
+  workspaceId,
+  parentWorkspaceId,
+  log,
+  phase,
+) {
+  try {
+    await deleteAllProjects(transport, workspaceId, parentWorkspaceId);
+    log?.info?.('serenity: emptied sub-workspace', { semrushWorkspaceId: workspaceId, phase });
+  } catch (emptyErr) {
+    log?.error?.('serenity: failed to empty sub-workspace', {
+      semrushWorkspaceId: workspaceId, phase, error: emptyErr?.message,
+    });
+  }
+}
+
+/**
+ * The create-or-adopt CORE of {@link ensureSubworkspace}, extracted so a caller that must NOT run
+ * the settle poll or persist the canonical pointer inline (LLMO-7418: the async provisioning
+ * worker) can still reuse the exact same, already-tested claim-filter/504-recovery logic —
+ * `findAdoptableFamilyMatch`, `adoptFromFamily`, the 504-ambiguous-create recovery branch — rather
+ * than re-deriving it. `ensureSubworkspace` itself is UNCHANGED and still owns this logic inline
+ * for its own two remaining synchronous callers (create-with-market, project/market activation);
+ * this function is a second caller of the same underlying helpers, not a replacement.
+ *
+ * Deliberately returns without polling or persisting anything: the async worker persists the
+ * returned `workspaceId` as a CANDIDATE (never the canonical `semrushSubWorkspaceId`) via its own
+ * atomic compare-and-set, and polls readiness itself across possibly-many invocations — see
+ * `handlers/provision-workspace-job.js`.
+ *
+ * Concurrency note: unlike `ensureSubworkspace`, this function takes no `reloadPointer` — the
+ * worker's own attempt-id-scoped compare-and-set on write is a strictly stronger guarantee than
+ * `reloadPointer`'s best-effort read-then-compare (see that function's own documented residual
+ * race), so re-deriving an equivalent guard here would be redundant, not additional safety.
+ *
+ * @param {SerenityTransport} transport
+ * @param {string} parentWorkspaceId
+ * @param {string} title - the sub-workspace title (see `subworkspaceTitle`).
+ * @param {object} log
+ * @param {object} claim - claim-filter inputs, forwarded to `findAdoptableFamilyMatch`.
+ * @param {object} [claim.brandCollection]
+ * @param {string} [claim.selfBrandId]
+ * @returns {Promise<{workspaceId: string, freshlyCreated: boolean}>} the resolved workspace id
+ *   (a CANDIDATE — the caller decides when/whether it becomes canonical) and whether this call
+ *   freshly created it upstream (as opposed to adopting an existing one) — the same provenance
+ *   `ensureSubworkspace` threads through `onWorkspaceCreated`, needed here so the worker knows
+ *   whether it owns the workspace for cleanup purposes (an adopted one may belong to a same-named
+ *   sibling brand's still-in-flight provisioning and must never be torn down).
+ * @throws {ErrorWithStatusCode} on an unrecoverable create/adopt failure — mirrors
+ *   `ensureSubworkspace`'s own error contract for this segment exactly.
+ */
+export async function createOrAdoptSubworkspaceCandidate(
+  transport,
+  parentWorkspaceId,
+  title,
+  log,
+  claim,
+) {
+  let created = await findAdoptableFamilyMatch(transport, parentWorkspaceId, title, log, claim);
+  let freshlyCreated = false;
+  if (!created) {
+    try {
+      created = await transport.createSubworkspace(parentWorkspaceId, title);
+      freshlyCreated = true;
+    } catch (e) {
+      if (!(e instanceof ErrorWithStatusCode) && e?.status === 504) {
+        created = await adoptFromFamily(transport, parentWorkspaceId, title, log, claim);
+      } else {
+        throw e;
+      }
+    }
+  }
+
+  const workspaceId = String(created?.id || '');
+  if (!hasText(workspaceId)) {
+    throw new ErrorWithStatusCode('createSubworkspace returned no workspace id', 502);
+  }
+  assertNotParent(workspaceId, parentWorkspaceId);
+
+  return { workspaceId, freshlyCreated };
+}
+
+/**
  * Guarantees the brand has a subworkspace and returns its id (design §6). Three cases:
  *   - column set        → the brand is already bound to a sub-workspace
  *                         (idempotent re-activate): settle it and hand it back. Note a
@@ -502,6 +616,18 @@ export async function deleteAllProjects(transport, workspaceId, parentWorkspaceI
  *   an ADOPTED workspace is tearing down a workspace it does not own. Titles are bare brand
  *   names, so an adopted workspace can belong to a same-named sibling brand whose own
  *   provisioning is still in flight and has not yet persisted its claim.
+ *
+ * KNOWN GAP vs. the async provisioning worker (LLMO-7352/LLMO-7418,
+ * `handlers/provision-workspace-job.js`): this function has NO awareness of
+ * `semrush_provisioning_status`/`semrush_provisioning_candidate_workspace_id` — it only ever
+ * checks `brand.getSemrushSubWorkspaceId()`. A `not-ready` async candidate is invisible to
+ * `findAdoptableFamilyMatch` (it filters on `isWorkspaceReady`), so a concurrent call into THIS
+ * function while an async attempt is mid-flight can independently create a SECOND workspace for
+ * the same brand. This race pre-dates the async worker (two concurrent sync callers already
+ * raced on the `reloadPointer` best-effort check above), but the async worker's bounded backoff
+ * (up to 5 hops, ~2.5 minutes) widens the window from a single in-request duration to that much
+ * longer span. Tracked as a required guard on this function's synchronous callers before general
+ * rollout (PR-C) — this comment documents the gap, it is not the fix.
  * @returns {Promise<string>} the subworkspace id.
  */
 export async function ensureSubworkspace(
