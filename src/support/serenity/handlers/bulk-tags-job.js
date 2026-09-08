@@ -34,6 +34,7 @@ import {
   invalidateTagCacheForProject,
 } from './markets.js';
 import { normalizeGeoTargetId, normalizeLanguageCode } from '../validation.js';
+import { dimensionOfRootName, isServerOwnedDimension } from '../prompt-tags.js';
 
 /** @typedef {import('../rest-transport.js').SerenityTransport} SerenityTransport */
 /** @typedef {Awaited<ReturnType<typeof readTagTreeSnapshot>>['items'][number]} TagTreeItem */
@@ -55,6 +56,11 @@ function promptTagIds(prompt) {
   return [...new Set((Array.isArray(prompt?.tags) ? prompt.tags : [])
     .map((tag) => (typeof tag === 'string' ? tag : String(tag?.id ?? '')))
     .filter(Boolean))];
+}
+
+function serverOwnedDimensionOf(item) {
+  const dimension = dimensionOfRootName(item.rootName);
+  return isServerOwnedDimension(dimension) ? dimension : null;
 }
 
 /**
@@ -267,6 +273,14 @@ export async function acceptBulkTags({
     if (!item || item.depth === 1) {
       throw codedError(
         'One or more mutation tagIds are unknown in this project',
+        400,
+        ERROR_CODES.INVALID_TAG_FILTER,
+      );
+    }
+    const serverOwnedDimension = serverOwnedDimensionOf(item);
+    if (serverOwnedDimension) {
+      throw codedError(
+        `A value of the server-owned "${serverOwnedDimension}" dimension cannot be bulk edited`,
         400,
         ERROR_CODES.INVALID_TAG_FILTER,
       );
@@ -486,6 +500,7 @@ export async function bulkTagsHandler(context, job, accessToken, injectedTranspo
   const selected = requestedTagIds.map((id) => snapshot.byId.get(id)).filter(Boolean);
   if (selected.length !== requestedTagIds.length
     || selected.some((item) => item.depth === 1
+      || serverOwnedDimensionOf(item)
       || item.compatibility?.state === 'readOnly')) {
     throw codedError(
       'The bulk tag mutation no longer resolves to a canonical taxonomy',

@@ -830,6 +830,25 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
     expect(ids).to.deep.equal(fixtureKeys);
   });
 
+  it('SerenityPromptTag rejects a runtime tag that omits compatibility', () => {
+    const schema = spec?.components?.schemas?.SerenityPromptTag;
+    expect(schema).to.exist;
+    const validate = makeAjv().compile(schema);
+
+    const valid = validate({
+      id: 'tag-1',
+      name: 'Campaign',
+      parentId: 'tag-root',
+      path: [{ id: 'tag-root', name: 'tag' }],
+    });
+
+    expect(valid).to.equal(false);
+    expect(validate.errors.some((error) => (
+      error.keyword === 'required'
+      && error.params?.missingProperty === 'compatibility'
+    ))).to.equal(true);
+  });
+
   /**
    * Each operationId in the spec gets a generated test that:
    * 1. stubs the handler to return the fixture

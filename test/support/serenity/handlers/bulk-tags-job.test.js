@@ -22,6 +22,9 @@ import {
   parseBulkTagsBody,
 } from '../../../../src/support/serenity/handlers/bulk-tags-job.js';
 import { SerenityTransportError } from '../../../../src/support/serenity/rest-transport.js';
+import { rootNameOfDimension } from '../../../../src/support/serenity/prompt-tags.js';
+
+const SERVER_OWNED_DIMENSIONS = ['intent', 'type', 'source', 'origin'];
 
 function requestHash(body) {
   return createHash('sha256').update(JSON.stringify({
@@ -37,6 +40,7 @@ function requestHash(body) {
 
 function workerTransport(prompts, update = sinon.stub().resolves(), tree = {}) {
   const roots = tree.roots ?? [{ id: 'tag-root', name: 'tag', children_count: 1 }];
+  const childParentId = roots[0]?.id;
   const children = tree.children ?? [{
     id: 'family',
     name: 'Family',
@@ -46,12 +50,28 @@ function workerTransport(prompts, update = sinon.stub().resolves(), tree = {}) {
   }];
   return {
     listProjectTags: sinon.stub().callsFake((_, __, options = {}) => Promise.resolve({
-      items: options.parentId === 'tag-root' ? children : roots,
+      items: options.parentId === childParentId ? children : roots,
     })),
     listPromptsByTags: sinon.stub().resolves({ items: prompts }),
     updatePromptTagsByIds: update,
     publishProject: sinon.stub().resolves(),
   };
+}
+
+function serverOwnedTransport(dimension, prompts = []) {
+  const rootId = `${dimension}-root`;
+  const valueId = `${dimension}-value`;
+  const rootName = rootNameOfDimension(dimension);
+  return workerTransport(prompts, sinon.stub().resolves(), {
+    roots: [{ id: rootId, name: rootName, children_count: 1 }],
+    children: [{
+      id: valueId,
+      name: `canonical-${dimension}`,
+      parent_id: rootId,
+      children_count: 0,
+      path: [{ id: rootId, name: rootName }],
+    }],
+  });
 }
 
 function workerJob(promptIds, overrides = {}) {
@@ -228,6 +248,40 @@ describe('acceptBulkTags idempotency', () => {
   });
 });
 
+describe('acceptBulkTags ownership guards', () => {
+  for (const operation of ['assign', 'remove']) {
+    it(`rejects ${operation} of a canonical server-owned descendant before enqueue`, async () => {
+      for (const dimension of SERVER_OWNED_DIMENSIONS) {
+        const transport = serverOwnedTransport(dimension);
+
+        // eslint-disable-next-line no-await-in-loop
+        await expect(acceptBulkTags({
+          context: { dataAccess: { AsyncJob: {} } },
+          transport,
+          brandId: 'brand',
+          orgId: 'org',
+          workspaceId: 'ws',
+          projectId: 'project',
+          body: {
+            geoTargetId: 1,
+            languageCode: 'en',
+            operation,
+            tagIds: [`${dimension}-value`],
+            filter: { tagFilterMode: 'faceted-v1' },
+          },
+          callerId: 'caller',
+          log: {},
+        })).to.be.rejected.then((error) => {
+          expect(error.status).to.equal(400);
+          expect(error.code).to.equal('invalidTagFilter');
+          expect(error.message).to.include(`server-owned "${dimension}"`);
+        });
+        expect(transport.listPromptsByTags).not.to.have.been.called;
+      }
+    });
+  }
+});
+
 describe('bulkTagsHandler worker accounting', () => {
   it('publishes once and reports successful updates', async () => {
     const transport = workerTransport([{ id: 'one', tags: [] }]);
@@ -314,6 +368,26 @@ describe('bulkTagsHandler worker accounting', () => {
     });
     expect(transport.listPromptsByTags).not.to.have.been.called;
   });
+
+  for (const operation of ['assign', 'remove']) {
+    it(`fails ${operation} revalidation when a target is a canonical server-owned descendant`, async () => {
+      for (const dimension of SERVER_OWNED_DIMENSIONS) {
+        const transport = serverOwnedTransport(dimension, [{ id: 'one', tags: [] }]);
+
+        // eslint-disable-next-line no-await-in-loop
+        await expect(bulkTagsHandler(
+          { env: {}, log: {} },
+          workerJob(['one'], { tagIds: [`${dimension}-value`], operation }),
+          'token',
+          transport,
+        )).to.be.rejected.then((error) => {
+          expect(error.status).to.equal(409);
+          expect(error.code).to.equal('incompatibleTagTaxonomy');
+        });
+        expect(transport.listPromptsByTags).not.to.have.been.called;
+      }
+    });
+  }
 
   it('records a per-item tagLimitExceeded failure without writing that prompt', async () => {
     const tags = Array.from({ length: 50 }, (_, index) => ({ id: `existing-${index}` }));

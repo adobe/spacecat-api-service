@@ -12006,7 +12006,7 @@ SerenityPromptTag:
     dimension root and its own `name` names its dimension upstream. Names are
     passed through exactly as upstream holds them, so the intent root reads
     `$abv_tags$intent`. The dimension is `intent`.
-  required: [id, name]
+  required: [id, name, compatibility]
   properties:
     id:
       type: string
