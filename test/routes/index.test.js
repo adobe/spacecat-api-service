@@ -765,7 +765,6 @@ describe('getRouteHandlers', () => {
       'POST /sites',
       'GET /sites.csv',
       'GET /sites.xlsx',
-      'GET /slack/events',
       'POST /slack/events',
       'GET /trigger',
       'POST /event/fulfillment',

@@ -64,8 +64,8 @@ export const INTERNAL_ROUTES = [
   'POST /sites/:siteId/geo-experiments/:geoExperimentId/trigger-impact-measurement',
   'POST /sites/:siteId/geo-experiments/:geoExperimentId/validate',
 
-  // Slack - event subscriptions and commands use Slack's signature verification
-  'GET /slack/events',
+  // Slack - event subscriptions and commands are authenticated by the Slack request
+  // signature (slackSignatureWrapper), not by a SpaceCat capability.
   'POST /slack/events',
   'POST /slack/channels/invite-by-user-id',
 

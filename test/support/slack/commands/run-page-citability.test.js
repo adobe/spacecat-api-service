@@ -104,8 +104,8 @@ describe('RunPageCitabilityCommand', () => {
     it('rejects multiple CSV files', async () => {
       dataAccessStub.Site.findByBaseURL.resolves({ getId: () => 'site-123' });
       slackContext.files = [
-        { name: 'file1.csv', url_private: 'https://example.com/file1.csv' },
-        { name: 'file2.csv', url_private: 'https://example.com/file2.csv' },
+        { name: 'file1.csv', url_private: 'https://files.slack.com/file1.csv' },
+        { name: 'file2.csv', url_private: 'https://files.slack.com/file2.csv' },
       ];
       const command = RunPageCitabilityCommand(context);
 
@@ -117,7 +117,7 @@ describe('RunPageCitabilityCommand', () => {
     it('rejects non-CSV files', async () => {
       dataAccessStub.Site.findByBaseURL.resolves({ getId: () => 'site-123' });
       slackContext.files = [
-        { name: 'file.txt', url_private: 'https://example.com/file.txt' },
+        { name: 'file.txt', url_private: 'https://files.slack.com/file.txt' },
       ];
       const command = RunPageCitabilityCommand(context);
 
