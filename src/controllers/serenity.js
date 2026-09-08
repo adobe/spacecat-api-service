@@ -21,7 +21,9 @@ import {
 import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
 
 import { createSerenityTransport } from '../support/serenity/rest-transport.js';
-import { isSemrushTransportError, unwrapTransportCause } from '../support/serenity/errors.js';
+import {
+  isSemrushTransportError, unwrapTransportCause, ERROR_CODES,
+} from '../support/serenity/errors.js';
 import {
   resolveBrandWorkspace,
   clearBrandWorkspaceCache,
@@ -200,6 +202,12 @@ function mapError(e, log, reqCtx = {}) {
     // error token in the response envelope; falls back to the status-based
     // default for plain throws.
     const errorToken = e.code && hasText(e.code) ? e.code : errorTokenForStatus(status);
+    if (e.code === ERROR_CODES.MAIN_BRAND_BENCHMARK_INVARIANT) {
+      // The client-facing message is deliberately generic (LLMO-7421 review) —
+      // log the workspace/project/count detail server-side only, via the
+      // error's own properties.
+      log.error(`Serenity controller error ${JSON.stringify(reqCtx)}`, e);
+    }
     return createResponse(
       { error: errorToken, message: safeError(e.message) },
       status,

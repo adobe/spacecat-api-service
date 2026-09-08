@@ -419,11 +419,11 @@ export class MainBrandBenchmarkInvariantError extends ErrorWithStatusCode {
    *   benchmarks actually found (0 = none, 2+ = duplicates).
    */
   constructor(workspaceId, projectId, { count = 0 } = {}) {
-    super(
-      `Expected exactly one main_brand=true benchmark for ${workspaceId}/${projectId} `
-      + `(draft view), found ${count}`,
-      502,
-    );
+    // Client-facing message deliberately generic (LLMO-7421 review): the
+    // stable `mainBrandBenchmarkInvariant` code is all a client needs to
+    // decide retry. workspaceId/projectId/count stay on the error instance
+    // for the controller to log server-side — see `mapError`.
+    super('Main-brand benchmark invariant not satisfied; retry the request', 502);
     this.name = 'MainBrandBenchmarkInvariantError';
     this.code = ERROR_CODES.MAIN_BRAND_BENCHMARK_INVARIANT;
     this.workspaceId = workspaceId;
@@ -541,6 +541,15 @@ export async function ensureOwnBrandBenchmark(
     // any) so URL attach still has somewhere to write. The invariant check
     // downstream ({@link assertMainBrandBenchmark}) is what catches this case
     // for callers that must block on it.
+    if (repairUnflagged && domainMatch) {
+      // repairUnflagged was requested but skipped: without a usable brand
+      // name/domain there is nothing to recreate the benchmark WITH, so the
+      // caller silently gets back the still-unflagged id. Log it — otherwise
+      // this looks identical to a successful repair in production.
+      log?.warn?.('brand-urls: SERENITY_BENCHMARK_REPAIR_SKIPPED_INSUFFICIENT_METADATA — repairUnflagged requested but brand name/domain insufficient to recreate; returning unflagged benchmark as-is', {
+        workspaceId, projectId, benchmarkId: domainMatch.id,
+      });
+    }
     return domainMatch ? String(domainMatch.id) : null;
   }
 

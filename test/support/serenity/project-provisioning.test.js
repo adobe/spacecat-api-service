@@ -222,6 +222,32 @@ describe('serenity project-provisioning: createProvisionAndPublishProject', () =
       expect(transport.listBenchmarks.getCall(1)).to.have.been.calledWith(WS, 'proj-1', { draft: true });
     });
 
+    it('derives name/aliases from brand_names when brand_name_display is absent (MysticatBot review)', async () => {
+      // Without brand_name_display, brand.name falls back to brand_names[0] and
+      // brand.aliases to brand_names.slice(1) — the alternate branch of the
+      // ternaries in createProvisionAndPublishProject that the other tests
+      // here never exercise, since CREATE_BODY always sets brand_name_display.
+      const createBodyNoDisplay = {
+        name: 'US-en', type: 'ai', domain: 'nba.com', brand_names: ['Kings', 'Sacramento Kings'],
+      };
+      transport.listBenchmarks.onCall(0).resolves(EMPTY);
+      transport.listBenchmarks.onCall(1).resolves(FLAGGED);
+
+      await createProvisionAndPublishProject(transport, WS, createBodyNoDisplay, { log });
+
+      expect(transport.createProject).to.have.been.calledOnceWith(WS, createBodyNoDisplay);
+      expect(transport.createBenchmarks).to.have.been.calledOnceWith(
+        WS,
+        'proj-1',
+        [sinon.match({
+          brand_name: 'Kings',
+          domain: 'nba.com',
+          main_brand: true,
+          brand_aliases: sinon.match.array.deepEquals(['sacramento kings', 'kings']),
+        })],
+      );
+    });
+
     it('creates the own-brand benchmark on the market TRACKED url, not its bare host', async () => {
       // A merge-integration miss caught in review: the flat path's `brand` object
       // must carry `primaryUrl` like the sub-workspace path's `ownBrand` does, or

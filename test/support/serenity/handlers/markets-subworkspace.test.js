@@ -28,6 +28,7 @@ import {
 import { clearTagCache } from '../../../../src/support/serenity/handlers/markets.js';
 import { SerenityTransportError } from '../../../../src/support/serenity/rest-transport.js';
 import { ERROR_CODES } from '../../../../src/support/serenity/errors.js';
+import { MainBrandBenchmarkInvariantError } from '../../../../src/support/serenity/brand-urls.js';
 import { TAG_IDS, dimensionTreeLevels, makeListProjectTagsStub } from '../fixtures/tag-tree.js';
 
 use(chaiAsPromised);
@@ -730,7 +731,7 @@ describe('markets-subworkspace handlers', () => {
           { dataAccess },
         ).then(() => null, (e) => e);
 
-        expect(err).to.match(/main_brand=true benchmark/);
+        expect(err).to.be.instanceOf(MainBrandBenchmarkInvariantError);
         expect(transport.publishProject).to.not.have.been.called;
         expect(create).to.not.have.been.called;
       });
