@@ -592,7 +592,8 @@ describe('SerenityController', () => {
       handlers.handleListPrompts.resolves({
         items: [], total: 0, page: 1, limit: 50,
       });
-      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const log = fakeLog();
+      const controller = SerenityController({ env: {} }, log, {});
       const ctx = fakeContext();
       ctx.request = {
         url: 'https://x/v2/orgs/x/brands/y/serenity/prompts?geoTargetId=2840&languageCode=en&page=2',
@@ -605,6 +606,7 @@ describe('SerenityController', () => {
       expect(args[4]).to.include({
         geoTargetId: 2840, languageCode: 'en', page: 2,
       });
+      expect(args[5]).to.equal(log);
     });
 
     it('listPrompts coerces limit query param to integer and forwards it', async () => {
@@ -1365,6 +1367,19 @@ describe('SerenityController', () => {
       expect(handlers.handleDeleteTag).to.have.been.calledOnce;
       expect(handlers.handleDeleteTag.firstCall.args[4]).to.equal('tag-1');
       expect(handlers.handleDeleteTagSubworkspace).to.not.have.been.called;
+    });
+
+    it('deleteTag resolves If-Match case-insensitively', async () => {
+      handlers.handleDeleteTag.resolves({ status: 204 });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({ params: { tagId: 'tag-1' } });
+      ctx.request = { url: 'https://x?geoTargetId=2840&languageCode=en' };
+      ctx.pathInfo.headers['iF-mAtCh'] = '"impact-revision"';
+
+      const response = await controller.deleteTag(ctx);
+
+      expect(response.status).to.equal(204);
+      expect(handlers.handleDeleteTag.firstCall.args[7]).to.equal('"impact-revision"');
     });
 
     it('deleteTag returns the authorize error without throwing (auth.error short-circuit)', async () => {
@@ -3115,14 +3130,22 @@ describe('SerenityController', () => {
       const JOB = '99999999-8888-7777-6666-555555555555';
 
       function makeAsyncJob({
-        status = 'COMPLETED', result = null, error = null, brandId = BRAND,
+        status = 'COMPLETED',
+        result = null,
+        error = null,
+        brandId = BRAND,
+        jobType = undefined,
       } = {}) {
         return {
           getId: () => JOB,
           getStatus: () => status,
           getResult: () => result,
           getError: () => error,
-          getMetadata: () => ({ brandId, promiseToken: { promise_token: 'secret' } }),
+          getMetadata: () => ({
+            brandId,
+            promiseToken: { promise_token: 'secret' },
+            ...(jobType ? { jobType } : {}),
+          }),
         };
       }
 
@@ -3147,6 +3170,38 @@ describe('SerenityController', () => {
         expect(body).to.not.have.property('metadata');
       });
 
+      it('exposes an explicit partial-failure outcome for a completed bulk-tags job', async () => {
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const result = {
+          outcome: 'PARTIAL_FAILURE',
+          matchedCount: 2,
+          processedCount: 2,
+          updatedCount: 1,
+          unchangedCount: 0,
+          failureCount: 1,
+          failures: [{
+            semrushPromptId: 'p-2',
+            code: 'serenityUpstreamError',
+            message: 'The prompt could not be updated',
+            retryable: true,
+          }],
+          publish: { state: 'SUCCEEDED', error: null },
+        };
+        const response = await controller.getPromptsJobStatus(
+          ctxWithJob(makeAsyncJob({
+            status: 'COMPLETED',
+            result,
+            jobType: 'serenity-bulk-tags',
+          })),
+        );
+        const body = await readBody(response);
+
+        expect(body.jobType).to.equal('bulkTags');
+        expect(body.status).to.equal('COMPLETED');
+        expect(body.result.outcome).to.equal('PARTIAL_FAILURE');
+        expect(body.error).to.equal(null);
+      });
+
       it('sanitizes a FAILED job error to the documented public envelope', async () => {
         const controller = SerenityController({ env: {} }, fakeLog(), {});
         const error = {
@@ -3166,12 +3221,32 @@ describe('SerenityController', () => {
           result: null,
           error: {
             code: 'jobFailed',
-            message: 'Promise token exchange rejected',
+            message: 'The background job failed',
             retryable: false,
           },
         });
         expect(JSON.stringify(body)).not.to.include('NEEDS_REAUTH');
         expect(JSON.stringify(body)).not.to.include('promiseToken');
+      });
+
+      it('does not expose an upstream URL from a FAILED job error', async () => {
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const response = await controller.getPromptsJobStatus(
+          ctxWithJob(makeAsyncJob({
+            status: 'FAILED',
+            error: {
+              code: 'serenityUpstreamError',
+              message: 'POST https://internal.example/workspaces/secret failed',
+              retryable: true,
+            },
+          })),
+        );
+        const body = await readBody(response);
+        expect(body.error).to.deep.equal({
+          code: 'serenityUpstreamError',
+          message: 'Upstream request failed',
+          retryable: true,
+        });
       });
 
       it('404s when the job does not exist', async () => {

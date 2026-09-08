@@ -27,16 +27,16 @@ export function classifyTagCompatibility(items) {
     ?? [...(item.path ?? []), { id: item.id ?? '', name: item.name }];
   for (const item of items) {
     const key = pathOf(item).map((part) => String(part.name).normalize('NFKC')
-      .toLocaleLowerCase()).join('__');
+      .toLowerCase()).join('__');
     counts.set(key, (counts.get(key) ?? 0) + 1);
   }
   return items.map((item) => {
     const path = pathOf(item);
     const rootName = path[0]?.name ?? item.name;
     const key = path.map((part) => String(part.name).normalize('NFKC')
-      .toLocaleLowerCase()).join('__');
+      .toLowerCase()).join('__');
     let reason = null;
-    if (rootName.toLocaleLowerCase() === DIMENSION.TAG && rootName !== DIMENSION.TAG) {
+    if (rootName.toLowerCase() === DIMENSION.TAG && rootName !== DIMENSION.TAG) {
       reason = 'caseVariantRoot';
     } else if (path.some((part) => String(part.name).includes(':') || String(part.name).includes('__'))) {
       reason = 'separatorInName';

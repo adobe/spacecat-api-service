@@ -36,6 +36,7 @@ import {
   MAX_TAG_IDS,
   validateTagIds,
   listFacetedPrompts,
+  capUpdateTagIds,
   BULK_CREATE_CONCURRENCY,
   BULK_PROMPTS_MAX_ITEMS,
   deleteProjectBatches,
@@ -427,6 +428,7 @@ export async function handleUpdatePromptSubworkspace(
     };
   }
   const projectId = String(project.id);
+  const cappedTagIds = await capUpdateTagIds(nextTagIds);
 
   // Recompute the type AND intent tags from the NEW text BEFORE any upstream write
   // (see the flat-mode twin handleUpdatePrompt): the unified layer must run before
@@ -449,7 +451,7 @@ export async function handleUpdatePromptSubworkspace(
   );
   const injectComputedIntent = makeIntentInjector(transport, workspaceId, intentByText, log);
   let typed = await injectComputedTags(projectId, {
-    text: nextText, geoTargetId, tagIds: nextTagIds,
+    text: nextText, geoTargetId, tagIds: cappedTagIds,
   });
   typed = await injectComputedIntent(projectId, typed);
 

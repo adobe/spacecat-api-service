@@ -116,7 +116,7 @@ const FIXTURES = {
           name: 'topic-a',
           parentId: null,
           path: null,
-          compatibility: { state: 'canonical', reason: null },
+          compatibility: { state: 'unverified', reason: 'taxonomyNotLoaded' },
         }],
         // Authorship metadata fields (LLMO-6289) on a list item.
         createdAt: '2026-07-01T00:00:00Z',

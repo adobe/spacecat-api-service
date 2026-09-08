@@ -197,9 +197,9 @@ function tagFilterParams(query) {
     return {};
   }
 
-  if (query.tagFilterMode !== 'faceted-v1') {
+  if (query.tagFilterMode !== 'elements-faceted-v1') {
     const error = new ErrorWithStatusCode(
-      'tagFilterMode must be faceted-v1 when tagPath is supplied',
+      'tagFilterMode must be elements-faceted-v1 when tagPath is supplied',
       400,
     );
     error.code = 'invalidTagFilter';

@@ -21,6 +21,7 @@ import {
   pageBulkFailures,
   parseBulkTagsBody,
 } from '../../../../src/support/serenity/handlers/bulk-tags-job.js';
+import { SerenityTransportError } from '../../../../src/support/serenity/rest-transport.js';
 
 function requestHash(body) {
   return createHash('sha256').update(JSON.stringify({
@@ -34,9 +35,9 @@ function requestHash(body) {
   })).digest('base64url');
 }
 
-function workerTransport(prompts, update = sinon.stub().resolves()) {
-  const roots = [{ id: 'tag-root', name: 'tag', children_count: 1 }];
-  const children = [{
+function workerTransport(prompts, update = sinon.stub().resolves(), tree = {}) {
+  const roots = tree.roots ?? [{ id: 'tag-root', name: 'tag', children_count: 1 }];
+  const children = tree.children ?? [{
     id: 'family',
     name: 'Family',
     parent_id: 'tag-root',
@@ -53,7 +54,7 @@ function workerTransport(prompts, update = sinon.stub().resolves()) {
   };
 }
 
-function workerJob(promptIds) {
+function workerJob(promptIds, overrides = {}) {
   return {
     getMetadata: () => ({
       workspaceId: 'ws',
@@ -62,6 +63,7 @@ function workerJob(promptIds) {
       operation: 'assign',
       promptIds,
       matchedCount: promptIds.length,
+      ...overrides,
     }),
   };
 }
@@ -128,6 +130,7 @@ describe('bulk tags job request and tree semantics', () => {
 describe('bulk tags job result paging', () => {
   it('returns at most 100 failures and an opaque next cursor', () => {
     const result = pageBulkFailures({
+      outcome: 'PARTIAL_FAILURE',
       matchedCount: 101,
       processedCount: 101,
       updatedCount: 0,
@@ -144,7 +147,18 @@ describe('bulk tags job result paging', () => {
 
     expect(result.failuresPage.items).to.have.lengthOf(100);
     expect(result.failuresPage.nextCursor).to.be.a('string');
+    expect(result.outcome).to.equal('PARTIAL_FAILURE');
     expect(result).not.to.have.property('failures');
+  });
+
+  it('clamps failureLimit to the public [1, 100] range', () => {
+    const failures = Array.from({ length: 101 }, (_, index) => ({
+      semrushPromptId: `prompt-${index}`,
+    }));
+    expect(pageBulkFailures({ failures }, undefined, 0).failuresPage.items)
+      .to.have.lengthOf(1);
+    expect(pageBulkFailures({ failures }, undefined, 500).failuresPage.items)
+      .to.have.lengthOf(100);
   });
 });
 
@@ -219,7 +233,12 @@ describe('bulkTagsHandler worker accounting', () => {
     const transport = workerTransport([{ id: 'one', tags: [] }]);
     const result = await bulkTagsHandler({ env: {}, log: {} }, workerJob(['one']), 'token', transport);
     expect(result).to.deep.include({
-      matchedCount: 1, processedCount: 1, updatedCount: 1, unchangedCount: 0, failureCount: 0,
+      outcome: 'SUCCEEDED',
+      matchedCount: 1,
+      processedCount: 1,
+      updatedCount: 1,
+      unchangedCount: 0,
+      failureCount: 0,
     });
     expect(transport.updatePromptTagsByIds).to.have.been.calledOnce;
     expect(transport.publishProject).to.have.been.calledOnceWith('ws', 'project');
@@ -234,17 +253,151 @@ describe('bulkTagsHandler worker accounting', () => {
     const transport = workerTransport([{ id: 'one', tags: [] }, { id: 'two', tags: [] }], update);
     const result = await bulkTagsHandler({ env: {}, log: {} }, workerJob(['one', 'two', 'gone']), 'token', transport);
     expect(result).to.deep.include({
-      processedCount: 3, updatedCount: 1, unchangedCount: 0, failureCount: 2,
+      outcome: 'PARTIAL_FAILURE',
+      processedCount: 3,
+      updatedCount: 1,
+      unchangedCount: 0,
+      failureCount: 2,
     });
     expect(result.failures.map((failure) => failure.semrushPromptId)).to.deep.equal(['one', 'gone']);
     expect(transport.updatePromptTagsByIds).to.have.been.calledTwice;
   });
 
-  it('accounts for an unchanged assignment without publishing', async () => {
+  it('publishes an unchanged retry so a prior publish failure can be recovered', async () => {
     const transport = workerTransport([{ id: 'one', tags: [{ id: 'family' }] }]);
     const result = await bulkTagsHandler({ env: {}, log: {} }, workerJob(['one']), 'token', transport);
-    expect(result).to.deep.include({ updatedCount: 0, unchangedCount: 1, failureCount: 0 });
+    expect(result).to.deep.include({
+      outcome: 'SUCCEEDED', updatedCount: 0, unchangedCount: 1, failureCount: 0,
+    });
     expect(transport.updatePromptTagsByIds).not.to.have.been.called;
-    expect(transport.publishProject).not.to.have.been.called;
+    expect(transport.publishProject).to.have.been.calledOnceWith('ws', 'project');
+  });
+
+  it('fails the job with 409 incompatibleTagTaxonomy when a requested tag disappeared', async () => {
+    const transport = workerTransport([{ id: 'one', tags: [] }]);
+
+    await expect(bulkTagsHandler(
+      { env: {}, log: {} },
+      workerJob(['one'], { tagIds: ['missing'] }),
+      'token',
+      transport,
+    )).to.be.rejected.then((error) => {
+      expect(error.status).to.equal(409);
+      expect(error.code).to.equal('incompatibleTagTaxonomy');
+    });
+    expect(transport.listPromptsByTags).not.to.have.been.called;
+  });
+
+  it('fails the job with 409 incompatibleTagTaxonomy when a requested tag became read-only', async () => {
+    const transport = workerTransport(
+      [{ id: 'one', tags: [] }],
+      sinon.stub().resolves(),
+      {
+        children: [{
+          id: 'family',
+          name: 'Bad__Family',
+          parent_id: 'tag-root',
+          children_count: 0,
+          path: [{ id: 'tag-root', name: 'tag' }],
+        }],
+      },
+    );
+
+    await expect(bulkTagsHandler(
+      { env: {}, log: {} },
+      workerJob(['one']),
+      'token',
+      transport,
+    )).to.be.rejected.then((error) => {
+      expect(error.status).to.equal(409);
+      expect(error.code).to.equal('incompatibleTagTaxonomy');
+    });
+    expect(transport.listPromptsByTags).not.to.have.been.called;
+  });
+
+  it('records a per-item tagLimitExceeded failure without writing that prompt', async () => {
+    const tags = Array.from({ length: 50 }, (_, index) => ({ id: `existing-${index}` }));
+    const transport = workerTransport([{ id: 'one', tags }]);
+
+    const result = await bulkTagsHandler(
+      { env: {}, log: {} },
+      workerJob(['one']),
+      'token',
+      transport,
+    );
+
+    expect(result).to.deep.include({
+      outcome: 'PARTIAL_FAILURE',
+      updatedCount: 0,
+      unchangedCount: 0,
+      failureCount: 1,
+    });
+    expect(result.failures).to.deep.equal([{
+      semrushPromptId: 'one',
+      code: 'tagLimitExceeded',
+      message: 'The requested tag set exceeds the prompt tag limit',
+      retryable: false,
+    }]);
+    expect(transport.updatePromptTagsByIds).not.to.have.been.called;
+  });
+
+  it('records promptNotFound when a frozen prompt is absent at worker time', async () => {
+    const transport = workerTransport([]);
+
+    const result = await bulkTagsHandler(
+      { env: {}, log: {} },
+      workerJob(['gone']),
+      'token',
+      transport,
+    );
+
+    expect(result.failures).to.deep.equal([{
+      semrushPromptId: 'gone',
+      code: 'promptNotFound',
+      message: 'The prompt no longer exists',
+      retryable: false,
+    }]);
+    expect(transport.publishProject).to.have.been.calledOnceWith('ws', 'project');
+  });
+
+  it('maps an upstream 404 during update to a non-retryable promptNotFound failure', async () => {
+    const update = sinon.stub().rejects(new SerenityTransportError(404, 'gone'));
+    const transport = workerTransport([{ id: 'one', tags: [] }], update);
+
+    const result = await bulkTagsHandler(
+      { env: {}, log: {} },
+      workerJob(['one']),
+      'token',
+      transport,
+    );
+
+    expect(result.failures).to.deep.equal([{
+      semrushPromptId: 'one',
+      code: 'promptNotFound',
+      message: 'The prompt no longer exists',
+      retryable: false,
+    }]);
+  });
+
+  it('marks a publish failure as a partial failure with a retryable public error', async () => {
+    const transport = workerTransport([{ id: 'one', tags: [] }]);
+    transport.publishProject.rejects(new Error('publish failed'));
+
+    const result = await bulkTagsHandler(
+      { env: {}, log: {} },
+      workerJob(['one']),
+      'token',
+      transport,
+    );
+
+    expect(result.outcome).to.equal('PARTIAL_FAILURE');
+    expect(result.publish).to.deep.equal({
+      state: 'FAILED',
+      error: {
+        code: 'serenityUpstreamError',
+        message: 'The project could not be published',
+        retryable: true,
+      },
+    });
   });
 });

@@ -1099,6 +1099,23 @@ async function listAffectedPromptIds(
   throw error;
 }
 
+/**
+ * @param {SerenityTransport} transport
+ * @param {string} semrushWorkspaceId
+ * @param {string} projectId
+ * @param {string} tagId
+ * @param {object} [log]
+ * @returns {Promise<{
+ *   tagId: string,
+ *   name: string,
+ *   path: Array<{ id: string, name: string }>,
+ *   descendantCount: number,
+ *   affectedPromptCount: number,
+ *   complete: true,
+ *   revision: string,
+ *   deletedIds: string[],
+ * }>}
+ */
 export async function buildTagImpact(transport, semrushWorkspaceId, projectId, tagId, log) {
   const snapshot = await readTagTreeSnapshot(
     transport,

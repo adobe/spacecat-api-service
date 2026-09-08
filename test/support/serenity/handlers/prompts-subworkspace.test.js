@@ -125,7 +125,7 @@ describe('prompts-subworkspace handlers', () => {
           name: 'Running Shoes',
           parentId: TAG_IDS.categoryRoot,
           path: [{ id: TAG_IDS.categoryRoot, name: 'category' }],
-          compatibility: { state: 'canonical', reason: null },
+          compatibility: { state: 'unverified', reason: 'taxonomyNotLoaded' },
         }],
         createdAt: null,
         createdBy: null,
@@ -477,6 +477,29 @@ describe('prompts-subworkspace handlers', () => {
   });
 
   describe('handleUpdatePromptSubworkspace', () => {
+    it('returns 409 tagLimitExceeded before resolving the project for an over-limit tag set', async () => {
+      const transport = makeTransport();
+      const result = await handleUpdatePromptSubworkspace(
+        transport,
+        WS,
+        'old-id',
+        {
+          text: 'new',
+          tagIds: Array.from({ length: 51 }, (_, index) => `tag-${index}`),
+          geoTargetId: 2840,
+          languageCode: 'en',
+        },
+        log,
+      );
+
+      expect(result.status).to.equal(409);
+      expect(result.body).to.deep.include({
+        error: ERROR_CODES.TAG_LIMIT_EXCEEDED,
+        details: { attemptedCount: 51, maxPromptTagIds: 50 },
+      });
+      expect(transport.listProjects).not.to.have.been.called;
+    });
+
     it('edits the prompt in place (patchPrompt + tag write) and publishes', async () => {
       const transport = makeTransport();
       const result = await handleUpdatePromptSubworkspace(transport, WS, 'old-id', {

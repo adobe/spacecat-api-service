@@ -822,6 +822,39 @@ describe('ElementsController', () => {
       });
     });
 
+    it('uses the Elements-specific filter mode for repeated tagPath filters', async () => {
+      const ctx = fakeContext({
+        url: promptsUrl('?tagPath=tag__Campaign&tagPath=tag__Audience__Enterprise'
+          + '&tagFilterMode=elements-faceted-v1'),
+      });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+
+      const res = await ctrl.listPrompts(ctx);
+
+      expect(res.status).to.equal(200);
+      expect(serviceStub.getPrompts).to.have.been.calledWith(
+        SUB_WORKSPACE_ID,
+        sinon.match({
+          tagPaths: ['tag__Campaign', 'tag__Audience__Enterprise'],
+        }),
+      );
+    });
+
+    it('rejects native faceted-v1 on the incompatible Elements filter engine', async () => {
+      const ctx = fakeContext({
+        url: promptsUrl('?tagPath=tag__Campaign&tagFilterMode=faceted-v1'),
+      });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+
+      const res = await ctrl.listPrompts(ctx);
+      const body = await readBody(res);
+
+      expect(res.status).to.equal(400);
+      expect(body.error).to.equal('invalidTagFilter');
+      expect(body.message).to.match(/elements-faceted-v1/);
+      expect(serviceStub.getPrompts).not.to.have.been.called;
+    });
+
     it('passes enrichUserIntent: true to getPrompts when ?userIntent=true', async () => {
       const ctx = fakeContext({ url: promptsUrl('?projectId=proj-a&userIntent=true') });
       const ctrl = ElementsController(ctx, fakeLog(), ENV);

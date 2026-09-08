@@ -61,6 +61,19 @@ import {
 import { classifyTagCompatibility } from './tag-compatibility.js';
 
 /** @typedef {import('./rest-transport.js').SerenityTransport} SerenityTransport */
+/**
+ * @typedef {object} TagTreeSnapshotItem
+ * @property {string} id
+ * @property {string} name
+ * @property {string | null} parentId
+ * @property {number} childrenCount
+ * @property {number} promptsCount
+ * @property {string} rootName
+ * @property {string} rootId
+ * @property {number} depth
+ * @property {Array<{ id: string, name: string }>} fullPath
+ * @property {{ state: 'canonical' | 'readOnly', reason: string | null }} compatibility
+ */
 
 /**
  * Where one tag sits in the dimension tree.
@@ -385,7 +398,7 @@ function valueAliasesOf(dimension) {
 export async function ensureDimensionRoots(transport, semrushWorkspaceId, projectId, log) {
   const rootLevel = await indexLevelByName(transport, semrushWorkspaceId, projectId, '', log);
   const caseVariantTagRoot = [...rootLevel.keys()]
-    .find((name) => name.toLocaleLowerCase() === DIMENSION.TAG && name !== DIMENSION.TAG);
+    .find((name) => name.toLowerCase() === DIMENSION.TAG && name !== DIMENSION.TAG);
   if (!rootLevel.has(DIMENSION.TAG) && caseVariantTagRoot) {
     const error = new ErrorWithStatusCode(
       `The project has a case-variant "${caseVariantTagRoot}" root; refusing to create "tag"`,
@@ -625,6 +638,15 @@ export async function findTagsInTree(transport, semrushWorkspaceId, projectId, t
 /**
  * Reads the complete draft taxonomy once and derives stable path and
  * compatibility metadata without modifying non-canonical Project Engine data.
+ *
+ * @param {SerenityTransport} transport
+ * @param {string} semrushWorkspaceId
+ * @param {string} projectId
+ * @param {object} [log]
+ * @returns {Promise<{
+ *   items: TagTreeSnapshotItem[],
+ *   byId: Map<string, TagTreeSnapshotItem>,
+ * }>}
  */
 export async function readTagTreeSnapshot(
   transport,

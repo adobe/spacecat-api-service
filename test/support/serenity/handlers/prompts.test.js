@@ -32,6 +32,7 @@ import {
   buildUpdateMetadata,
   resolveSort,
   validateTagIds,
+  capUpdateTagIds,
 } from '../../../../src/support/serenity/handlers/prompts.js';
 import { ErrorWithStatusCode } from '../../../../src/support/utils.js';
 import { SerenityTransportError } from '../../../../src/support/serenity/rest-transport.js';
@@ -63,6 +64,19 @@ describe('plain tag limits', () => {
     }
     expect(thrown).to.be.instanceOf(ErrorWithStatusCode);
     expect(thrown.code).to.equal(ERROR_CODES.TAG_LIMIT_EXCEEDED);
+  });
+
+  it('preserves an in-limit PATCH replacement set without reordering or dropping ids', async () => {
+    const tagIds = ['customer-a', TAG_IDS.originHuman, 'customer-b', TAG_IDS.sourceConfig];
+    expect(await capUpdateTagIds(tagIds)).to.deep.equal(tagIds);
+  });
+
+  it('rejects an over-limit PATCH replacement set with tagLimitExceeded', async () => {
+    const tagIds = Array.from({ length: 51 }, (_, index) => `tag-${index}`);
+    await expect(capUpdateTagIds(tagIds)).to.be.rejected.then((error) => {
+      expect(error.status).to.equal(409);
+      expect(error.code).to.equal(ERROR_CODES.TAG_LIMIT_EXCEEDED);
+    });
   });
 });
 
@@ -112,6 +126,7 @@ function makeDataAccess(projects) {
 
 function fakeLog() {
   return {
+    debug: sinon.stub(),
     info: sinon.stub(),
     warn: sinon.stub(),
     error: sinon.stub(),
@@ -227,7 +242,7 @@ describe('handlers/prompts.js — handleListPrompts', () => {
       name: 'consideration',
       parentId: null,
       path: null,
-      compatibility: { state: 'canonical', reason: null },
+      compatibility: { state: 'unverified', reason: 'taxonomyNotLoaded' },
     }]);
   });
 
@@ -305,7 +320,7 @@ describe('handlers/prompts.js — handleListPrompts', () => {
         name: 'awareness',
         parentId: null,
         path: null,
-        compatibility: { state: 'canonical', reason: null },
+        compatibility: { state: 'unverified', reason: 'taxonomyNotLoaded' },
       }],
       createdAt: null,
       createdBy: null,
@@ -413,6 +428,49 @@ describe('handlers/prompts.js — handleListPrompts', () => {
     expect(body.tag_ids).to.deep.equal([]);
   });
 
+  it('passes the request log through the flat faceted listing path', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(project);
+    const transport = {
+      listProjectTags: makeListProjectTagsStub(),
+      listPromptsByTags: sinon.stub().resolves({
+        items: [{
+          id: 'sem-1',
+          name: 'prompt',
+          tags: [{
+            id: TAG_IDS.categoryRunningShoes,
+            name: 'Running Shoes',
+            parent_id: TAG_IDS.categoryRoot,
+            path: [{ id: TAG_IDS.categoryRoot, name: 'category' }],
+          }],
+        }],
+      }),
+    };
+    const log = fakeLog();
+
+    await handleListPrompts(
+      transport,
+      dataAccess,
+      BRAND,
+      WORKSPACE,
+      {
+        geoTargetId: 2840,
+        languageCode: 'en',
+        tagIds: [TAG_IDS.categoryRunningShoes],
+        tagFilterMode: 'faceted-v1',
+      },
+      log,
+    );
+
+    expect(log.debug).to.have.been.calledWith(
+      'listAllProjectPrompts: faceted prompt page read',
+      sinon.match({ projectId: 'proj-us-en', upstreamPromptsScanned: 1 }),
+    );
+  });
+
   it('buildTagsOf: skips null/non-object entries and objects without name; coerces numeric id', async () => {
     const project = makeProject({
       semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
@@ -449,21 +507,21 @@ describe('handlers/prompts.js — handleListPrompts', () => {
         name: 'name-only',
         parentId: null,
         path: null,
-        compatibility: { state: 'canonical', reason: null },
+        compatibility: { state: 'unverified', reason: 'taxonomyNotLoaded' },
       },
       {
         id: '42',
         name: 'valid',
         parentId: null,
         path: null,
-        compatibility: { state: 'canonical', reason: null },
+        compatibility: { state: 'unverified', reason: 'taxonomyNotLoaded' },
       },
       {
         id: '',
         name: 'string-tag',
         parentId: null,
         path: null,
-        compatibility: { state: 'canonical', reason: null },
+        compatibility: { state: 'unverified', reason: 'taxonomyNotLoaded' },
       },
     ]);
   });
@@ -1099,6 +1157,31 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
 });
 
 describe('handlers/prompts.js — handleUpdatePrompt', () => {
+  it('returns 409 tagLimitExceeded before resolving the project for an over-limit tag set', async () => {
+    const dataAccess = makeDataAccess([]);
+    const result = await handleUpdatePrompt(
+      {},
+      dataAccess,
+      BRAND,
+      WORKSPACE,
+      'prompt-1',
+      {
+        text: 'updated',
+        tagIds: Array.from({ length: 51 }, (_, index) => `tag-${index}`),
+        geoTargetId: 2840,
+        languageCode: 'en',
+      },
+      fakeLog(),
+    );
+
+    expect(result.status).to.equal(409);
+    expect(result.body).to.deep.include({
+      error: ERROR_CODES.TAG_LIMIT_EXCEEDED,
+      details: { attemptedCount: 51, maxPromptTagIds: 50 },
+    });
+    expect(dataAccess.BrandSemrushProject.findBySlice).not.to.have.been.called;
+  });
+
   // Regression guard for the "drop slow path" decision: PATCH treats the
   // body as the full next state, so omitting either text or tagIds is a
   // client error. Previously omitting tags meant "preserve" and forced a

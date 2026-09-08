@@ -31,7 +31,9 @@ import {
 } from '../../../src/support/serenity/handlers/tags.js';
 import {
   listAllProjectPrompts,
+  listFacetedPrompts,
 } from '../../../src/support/serenity/handlers/prompts.js';
+import { listProjectTagTree } from '../../../src/support/serenity/handlers/markets.js';
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -196,6 +198,36 @@ describe('remaining plain-tags regression coverage', () => {
       expect(createAndEnqueueJob).to.have.been.calledOnce;
     });
 
+    it('rejects an over-limit accepted snapshot before enqueueing', async () => {
+      const createAndEnqueueJob = sinon.stub();
+      const { acceptBulkTags } = await loadBulkModule(createAndEnqueueJob);
+      const transport = bulkTransport();
+      transport.listPromptsByTags.resolves({
+        items: [{
+          id: 'prompt-1',
+          tags: Array.from({ length: 50 }, (_, index) => ({ id: `existing-${index}` })),
+        }],
+      });
+      const body = bulkBody();
+      body.filter.tagIds = [];
+
+      await expect(acceptBulkTags({
+        context: { dataAccess: { AsyncJob: {} } },
+        transport,
+        brandId: BRAND,
+        orgId: 'org-1',
+        workspaceId: WS,
+        projectId: PROJECT,
+        body,
+        callerId: 'caller',
+        log: fakeLog(),
+      })).to.be.rejected.then((error) => {
+        expect(error.status).to.equal(409);
+        expect(error.code).to.equal('tagLimitExceeded');
+      });
+      expect(createAndEnqueueJob).not.to.have.been.called;
+    });
+
     it('loads and replays the winning job after a concurrent create conflict without dispatching twice', async () => {
       const body = bulkBody();
       const hash = requestHash(body);
@@ -341,6 +373,30 @@ describe('remaining plain-tags regression coverage', () => {
         });
     });
 
+    it('listProjectTagTree fails closed on a malformed item', async () => {
+      const listProjectTags = sinon.stub().resolves({
+        page: 1,
+        total: 1,
+        items: [{ id: '', name: 'missing id' }],
+      });
+      const log = fakeLog();
+
+      await expect(listProjectTagTree(
+        { listProjectTags },
+        WS,
+        PROJECT,
+        '',
+        log,
+      )).to.be.rejected.then((error) => {
+        expect(error.status).to.equal(503);
+        expect(error.code).to.equal('tagTreeReadIncomplete');
+      });
+      expect(log.warn).to.have.been.calledWith(
+        'listProjectTagTree: incomplete tag level',
+        sinon.match({ reason: 'malformedItem' }),
+      );
+    });
+
     it('fails closed when a short page contradicts the advertised total', async () => {
       const listProjectTags = sinon.stub().resolves({
         page: 1,
@@ -355,7 +411,7 @@ describe('remaining plain-tags regression coverage', () => {
         });
     });
 
-    it('fails closed when pagination repeats ids instead of making progress', async () => {
+    it('listProjectTagTree fails closed when pagination repeats a tag id', async () => {
       const firstPage = Array.from({ length: 100 }, (_, index) => (
         tagNode(`root-${index}`, `Root ${index}`, null, null)
       ));
@@ -364,13 +420,38 @@ describe('remaining plain-tags regression coverage', () => {
         total: 101,
         items: firstPage,
       }));
+      const log = fakeLog();
+
+      await expect(listProjectTagTree(
+        { listProjectTags },
+        WS,
+        PROJECT,
+        '',
+        log,
+      ))
+        .to.be.rejected.then((error) => {
+          expect(error.status).to.equal(503);
+          expect(error.code).to.equal('tagTreeReadIncomplete');
+        });
+      expect(listProjectTags).to.have.been.calledTwice;
+      expect(log.warn).to.have.been.calledWith(
+        'listProjectTagTree: incomplete tag level',
+        sinon.match({ reason: 'repeatedTagId' }),
+      );
+    });
+
+    it('fails closed with tagTreeReadIncomplete when MAX_TREE_READS is exceeded', async () => {
+      const roots = Array.from({ length: 200 }, (_, index) => (
+        tagNode(`root-${index}`, `Root ${index}`, null, null, 1)
+      ));
+      const listProjectTags = pagedTreeStub({ '': roots });
 
       await expect(readTagTreeSnapshot({ listProjectTags }, WS, PROJECT, fakeLog()))
         .to.be.rejected.then((error) => {
           expect(error.status).to.equal(503);
           expect(error.code).to.equal('tagTreeReadIncomplete');
         });
-      expect(listProjectTags).to.have.been.calledTwice;
+      expect(listProjectTags).to.have.callCount(201);
     });
 
     it('classifies canonical nodes and ambiguous sibling paths from one complete snapshot', async () => {
@@ -452,6 +533,53 @@ describe('remaining plain-tags regression coverage', () => {
       });
       expect(result.deletedIds).to.deep.equal(['family', 'leaf']);
       expect(result.revision).to.match(/^"[A-Za-z0-9_-]+"$/);
+    });
+
+    it('rejects dimension roots as tag-impact targets', async () => {
+      const { transport } = impactFixture();
+
+      await expect(buildTagImpact(transport, WS, PROJECT, 'tag-root', fakeLog()))
+        .to.be.rejected.then((error) => {
+          expect(error.status).to.equal(400);
+          expect(error.message).to.match(/dimension root/);
+        });
+      expect(transport.listPromptsByTags).not.to.have.been.called;
+    });
+
+    it('rejects server-owned tags as tag-impact targets', async () => {
+      const rootPath = [{ id: 'type-root', name: 'type' }];
+      const transport = {
+        listProjectTags: pagedTreeStub({
+          '': [tagNode('type-root', 'type', null, null, 1)],
+          'type-root': [tagNode('type-value', 'branded', 'type-root', rootPath)],
+        }),
+        listPromptsByTags: sinon.stub(),
+      };
+
+      await expect(buildTagImpact(transport, WS, PROJECT, 'type-value', fakeLog()))
+        .to.be.rejected.then((error) => {
+          expect(error.status).to.equal(400);
+          expect(error.message).to.match(/server-owned "type"/);
+        });
+      expect(transport.listPromptsByTags).not.to.have.been.called;
+    });
+
+    it('rejects read-only tags as tag-impact targets', async () => {
+      const rootPath = [{ id: 'tag-root', name: 'tag' }];
+      const transport = {
+        listProjectTags: pagedTreeStub({
+          '': [tagNode('tag-root', 'tag', null, null, 1)],
+          'tag-root': [tagNode('bad', 'Bad__Name', 'tag-root', rootPath)],
+        }),
+        listPromptsByTags: sinon.stub(),
+      };
+
+      await expect(buildTagImpact(transport, WS, PROJECT, 'bad', fakeLog()))
+        .to.be.rejected.then((error) => {
+          expect(error.status).to.equal(409);
+          expect(error.code).to.equal('incompatibleTagTaxonomy');
+        });
+      expect(transport.listPromptsByTags).not.to.have.been.called;
     });
 
     it('handleTagImpact returns exact descendant and prompt-reference counts without internal ids', async () => {
@@ -586,6 +714,46 @@ describe('remaining plain-tags regression coverage', () => {
         }),
       );
       expect(log.info).not.to.have.been.called;
+    });
+  });
+
+  describe('listFacetedPrompts pagination', () => {
+    it('applies page-2 arithmetic after filtering the complete cohort', async () => {
+      const rootPath = [{ id: 'tag-root', name: 'tag' }];
+      const listProjectTags = pagedTreeStub({
+        '': [tagNode('tag-root', 'tag', null, null, 1)],
+        'tag-root': [tagNode('family', 'Family', 'tag-root', rootPath)],
+      });
+      const prompts = [
+        { id: 'p-1', name: 'one', tags: [{ id: 'family', name: 'Family', path: rootPath }] },
+        { id: 'p-x', name: 'other', tags: [{ id: 'other', name: 'Other', path: rootPath }] },
+        { id: 'p-2', name: 'two', tags: [{ id: 'family', name: 'Family', path: rootPath }] },
+        { id: 'p-y', name: 'another', tags: [] },
+        { id: 'p-3', name: 'three', tags: [{ id: 'family', name: 'Family', path: rootPath }] },
+      ];
+      const listPromptsByTags = sinon.stub().resolves({ items: prompts });
+
+      const result = await listFacetedPrompts(
+        { listProjectTags, listPromptsByTags },
+        WS,
+        PROJECT,
+        {
+          geoTargetId: 2840,
+          languageCode: 'en',
+          page: 2,
+          limit: 2,
+          tagIds: ['family'],
+        },
+        fakeLog(),
+      );
+
+      expect(result).to.include({ total: 3, page: 2, limit: 2 });
+      expect(result.items.map((item) => item.semrushPromptId)).to.deep.equal(['p-3']);
+      expect(listPromptsByTags).to.have.been.calledOnceWith(
+        WS,
+        PROJECT,
+        sinon.match({ tag_ids: ['family'], page: 1, limit: 200 }),
+      );
     });
   });
 });

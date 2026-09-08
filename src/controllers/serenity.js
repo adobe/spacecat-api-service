@@ -126,6 +126,19 @@ function safeError(msg) {
   return cleanupHeaderValue(String(msg || '')).slice(0, MAX_ERR_MSG_LEN);
 }
 
+function headerValue(headers, name) {
+  if (!headers || typeof headers !== 'object') {
+    return undefined;
+  }
+  if (typeof headers.get === 'function') {
+    return headers.get(name) ?? undefined;
+  }
+  const wanted = name.toLowerCase();
+  const entry = Object.entries(headers)
+    .find(([key]) => key.toLowerCase() === wanted);
+  return entry?.[1];
+}
+
 /**
  * Extracts query params from the request URL. Does NOT fall back to
  * `context.data` (the request body) — body keys must never become query keys
@@ -186,11 +199,15 @@ function publicJobError(error) {
     'tagLimitExceeded', 'incompatibleTagTaxonomy',
   ]);
   const code = allowedCodes.has(error.code) ? error.code : 'jobFailed';
+  let message = 'The background job failed';
+  if (code === 'serenityUpstreamError') {
+    message = 'Upstream request failed';
+  } else if (code !== 'jobFailed' && typeof error.message === 'string') {
+    message = safeError(error.message).slice(0, 256) || message;
+  }
   return {
     code,
-    message: typeof error.message === 'string'
-      ? error.message.slice(0, 256)
-      : 'The background job failed',
+    message,
     retryable: error.retryable === true,
   };
 }
@@ -608,9 +625,10 @@ function SerenityController(context, log, env) {
         : await handleListPrompts(
           transport,
           ctx.dataAccess,
-          auth.brandUuid,
-          auth.workspaceId,
+          /** @type {string} */ (auth.brandUuid),
+          /** @type {string} */ (auth.workspaceId),
           parsedQuery(ctx),
+          log,
         );
       return createResponse(result, 200);
     } catch (e) {
@@ -848,8 +866,8 @@ function SerenityController(context, log, env) {
         ? await handleBulkTagsSubworkspace(
           ctx,
           transport,
-          auth.brandUuid,
-          ctx?.params?.spaceCatId,
+          /** @type {string} */ (auth.brandUuid),
+          /** @type {string} */ (ctx?.params?.spaceCatId),
           /** @type {string} */ (auth.workspaceId),
           ctx.data || {},
           callerId,
@@ -860,8 +878,8 @@ function SerenityController(context, log, env) {
           ctx,
           transport,
           ctx.dataAccess,
-          auth.brandUuid,
-          ctx?.params?.spaceCatId,
+          /** @type {string} */ (auth.brandUuid),
+          /** @type {string} */ (ctx?.params?.spaceCatId),
           /** @type {string} */ (auth.workspaceId),
           ctx.data || {},
           callerId,
@@ -1400,8 +1418,7 @@ function SerenityController(context, log, env) {
         return auth.error;
       }
       const transport = buildTransport(ctx, imsToken);
-      const ifMatch = ctx?.pathInfo?.headers?.['if-match']
-        ?? ctx?.pathInfo?.headers?.['If-Match'];
+      const ifMatch = headerValue(ctx?.pathInfo?.headers, 'if-match');
       if (auth.mode === 'subworkspace') {
         await handleDeleteTagSubworkspace(
           transport,
@@ -2228,7 +2245,11 @@ function SerenityController(context, log, env) {
       const status = job.getStatus();
       const rawResult = status === 'COMPLETED' ? job.getResult?.() ?? null : null;
       const result = publicJobType === BULK_TAGS_PUBLIC_JOB_TYPE && rawResult
-        ? pageBulkFailures(rawResult, query.failureCursor, failureLimit)
+        ? pageBulkFailures(
+          rawResult,
+          typeof query.failureCursor === 'string' ? query.failureCursor : undefined,
+          failureLimit,
+        )
         : rawResult;
       const error = status === 'FAILED' ? publicJobError(job.getError?.()) : null;
       return createResponse(

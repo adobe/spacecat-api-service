@@ -35,6 +35,7 @@ import {
 } from './markets.js';
 import { normalizeGeoTargetId, normalizeLanguageCode } from '../validation.js';
 
+/** @typedef {import('../rest-transport.js').SerenityTransport} SerenityTransport */
 /** @typedef {Awaited<ReturnType<typeof readTagTreeSnapshot>>['items'][number]} TagTreeItem */
 
 export const BULK_TAGS_JOB_TYPE = 'serenity-bulk-tags';
@@ -56,6 +57,11 @@ function promptTagIds(prompt) {
     .filter(Boolean))];
 }
 
+/**
+ * @param {object} prompt
+ * @param {Array<Set<string>>} groups
+ * @returns {boolean}
+ */
 export function matchesBulkTagFacets(prompt, groups) {
   if (groups.length === 0) {
     return true;
@@ -64,25 +70,42 @@ export function matchesBulkTagFacets(prompt, groups) {
   return groups.every((group) => [...group].some((id) => ids.has(id)));
 }
 
-export function applyBulkTagOperation(currentIds, operation, selected, snapshot) {
-  const result = new Set(currentIds);
-  if (operation === 'assign') {
-    for (const item of selected) {
-      result.add(item.id);
-      if (item.rootName === 'tag' && item.depth === 3) {
-        result.add(item.fullPath[1].id);
-      }
+function buildBulkTagMutationIds(operation, selected, snapshot) {
+  const ids = new Set();
+  for (const item of selected) {
+    ids.add(item.id);
+    if (operation === 'assign' && item.rootName === 'tag' && item.depth === 3) {
+      ids.add(item.fullPath[1].id);
     }
-  } else {
-    for (const item of selected) {
-      result.delete(item.id);
-      if (item.rootName === 'tag' && item.depth === 2) {
-        for (const candidate of snapshot.items) {
-          if (candidate.fullPath.some((part) => part.id === item.id)) {
-            result.delete(candidate.id);
-          }
+    if (operation === 'remove' && item.rootName === 'tag' && item.depth === 2) {
+      for (const candidate of snapshot.items) {
+        if (candidate.fullPath.some((part) => part.id === item.id)) {
+          ids.add(candidate.id);
         }
       }
+    }
+  }
+  return ids;
+}
+
+/**
+ * @param {string[]} currentIds
+ * @param {'assign' | 'remove'} operation
+ * @param {TagTreeItem[]} selected
+ * @param {Awaited<ReturnType<typeof readTagTreeSnapshot>>} snapshot
+ * @param {Set<string>} [mutationIds]
+ * @returns {string[]}
+ */
+export function applyBulkTagOperation(currentIds, operation, selected, snapshot, mutationIds) {
+  const result = new Set(currentIds);
+  const effectiveIds = mutationIds ?? buildBulkTagMutationIds(operation, selected, snapshot);
+  if (operation === 'assign') {
+    for (const id of effectiveIds) {
+      result.add(id);
+    }
+  } else {
+    for (const id of effectiveIds) {
+      result.delete(id);
     }
   }
 
@@ -124,6 +147,16 @@ function idempotencyJobId(scope) {
   ].join('-');
 }
 
+/**
+ * @param {any} body
+ * @returns {{
+ *   geoTargetId: number,
+ *   languageCode: string,
+ *   operation: 'assign' | 'remove',
+ *   tagIds: string[],
+ *   filter: { tagIds: string[], tagFilterMode: 'faceted-v1', search?: string },
+ * }}
+ */
 export function parseBulkTagsBody(body) {
   const geoTargetId = normalizeGeoTargetId(Number(body?.geoTargetId));
   const languageCode = normalizeLanguageCode(body?.languageCode);
@@ -165,6 +198,20 @@ export function parseBulkTagsBody(body) {
   };
 }
 
+/**
+ * @param {object} options
+ * @param {object} options.context
+ * @param {SerenityTransport} options.transport
+ * @param {string} options.brandId
+ * @param {string} options.orgId
+ * @param {string} options.workspaceId
+ * @param {string} options.projectId
+ * @param {any} options.body
+ * @param {string} options.callerId
+ * @param {string | null} [options.idempotencyKey]
+ * @param {object} [options.log]
+ * @returns {Promise<{ status: number, body: object }>}
+ */
 export async function acceptBulkTags({
   context,
   transport,
@@ -239,13 +286,26 @@ export async function acceptBulkTags({
     log,
     snapshot,
   );
-  const prompts = (await listAllProjectPrompts(transport, workspaceId, projectId, {
+  // Freezing the acceptance-time prompt ids requires one bounded corpus read.
+  // Filter and preflight in the same pass, and reuse one pre-expanded mutation
+  // set, so the synchronous path does not repeatedly walk either collection.
+  const corpus = await listAllProjectPrompts(transport, workspaceId, projectId, {
     tagIds: resolvedFilter.candidateIds,
     search: parsed.filter.search,
-  }, log)).filter((prompt) => matchesBulkTagFacets(prompt, resolvedFilter.groups));
-
-  for (const prompt of prompts) {
-    applyBulkTagOperation(promptTagIds(prompt), parsed.operation, selected, snapshot);
+  }, log);
+  const mutationIds = buildBulkTagMutationIds(parsed.operation, selected, snapshot);
+  const prompts = [];
+  for (const prompt of corpus) {
+    if (matchesBulkTagFacets(prompt, resolvedFilter.groups)) {
+      applyBulkTagOperation(
+        promptTagIds(prompt),
+        parsed.operation,
+        selected,
+        snapshot,
+        mutationIds,
+      );
+      prompts.push(prompt);
+    }
   }
 
   let job;
@@ -309,6 +369,19 @@ export async function acceptBulkTags({
   };
 }
 
+/**
+ * @param {object} context
+ * @param {SerenityTransport} transport
+ * @param {object} dataAccess
+ * @param {string} brandId
+ * @param {string} orgId
+ * @param {string} workspaceId
+ * @param {any} body
+ * @param {string} callerId
+ * @param {string | null} [idempotencyKey]
+ * @param {object} [log]
+ * @returns {Promise<{ status: number, body: object }>}
+ */
 export async function handleBulkTags(
   context,
   transport,
@@ -344,6 +417,18 @@ export async function handleBulkTags(
   });
 }
 
+/**
+ * @param {object} context
+ * @param {SerenityTransport} transport
+ * @param {string} brandId
+ * @param {string} orgId
+ * @param {string} workspaceId
+ * @param {any} body
+ * @param {string} callerId
+ * @param {string | null} [idempotencyKey]
+ * @param {object} [log]
+ * @returns {Promise<{ status: number, body: object }>}
+ */
 export async function handleBulkTagsSubworkspace(
   context,
   transport,
@@ -380,6 +465,13 @@ export async function handleBulkTagsSubworkspace(
   });
 }
 
+/**
+ * @param {object} context
+ * @param {{ getMetadata: () => any }} job
+ * @param {string} accessToken
+ * @param {SerenityTransport} [injectedTransport]
+ * @returns {Promise<object>}
+ */
 export async function bulkTagsHandler(context, job, accessToken, injectedTransport) {
   const metadata = job.getMetadata() ?? {};
   const transport = injectedTransport
@@ -393,13 +485,15 @@ export async function bulkTagsHandler(context, job, accessToken, injectedTranspo
   const requestedTagIds = Array.isArray(metadata.tagIds) ? metadata.tagIds : [];
   const selected = requestedTagIds.map((id) => snapshot.byId.get(id)).filter(Boolean);
   if (selected.length !== requestedTagIds.length
-    || selected.some((item) => item.compatibility?.state === 'readOnly')) {
+    || selected.some((item) => item.depth === 1
+      || item.compatibility?.state === 'readOnly')) {
     throw codedError(
       'The bulk tag mutation no longer resolves to a canonical taxonomy',
       409,
       ERROR_CODES.INCOMPATIBLE_TAG_TAXONOMY,
     );
   }
+  const mutationIds = buildBulkTagMutationIds(metadata.operation, selected, snapshot);
   const currentPrompts = await listAllProjectPrompts(
     transport,
     metadata.workspaceId,
@@ -423,7 +517,13 @@ export async function bulkTagsHandler(context, job, accessToken, injectedTranspo
     const current = promptTagIds(prompt);
     let next;
     try {
-      next = applyBulkTagOperation(current, metadata.operation, selected, snapshot);
+      next = applyBulkTagOperation(
+        current,
+        metadata.operation,
+        selected,
+        snapshot,
+        mutationIds,
+      );
     } catch (error) {
       return {
         failure: {
@@ -465,7 +565,7 @@ export async function bulkTagsHandler(context, job, accessToken, injectedTranspo
   const publishErrors = await publishAffected(
     transport,
     metadata.workspaceId,
-    updatedCount > 0 ? [metadata.projectId] : [],
+    metadata.projectId ? [metadata.projectId] : [],
     context.log,
   );
   const publish = publishErrors.length === 0
@@ -479,6 +579,9 @@ export async function bulkTagsHandler(context, job, accessToken, injectedTranspo
       },
     };
   return {
+    outcome: failures.length === 0 && publish.state === 'SUCCEEDED'
+      ? 'SUCCEEDED'
+      : 'PARTIAL_FAILURE',
     matchedCount: metadata.matchedCount,
     processedCount: metadata.matchedCount,
     updatedCount,
@@ -489,12 +592,18 @@ export async function bulkTagsHandler(context, job, accessToken, injectedTranspo
   };
 }
 
+/**
+ * @param {object} result
+ * @param {string} [cursor]
+ * @param {number} [limit]
+ * @returns {object}
+ */
 export function pageBulkFailures(result, cursor, limit = BULK_FAILURE_PAGE_LIMIT) {
   const failures = Array.isArray(result?.failures) ? result.failures : [];
   const start = cursor ? Number.parseInt(Buffer.from(cursor, 'base64url').toString('utf8'), 10) : 0;
   const safeStart = Number.isInteger(start) && start >= 0 ? start : 0;
-  const safeLimit = Number.isInteger(limit) && limit > 0
-    ? Math.min(limit, BULK_FAILURE_PAGE_LIMIT)
+  const safeLimit = Number.isInteger(limit)
+    ? Math.min(Math.max(limit, 1), BULK_FAILURE_PAGE_LIMIT)
     : BULK_FAILURE_PAGE_LIMIT;
   const items = failures.slice(safeStart, safeStart + safeLimit);
   const next = safeStart + items.length;

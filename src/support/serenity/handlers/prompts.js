@@ -29,11 +29,10 @@ import {
   resolveIntentValueInjection,
   resolveServerOwnedValueInjection,
   readTagTreeSnapshot,
-  indexLevelByName,
 } from '../tag-tree.js';
 import {
   DIMENSION, ORIGIN_VALUE, INTENT_VALUE, PROXY_CREATE_SOURCE_VALUE,
-  canonicalizeSource, SOURCE_VALUES, rootNameOfDimension,
+  canonicalizeSource, SOURCE_VALUES,
 } from '../prompt-tags.js';
 import { classifyPromptIntents } from '../intent-classification.js';
 import { classifyTagCompatibility } from '../tag-compatibility.js';
@@ -59,9 +58,6 @@ import { logPromptDeleteEvent } from '../prompt-delete-log.js';
 export const DEFAULT_PAGE_LIMIT = 50;
 export const MAX_PAGE_LIMIT = 1000;
 export const MAX_TAG_IDS = MAX_PROMPT_TAG_IDS;
-// PATCH's raw-input ceiling bounds capUpdateTagIds' taxonomy reads while
-// preserving server-managed ids echoed by clients.
-export const MAX_UPDATE_TAG_IDS_INPUT = 500;
 // Caps the inflight upstream calls when fanning out a bulk create.
 // 8 keeps per-call wall time reasonable without overwhelming upstream rate
 // limits — the prior `serenity` testing exhausted Semrush's shared limit
@@ -254,7 +250,7 @@ export function validateAsync(body) {
  * Builds the prompt's tag list from the upstream item: one entry per tag,
  * carrying its id, bare name, parent id and root-first ancestry breadcrumb.
  *
- * This is the authoritative shape. Tag names are NOT unique — upstream scopes
+ * This is the canonical DTO shape. Tag names are NOT unique — upstream scopes
  * uniqueness to `(project, parent)` — so a prompt can legitimately carry two
  * different tags with the same bare name (a sub-category `human` and the
  * `source` value `human`). A list keyed by id preserves both; anything keyed by
@@ -275,11 +271,18 @@ export function validateAsync(body) {
  * `$abv_tags$intent`; use `dimensionOfRootName` rather than comparing by hand.
  *
  * String-form tags (a defensive upstream fallback) carry a name but no id, and
- * are surfaced with an empty id rather than dropped.
+ * are surfaced with an empty id rather than dropped. Compatibility is
+ * authoritative only when `compatibilityById` came from a complete taxonomy;
+ * otherwise locally valid tags are marked `unverified`.
  *
  * @param {any} item - the upstream prompt item.
+ * @param {Map<string, {
+ *   state: 'canonical' | 'readOnly',
+ *   reason: string | null,
+ * }>} [compatibilityById]
  * @returns {Array<{ id: string, name: string, parentId: string | null,
- *   path: Array<{ id: string, name: string }> | null }>}
+ *   path: Array<{ id: string, name: string }> | null,
+ *   compatibility: { state: string, reason: string | null } }>}
  */
 function buildTagsOf(item, compatibilityById) {
   if (!Array.isArray(item?.tags)) {
@@ -304,7 +307,7 @@ function buildTagsOf(item, compatibilityById) {
       const names = [...(path ?? []).map((part) => part.name), String(t.name)];
       const rootName = path?.[0]?.name ?? String(t.name);
       let reason = null;
-      if (rootName.toLocaleLowerCase() === DIMENSION.TAG && rootName !== DIMENSION.TAG) {
+      if (rootName.toLowerCase() === DIMENSION.TAG && rootName !== DIMENSION.TAG) {
         reason = 'caseVariantRoot';
       } else if (names.some((name) => name.includes(':') || name.includes('__'))) {
         reason = 'separatorInName';
@@ -322,16 +325,29 @@ function buildTagsOf(item, compatibilityById) {
     }
     return acc;
   }, []);
-  return classifyTagCompatibility(tags).map((tag) => ({
-    ...tag,
-    compatibility: compatibilityById?.get(tag.id) ?? tag.compatibility,
-  }));
+  return classifyTagCompatibility(tags).map((tag) => {
+    const authoritative = compatibilityById?.get(tag.id);
+    return {
+      ...tag,
+      compatibility: authoritative
+        ?? (tag.compatibility.state === 'readOnly'
+          ? tag.compatibility
+          : { state: 'unverified', reason: 'taxonomyNotLoaded' }),
+    };
+  });
 }
 
 /**
  * @param {number} geoTargetId
  * @param {string} languageCode
  * @param {any} item - the upstream prompt item.
+ * @param {Map<string, {
+ *   state: 'canonical' | 'readOnly',
+ *   reason: string | null,
+ * }>} [compatibilityById] - authoritative compatibility from a complete
+ *   project taxonomy. Without it, otherwise-canonical embedded tags are
+ *   returned as `unverified`.
+ * @returns {object | null}
  */
 export function buildPromptDto(geoTargetId, languageCode, item, compatibilityById) {
   const text = item?.name || '';
@@ -368,6 +384,11 @@ export function buildPromptDto(geoTargetId, languageCode, item, compatibilityByI
  * downward through the tag hierarchy. AND semantics must be enforced by the
  * caller if needed.
  * @param {SerenityTransport} transport
+ * @param {object} dataAccess
+ * @param {string} brandId
+ * @param {string} semrushWorkspaceId
+ * @param {object} query
+ * @param {object} [log]
  */
 export async function handleListPrompts(
   transport,
@@ -375,6 +396,7 @@ export async function handleListPrompts(
   brandId,
   semrushWorkspaceId,
   query,
+  log,
 ) {
   const geoTargetId = normalizeGeoTargetId(query?.geoTargetId);
   const languageCode = normalizeLanguageCode(query?.languageCode);
@@ -443,6 +465,7 @@ export async function handleListPrompts(
         order,
         tagIds,
       },
+      log,
     );
   }
   // Each prompt's tags already carry their own parentage (see buildTagsOf), so
@@ -1079,111 +1102,17 @@ function sanitizeTagIds(raw) {
 }
 
 /**
- * The closed, server-owned dimensions whose ids {@link capUpdateTagIds} exempts
- * from the caller cap on UPDATE.
- */
-const CLOSED_DIMENSIONS_FOR_UPDATE_CAP = [
-  DIMENSION.TYPE, DIMENSION.INTENT, DIMENSION.ORIGIN, DIMENSION.SOURCE,
-];
-
-/**
- * Reads every id currently under one of {@link CLOSED_DIMENSIONS_FOR_UPDATE_CAP}'s
- * roots, by root NAME rather than a generic tree walk. `findTagsInTree`'s walk
- * only descends a root whose OWN `childrenCount` is reported nonzero, and the
- * open `source` root reports `childrenCount: 0` (tag-tree.js fixture comment;
- * matches upstream, since `source` values are minted on demand rather than
- * eagerly counted) — a walk-based resolver would therefore never find a
- * `source` id and misclassify every one of them as open. Reading each of the
- * four roots' children directly, by the name each is provisioned under, has no
- * such blind spot.
+ * Preserves an UPDATE's complete, format-validated tag set when it is within
+ * the public limit and fails loudly otherwise. No ids are reordered, exempted,
+ * or truncated: flat and subworkspace PATCH share the same 409 contract, and
+ * server-owned ids echoed by an editor remain present verbatim.
  *
- * A dimension whose root does not exist yet (a legacy project mid-provisioning)
- * contributes nothing — there is nothing to protect on that project.
- *
- * @param {SerenityTransport} transport
- * @param {string} semrushWorkspaceId
- * @param {string} projectId
- * @param {object} [log]
- * @returns {Promise<Set<string>>}
- */
-async function collectClosedDimensionTagIds(transport, semrushWorkspaceId, projectId, log) {
-  const rootsByName = await indexLevelByName(transport, semrushWorkspaceId, projectId, '', log);
-  const ids = new Set();
-  const rootIds = /** @type {string[]} */ (
-    CLOSED_DIMENSIONS_FOR_UPDATE_CAP
-      .map((dimension) => rootsByName.get(rootNameOfDimension(dimension)))
-      .filter((rootId) => Boolean(rootId))
-  );
-  // The four CLOSED-dimension roots' (type/intent/origin/source) children
-  // reads are independent of each other -- run them concurrently rather than
-  // one dimension at a time. Four, not five: `category` is the one OPEN
-  // dimension and is never exempted from the update cap.
-  const childrenByRoot = await Promise.all(
-    rootIds.map(
-      (rootId) => indexLevelByName(transport, semrushWorkspaceId, projectId, rootId, log),
-    ),
-  );
-  rootIds.forEach((rootId, i) => {
-    ids.add(rootId);
-    for (const childId of childrenByRoot[i].values()) {
-      ids.add(childId);
-    }
-  });
-  return ids;
-}
-
-/**
- * Re-applies {@link MAX_TAG_IDS} to an UPDATE's format-validated `tagIds`, but
- * ONLY to the ids that do NOT sit under a closed, server-owned dimension root
- * (`type`/`intent`/`origin`/`source`).
- *
- * On CREATE, {@link sanitizeTagIds}'s flat positional slice is safe because the
- * server-derived ids are appended by {@link makePromptTagInjector} strictly
- * AFTER the slice runs — a caller can never supply one pre-slice. On UPDATE
- * there is no such ordering guarantee: the body is the full next state (see
- * {@link handleUpdatePrompt}'s docblock), so a client that echoes its prompt's
- * own previously-returned tag list — the documented edit-form pattern, since
- * clients always have the existing tagIds available locally — is submitting
- * ALREADY-INJECTED closed-dimension ids as ordinary caller-supplied ids. A flat
- * slice at {@link MAX_TAG_IDS} would then silently drop whichever one landed
- * past index 50. `type`/`intent` self-heal because {@link makePromptTagInjector}
- * and the intent injector always strip-and-reinject them regardless of what
- * survived the slice, but `origin`/`source` are NOT re-derived on UPDATE
- * (origin-dimension.md §3 item 3: the stored value rides through untouched) --
- * once truncated away, nothing puts them back, and the prompt becomes invisible
- * to that dimension's filter with no error.
- *
- * Resolves the closed-dimension id set in {@link collectClosedDimensionTagIds},
- * then caps only the ids NOT in it. Skips that resolve entirely when `tagIds`
- * is already at or under the cap — the overwhelmingly common case — so this
- * adds no cost to a typical edit.
- *
- * @param {SerenityTransport} transport
- * @param {string} semrushWorkspaceId
- * @param {string} projectId
  * @param {string[]} tagIds - already {@link validTagIds}-validated.
- * @param {object} [log]
  * @returns {Promise<string[]>}
  */
-export async function capUpdateTagIds(transport, semrushWorkspaceId, projectId, tagIds, log) {
-  if (tagIds.length <= MAX_TAG_IDS) {
-    return tagIds;
-  }
-  const closedIds = await collectClosedDimensionTagIds(
-    transport,
-    semrushWorkspaceId,
-    projectId,
-    log,
-  );
-  const managed = [];
-  const open = [];
-  for (const id of tagIds) {
-    (closedIds.has(id) ? managed : open).push(id);
-  }
-  // Reorders managed ids ahead of open ids relative to the caller's original
-  // array -- harmless today since the upstream replace-mode write treats
-  // `references` as an unordered set, never a caller-meaningful sequence.
-  return [...managed, ...open.slice(0, MAX_TAG_IDS)];
+export async function capUpdateTagIds(tagIds) {
+  assertPromptTagLimit(tagIds);
+  return [...tagIds];
 }
 
 /**
@@ -1570,13 +1499,17 @@ export function parseUpdatePromptBody(body) {
       body: { error: 'invalidRequest', message: 'text must be a non-empty string' },
     };
   }
-  if (Array.isArray(body.tagIds) && body.tagIds.length > MAX_UPDATE_TAG_IDS_INPUT) {
+  if (Array.isArray(body.tagIds) && body.tagIds.length > MAX_TAG_IDS) {
     return {
       ok: false,
-      status: 400,
+      status: 409,
       body: {
-        error: 'invalidRequest',
-        message: `tagIds array exceeds maxItems=${MAX_UPDATE_TAG_IDS_INPUT}`,
+        error: ERROR_CODES.TAG_LIMIT_EXCEEDED,
+        message: 'Prompt tag limit would be exceeded; no changes were applied',
+        details: {
+          attemptedCount: body.tagIds.length,
+          maxPromptTagIds: MAX_TAG_IDS,
+        },
       },
     };
   }
@@ -1975,13 +1908,7 @@ export async function handleUpdatePrompt(
   // to run first for failure-safety. Skipping the reclassification would require
   // the client to send the old text — a contract change deliberately out of
   // scope here (keep the edit path a single straight line).
-  const cappedTagIds = await capUpdateTagIds(
-    transport,
-    semrushWorkspaceId,
-    projectId,
-    nextTagIds,
-    log,
-  );
+  const cappedTagIds = await capUpdateTagIds(nextTagIds);
   const injectComputedTags = makePromptTagInjector(
     transport,
     semrushWorkspaceId,

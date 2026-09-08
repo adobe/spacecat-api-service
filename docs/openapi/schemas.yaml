@@ -11950,6 +11950,12 @@ SerenityPrompt:
         own name — bearing in mind that `path[0].name` is the root's UPSTREAM
         name, which for the intent dimension is `$abv_tags$intent` and for the
         other four is the dimension key itself.
+
+        On a plain prompt list, the service does not read the complete project
+        taxonomy, so otherwise-valid embedded tags carry
+        `compatibility.state: unverified` with reason `taxonomyNotLoaded`.
+        `tagFilterMode=faceted-v1` reads the complete taxonomy and returns
+        authoritative compatibility.
     tagIds:
       type: array
       items: { type: string }
@@ -12179,8 +12185,10 @@ SerenityPromptsJobAccepted:
 SerenityPromptsJobStatus:
   type: object
   description: |
-    Poll response for an async `serenity-classify-prompts` job. Secret-free by
-    design — the job's internal metadata (promise token etc.) is never exposed.
+    Poll response for an async Serenity job. Secret-free by design — the job's
+    internal metadata (promise token etc.) is never exposed. `COMPLETED` means
+    processing is terminal, not necessarily full business success: a bulk-tags
+    caller must inspect `result.outcome`, `failureCount`, and `publish.state`.
   required: [jobId, jobType, status, result, error]
   properties:
     jobId:
@@ -12318,8 +12326,15 @@ SerenityBulkTagsResult:
   type: object
   additionalProperties: false
   required:
-    [matchedCount, processedCount, updatedCount, unchangedCount, failureCount, failuresPage, publish]
+    [outcome, matchedCount, processedCount, updatedCount, unchangedCount, failureCount, failuresPage, publish]
   properties:
+    outcome:
+      type: string
+      enum: [SUCCEEDED, PARTIAL_FAILURE]
+      description: |
+        Explicit business outcome. `PARTIAL_FAILURE` means at least one prompt
+        failed or the final project publish failed even though the AsyncJob
+        status is `COMPLETED`.
     matchedCount: { type: integer, minimum: 0 }
     processedCount: { type: integer, minimum: 0 }
     updatedCount: { type: integer, minimum: 0 }
@@ -12722,10 +12737,16 @@ SerenityTagCompatibility:
   type: object
   required: [state, reason]
   properties:
-    state: { type: string, enum: [canonical, readOnly] }
+    state:
+      type: string
+      enum: [canonical, readOnly, unverified]
+      description: |
+        `canonical` and `readOnly` are authoritative only when derived from a
+        complete project taxonomy. Plain prompt lists avoid that expensive tree
+        read and return `unverified` for tags not locally provable as read-only.
     reason:
       type: [string, 'null']
-      enum: [unsupportedDepth, caseVariantRoot, ambiguousPath, separatorInName, null]
+      enum: [unsupportedDepth, caseVariantRoot, ambiguousPath, separatorInName, taxonomyNotLoaded, null]
 
 SerenityTagConstraints:
   type: object

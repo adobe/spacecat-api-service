@@ -32,8 +32,10 @@ x-tag-filter-mode-parameter: &tagFilterModeParameter
   name: tagFilterMode
   in: query
   required: false
-  schema: { type: string, enum: [faceted-v1] }
-  description: Required when tagPath is supplied.
+  schema: { type: string, enum: [elements-faceted-v1] }
+  description: |
+    Required when tagPath is supplied. This token selects the Elements path
+    filter engine and is intentionally distinct from native prompt-id faceting.
 
 v2-serenity-prompts:
   parameters:
@@ -58,7 +60,13 @@ v2-serenity-prompts:
       Returns the prompts for a single (brandId, geoTargetId, languageCode)
       slice. Both `geoTargetId` and `languageCode` are required — the request
       always resolves to exactly one upstream project. Pagination is real
-      upstream pagination (no fan-out, no merged-and-sliced shimming).
+      upstream pagination (no fan-out, no merged-and-sliced shimming) unless
+      `tagFilterMode=faceted-v1` is selected.
+
+      Plain list reads do not load the complete project taxonomy. Their embedded
+      tags therefore report `compatibility.state=unverified` unless the tag is
+      locally provably read-only. Faceted reads load the complete taxonomy and
+      return authoritative `canonical` / `readOnly` compatibility.
     operationId: listSerenityPrompts
     security:
       - session_token: []
@@ -144,6 +152,11 @@ v2-serenity-prompts:
         content:
           application/json:
             schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '503':
+        description: The complete faceted taxonomy or prompt cohort could not be established.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
       '500': { $ref: './responses.yaml#/500' }
   post:
     tags: [serenity]
@@ -182,6 +195,11 @@ v2-serenity-prompts:
         description: Organization, brand, or workspace not found, or serenity is not active for the organization.
       '502':
         description: Upstream returned a non-2xx response.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '503':
+        description: The complete taxonomy required to validate prompt tags could not be established.
         content:
           application/json:
             schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
@@ -246,7 +264,10 @@ v2-serenity-prompt-by-id:
       '404':
         description: Organization, brand, slice, or prompt not found, or serenity is not active for the organization.
       '409':
-        description: The new text exactly matches a different prompt's text in this slice; nothing was changed upstream.
+        description: |
+          The new text exactly matches a different prompt's text in this slice,
+          or the complete replacement tag set exceeds the 50-id limit. Nothing
+          was changed upstream.
         content:
           application/json:
             schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
@@ -320,6 +341,20 @@ v2-serenity-prompts-bulk-tags:
   post:
     tags: [serenity]
     summary: Assign or remove tags from all prompts matching a project-local filter
+    description: |
+      Freezes the matching prompt-id population before returning 202. Assignment
+      and removal requests preflight the accepted snapshot against the 50-id
+      prompt limit. Taxonomy expansion is computed once and filtering plus
+      preflight share one corpus pass. The worker re-reads the current prompt
+      corpus and current taxonomy before making write decisions.
+
+      `Idempotency-Key` replay is request deduplication, not a retry command: the
+      same unexpired key and canonical request returns the original job/result.
+      To retry a terminal partial failure, submit the same set operation with a
+      new key (or no key). Assign/remove are set-idempotent, so already-completed
+      prompt writes become unchanged; the worker still retries project publish,
+      even when the retry matches no remaining prompts. Publish is project-wide
+      and may include other changes already staged in the same upstream draft.
     operationId: bulkTagSerenityPrompts
     security:
       - session_token: []
@@ -330,7 +365,10 @@ v2-serenity-prompts-bulk-tags:
         schema: { type: string, maxLength: 256 }
         description: |
           Scoped to organization, brand, project, caller, and this operation.
-          Retained for 86400 seconds.
+          Retained for 86400 seconds. The same key with the same canonical body
+          replays the original job; the same key with a different body returns
+          409 `idempotencyConflict`. Omit the header, use a new key, or wait for
+          expiry to create a new job.
     requestBody:
       required: true
       content:
@@ -389,7 +427,12 @@ v2-serenity-prompts-job-by-id:
       org/brand access + serenity-active checks as every other serenity endpoint;
       a job that does not belong to the addressed brand 404s exactly like a
       missing job (jobs are never leaked across brands). The response is
-      secret-free — only `{ jobId, status, result, error }`.
+      secret-free — only `{ jobId, jobType, status, result, error }`.
+
+      `COMPLETED` means worker processing is terminal, not that every prompt or
+      the project publish succeeded. For `bulkTags`, inspect
+      `result.outcome`: `PARTIAL_FAILURE` accompanies item failures and/or a
+      failed publish, with item details paged through `failureCursor`.
     operationId: getSerenityPromptsJobStatus
     security:
       - session_token: []
@@ -642,6 +685,11 @@ v2-serenity-tags:
         description: Organization, brand, or workspace not found, or serenity is not active for the organization.
       '502':
         description: Upstream returned a non-2xx response.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '503':
+        description: The complete requested tag level could not be established.
         content:
           application/json:
             schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
