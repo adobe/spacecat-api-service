@@ -14762,7 +14762,7 @@ describe('Suggestions Controller', () => {
       expect(fetchStub).to.have.been.calledOnce;
       const fetchArgs = fetchStub.getCall(0).args;
       expect(fetchArgs[0]).to.equal('https://www.lovesac.com/sactionals');
-      expect(fetchArgs[1].headers['User-Agent']).to.equal('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Tokowaka-AI Tokowaka/1.0 AdobeEdgeOptimize-AI AdobeEdgeOptimize/1.0');
+      expect(fetchArgs[1].headers['User-Agent']).to.equal('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Spacecat/1.0 Tokowaka-AI AdobeEdgeOptimize-AI');
     });
 
     it('should handle fetch failure with 404', async () => {
@@ -14802,11 +14802,14 @@ describe('Suggestions Controller', () => {
 
     it('should log x-tokowaka-request-id when present in error response', async () => {
       const mockRequestId = 'req-abc-123-xyz';
+      const getHeaderStub = sandbox.stub();
+      getHeaderStub.withArgs('x-tokowaka-request-id').returns(mockRequestId);
+      getHeaderStub.withArgs('x-edgeoptimize-request-id').returns(null);
       const mockResponse = {
         ok: false,
         status: 503,
         headers: {
-          get: sandbox.stub().withArgs('x-tokowaka-request-id').returns(mockRequestId),
+          get: getHeaderStub,
         },
       };
 
@@ -14833,8 +14836,49 @@ describe('Suggestions Controller', () => {
       const body = await response.json();
       expect(body.status).to.equal('error');
       expect(body.statusCode).to.equal(503);
-      expect(warnStub).to.have.been.calledWith(
-        `Failed to fetch URL. Status: 503, x-tokowaka-request-id: ${mockRequestId}`,
+      expect(warnStub.getCall(0).args[0]).to.match(
+        new RegExp(`^\\[edge-live-preview\\] Failed to fetch URL siteId=${SITE_ID} opportunityId=${OPPORTUNITY_ID} url=https://www\\.lovesac\\.com/error-page status=503 elapsedMs=\\d+ x-tokowaka-request-id=${mockRequestId}$`),
+      );
+    });
+
+    it('should log x-edgeoptimize-request-id when x-tokowaka-request-id is absent', async () => {
+      const mockRequestId = 'edgeopt-req-456';
+      const getHeaderStub = sandbox.stub();
+      getHeaderStub.withArgs('x-tokowaka-request-id').returns(null);
+      getHeaderStub.withArgs('x-edgeoptimize-request-id').returns(mockRequestId);
+      const mockResponse = {
+        ok: false,
+        status: 503,
+        headers: {
+          get: getHeaderStub,
+        },
+      };
+
+      fetchStub.resolves(mockResponse);
+
+      const warnStub = sandbox.stub();
+      const response = await suggestionsController.fetchFromEdge({
+        ...context,
+        log: {
+          info: sandbox.stub(),
+          warn: warnStub,
+          error: sandbox.stub(),
+        },
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          url: 'https://www.lovesac.com/error-page',
+        },
+      });
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body.status).to.equal('error');
+      expect(body.statusCode).to.equal(503);
+      expect(warnStub.getCall(0).args[0]).to.match(
+        new RegExp(`^\\[edge-live-preview\\] Failed to fetch URL siteId=${SITE_ID} opportunityId=${OPPORTUNITY_ID} url=https://www\\.lovesac\\.com/error-page status=503 elapsedMs=\\d+ x-edgeoptimize-request-id=${mockRequestId}$`),
       );
     });
 
