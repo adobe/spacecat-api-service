@@ -160,6 +160,26 @@ describe('bulk tags job request and tree semantics', () => {
         search: 'x'.repeat(MAX_BULK_TAG_SEARCH_LENGTH + 1),
       },
     })).to.throw(`filter.search must not exceed ${MAX_BULK_TAG_SEARCH_LENGTH} characters`);
+    expect(parseBulkTagsBody({
+      geoTargetId: 1,
+      languageCode: 'en',
+      operation: 'assign',
+      tagIds: ['child'],
+      filter: {
+        tagFilterMode: 'faceted-v1',
+        search: '😀'.repeat(MAX_BULK_TAG_SEARCH_LENGTH),
+      },
+    }).filter.search).to.equal('😀'.repeat(MAX_BULK_TAG_SEARCH_LENGTH));
+    expect(() => parseBulkTagsBody({
+      geoTargetId: 1,
+      languageCode: 'en',
+      operation: 'assign',
+      tagIds: ['child'],
+      filter: {
+        tagFilterMode: 'faceted-v1',
+        search: `${'x'.repeat(MAX_BULK_TAG_SEARCH_LENGTH)} `,
+      },
+    })).to.throw(`filter.search must not exceed ${MAX_BULK_TAG_SEARCH_LENGTH} characters`);
   });
 
   it('assigns a child with its parent and removes a parent subtree', () => {

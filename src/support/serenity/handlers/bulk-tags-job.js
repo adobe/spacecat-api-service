@@ -301,14 +301,15 @@ export function parseBulkTagsBody(body) {
     maximum: MAX_TAG_FILTER_VALUES,
     tooLargeCode: ERROR_CODES.TAG_FILTER_TOO_LARGE,
   });
-  const search = typeof filter.search === 'string' ? filter.search.trim() : '';
-  if (search.length > MAX_BULK_TAG_SEARCH_LENGTH) {
+  const rawSearch = typeof filter.search === 'string' ? filter.search : '';
+  if (Array.from(rawSearch).length > MAX_BULK_TAG_SEARCH_LENGTH) {
     throw codedError(
       `filter.search must not exceed ${MAX_BULK_TAG_SEARCH_LENGTH} characters`,
       400,
       ERROR_CODES.INVALID_REQUEST,
     );
   }
+  const search = rawSearch.trim();
   return {
     geoTargetId,
     languageCode,
