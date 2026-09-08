@@ -34,11 +34,12 @@ import { upsertFeatureFlag } from '../../../../src/support/feature-flags-storage
  *  - 404 on missing org / site
  *  - 403 on cross-org user access
  *
- * The resolver's v1 → 404 gate is covered by controller unit tests
- * (test/controllers/brands.test.js). It is not exercised here: since LLMO-7108
- * removed the legacy-site cutoff, the only remaining v1 path is the
- * LLMO_ONBOARDING_DEFAULT_VERSION kill switch, which is fixed at IT-harness
- * startup and cannot be toggled per-test over HTTP.
+ * The resolver can no longer return v1 (the LLMO_ONBOARDING_DEFAULT_VERSION
+ * kill switch was removed — brandalf-migration cleanup §2; upstream gate for
+ * DRS #2807), so there is no v1 → 404 path to exercise here: every org resolves
+ * v2. The brands controller retains a defensive v1 → 404 branch that the real
+ * resolver never triggers; it is covered by controller unit tests
+ * (test/controllers/brands.test.js).
  *
  * Each describe block calls `resetData()` to start from baseline, then uses
  * the postgrestClient directly to set up the brandalf flag and brand→site

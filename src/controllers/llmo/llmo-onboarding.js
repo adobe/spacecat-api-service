@@ -31,10 +31,9 @@ import {
 } from '../../support/customer-config-mapper.js';
 import {
   resolveLlmoOnboardingMode,
-  LLMO_ONBOARDING_MODE_V1,
-  LLMO_ONBOARDING_MODE_V2,
   LLMO_FEATURE_FLAG_PRODUCT,
   LLMO_BRANDALF_FLAG,
+  LLMO_ONBOARDING_MODE_V2,
 } from '../../support/llmo-onboarding-mode.js';
 import { upsertFeatureFlag } from '../../support/feature-flags-storage.js';
 import { detectCdnForDomain } from '../../support/cdn-detection.js';
@@ -1348,14 +1347,15 @@ export async function enqueueLlmoOnboardingPublish(context, site, dataFolder) {
  * Activates the brand and kicks off prompt generation for an onboarded site.
  *
  * This is the brand/prompt-generation half of onboarding, owned by Piece 2
- * (LLMO-5605). For v2 it writes the initial brand to the normalized brands table
- * and triggers the Brandalf DRS job; for v1 it submits the legacy DRS
- * prompt-generation job directly. Site-only onboarding (LLMO-5606) does NOT call
- * this — it stands up the site with no brand entity, no Brandalf job, and no
- * prompt-generation job.
+ * (LLMO-5605). Always v2: it writes the initial brand to the normalized brands
+ * table and triggers the Brandalf DRS job. The legacy v1 direct
+ * prompt-generation path was retired (brandalf-migration cleanup §2). Site-only
+ * onboarding (LLMO-5606) does NOT call this — it stands up the site with no
+ * brand entity, no Brandalf job, and no prompt-generation job.
  *
  * @param {object} params
- * @param {string} params.onboardingMode - Resolved LLMO onboarding mode (v1/v2).
+ * @param {string} params.onboardingMode - Resolved LLMO onboarding mode (always
+ *   'v2'); forwarded to the DRS Brandalf job metadata.
  * @param {object} params.organization - The organization model.
  * @param {object} params.site - The site model.
  * @param {object} params.siteConfig - The (already-saved) site config object.
@@ -1368,8 +1368,6 @@ export async function enqueueLlmoOnboardingPublish(context, site, dataFolder) {
  * @returns {Promise<{
  *   brandalfTriggered: boolean,
  *   brandalfError: string|null,
- *   promptGenerationJobId: string|null,
- *   promptGenerationError: string|null,
  *   promptSuggestionSchedules: Array<object>|null,
  *   promptSuggestionSchedulesTimedOut: boolean,
  *   requiredWorkFailed: boolean,
@@ -1393,6 +1391,16 @@ export async function activateBrandAndGeneratePrompts({
   context,
   say = () => {},
 }) {
+  // Contract guard (brandalf-migration cleanup §2): the resolver can no longer
+  // produce a non-v2 mode, and this value is stamped into DRS Brandalf job
+  // metadata. Fail closed so a future caller can never regress a stale 'v1' into
+  // DRS rather than silently handing off a v1-tagged job.
+  if (onboardingMode !== LLMO_ONBOARDING_MODE_V2) {
+    throw new Error(
+      `activateBrandAndGeneratePrompts requires onboardingMode '${LLMO_ONBOARDING_MODE_V2}'; got '${onboardingMode}'`,
+    );
+  }
+
   const { log } = context;
 
   // LLMO-7218 AC3/AC4: tracked here (not thrown) because every DRS side-effect below stays
@@ -1402,232 +1410,180 @@ export async function activateBrandAndGeneratePrompts({
   // gave no way to contradict.
   let brandalfTriggered = false;
   let brandalfError = null;
-  let promptGenerationJobId = null;
-  let promptGenerationError = null;
   let promptSuggestionSchedules = null;
   let promptSuggestionSchedulesTimedOut = false;
 
-  if (onboardingMode === LLMO_ONBOARDING_MODE_V2) {
-    const postgrestClient = context.dataAccess?.services?.postgrestClient;
+  const postgrestClient = context.dataAccess?.services?.postgrestClient;
 
-    // Write initial brand to normalized brands table so DRS prompt sync can
-    // find it via GET /v2/orgs/{orgId}/brands before the Brandalf job finishes.
-    // Brandalf will upsert over this with LLM-identified sub-brands later.
-    // Use baseURL (matches sites.base_url) so syncBrandSites can link the brand
-    // to the site. overrideBaseURL may differ (e.g., www.blick.ch vs blick.ch)
-    // and would fail the exact-match lookup against the sites table.
-    // LLMO-5556: a second site onboarded under an existing brand name must not
-    // re-point that brand's primary site, nor clobber its URLs/aliases via the
-    // full-replace syncs inside upsertBrand. Detect the collision and skip the
-    // initial-brand write — the brand already exists so DRS sync still resolves
-    // it; a human then decides whether the new site is a sub-brand or a URL.
-    try {
-      const { data: existingBrand, error: lookupError } = await postgrestClient
-        .from('brands')
-        .select('id, site_id')
-        .eq('organization_id', organization.getId())
-        .eq('name', brandName.trim())
-        .maybeSingle();
+  // Write initial brand to normalized brands table so DRS prompt sync can
+  // find it via GET /v2/orgs/{orgId}/brands before the Brandalf job finishes.
+  // Brandalf will upsert over this with LLM-identified sub-brands later.
+  // Use baseURL (matches sites.base_url) so syncBrandSites can link the brand
+  // to the site. overrideBaseURL may differ (e.g., www.blick.ch vs blick.ch)
+  // and would fail the exact-match lookup against the sites table.
+  // LLMO-5556: a second site onboarded under an existing brand name must not
+  // re-point that brand's primary site, nor clobber its URLs/aliases via the
+  // full-replace syncs inside upsertBrand. Detect the collision and skip the
+  // initial-brand write — the brand already exists so DRS sync still resolves
+  // it; a human then decides whether the new site is a sub-brand or a URL.
+  try {
+    const { data: existingBrand, error: lookupError } = await postgrestClient
+      .from('brands')
+      .select('id, site_id')
+      .eq('organization_id', organization.getId())
+      .eq('name', brandName.trim())
+      .maybeSingle();
 
-      if (lookupError) {
-        // Fail closed (LLMO-5556): PostgREST returns { data: null, error } on a
-        // query failure rather than throwing, so without this check a transient
-        // failure would fall through to upsertBrand and could re-point an
-        // existing brand's primary site. Skip the write as a precaution.
-        log.warn(`Skipping initial brand write: failed to look up existing brand "${brandName.trim()}" `
-          + `(org ${organization.getId()}): ${lookupError.message}`);
-      } else if (existingBrand?.site_id && existingBrand.site_id !== site.getId()) {
-        log.warn(`Skipping initial brand write: brand "${brandName.trim()}" `
-          + `(org ${organization.getId()}) already exists with a different primary site `
-          + `(existing=${existingBrand.site_id}, onboarding=${site.getId()}). `
-          + `Add ${baseURL} as a brand URL or onboard under a distinct brand name.`);
-      } else {
-        // No collision: proceed with upsert (new brand, existing brand with a
-        // null primary site, or a re-onboard of the same site). upsertBrand's
-        // own guard keeps an already-set site_id immutable on the last case.
-        // LLMO-5645: seed operator market when supplied; else the
-        // DEFAULT_BRAND_REGION placeholder (consistent with the V2 config +
-        // brandAliases, both overwritten by Brandalf's async result).
-        const stubRegions = onboardingStubRegions(region);
-        await upsertBrand({
-          organizationId: organization.getId(),
-          brand: {
-            name: brandName.trim(),
-            status: 'active',
-            baseSiteId: site.getId(),
-            region: stubRegions,
-            urls: [{ value: baseURL, type: 'base' }],
-            brandAliases: [{ name: brandName.trim(), regions: stubRegions }],
-          },
-          postgrestClient,
-          updatedBy: 'llmo-onboarding',
-          log,
-        });
-        log.info(`Created initial brand "${brandName}" in normalized table for site ${site.getId()}`);
-      }
-    } catch (brandError) {
-      log.warn(`Failed to create initial brand in normalized table: ${brandError.message}`);
+    if (lookupError) {
+      // Fail closed (LLMO-5556): PostgREST returns { data: null, error } on a
+      // query failure rather than throwing, so without this check a transient
+      // failure would fall through to upsertBrand and could re-point an
+      // existing brand's primary site. Skip the write as a precaution.
+      log.warn(`Skipping initial brand write: failed to look up existing brand "${brandName.trim()}" `
+        + `(org ${organization.getId()}): ${lookupError.message}`);
+    } else if (existingBrand?.site_id && existingBrand.site_id !== site.getId()) {
+      log.warn(`Skipping initial brand write: brand "${brandName.trim()}" `
+        + `(org ${organization.getId()}) already exists with a different primary site `
+        + `(existing=${existingBrand.site_id}, onboarding=${site.getId()}). `
+        + `Add ${baseURL} as a brand URL or onboard under a distinct brand name.`);
+    } else {
+      // No collision: proceed with upsert (new brand, existing brand with a
+      // null primary site, or a re-onboard of the same site). upsertBrand's
+      // own guard keeps an already-set site_id immutable on the last case.
+      // LLMO-5645: seed operator market when supplied; else the
+      // DEFAULT_BRAND_REGION placeholder (consistent with the V2 config +
+      // brandAliases, both overwritten by Brandalf's async result).
+      const stubRegions = onboardingStubRegions(region);
+      await upsertBrand({
+        organizationId: organization.getId(),
+        brand: {
+          name: brandName.trim(),
+          status: 'active',
+          baseSiteId: site.getId(),
+          region: stubRegions,
+          urls: [{ value: baseURL, type: 'base' }],
+          brandAliases: [{ name: brandName.trim(), regions: stubRegions }],
+        },
+        postgrestClient,
+        updatedBy: 'llmo-onboarding',
+        log,
+      });
+      log.info(`Created initial brand "${brandName}" in normalized table for site ${site.getId()}`);
     }
+  } catch (brandError) {
+    log.warn(`Failed to create initial brand in normalized table: ${brandError.message}`);
+  }
 
-    // One DRS client, shared by the Brandalf trigger and the recurring
-    // prompt-suggestion schedule registration below. createFrom can throw on a
-    // malformed context or SDK regression; treat that as "DRS unavailable" and
-    // skip both best-effort side-effects rather than 500 the whole onboarding
-    // (the Brandalf trigger and schedule registration are both best-effort).
-    let drsClient;
+  // One DRS client, shared by the Brandalf trigger and the recurring
+  // prompt-suggestion schedule registration below. createFrom can throw on a
+  // malformed context or SDK regression; treat that as "DRS unavailable" and
+  // skip both best-effort side-effects rather than 500 the whole onboarding
+  // (the Brandalf trigger and schedule registration are both best-effort).
+  let drsClient;
+  try {
+    drsClient = DrsClient.createFrom(context);
+  } catch (drsClientError) {
+    log.error(`DRS client creation failed, skipping Brandalf + schedules: ${drsClientError.message}`);
+    say(':warning: DRS client unavailable (will need manual trigger)');
+    // LLMO-7218 AC4: without this, brandalfError stays null and the returned summary says
+    // requiredWorkFailed=true with no captured reason anywhere in it — exactly the "reconstruct
+    // from logs" outcome AC4 exists to prevent.
+    brandalfError = drsClientError.message;
+  }
+
+  if (drsClient) {
+    // Trigger Brandalf immediately after the v2 config exists so downstream
+    // brand sync can attach results to the newly created organization.
     try {
-      drsClient = DrsClient.createFrom(context);
-    } catch (drsClientError) {
-      log.error(`DRS client creation failed, skipping Brandalf + schedules: ${drsClientError.message}`);
-      say(':warning: DRS client unavailable (will need manual trigger)');
-      // LLMO-7218 AC4: without this, brandalfError stays null and the returned summary says
-      // requiredWorkFailed=true with no captured reason anywhere in it — exactly the "reconstruct
-      // from logs" outcome AC4 exists to prevent. Mirrors the v1 branch below, which already
-      // records drsError.message from its own DrsClient.createFrom call.
-      brandalfError = drsClientError.message;
-    }
-
-    if (drsClient) {
-      // Trigger Brandalf immediately after the v2 config exists so downstream
-      // brand sync can attach results to the newly created organization.
-      try {
-        if (drsClient.isConfigured()) {
-          const companyWebsite = siteConfig.getFetchConfig?.()?.overrideBaseURL || baseURL;
-          await triggerBrandalfOnboardingJob({
-            drsClient,
-            organizationId: organization.getId(),
-            siteId: site.getId(),
-            imsOrgId,
-            brandName: brandName.trim(),
-            companyWebsite,
-            onboardingMode,
-            region,
-            log,
-            say,
-          });
-          brandalfTriggered = true;
-        } else {
-          log.debug('DRS client not configured, skipping Brandalf flow');
-          brandalfError = 'DRS client not configured';
-        }
-      } catch (drsError) {
-        log.error(`Failed to start DRS Brandalf flow: ${drsError.message}`);
-        say(':warning: Failed to start DRS Brandalf flow (will need manual trigger)');
-        brandalfError = drsError.message;
-      }
-
-      // Run the "prompt suggestion" pipelines, tier-gated (LLMO prompt-suggestion
-      // tier gate): PAYING sites get a recurring schedule with an immediate first
-      // run; TRIAL / non-paying (or an indeterminate tier — isPayingLlmoSite fails
-      // safe to trial) get a single on-demand run per pipeline, no recurring
-      // schedule. These fire right after we SUBMIT the async Brandalf job above
-      // (submit, not completion), so they race Brandalf: for a genuinely new site
-      // the immediate first run typically no-ops because base-prompt/brand data
-      // does not exist yet. For a paying site that is acceptable — the durable
-      // outcome is the recurring schedule row, and the next scheduled run
-      // self-heals once brand data exists. Cold-start latency is worst for
-      // synthetic_personas (quarterly): if its immediate run no-ops, the first real
-      // output can be up to a quarter out. Chaining registration off
-      // base-prompt-generation completion is cross-repo (DRS owns the
-      // Brandalf→prompt-gen chain) and out of scope here.
-      // TODO(LLMO-4258 follow-up): have DRS trigger these once base prompt
-      // generation completes, instead of racing the Brandalf submit.
-      // Bound by settleWithin: isPayingLlmoSite hits the tier service and is
-      // awaited on the synchronous response path. Its own try/catch handles
-      // rejections but NOT a hang, so cap it and fall back to `false` (trial) on
-      // timeout — same fail-safe-to-trial intent as isPayingLlmoSite itself, so an
-      // indeterminate tier never gets a recurring, fleet-wide schedule.
-      const isPaying = await settleWithin(
-        isPayingLlmoSite(site, context),
-        TIER_LOOKUP_TIMEOUT_MS,
-        false,
-      );
-
-      // Bound by settleWithin: the per-pipeline createSchedule/submitJob calls are
-      // awaited on the synchronous response path, so a slow/hung DRS could
-      // otherwise stall onboarding. On timeout we stop waiting — createSchedule is
-      // idempotent, the durable outcome is the server-side schedule row (paying)
-      // or a submitted job (trial), and per-pipeline ERROR logging inside
-      // ensurePromptSuggestionSchedules stays deterministic.
-      const scheduleResult = await settleWithin(
-        ensurePromptSuggestionSchedules({
-          drsClient,
-          siteId: site.getId(),
-          isPaying,
-          log,
-          say,
-        }),
-        SCHEDULE_REGISTRATION_TIMEOUT_MS,
-        null,
-      );
-      // null fallback === timed out with calls still pending: the per-pipeline
-      // catch blocks never fired, so this is the only place a hung DRS is visible.
-      // Schedules may still land server-side (createSchedule is idempotent), but
-      // the operator needs a signal that registration was abandoned mid-flight.
-      if (scheduleResult === null) {
-        log.warn('DRS prompt-suggestion schedule registration timed out after '
-          + `${SCHEDULE_REGISTRATION_TIMEOUT_MS}ms for site ${site.getId()} `
-          + '(schedules may still have been created server-side; may need manual verification)');
-        say(':warning: DRS schedule registration timed out (may need manual verification)');
-        promptSuggestionSchedulesTimedOut = true;
-      } else {
-        promptSuggestionSchedules = scheduleResult.results;
-      }
-    }
-  } else {
-    // V1 has no Brandalf trigger, so DRS will not submit prompt generation
-    // automatically. Submit it directly here so v1 onboardings still get
-    // prompts written to the legacy LLMO config (LLMO-4534).
-    try {
-      const drsClient = DrsClient.createFrom(context);
       if (drsClient.isConfigured()) {
-        const trimmedBrand = brandName.trim();
-        const brandProfile = siteConfig.getBrandProfile?.();
-        // LLMO-4534: v1 fallback audience is English-only. v2 onboardings get a
-        // locale-aware audience from brand_profile.main_profile.target_audience.
-        const audience = brandProfile?.main_profile?.target_audience
-          || `General consumers interested in ${trimmedBrand} products and services`;
-
-        // The audit-worker `drs-prompt-generation` handler takes the legacy LLMO
-        // config write path when `onboarding_mode` is absent from the DRS job
-        // metadata. Do NOT pass `onboarding_mode` here — adding it would route v1
-        // prompts to the v2 customer-config storage and break v1 onboardings.
-        //
-        // LLMO-4683: forward operator-supplied `region` so the GPT prompt-generation
-        // job conditions on the brand's market. Omitted → DRS client default ('US')
-        // applies, preserving prior behavior.
-        if (region) {
-          log.info(`Using operator-supplied region "${region}" for v1 DRS prompt generation`);
-        }
-        const drsJob = await drsClient.submitPromptGenerationJob({
-          baseUrl: siteConfig.getFetchConfig?.()?.overrideBaseURL || baseURL,
-          brandName: trimmedBrand,
-          audience,
+        const companyWebsite = siteConfig.getFetchConfig?.()?.overrideBaseURL || baseURL;
+        await triggerBrandalfOnboardingJob({
+          drsClient,
+          organizationId: organization.getId(),
           siteId: site.getId(),
           imsOrgId,
-          ...(region ? { region } : {}),
+          brandName: brandName.trim(),
+          companyWebsite,
+          onboardingMode,
+          region,
+          log,
+          say,
         });
-        if (!drsJob?.job_id) {
-          throw new Error('DRS submitPromptGenerationJob returned no job_id');
-        }
-        log.info(`Started DRS prompt generation: job=${drsJob.job_id}`);
-        say(`:robot_face: Started DRS prompt generation job: ${drsJob.job_id}`);
-        promptGenerationJobId = drsJob.job_id;
+        brandalfTriggered = true;
       } else {
-        log.debug('DRS client not configured, skipping prompt generation');
-        promptGenerationError = 'DRS client not configured';
+        log.debug('DRS client not configured, skipping Brandalf flow');
+        brandalfError = 'DRS client not configured';
       }
     } catch (drsError) {
-      log.error(`Failed to start DRS prompt generation: ${drsError.message}`);
-      say(`:warning: Failed to start DRS prompt generation for site ${site.getId()} (will need manual trigger)`);
-      promptGenerationError = drsError.message;
+      log.error(`Failed to start DRS Brandalf flow: ${drsError.message}`);
+      say(':warning: Failed to start DRS Brandalf flow (will need manual trigger)');
+      brandalfError = drsError.message;
+    }
+
+    // Run the "prompt suggestion" pipelines, tier-gated (LLMO prompt-suggestion
+    // tier gate): PAYING sites get a recurring schedule with an immediate first
+    // run; TRIAL / non-paying (or an indeterminate tier — isPayingLlmoSite fails
+    // safe to trial) get a single on-demand run per pipeline, no recurring
+    // schedule. These fire right after we SUBMIT the async Brandalf job above
+    // (submit, not completion), so they race Brandalf: for a genuinely new site
+    // the immediate first run typically no-ops because base-prompt/brand data
+    // does not exist yet. For a paying site that is acceptable — the durable
+    // outcome is the recurring schedule row, and the next scheduled run
+    // self-heals once brand data exists. Cold-start latency is worst for
+    // synthetic_personas (quarterly): if its immediate run no-ops, the first real
+    // output can be up to a quarter out. Chaining registration off
+    // base-prompt-generation completion is cross-repo (DRS owns the
+    // Brandalf→prompt-gen chain) and out of scope here.
+    // TODO(LLMO-4258 follow-up): have DRS trigger these once base prompt
+    // generation completes, instead of racing the Brandalf submit.
+    // Bound by settleWithin: isPayingLlmoSite hits the tier service and is
+    // awaited on the synchronous response path. Its own try/catch handles
+    // rejections but NOT a hang, so cap it and fall back to `false` (trial) on
+    // timeout — same fail-safe-to-trial intent as isPayingLlmoSite itself, so an
+    // indeterminate tier never gets a recurring, fleet-wide schedule.
+    const isPaying = await settleWithin(
+      isPayingLlmoSite(site, context),
+      TIER_LOOKUP_TIMEOUT_MS,
+      false,
+    );
+
+    // Bound by settleWithin: the per-pipeline createSchedule/submitJob calls are
+    // awaited on the synchronous response path, so a slow/hung DRS could
+    // otherwise stall onboarding. On timeout we stop waiting — createSchedule is
+    // idempotent, the durable outcome is the server-side schedule row (paying)
+    // or a submitted job (trial), and per-pipeline ERROR logging inside
+    // ensurePromptSuggestionSchedules stays deterministic.
+    const scheduleResult = await settleWithin(
+      ensurePromptSuggestionSchedules({
+        drsClient,
+        siteId: site.getId(),
+        isPaying,
+        log,
+        say,
+      }),
+      SCHEDULE_REGISTRATION_TIMEOUT_MS,
+      null,
+    );
+    // null fallback === timed out with calls still pending: the per-pipeline
+    // catch blocks never fired, so this is the only place a hung DRS is visible.
+    // Schedules may still land server-side (createSchedule is idempotent), but
+    // the operator needs a signal that registration was abandoned mid-flight.
+    if (scheduleResult === null) {
+      log.warn('DRS prompt-suggestion schedule registration timed out after '
+        + `${SCHEDULE_REGISTRATION_TIMEOUT_MS}ms for site ${site.getId()} `
+        + '(schedules may still have been created server-side; may need manual verification)');
+      say(':warning: DRS schedule registration timed out (may need manual verification)');
+      promptSuggestionSchedulesTimedOut = true;
+    } else {
+      promptSuggestionSchedules = scheduleResult.results;
     }
   }
 
-  // Required-work gate (LLMO-7218 AC3): what counts as "required" differs by mode, since v1 has
-  // no Brandalf step at all. A schedule-registration timeout counts as failed, not merely
-  // unknown — the caller needs an actionable signal, and "unknown" would let this collapse back
-  // into the same silent-success outcome AC3 exists to prevent.
+  // Required-work gate (LLMO-7218 AC3): onboarding is always v2, so required work is the
+  // Brandalf submission plus prompt-suggestion schedule registration. A schedule-registration
+  // timeout counts as failed, not merely unknown — the caller needs an actionable signal, and
+  // "unknown" would let this collapse back into the same silent-success outcome AC3 exists to
+  // prevent.
   //
   // "DRS client not configured" deliberately counts as failed here too, same as a genuine submit
   // error: either way the customer ends this onboarding with zero prompts, which is exactly the
@@ -1638,16 +1594,12 @@ export async function activateBrandAndGeneratePrompts({
   // trial sites never get the durable recurring schedule PAID sites do (LLMO-7218's schedule
   // reconciliation scope is PAID-only) — a trial customer whose one-time job failed to submit
   // also ends this onboarding with zero prompts, so the same signal applies.
-  const requiredWorkFailed = onboardingMode === LLMO_ONBOARDING_MODE_V2
-    ? !brandalfTriggered || promptSuggestionSchedulesTimedOut
-      || Boolean(promptSuggestionSchedules?.some((r) => r.status === 'failed'))
-    : promptGenerationJobId === null;
+  const requiredWorkFailed = !brandalfTriggered || promptSuggestionSchedulesTimedOut
+    || Boolean(promptSuggestionSchedules?.some((r) => r.status === 'failed'));
 
   return {
     brandalfTriggered,
     brandalfError,
-    promptGenerationJobId,
-    promptGenerationError,
     promptSuggestionSchedules,
     promptSuggestionSchedulesTimedOut,
     requiredWorkFailed,
@@ -1662,12 +1614,12 @@ export async function activateBrandAndGeneratePrompts({
  * @param {string} params.brandName - The brand name
  * @param {string} params.imsOrgId - The IMS Organization ID
  * @param {string} [params.deliveryType] - The delivery type for site creation
- * @param {string} [params.region] - Optional ISO 3166-1 alpha-2 region code forwarded to V1 DRS
- *   prompt generation. Omitted → DRS client default ('US') applies.
+ * @param {string} [params.region] - Optional ISO 3166-1 alpha-2 region code forwarded to the DRS
+ *   Brandalf onboarding job. Omitted → DRS client default ('US') applies.
  * @param {boolean} [params.siteOnly=false] - Site-only onboarding (LLMO-5606). When true, stands
  *   up the site, entitlement/enrollment, config, and site-analysis audits, but skips the entire
- *   brand activation + prompt-generation block (no brand entity, no Brandalf job, no v1
- *   prompt-generation job) and never enables/triggers llmo-customer-analysis.
+ *   brand activation + prompt-generation block (no brand entity, no Brandalf job) and never
+ *   enables/triggers llmo-customer-analysis.
  * @param {object} context - The request context
  * @param {Function} [say] - Optional function to send progress messages
  * @returns {Promise<object>} Onboarding result
@@ -1790,32 +1742,31 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
     site.setConfig(Config.toDynamoItem(siteConfig));
     await site.save();
 
-    if (onboardingMode === LLMO_ONBOARDING_MODE_V2) {
-      await ensureInitialCustomerConfigV2({
-        organizationId: organization.getId(),
-        brandName,
-        imsOrgId,
-        siteId: site.getId(),
-        baseURL,
-        overrideBaseURL: siteConfig.getFetchConfig?.()?.overrideBaseURL,
-        region,
-        context,
-      });
+    // Onboarding is always v2 — the v1 path was retired (brandalf-migration
+    // cleanup §2). Initialize the v2 customer config and enable the brandalf
+    // flag org-wide so the DRS scheduler uses v2 prompts for this org.
+    await ensureInitialCustomerConfigV2({
+      organizationId: organization.getId(),
+      brandName,
+      imsOrgId,
+      siteId: site.getId(),
+      baseURL,
+      overrideBaseURL: siteConfig.getFetchConfig?.()?.overrideBaseURL,
+      region,
+      context,
+    });
 
-      // Enable brandalf flag so DRS scheduler uses v2 prompts for this org
-      const postgrestClient = context.dataAccess?.services?.postgrestClient;
-      await upsertFeatureFlag({
-        organizationId: organization.getId(),
-        product: LLMO_FEATURE_FLAG_PRODUCT,
-        flagName: LLMO_BRANDALF_FLAG,
-        value: true,
-        updatedBy: 'llmo-onboarding',
-        postgrestClient,
-      });
-      log.info(`Enabled brandalf feature flag for organization ${organization.getId()}`);
-    } else {
-      log.info(`Skipping v2 customer config initialization for site ${site.getId()} in ${LLMO_ONBOARDING_MODE_V1} mode`);
-    }
+    // Enable brandalf flag so DRS scheduler uses v2 prompts for this org
+    const postgrestClient = context.dataAccess?.services?.postgrestClient;
+    await upsertFeatureFlag({
+      organizationId: organization.getId(),
+      product: LLMO_FEATURE_FLAG_PRODUCT,
+      flagName: LLMO_BRANDALF_FLAG,
+      value: true,
+      updatedBy: 'llmo-onboarding',
+      postgrestClient,
+    });
+    log.info(`Enabled brandalf feature flag for organization ${organization.getId()}`);
 
     // Brand activation + prompt generation. This block is owned by Piece 2
     // (LLMO-5605). Site-only onboarding (LLMO-5606) skips it entirely — no brand
