@@ -14,6 +14,7 @@ import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import { hasText } from '@adobe/spacecat-shared-utils';
 import { cleanupPlgSiteSuggestionsAndFixes } from '../plg-onboarding-cleanup.js';
 import { updateRumConfig } from '../../../support/rum-config-service.js';
+import { sanitizeUrlForReason } from '../../../support/url-safety.js';
 import { hasActiveSuggestions } from './displacement.js';
 import {
   AEM_CS_AUTHOR_URL_PATTERN, AEM_CS_PUBLISH_HOST_PATTERN, EDS_HOST_PATTERN,
@@ -23,6 +24,7 @@ import {
   getReviewerIdentity, isFromAsoUI, isInternalOrg, isInternalOrgDemoSite,
 } from './internal-org.js';
 import {
+  AUTHENTICATED_SITE,
   DOMAIN_ALREADY_ASSIGNED,
   DOMAIN_ALREADY_ONBOARDED_IN_ORG,
   NON_PROD_DOMAIN,
@@ -483,6 +485,7 @@ export async function performAsoPlgOnboarding({
     RUMAPIClient,
     composeBaseURL,
     detectBotBlocker,
+    detectAuthWall,
     detectLocale,
     resolveCanonicalUrl,
     createOrFindOrganization,
@@ -682,6 +685,30 @@ export async function performAsoPlgOnboarding({
       await persistAndNotify(onboarding, context);
       return onboarding;
     }
+
+    // Step 4b: Authenticated-site check — ASO cannot audit login/SSO-gated sites and there is
+    // no remediation the customer can apply, so reject them outright (rather than waitlisting
+    // for a review that could only uphold the rejection) before any site/entitlement is
+    // provisioned.
+    const authWall = await detectAuthWall({ baseUrl: baseURL, log });
+    if (authWall.authenticated) {
+      log.info(`Domain ${domain} appears to require authentication (signal: ${authWall.signal}), rejecting`);
+      // finalUrl is host-validated (public) but its path/query/fragment are caller-controlled;
+      // reduce it before it is persisted and forwarded to Slack (mrkdwn) to avoid injection.
+      const safeFinalUrl = authWall.finalUrl ? sanitizeUrlForReason(authWall.finalUrl) : '';
+      let rejectionReason = `Domain ${domain} ${AUTHENTICATED_SITE} (detected: ${authWall.signal}`;
+      rejectionReason += safeFinalUrl ? `, resolved to ${safeFinalUrl}).` : ').';
+      onboarding.setStatus(STATUSES.REJECTED);
+      onboarding.setWaitlistReason(rejectionReason);
+      onboarding.setSiteId(site?.getId() || null);
+      onboarding.setSteps(steps);
+      await persistAndNotify(onboarding, context);
+      return onboarding;
+    }
+    // Informational audit-trail breadcrumb (persisted on the onboarding record like the
+    // other `steps.*` flags): records that the auth-wall probe ran and the front door was
+    // public. Not read back in the flow; kept for post-hoc diagnosis of onboarding runs.
+    steps.authWallChecked = true;
 
     // Step 5: Create site if new
     if (!site) {
