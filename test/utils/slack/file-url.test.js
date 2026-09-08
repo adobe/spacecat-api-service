@@ -47,6 +47,11 @@ describe('Slack file URL allowlist', () => {
       // Non-http(s) schemes.
       ['a file: URL', 'file:///etc/passwd'],
       ['a data: URL', 'data:text/plain;base64,aGk='],
+      // Trailing dot is the FQDN root form: 'files.slack.com.' does not end with '.slack.com'
+      // and is not in the exact-match set, so it is rejected. Pinned because a future
+      // normalisation change could silently make it pass.
+      ['a trailing-dot FQDN host', 'https://files.slack.com./files-pri/T1-F2/x.csv'],
+      ['a trailing-dot bare host', 'https://slack.com./collect'],
       // Structurally invalid / absent input.
       ['a relative URL', '/files-pri/T1-F2/x.csv'],
       ['an empty string', ''],

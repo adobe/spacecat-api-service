@@ -233,6 +233,29 @@ describe('RunAuditCommand', () => {
       expect(slackContext.say.secondCall.args[0]).to.equal(':white_check_mark: prerender audit queued for 2 URLs.');
     });
 
+    it('refuses a prerender CSV whose url_private is not Slack-hosted, without a 500 (VULN-39365)', async () => {
+      const site = { getId: () => '123' };
+      dataAccessStub.Site.findByBaseURL.resolves(site);
+      dataAccessStub.Configuration.findLatest.resolves(createDefaultConfigurationMock('prerender', ['LLMO']));
+      slackContext.files = [
+        {
+          name: 'urls.csv',
+          url_private: 'https://attacker.example.com/collect',
+        },
+      ];
+      // No nock interceptor for the attacker host on purpose: if the guard failed to stop the
+      // fetch, the request would be attempted and nock would surface it.
+
+      const command = RunAuditCommand(context);
+      await command.handleExecution(['site.com', 'prerender'], slackContext);
+
+      // The throw from assertSlackFileUrl is caught by the command and reported to Slack,
+      // rather than escaping as an unhandled 500.
+      const said = slackContext.say.getCalls().map((c) => String(c.args[0])).join('\n');
+      expect(said).to.contain('not a Slack-hosted https URL');
+      expect(sqsStub.sendMessage).to.have.not.been.called;
+    });
+
     it('sends a single SQS message for large prerender CSV', async () => {
       const site = { getId: () => '123' };
       dataAccessStub.Site.findByBaseURL.resolves(site);

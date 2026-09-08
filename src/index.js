@@ -493,10 +493,16 @@ const wrappedMain = wrap(run)
   })
   .with(authWrapper, {
     authHandlers: AUTH_HANDLERS,
-    // Declare the bypass explicitly rather than inheriting the shared library's default, so
-    // this service owns the list of routes it leaves unauthenticated. POST /slack/events is
-    // authenticated instead by slackSignatureWrapper above, which runs before this wrapper.
-    // Harmless no-op against shared versions predating the option (they use the same default).
+    // Declare the route-based anonymous bypass explicitly rather than inheriting the shared
+    // library's default, so this service owns the list of routes it leaves unauthenticated.
+    // POST /slack/events is authenticated instead by slackSignatureWrapper above, which runs
+    // before this wrapper.
+    //
+    // Inert on the currently pinned @adobe/spacecat-shared-http-utils (which does not read the
+    // option and applies its own default); it takes effect once the version carrying
+    // `anonymousEndpoints` is picked up. Declaring it now is forward-safe, not a behaviour
+    // change: the option replaces only the exact-match route list -- the unconditional OPTIONS
+    // and `POST /hooks/site-detection/*` bypasses are separate clauses it does not touch.
     anonymousEndpoints: ['POST /slack/events'],
   })
   .with(s2sAuthWrapper, { routeCapabilities: routeRequiredCapabilities });

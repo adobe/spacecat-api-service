@@ -14,6 +14,7 @@ import crypto from 'crypto';
 import { Response } from '@adobe/fetch';
 import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
 import { hasText } from '@adobe/spacecat-shared-utils';
+import { checkBodySize } from '../../utils/validations.js';
 
 /**
  * Slack request-signature verification (VULN-39365).
@@ -59,6 +60,16 @@ const TIMESTAMP_HEADER = 'x-slack-request-timestamp';
 // authenticated by RouteScopedLegacyApiKeyHandler, not a request signed by Slack.
 const SLACK_SIGNED_PATHS = new Set(['/slack/events', 'slack/events']);
 
+// Fail-closed backstop, matched against the RAW request URL rather than context.pathInfo.
+//
+// `isSlackSignedRoute` keys off `context.pathInfo.suffix`, which is populated upstream by
+// `enrichPathInfo`. If this wrapper were ever re-ordered to run BEFORE that (or pathInfo were
+// otherwise unpopulated), `suffix` would be empty, the guard would be skipped, and the request
+// would pass through UNVERIFIED -- i.e. fail open, which is precisely the VULN-39365 surface.
+// Consulting the request URL as well makes the guard independent of wrapper ordering: the worst
+// case becomes a 401 on a path nothing serves, never an unverified Slack payload.
+const SLACK_EVENTS_URL_PATH = /(^|\/)slack\/events\/?$/;
+
 // CORS preflight is answered by `run()` in src/index.js with a 204 before any route handler is
 // reached, and carries no body to sign. Excluding it keeps that behaviour intact rather than
 // turning every preflight into a 401. Every other method on the guarded suffix is verified --
@@ -101,17 +112,35 @@ export function computeSlackSignature(signingSecret, timestamp, rawBody) {
 
 /**
  * True when the request must carry a valid Slack signature: the route is one Slack signs, and
- * the method is one that can carry a signed body. Tolerates a suffix with or without a leading
- * slash (production sets it with one; some test harnesses do not).
+ * the method is one that can carry a signed body.
  *
+ * The route is resolved from `context.pathInfo.suffix` when available (tolerating a suffix with
+ * or without a leading slash), and otherwise from the raw request URL. That fallback is what
+ * makes the guard fail CLOSED rather than open if `pathInfo` is ever unpopulated -- see
+ * SLACK_EVENTS_URL_PATH.
+ *
+ * @param {Request} request - the universal request.
  * @param {object} context - the universal context.
  * @returns {boolean}
  */
-function isSlackSignedRoute(context) {
-  if (!SLACK_SIGNED_PATHS.has(context?.pathInfo?.suffix || '')) {
+function isSlackSignedRoute(request, context) {
+  // Prefer pathInfo.method (set by enrichPathInfo), fall back to the request's own method.
+  const method = (context?.pathInfo?.method || request?.method || '').toUpperCase();
+  if (UNVERIFIED_METHODS.has(method)) {
     return false;
   }
-  return !UNVERIFIED_METHODS.has((context?.pathInfo?.method || '').toUpperCase());
+
+  const suffix = context?.pathInfo?.suffix;
+  if (typeof suffix === 'string' && suffix.length > 0) {
+    return SLACK_SIGNED_PATHS.has(suffix);
+  }
+
+  try {
+    return SLACK_EVENTS_URL_PATH.test(new URL(request.url).pathname);
+  } catch {
+    // An unparseable URL cannot be shown to be a non-Slack route, so guard it.
+    return true;
+  }
 }
 
 /**
@@ -124,7 +153,7 @@ function isSlackSignedRoute(context) {
  */
 export function slackSignatureWrapper(fn) {
   return async (request, context) => {
-    if (!isSlackSignedRoute(context)) {
+    if (!isSlackSignedRoute(request, context)) {
       return fn(request, context);
     }
 
@@ -205,7 +234,11 @@ export function slackSignatureWrapper(fn) {
     }
 
     const bodyBytes = Buffer.byteLength(rawBody, 'utf8');
-    if (bodyBytes > MAX_BODY_BYTES) {
+    // Reuse the repo's shared body-size helper for the post-read (authoritative) check. The
+    // Content-Length pre-check above has no equivalent there: it measures a client-supplied
+    // header, not a body, and exists only to reject a declared-oversized request before
+    // buffering it.
+    if (!checkBodySize(rawBody, MAX_BODY_BYTES)) {
       return unauthorized('body_too_large', { bodyBytes, maxBytes: MAX_BODY_BYTES });
     }
 

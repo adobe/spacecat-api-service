@@ -233,8 +233,14 @@ describe('Index Tests', () => {
     });
 
     beforeEach(() => {
+      // Deliberately set ONLY `suffix`, which in production comes from the Lambda adapter and
+      // NOT from enrichPathInfo. `method` and `headers` are left unset so they must be
+      // populated by the real enrichPathInfo in the chain -- otherwise these tests would
+      // supply the pathInfo the wrapper reads and would stay green even if a future `.with()`
+      // reorder broke the ordering they exist to protect.
       context.pathInfo.suffix = slackPath;
-      context.pathInfo.method = 'POST';
+      delete context.pathInfo.method;
+      delete context.pathInfo.headers;
     });
 
     it('rejects an unsigned POST before it reaches the Slack controller', async () => {
@@ -300,8 +306,6 @@ describe('Index Tests', () => {
     it('does not process Slack events over GET', async () => {
       // The GET route is gone. The wrapper guards every non-preflight method on this suffix,
       // so an unsigned GET is rejected at the signature layer rather than reaching a handler.
-      context.pathInfo.method = 'GET';
-
       const resp = await main(new Request(`${baseUrl}${slackPath}`), context);
 
       expect(resp.status).to.equal(401);
@@ -309,8 +313,6 @@ describe('Index Tests', () => {
     });
 
     it('still answers an OPTIONS preflight on the Slack route', async () => {
-      context.pathInfo.method = 'OPTIONS';
-
       const resp = await main(
         new Request(`${baseUrl}${slackPath}`, { method: 'OPTIONS' }),
         context,

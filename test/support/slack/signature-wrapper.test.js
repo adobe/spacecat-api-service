@@ -153,8 +153,58 @@ describe('slackSignatureWrapper', () => {
       expect(next).to.have.not.been.called;
     });
 
-    it('tolerates a context with no pathInfo', async () => {
+    it('fails CLOSED when pathInfo is missing but the URL is the Slack route', async () => {
+      // Regression guard for the ordering hazard: if this wrapper ever ran before
+      // enrichPathInfo, `pathInfo.suffix` would be empty. Keying only off pathInfo would then
+      // skip the guard and pass the request through UNVERIFIED -- the VULN-39365 surface.
+      // The raw-URL backstop must reject instead.
       const result = await slackSignatureWrapper(next)(buildRequest('{}'), { log, env: {} });
+
+      expect(result.status).to.equal(401);
+      expect(next).to.have.not.been.called;
+    });
+
+    it('fails closed on the Slack URL even with a trailing slash', async () => {
+      const request = new Request('https://spacecat.test/slack/events/', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{}',
+      });
+
+      const result = await slackSignatureWrapper(next)(request, { log, env: {} });
+
+      expect(result.status).to.equal(401);
+    });
+
+    it('fails closed on the Slack URL behind an /api/v1 prefix', async () => {
+      const request = new Request('https://spacecat.test/api/v1/slack/events', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{}',
+      });
+
+      const result = await slackSignatureWrapper(next)(request, { log, env: {} });
+
+      expect(result.status).to.equal(401);
+    });
+
+    it('still passes a non-Slack URL through when pathInfo is missing', async () => {
+      const request = new Request('https://spacecat.test/sites', { method: 'GET' });
+
+      const result = await slackSignatureWrapper(next)(request, { log, env: {} });
+
+      expect(result).to.equal('downstream-called');
+    });
+
+    it('does not guard the sibling /slack/channels route', async () => {
+      // Authenticated by RouteScopedLegacyApiKeyHandler, not signed by Slack.
+      const request = new Request('https://spacecat.test/slack/channels/invite-by-user-id', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{}',
+      });
+
+      const result = await slackSignatureWrapper(next)(request, { log, env: {} });
 
       expect(result).to.equal('downstream-called');
     });
@@ -271,41 +321,57 @@ describe('slackSignatureWrapper', () => {
       expectUnauthorized(await slackSignatureWrapper(next)(request, context));
     });
 
-    it('accepts a timestamp at the edge of the replay window', async () => {
-      const edge = `${nowSeconds() - MAX_TIMESTAMP_SKEW_SECONDS + 2}`;
-      const { request, context } = signedDelivery('{}', { timestamp: edge });
+    // Boundary cases are pinned with fake timers: with the real clock a one-second boundary can
+    // flake under CI load, and the exact +/-MAX assertions would not be exact.
+    describe('replay-window boundaries (fake timers)', () => {
+      let clock;
 
-      const result = await slackSignatureWrapper(next)(request, context);
+      beforeEach(() => {
+        clock = sandbox.useFakeTimers({ now: 1_700_000_000_000, toFake: ['Date'] });
+      });
 
-      expect(result).to.equal('downstream-called');
-    });
+      afterEach(() => {
+        clock.restore();
+      });
 
-    it('accepts a timestamp at the exact past edge of the replay window', async () => {
-      const edge = `${nowSeconds() - MAX_TIMESTAMP_SKEW_SECONDS}`;
-      const { request, context } = signedDelivery('{}', { timestamp: edge });
+      it('accepts a timestamp at the exact past edge of the replay window', async () => {
+        const edge = `${nowSeconds() - MAX_TIMESTAMP_SKEW_SECONDS}`;
+        const { request, context } = signedDelivery('{}', { timestamp: edge });
 
-      expect(await slackSignatureWrapper(next)(request, context)).to.equal('downstream-called');
-    });
+        expect(await slackSignatureWrapper(next)(request, context)).to.equal('downstream-called');
+      });
 
-    it('accepts a timestamp at the exact future edge of the replay window', async () => {
-      const edge = `${nowSeconds() + MAX_TIMESTAMP_SKEW_SECONDS}`;
-      const { request, context } = signedDelivery('{}', { timestamp: edge });
+      it('accepts a timestamp at the exact future edge of the replay window', async () => {
+        const edge = `${nowSeconds() + MAX_TIMESTAMP_SKEW_SECONDS}`;
+        const { request, context } = signedDelivery('{}', { timestamp: edge });
 
-      expect(await slackSignatureWrapper(next)(request, context)).to.equal('downstream-called');
-    });
+        expect(await slackSignatureWrapper(next)(request, context)).to.equal('downstream-called');
+      });
 
-    it('rejects a timestamp one second past the window', async () => {
-      const stale = `${nowSeconds() - MAX_TIMESTAMP_SKEW_SECONDS - 1}`;
-      const { request, context } = signedDelivery('{}', { timestamp: stale });
+      it('rejects a timestamp exactly one second past the window', async () => {
+        const stale = `${nowSeconds() - MAX_TIMESTAMP_SKEW_SECONDS - 1}`;
+        const { request, context } = signedDelivery('{}', { timestamp: stale });
 
-      expectUnauthorized(await slackSignatureWrapper(next)(request, context));
-    });
+        expectUnauthorized(await slackSignatureWrapper(next)(request, context));
+      });
 
-    it('rejects a timestamp one second beyond the future window', async () => {
-      const ahead = `${nowSeconds() + MAX_TIMESTAMP_SKEW_SECONDS + 1}`;
-      const { request, context } = signedDelivery('{}', { timestamp: ahead });
+      it('rejects a timestamp exactly one second beyond the future window', async () => {
+        const ahead = `${nowSeconds() + MAX_TIMESTAMP_SKEW_SECONDS + 1}`;
+        const { request, context } = signedDelivery('{}', { timestamp: ahead });
 
-      expectUnauthorized(await slackSignatureWrapper(next)(request, context));
+        expectUnauthorized(await slackSignatureWrapper(next)(request, context));
+      });
+
+      it('reports the observed skew so clock drift is diagnosable', async () => {
+        const stale = `${nowSeconds() - MAX_TIMESTAMP_SKEW_SECONDS - 42}`;
+        const { request, context } = signedDelivery('{}', { timestamp: stale });
+
+        await slackSignatureWrapper(next)(request, context);
+
+        const logged = log.warn.getCalls().map((c) => c.args.join(' ')).join('\n');
+        expect(logged).to.contain('reason=stale_timestamp');
+        expect(logged).to.contain(`skewSeconds=${MAX_TIMESTAMP_SKEW_SECONDS + 42}`);
+      });
     });
 
     it('rejects a body larger than the cap before hashing it', async () => {
@@ -313,6 +379,25 @@ describe('slackSignatureWrapper', () => {
       const { request, context } = signedDelivery(body);
 
       expectUnauthorized(await slackSignatureWrapper(next)(request, context));
+    });
+
+    it('rejects an oversized body whose content-length understates it (post-read enforcement)', async () => {
+      // The declared-length check is an honest-client hint; a forger can omit or understate it.
+      // This exercises the post-read byte-length branch the code calls "the real enforcement".
+      const body = 'x'.repeat(MAX_BODY_BYTES + 1);
+      const timestamp = `${nowSeconds()}`;
+      const headers = {
+        'x-slack-request-timestamp': timestamp,
+        'x-slack-signature': computeSlackSignature(SIGNING_SECRET, timestamp, body),
+      };
+      const request = buildRequest(body, { ...headers, 'content-length': '10' });
+
+      const result = await slackSignatureWrapper(next)(request, buildContext(headers));
+
+      expectUnauthorized(result);
+      const logged = log.warn.getCalls().map((c) => c.args.join(' ')).join('\n');
+      expect(logged).to.contain('reason=body_too_large');
+      expect(logged).to.contain('bodyBytes=');
     });
 
     it('rejects a declared-oversized content-length without reading the body', async () => {
