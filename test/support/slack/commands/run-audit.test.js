@@ -165,7 +165,7 @@ describe('RunAuditCommand', () => {
         getId: () => '123',
       });
       dataAccessStub.Configuration.findLatest.resolves(createDefaultConfigurationMock('lhs-mobile', ['LLMO']));
-      const fileUrl = 'https://example.com/sites.csv';
+      const fileUrl = 'https://files.slack.com/sites.csv';
       slackContext.files = [
         {
           name: 'sites.csv',
@@ -190,7 +190,7 @@ describe('RunAuditCommand', () => {
       slackContext.files = [
         {
           name: 'sites.csv',
-          url_private: 'https://example.com/sites.csv',
+          url_private: 'https://files.slack.com/sites.csv',
         },
       ];
       await command.handleExecution(['site.com'], slackContext);
@@ -204,10 +204,10 @@ describe('RunAuditCommand', () => {
       slackContext.files = [
         {
           name: 'urls.csv',
-          url_private: 'https://example.com/urls.csv',
+          url_private: 'https://files.slack.com/urls.csv',
         },
       ];
-      nock('https://example.com')
+      nock('https://files.slack.com')
         .get('/urls.csv')
         .reply(200, 'https://valid.site/page-1\nhttps://valid.site/page-2\ninvalid-url');
 
@@ -240,12 +240,12 @@ describe('RunAuditCommand', () => {
       slackContext.files = [
         {
           name: 'urls.csv',
-          url_private: 'https://example.com/urls.csv',
+          url_private: 'https://files.slack.com/urls.csv',
         },
       ];
       // Generate 500 valid URLs — all sent in a single message (no batching)
       const urls = Array.from({ length: 500 }, (_, i) => `https://valid.site/page-${i + 1}`);
-      nock('https://example.com')
+      nock('https://files.slack.com')
         .get('/urls.csv')
         .reply(200, urls.join('\n'));
 
@@ -261,10 +261,10 @@ describe('RunAuditCommand', () => {
       slackContext.files = [
         {
           name: 'urls.csv',
-          url_private: 'https://example.com/urls.csv',
+          url_private: 'https://files.slack.com/urls.csv',
         },
       ];
-      nock('https://example.com')
+      nock('https://files.slack.com')
         .get('/urls.csv')
         .reply(200, 'invalid-url');
 
@@ -279,11 +279,11 @@ describe('RunAuditCommand', () => {
       slackContext.files = [
         {
           name: 'urls1.csv',
-          url_private: 'https://example.com/urls1.csv',
+          url_private: 'https://files.slack.com/urls1.csv',
         },
         {
           name: 'urls2.csv',
-          url_private: 'https://example.com/urls2.csv',
+          url_private: 'https://files.slack.com/urls2.csv',
         },
       ];
 
@@ -298,7 +298,7 @@ describe('RunAuditCommand', () => {
       slackContext.files = [
         {
           name: 'urls.txt',
-          url_private: 'https://example.com/urls.txt',
+          url_private: 'https://files.slack.com/urls.txt',
         },
       ];
 
@@ -315,10 +315,10 @@ describe('RunAuditCommand', () => {
       slackContext.files = [
         {
           name: 'urls.csv',
-          url_private: 'https://example.com/urls.csv',
+          url_private: 'https://files.slack.com/urls.csv',
         },
       ];
-      nock('https://example.com')
+      nock('https://files.slack.com')
         .get('/urls.csv')
         .reply(200, 'https://valid.site/page-1');
 
@@ -340,10 +340,10 @@ describe('RunAuditCommand', () => {
       slackContext.files = [
         {
           name: 'urls.csv',
-          url_private: 'https://example.com/urls.csv',
+          url_private: 'https://files.slack.com/urls.csv',
         },
       ];
-      nock('https://example.com')
+      nock('https://files.slack.com')
         .get('/urls.csv')
         .reply(200, 'https://valid.site/page-1');
 
@@ -363,10 +363,10 @@ describe('RunAuditCommand', () => {
       slackContext.files = [
         {
           name: 'urls.csv',
-          url_private: 'https://example.com/urls.csv',
+          url_private: 'https://files.slack.com/urls.csv',
         },
       ];
-      nock('https://example.com')
+      nock('https://files.slack.com')
         .get('/urls.csv')
         .reply(200, 'https://valid.site/page-1');
 
@@ -386,10 +386,10 @@ describe('RunAuditCommand', () => {
       slackContext.files = [
         {
           name: 'urls.csv',
-          url_private: 'https://example.com/urls.csv',
+          url_private: 'https://files.slack.com/urls.csv',
         },
       ];
-      nock('https://example.com')
+      nock('https://files.slack.com')
         .get('/urls.csv')
         .reply(200, 'https://valid.site/page-1');
 
@@ -414,10 +414,10 @@ describe('RunAuditCommand', () => {
       slackContext.files = [
         {
           name: 'urls.csv',
-          url_private: 'https://example.com/urls.csv',
+          url_private: 'https://files.slack.com/urls.csv',
         },
       ];
-      nock('https://example.com')
+      nock('https://files.slack.com')
         .get('/urls.csv')
         .reply(200, 'https://valid.site/page-1');
 
@@ -434,10 +434,10 @@ describe('RunAuditCommand', () => {
       slackContext.files = [
         {
           name: 'urls.csv',
-          url_private: 'https://example.com/urls.csv',
+          url_private: 'https://files.slack.com/urls.csv',
         },
       ];
-      nock('https://example.com')
+      nock('https://files.slack.com')
         .get('/urls.csv')
         .reply(200, 'https://valid.site/page-1');
 
@@ -453,11 +453,11 @@ describe('RunAuditCommand', () => {
       slackContext.files = [
         {
           name: 'sites1.csv',
-          url_private: 'https://example.com/sites1.csv',
+          url_private: 'https://files.slack.com/sites1.csv',
         },
         {
           name: 'sites2.csv',
-          url_private: 'https://example.com/sites2.csv',
+          url_private: 'https://files.slack.com/sites2.csv',
         },
       ];
       await command.handleExecution(['', 'all'], slackContext);
@@ -469,7 +469,7 @@ describe('RunAuditCommand', () => {
       slackContext.files = [
         {
           name: 'sites.txt',
-          url_private: 'https://example.com/sites.txt',
+          url_private: 'https://files.slack.com/sites.txt',
         },
       ];
       await command.handleExecution(['', 'all'], slackContext);
@@ -481,10 +481,10 @@ describe('RunAuditCommand', () => {
       slackContext.files = [
         {
           name: 'sites.csv',
-          url_private: 'https://example.com/sites.csv',
+          url_private: 'https://files.slack.com/sites.csv',
         },
       ];
-      nock('https://example.com')
+      nock('https://files.slack.com')
         .get('/sites.csv')
         .reply(200, 'invalid-url,uuidv4\n');
 
@@ -535,10 +535,10 @@ describe('RunAuditCommand', () => {
       slackContext.files = [
         {
           name: 'sites.csv',
-          url_private: 'https://example.com/sites.csv',
+          url_private: 'https://files.slack.com/sites.csv',
         },
       ];
-      nock('https://example.com')
+      nock('https://files.slack.com')
         .get('/sites.csv')
         .reply(401, 'Unauthorized');
 
@@ -835,10 +835,10 @@ describe('RunAuditCommand', () => {
       slackContext.files = [
         {
           name: 'urls.csv',
-          url_private: 'https://example.com/urls.csv',
+          url_private: 'https://files.slack.com/urls.csv',
         },
       ];
-      nock('https://example.com')
+      nock('https://files.slack.com')
         .get('/urls.csv')
         .reply(200, 'https://valid.site/page-1\nhttps://valid.site/page-2');
 
@@ -856,10 +856,10 @@ describe('RunAuditCommand', () => {
       slackContext.files = [
         {
           name: 'urls.csv',
-          url_private: 'https://example.com/urls.csv',
+          url_private: 'https://files.slack.com/urls.csv',
         },
       ];
-      nock('https://example.com')
+      nock('https://files.slack.com')
         .get('/urls.csv')
         .reply(200, 'https://valid.site/page-1');
 

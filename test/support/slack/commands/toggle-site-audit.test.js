@@ -279,7 +279,7 @@ describe('UpdateSitesAuditsCommand', () => {
 
       slackContextMock.files = [{
         name: 'sites.csv',
-        url_private: 'https://mock-url',
+        url_private: 'https://files.slack.com/mock-url',
       }];
 
       await command.handleExecution(args, slackContextMock);
@@ -295,7 +295,7 @@ describe('UpdateSitesAuditsCommand', () => {
 
       slackContextMock.files = [{
         name: 'sites.csv',
-        url_private: 'https://mock-url',
+        url_private: 'https://files.slack.com/mock-url',
       }];
       dataAccessMock.Site.findByBaseURL.withArgs('https://site1.com').resolves(site);
       dataAccessMock.Site.findByBaseURL.withArgs('https://site2.com').resolves(site);
@@ -311,7 +311,7 @@ describe('UpdateSitesAuditsCommand', () => {
     it('should handle errors during audit disabling in bulk processing', async () => {
       slackContextMock.files = [{
         name: 'sites.csv',
-        url_private: 'http://mock-url',
+        url_private: 'https://files.slack.com/mock-url',
       }];
 
       dataAccessMock.Site.findByBaseURL.withArgs('https://site1.com').resolves(site);
@@ -345,7 +345,7 @@ describe('UpdateSitesAuditsCommand', () => {
 
       slackContextMock.files = [{
         name: 'sites.csv',
-        url_private: 'http://mock-url',
+        url_private: 'https://files.slack.com/mock-url',
       }];
 
       const command = ToggleSiteAuditCommand(contextMock);
@@ -362,7 +362,7 @@ describe('UpdateSitesAuditsCommand', () => {
 
       slackContextMock.files = [{
         name: 'sites.csv',
-        url_private: 'http://mock-url',
+        url_private: 'https://files.slack.com/mock-url',
       }];
 
       const command = ToggleSiteAuditCommand(contextMock);
@@ -379,7 +379,7 @@ describe('UpdateSitesAuditsCommand', () => {
 
       slackContextMock.files = [{
         name: 'sites.csv',
-        url_private: 'http://mock-url',
+        url_private: 'https://files.slack.com/mock-url',
       }];
 
       const command = ToggleSiteAuditCommand(contextMock);
@@ -395,7 +395,7 @@ describe('UpdateSitesAuditsCommand', () => {
 
       slackContextMock.files = [{
         name: 'sites.csv',
-        url_private: 'http://mock-url',
+        url_private: 'https://files.slack.com/mock-url',
       }];
 
       const command = ToggleSiteAuditCommand(contextMock);
@@ -412,7 +412,7 @@ describe('UpdateSitesAuditsCommand', () => {
 
       slackContextMock.files = [{
         name: 'sites.csv',
-        url_private: 'http://mock-url',
+        url_private: 'https://files.slack.com/mock-url',
       }];
 
       const command = ToggleSiteAuditCommand(contextMock);
@@ -429,7 +429,7 @@ describe('UpdateSitesAuditsCommand', () => {
 
       slackContextMock.files = [{
         name: 'sites.csv',
-        url_private: 'http://mock-url',
+        url_private: 'https://files.slack.com/mock-url',
       }];
 
       dataAccessMock.Site.findByBaseURL.withArgs('https://site1.com').resolves(site);
@@ -457,7 +457,7 @@ describe('UpdateSitesAuditsCommand', () => {
 
       slackContextMock.files = [{
         name: 'sites.csv',
-        url_private: 'http://mock-url',
+        url_private: 'https://files.slack.com/mock-url',
       }];
 
       const command = ToggleSiteAuditCommand(contextMock);
@@ -471,7 +471,7 @@ describe('UpdateSitesAuditsCommand', () => {
     it('should handle invalid profile name', async () => {
       slackContextMock.files = [{
         name: 'sites.csv',
-        url_private: 'http://mock-url',
+        url_private: 'https://files.slack.com/mock-url',
       }];
 
       const command = ToggleSiteAuditCommand(contextMock);

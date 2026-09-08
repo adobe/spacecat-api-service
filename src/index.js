@@ -122,6 +122,7 @@ import ElementsController from './controllers/elements.js';
 import ProxyController from './controllers/proxy.js';
 import OnboardingController from './controllers/onboarding.js';
 import GitHubWebhookHmacHandler from './support/github-webhook-hmac-handler.js';
+import { slackSignatureWrapper } from './support/slack/signature-wrapper.js';
 import AsoOverlayKeyHandler from './support/aso-overlay-key-handler.js';
 import ApiKeyImsHandler from './support/api-key-ims-handler.js';
 import RouteScopedLegacyApiKeyHandler from './support/route-scoped-legacy-api-key-handler.js';
@@ -500,6 +501,11 @@ export const main = wrappedMain
   .with(dataAccess)
   .with(bodyData)
   .with(multipartFormData)
+  // Runs immediately after enrichPathInfo (so context.pathInfo.headers is populated) and
+  // before multipartFormData/bodyData (so the request body is still unread). Verifies the
+  // Slack request signature on /slack/events, which authWrapper treats as an anonymous
+  // endpoint and which bypasses Bolt's own receiver-level check (VULN-39365).
+  .with(slackSignatureWrapper)
   .with(enrichPathInfo)
   .with(sqs)
   .with(s3ClientWrapper)
