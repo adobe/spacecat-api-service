@@ -1875,3 +1875,239 @@ export async function listRegions(postgrestClient) {
   }
   return data || [];
 }
+
+// =============================================================================
+// Async Semrush sub-workspace provisioning (LLMO-7352 / LLMO-7418)
+// =============================================================================
+//
+// The async provisioning worker (src/support/serenity/handlers/provision-workspace-job.js)
+// is the ONLY writer of the four functions below. Every write is an attempt-id-scoped
+// compare-and-set: `.eq('semrush_provisioning_attempt_id', attemptId)` on the UPDATE
+// statement itself (not a separate read-then-compare), so Postgres evaluates it atomically
+// against the row as it exists at write time — the exact same `updateBrand`
+// `expectedUpdatedAt` idiom already proven in this file, keyed on the attempt id instead of
+// `updated_at`. A stale/superseded attempt (a retry that minted a new attempt id, or a late
+// at-least-once SQS redelivery racing a newer hop) therefore matches ZERO rows instead of
+// silently overwriting a newer winner's write — `data` comes back `null` and the caller
+// (the worker) treats that as "stand down", not an error.
+
+const PROVISIONING_SELECT = 'id, semrush_provisioning_status, semrush_provisioning_attempt_id, '
+  + 'semrush_provisioning_job_id, semrush_provisioning_candidate_workspace_id, '
+  + 'semrush_sub_workspace_id, status';
+
+/**
+ * Reads a brand's current async-provisioning state. Plain read, no compare-and-set — used by the
+ * worker at the START of each invocation to decide whether to resume an already-persisted
+ * candidate (skip create-or-adopt) or run it for the first time, and to confirm the attempt id it
+ * was dispatched with is still the brand's current one before doing any Semrush work at all.
+ *
+ * @param {string} brandId
+ * @param {object} postgrestClient
+ * @returns {Promise<object|null>} the provisioning columns (camelCase), or null if the brand
+ *   does not exist.
+ */
+export async function getBrandProvisioningState(brandId, postgrestClient) {
+  if (!postgrestClient?.from) {
+    throw new Error('PostgREST client is required');
+  }
+
+  const { data, error } = await postgrestClient
+    .from('brands')
+    .select(PROVISIONING_SELECT)
+    .eq('id', brandId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Failed to read brand provisioning state: ${error.message}`);
+  }
+  if (!data) {
+    return null;
+  }
+  return {
+    id: data.id,
+    status: data.status,
+    semrushSubWorkspaceId: data.semrush_sub_workspace_id,
+    provisioningStatus: data.semrush_provisioning_status,
+    provisioningAttemptId: data.semrush_provisioning_attempt_id,
+    provisioningJobId: data.semrush_provisioning_job_id,
+    provisioningCandidateWorkspaceId: data.semrush_provisioning_candidate_workspace_id,
+  };
+}
+
+/**
+ * Persists a CANDIDATE (non-canonical) workspace id for the given attempt, immediately after
+ * create-or-adopt resolves — before any poll or requeue (LLMO-7352: this is what lets a
+ * self-requeued hop resume polling the SAME candidate instead of re-running create-or-adopt and
+ * leaking a duplicate workspace).
+ *
+ * Compare-and-set guarded on `status = 'pending'` too, not just the attempt id: a terminal write
+ * (ready/failed) landing between this hop's create-or-adopt and this persist must not be
+ * overwritten back to a candidate — the terminal state always wins.
+ *
+ * ALSO guarded on the candidate column still being NULL (LLMO-7418 adversarial review finding):
+ * SQS is at-least-once, so two deliveries of the SAME first-hop message can both pass the
+ * currency check and both run create-or-adopt before either persists — without this guard both
+ * UPDATEs would match (neither changes `attempt_id`/`status`) and both would return true, so
+ * neither invocation would ever see a CAS rejection and neither would clean up its own real,
+ * now-orphaned workspace. Requiring NULL makes exactly one of the two writes win; the loser's
+ * `persisted === false` return correctly routes it into the caller's cleanup-if-owned branch.
+ *
+ * @param {object} params
+ * @param {string} params.brandId
+ * @param {string} params.attemptId - the attempt this candidate belongs to.
+ * @param {string} params.candidateWorkspaceId
+ * @param {object} params.postgrestClient
+ * @returns {Promise<boolean>} true if the write landed (attempt still current, pending, and no
+ *   candidate persisted yet), false if a newer/terminal state already won OR a concurrent
+ *   delivery already persisted a candidate first (CAS rejected either way) — the caller must
+ *   then treat the candidate it just created as an orphan needing cleanup if it created it fresh.
+ */
+export async function persistProvisioningCandidate({
+  brandId, attemptId, candidateWorkspaceId, postgrestClient,
+}) {
+  if (!postgrestClient?.from) {
+    throw new Error('PostgREST client is required');
+  }
+
+  const { data, error } = await postgrestClient
+    .from('brands')
+    .update({ semrush_provisioning_candidate_workspace_id: candidateWorkspaceId })
+    .eq('id', brandId)
+    .eq('semrush_provisioning_attempt_id', attemptId)
+    .eq('semrush_provisioning_status', 'pending')
+    .is('semrush_provisioning_candidate_workspace_id', null)
+    .select('id')
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Failed to persist provisioning candidate: ${error.message}`);
+  }
+  return Boolean(data);
+}
+
+/**
+ * Updates the async_jobs id driving the CURRENT attempt — called on every self-requeue hop, since
+ * each hop is a brand-new AsyncJob row (nothing carries forward automatically; see
+ * `createAndEnqueueJob`/`requeuePending`). Same attempt-id + `status='pending'` compare-and-set as
+ * every other write here, so a stale/superseded attempt's job-id update can never clobber a later
+ * hop's — or a terminal promotion's — value after the fact.
+ *
+ * @param {object} params
+ * @param {string} params.brandId
+ * @param {string} params.attemptId
+ * @param {string} params.jobId - the new self-requeued AsyncJob id.
+ * @param {object} params.postgrestClient
+ * @returns {Promise<boolean>} true if the write landed, false if the CAS was rejected.
+ */
+export async function updateProvisioningJobId({
+  brandId, attemptId, jobId, postgrestClient,
+}) {
+  if (!postgrestClient?.from) {
+    throw new Error('PostgREST client is required');
+  }
+
+  const { data, error } = await postgrestClient
+    .from('brands')
+    .update({ semrush_provisioning_job_id: jobId })
+    .eq('id', brandId)
+    .eq('semrush_provisioning_attempt_id', attemptId)
+    .eq('semrush_provisioning_status', 'pending')
+    .select('id')
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Failed to update provisioning job id: ${error.message}`);
+  }
+  return Boolean(data);
+}
+
+/**
+ * Terminal promotion to READY: writes the CANONICAL `semrush_sub_workspace_id` pointer (the
+ * only write path that may ever set it for an async attempt) and flips the brand active, in one
+ * atomic compare-and-set keyed on the attempt still being the brand's current, pending one.
+ *
+ * @param {object} params
+ * @param {string} params.brandId
+ * @param {string} params.attemptId
+ * @param {string} params.workspaceId - the CONFIRMED-ready workspace id to promote to canonical.
+ * @param {object} params.postgrestClient
+ * @param {string} [params.updatedBy]
+ * @returns {Promise<boolean>} true if the promotion landed, false if the CAS was rejected (a
+ *   newer/terminal attempt already won — the caller must then treat ITS OWN freshly-created
+ *   workspace as an orphan needing best-effort cleanup, never the winner's).
+ */
+export async function promoteProvisioningReady({
+  brandId, attemptId, workspaceId, postgrestClient, updatedBy = 'system',
+}) {
+  if (!postgrestClient?.from) {
+    throw new Error('PostgREST client is required');
+  }
+
+  const { data, error } = await postgrestClient
+    .from('brands')
+    .update({
+      semrush_sub_workspace_id: workspaceId,
+      semrush_provisioning_status: 'ready',
+      status: 'active',
+      updated_by: updatedBy,
+    })
+    .eq('id', brandId)
+    .eq('semrush_provisioning_attempt_id', attemptId)
+    .eq('semrush_provisioning_status', 'pending')
+    .select('id')
+    .maybeSingle();
+
+  if (error) {
+    // brands_semrush_sub_workspace_id_key (UNIQUE): two different attempts racing the same
+    // candidate id — one write wins, the other must NOT be mistaken for a stale-attempt CAS
+    // rejection (which would skip cleanup of a workspace that is, in this case, actually a live
+    // DUPLICATE the loser must still empty). Surface distinctly rather than folding into the
+    // generic error.
+    if (error.code === '23505' && error.message?.includes('semrush_sub_workspace_id')) {
+      const err = new Error('Workspace id already claimed by another brand/attempt');
+      err.status = 409;
+      err.code = 'semrush_workspace_id_conflict';
+      throw err;
+    }
+    throw new Error(`Failed to promote provisioning to ready: ${error.message}`);
+  }
+  return Boolean(data);
+}
+
+/**
+ * Terminal promotion to FAILED: records a sanitized failure reason and leaves the canonical
+ * `semrush_sub_workspace_id` pointer untouched (it is never written on this path — a failed
+ * attempt has no confirmed workspace). Same attempt-id + `status='pending'` compare-and-set.
+ *
+ * @param {object} params
+ * @param {string} params.brandId
+ * @param {string} params.attemptId
+ * @param {string} params.error - sanitized failure reason (never a raw Semrush workspace id or
+ *   upstream body — that redaction is the CALLER's responsibility; this just persists it).
+ * @param {object} params.postgrestClient
+ * @returns {Promise<boolean>} true if the write landed, false if the CAS was rejected.
+ */
+export async function promoteProvisioningFailed({
+  brandId, attemptId, error: failureReason, postgrestClient,
+}) {
+  if (!postgrestClient?.from) {
+    throw new Error('PostgREST client is required');
+  }
+
+  const { data, error } = await postgrestClient
+    .from('brands')
+    .update({
+      semrush_provisioning_status: 'failed',
+      semrush_provisioning_error: failureReason,
+    })
+    .eq('id', brandId)
+    .eq('semrush_provisioning_attempt_id', attemptId)
+    .eq('semrush_provisioning_status', 'pending')
+    .select('id')
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Failed to promote provisioning to failed: ${error.message}`);
+  }
+  return Boolean(data);
+}

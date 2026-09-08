@@ -36,6 +36,10 @@ import {
   BULK_TAGS_JOB_TYPE,
 } from '../support/serenity/handlers/bulk-tags-job.js';
 import {
+  provisionWorkspaceHandler,
+  PROVISION_WORKSPACE_JOB_TYPE,
+} from '../support/serenity/handlers/provision-workspace-job.js';
+import {
   isRateLimited,
   isSemrushTransportError,
 } from '../support/serenity/errors.js';
@@ -102,8 +106,11 @@ export const vaultOpts = {
  * first-and-persist promise-token handling, terminal-state invalidation).
  * Per-consumer job logic — serenity-docs#33's prompt intent classification
  * (classify -> create-with-tags -> publish) — lives in
- * `../support/serenity/handlers/classify-prompts-job.js` and is registered
- * below.
+ * `../support/serenity/handlers/classify-prompts-job.js`; bulk tag operations
+ * live in `../support/serenity/handlers/bulk-tags-job.js`; and LLMO-7352/
+ * LLMO-7418's async Semrush sub-workspace provisioning lives in
+ * `../support/serenity/handlers/provision-workspace-job.js`. All three are
+ * registered below.
  *
  * @type {Record<string, (context: object, job: object,
  *   accessToken: string) => Promise<object>>}
@@ -111,6 +118,7 @@ export const vaultOpts = {
 const HANDLERS = {
   [CLASSIFY_PROMPTS_JOB_TYPE]: classifyPromptsHandler,
   [BULK_TAGS_JOB_TYPE]: bulkTagsHandler,
+  [PROVISION_WORKSPACE_JOB_TYPE]: provisionWorkspaceHandler,
 };
 
 const TRANSIENT_NETWORK_ERROR_CODES = new Set([
@@ -258,7 +266,17 @@ export async function run(message, context) {
       log.warn(`[serenity-job-runner] Job ${jobId} remains IN_PROGRESS for SQS retry: ${error.message}`);
       throw error;
     }
-    log.error(`[serenity-job-runner] Job ${jobId} failed: ${error.message}`);
+    // Include the job's own metadata (brandId/attemptId/type — whatever a given handler
+    // stores) alongside jobId: a bare jobId leaves an operator with no path from a CloudWatch
+    // failure log back to the affected brand/attempt without a separate AsyncJob lookup, which
+    // is exactly the "diagnosable only after a customer complains" gap this worker exists to
+    // close (observability review, LLMO-7418). Redact the promise token first (LLMO-7418
+    // external-review finding): metadata carries the live token this job hasn't invalidated
+    // yet at this point in the flow, and a raw CloudWatch dump must never include it.
+    const safeMetadata = { ...(job.getMetadata() ?? {}) };
+    delete safeMetadata.promiseToken;
+    delete safeMetadata.promisePair;
+    log.error(`[serenity-job-runner] Job ${jobId} failed: ${error.message}`, { metadata: safeMetadata });
     job.setStatus('FAILED');
     job.setError({
       code: error.code ?? 'JOB_FAILED',

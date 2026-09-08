@@ -35,6 +35,11 @@ import {
   setBrandClaimsEnabled,
   readSerenityFlagScopes,
   withSerenityState,
+  getBrandProvisioningState,
+  persistProvisioningCandidate,
+  updateProvisioningJobId,
+  promoteProvisioningReady,
+  promoteProvisioningFailed,
 } from '../../src/support/brands-storage.js';
 
 use(sinonChai);
@@ -978,7 +983,7 @@ describe('brands-storage', () => {
   // so tests can verify which filters were applied to queries.
   function createCapturingClient(tableMap) {
     const calls = {
-      upsert: [], update: [], delete: [], or: [], neq: [], eq: [],
+      upsert: [], update: [], delete: [], or: [], neq: [], eq: [], is: [],
     };
     const callCounts = {};
     const makeQuery = (table) => {
@@ -1026,6 +1031,12 @@ describe('brands-storage', () => {
           if (prop === 'eq') {
             return (col, val) => {
               calls.eq.push({ table, col, val });
+              return new Proxy({}, handler);
+            };
+          }
+          if (prop === 'is') {
+            return (col, val) => {
+              calls.is.push({ table, col, val });
               return new Proxy({}, handler);
             };
           }
@@ -4416,6 +4427,314 @@ describe('brands-storage', () => {
       });
 
       expect(result).to.be.null;
+    });
+  });
+
+  describe('async Semrush provisioning (LLMO-7352 / LLMO-7418)', () => {
+    const ATTEMPT_ID = '44444444-4444-4444-8444-444444444444';
+    const JOB_ID = '55555555-5555-4555-8555-555555555555';
+    const CANDIDATE_WS = 'candidate-ws-1';
+    const CANONICAL_WS = 'canonical-ws-1';
+
+    describe('getBrandProvisioningState', () => {
+      it('throws when postgrestClient is missing', async () => {
+        await expect(getBrandProvisioningState(BRAND_ID, null))
+          .to.be.rejectedWith('PostgREST client is required');
+      });
+
+      it('maps the provisioning columns to camelCase', async () => {
+        const postgrestClient = createTableMockClient({
+          brands: {
+            data: {
+              id: BRAND_ID,
+              status: 'pending',
+              semrush_sub_workspace_id: null,
+              semrush_provisioning_status: 'pending',
+              semrush_provisioning_attempt_id: ATTEMPT_ID,
+              semrush_provisioning_job_id: JOB_ID,
+              semrush_provisioning_candidate_workspace_id: CANDIDATE_WS,
+            },
+            error: null,
+          },
+        });
+
+        const result = await getBrandProvisioningState(BRAND_ID, postgrestClient);
+
+        expect(result).to.deep.equal({
+          id: BRAND_ID,
+          status: 'pending',
+          semrushSubWorkspaceId: null,
+          provisioningStatus: 'pending',
+          provisioningAttemptId: ATTEMPT_ID,
+          provisioningJobId: JOB_ID,
+          provisioningCandidateWorkspaceId: CANDIDATE_WS,
+        });
+      });
+
+      it('returns null when the brand does not exist', async () => {
+        const postgrestClient = createTableMockClient({ brands: { data: null, error: null } });
+        expect(await getBrandProvisioningState(BRAND_ID, postgrestClient)).to.be.null;
+      });
+
+      it('throws a generic error on a database failure', async () => {
+        const postgrestClient = createTableMockClient({
+          brands: { data: null, error: { message: 'boom' } },
+        });
+        await expect(getBrandProvisioningState(BRAND_ID, postgrestClient))
+          .to.be.rejectedWith('Failed to read brand provisioning state: boom');
+      });
+    });
+
+    describe('persistProvisioningCandidate', () => {
+      it('throws when postgrestClient is missing', async () => {
+        await expect(persistProvisioningCandidate({
+          brandId: BRAND_ID,
+          attemptId: ATTEMPT_ID,
+          candidateWorkspaceId: CANDIDATE_WS,
+          postgrestClient: null,
+        })).to.be.rejectedWith('PostgREST client is required');
+      });
+
+      it('returns true and writes the candidate id when the CAS matches', async () => {
+        const postgrestClient = createCapturingClient({
+          brands: { data: { id: BRAND_ID }, error: null },
+        });
+
+        const result = await persistProvisioningCandidate({
+          brandId: BRAND_ID,
+          attemptId: ATTEMPT_ID,
+          candidateWorkspaceId: CANDIDATE_WS,
+          postgrestClient,
+        });
+
+        expect(result).to.equal(true);
+        expect(postgrestClient.capturedCalls.update).to.deep.equal([
+          { table: 'brands', row: { semrush_provisioning_candidate_workspace_id: CANDIDATE_WS } },
+        ]);
+        // The compare-and-set predicate: id + attempt id + still-pending status.
+        expect(postgrestClient.capturedCalls.eq).to.deep.equal([
+          { table: 'brands', col: 'id', val: BRAND_ID },
+          { table: 'brands', col: 'semrush_provisioning_attempt_id', val: ATTEMPT_ID },
+          { table: 'brands', col: 'semrush_provisioning_status', val: 'pending' },
+        ]);
+        // LLMO-7418 adversarial-review fix: the candidate column must still be NULL, or two
+        // concurrent (at-least-once) deliveries of the same first hop could both "win".
+        expect(postgrestClient.capturedCalls.is).to.deep.equal([
+          { table: 'brands', col: 'semrush_provisioning_candidate_workspace_id', val: null },
+        ]);
+      });
+
+      it('returns false when the CAS is rejected (attempt superseded or terminal)', async () => {
+        const postgrestClient = createTableMockClient({ brands: { data: null, error: null } });
+        const result = await persistProvisioningCandidate({
+          brandId: BRAND_ID,
+          attemptId: ATTEMPT_ID,
+          candidateWorkspaceId: CANDIDATE_WS,
+          postgrestClient,
+        });
+        expect(result).to.equal(false);
+      });
+
+      it('returns false for the LOSING side of two concurrent deliveries racing the same first hop (LLMO-7418)', async () => {
+        // Simulates SQS at-least-once redelivery: two invocations of the SAME message both pass
+        // the currency check and both resolve a (different) candidate workspace before either
+        // persists. The first call's candidate column is still NULL, so its UPDATE (now guarded
+        // by .is(...,null)) matches; the second call's UPDATE must NOT match, since the column is
+        // no longer NULL — without the guard both would match and the loser would leak a real,
+        // now-orphaned Semrush workspace with nothing ever cleaning it up.
+        const postgrestClient = createTableMockClient({
+          brands: [
+            { data: { id: BRAND_ID }, error: null },
+            { data: null, error: null },
+          ],
+        });
+
+        const first = await persistProvisioningCandidate({
+          brandId: BRAND_ID,
+          attemptId: ATTEMPT_ID,
+          candidateWorkspaceId: CANDIDATE_WS,
+          postgrestClient,
+        });
+        const second = await persistProvisioningCandidate({
+          brandId: BRAND_ID,
+          attemptId: ATTEMPT_ID,
+          candidateWorkspaceId: 'candidate-ws-2',
+          postgrestClient,
+        });
+
+        expect(first).to.equal(true);
+        expect(second).to.equal(false);
+      });
+
+      it('throws a generic error on a database failure', async () => {
+        const postgrestClient = createTableMockClient({
+          brands: { data: null, error: { message: 'boom' } },
+        });
+        await expect(persistProvisioningCandidate({
+          brandId: BRAND_ID,
+          attemptId: ATTEMPT_ID,
+          candidateWorkspaceId: CANDIDATE_WS,
+          postgrestClient,
+        })).to.be.rejectedWith('Failed to persist provisioning candidate: boom');
+      });
+    });
+
+    describe('updateProvisioningJobId', () => {
+      it('throws when postgrestClient is missing', async () => {
+        await expect(updateProvisioningJobId({
+          brandId: BRAND_ID, attemptId: ATTEMPT_ID, jobId: JOB_ID, postgrestClient: null,
+        })).to.be.rejectedWith('PostgREST client is required');
+      });
+
+      it('returns true when the CAS matches', async () => {
+        const postgrestClient = createTableMockClient({
+          brands: { data: { id: BRAND_ID }, error: null },
+        });
+        const result = await updateProvisioningJobId({
+          brandId: BRAND_ID, attemptId: ATTEMPT_ID, jobId: JOB_ID, postgrestClient,
+        });
+        expect(result).to.equal(true);
+      });
+
+      it('returns false when the CAS is rejected', async () => {
+        const postgrestClient = createTableMockClient({ brands: { data: null, error: null } });
+        const result = await updateProvisioningJobId({
+          brandId: BRAND_ID, attemptId: ATTEMPT_ID, jobId: JOB_ID, postgrestClient,
+        });
+        expect(result).to.equal(false);
+      });
+
+      it('throws a generic error on a database failure', async () => {
+        const postgrestClient = createTableMockClient({
+          brands: { data: null, error: { message: 'boom' } },
+        });
+        await expect(updateProvisioningJobId({
+          brandId: BRAND_ID, attemptId: ATTEMPT_ID, jobId: JOB_ID, postgrestClient,
+        })).to.be.rejectedWith('Failed to update provisioning job id: boom');
+      });
+    });
+
+    describe('promoteProvisioningReady', () => {
+      it('throws when postgrestClient is missing', async () => {
+        await expect(promoteProvisioningReady({
+          brandId: BRAND_ID,
+          attemptId: ATTEMPT_ID,
+          workspaceId: CANONICAL_WS,
+          postgrestClient: null,
+        })).to.be.rejectedWith('PostgREST client is required');
+      });
+
+      it('writes the canonical pointer + flips status active on a matched CAS', async () => {
+        const postgrestClient = createCapturingClient({
+          brands: { data: { id: BRAND_ID }, error: null },
+        });
+
+        const result = await promoteProvisioningReady({
+          brandId: BRAND_ID,
+          attemptId: ATTEMPT_ID,
+          workspaceId: CANONICAL_WS,
+          postgrestClient,
+          updatedBy: 'serenity-provision-worker',
+        });
+
+        expect(result).to.equal(true);
+        expect(postgrestClient.capturedCalls.update).to.deep.equal([{
+          table: 'brands',
+          row: {
+            semrush_sub_workspace_id: CANONICAL_WS,
+            semrush_provisioning_status: 'ready',
+            status: 'active',
+            updated_by: 'serenity-provision-worker',
+          },
+        }]);
+      });
+
+      it('returns false when the CAS is rejected (a newer/terminal attempt already won)', async () => {
+        const postgrestClient = createTableMockClient({ brands: { data: null, error: null } });
+        const result = await promoteProvisioningReady({
+          brandId: BRAND_ID, attemptId: ATTEMPT_ID, workspaceId: CANONICAL_WS, postgrestClient,
+        });
+        expect(result).to.equal(false);
+      });
+
+      it('maps a semrush_sub_workspace_id UNIQUE violation to a distinct 409', async () => {
+        const postgrestClient = createTableMockClient({
+          brands: [{
+            data: null,
+            error: {
+              code: '23505',
+              message: 'duplicate key value violates unique constraint '
+                + '"brands_semrush_sub_workspace_id_key"',
+            },
+          }],
+        });
+
+        const err = await promoteProvisioningReady({
+          brandId: BRAND_ID, attemptId: ATTEMPT_ID, workspaceId: CANONICAL_WS, postgrestClient,
+        }).catch((e) => e);
+
+        expect(err.status).to.equal(409);
+        expect(err.code).to.equal('semrush_workspace_id_conflict');
+      });
+
+      it('throws a generic error on other database failures', async () => {
+        const postgrestClient = createTableMockClient({
+          brands: [{ data: null, error: { message: 'boom' } }],
+        });
+        await expect(promoteProvisioningReady({
+          brandId: BRAND_ID, attemptId: ATTEMPT_ID, workspaceId: CANONICAL_WS, postgrestClient,
+        })).to.be.rejectedWith('Failed to promote provisioning to ready: boom');
+      });
+    });
+
+    describe('promoteProvisioningFailed', () => {
+      it('throws when postgrestClient is missing', async () => {
+        await expect(promoteProvisioningFailed({
+          brandId: BRAND_ID,
+          attemptId: ATTEMPT_ID,
+          error: 'terminal failure',
+          postgrestClient: null,
+        })).to.be.rejectedWith('PostgREST client is required');
+      });
+
+      it('records the sanitized failure reason WITHOUT touching the canonical pointer', async () => {
+        const postgrestClient = createCapturingClient({
+          brands: { data: { id: BRAND_ID }, error: null },
+        });
+
+        const result = await promoteProvisioningFailed({
+          brandId: BRAND_ID,
+          attemptId: ATTEMPT_ID,
+          error: 'workspace provisioning failed',
+          postgrestClient,
+        });
+
+        expect(result).to.equal(true);
+        expect(postgrestClient.capturedCalls.update).to.deep.equal([{
+          table: 'brands',
+          row: {
+            semrush_provisioning_status: 'failed',
+            semrush_provisioning_error: 'workspace provisioning failed',
+          },
+        }]);
+      });
+
+      it('returns false when the CAS is rejected', async () => {
+        const postgrestClient = createTableMockClient({ brands: { data: null, error: null } });
+        const result = await promoteProvisioningFailed({
+          brandId: BRAND_ID, attemptId: ATTEMPT_ID, error: 'terminal failure', postgrestClient,
+        });
+        expect(result).to.equal(false);
+      });
+
+      it('throws a generic error on a database failure', async () => {
+        const postgrestClient = createTableMockClient({
+          brands: { data: null, error: { message: 'boom' } },
+        });
+        await expect(promoteProvisioningFailed({
+          brandId: BRAND_ID, attemptId: ATTEMPT_ID, error: 'terminal failure', postgrestClient,
+        })).to.be.rejectedWith('Failed to promote provisioning to failed: boom');
+      });
     });
   });
 

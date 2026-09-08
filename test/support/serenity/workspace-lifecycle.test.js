@@ -21,6 +21,9 @@ import {
   ensureSubworkspace,
   decommissionBrandWorkspace,
   deleteAllProjects,
+  emptyWorkspaceBestEffort,
+  createOrAdoptSubworkspaceCandidate,
+  subworkspaceTitle,
 } from '../../../src/support/serenity/workspace-lifecycle.js';
 import { ERROR_CODES } from '../../../src/support/serenity/errors.js';
 import { SerenityTransportError } from '../../../src/support/serenity/rest-transport.js';
@@ -1493,6 +1496,169 @@ describe('workspace-lifecycle', () => {
         .to.be.rejectedWith(/must not be the organization parent workspace/);
       expect(transport.listProjects).to.not.have.been.called;
       expect(transport.deleteProject).to.not.have.been.called;
+    });
+  });
+
+  // LLMO-7418: emptyWorkspaceBestEffort moved here from brand-provisioning.js so the async
+  // provisioning worker shares the exact same cleanup primitive. Direct coverage of its own
+  // "never throws, logs either way" contract — previously only exercised indirectly through
+  // provisionBrandSubworkspace's real (unmocked) call chain.
+  describe('emptyWorkspaceBestEffort', () => {
+    it('deletes every project and logs info on success', async () => {
+      const transport = makeTransport({
+        listProjects: sinon.stub().resolves({ items: [{ id: 'p1' }] }),
+      });
+      const spyLog = { info: sinon.stub(), error: sinon.stub() };
+
+      await emptyWorkspaceBestEffort(transport, SUB_WS, PARENT_WS, spyLog, 'test-phase');
+
+      expect(transport.deleteProject).to.have.been.calledOnceWithExactly(SUB_WS, 'p1');
+      expect(spyLog.info).to.have.been.calledOnceWithExactly(
+        'serenity: emptied sub-workspace',
+        { semrushWorkspaceId: SUB_WS, phase: 'test-phase' },
+      );
+      expect(spyLog.error).to.not.have.been.called;
+    });
+
+    it('never throws — swallows a cleanup failure and logs it at error with the workspace id', async () => {
+      const transport = makeTransport({
+        listProjects: sinon.stub().rejects(new Error('cleanup network error')),
+      });
+      const spyLog = { info: sinon.stub(), error: sinon.stub() };
+
+      // Must resolve, not reject — the caller is always already on an error/cleanup path.
+      await expect(emptyWorkspaceBestEffort(transport, SUB_WS, PARENT_WS, spyLog, 'test-phase'))
+        .to.be.fulfilled;
+
+      expect(spyLog.error).to.have.been.calledOnceWithExactly(
+        'serenity: failed to empty sub-workspace',
+        { semrushWorkspaceId: SUB_WS, phase: 'test-phase', error: 'cleanup network error' },
+      );
+      expect(spyLog.info).to.not.have.been.called;
+    });
+
+    it('tolerates a missing log (log?. guards)', async () => {
+      const transport = makeTransport({
+        listProjects: sinon.stub().rejects(new Error('boom')),
+      });
+      await expect(emptyWorkspaceBestEffort(transport, SUB_WS, PARENT_WS, undefined, 'test-phase'))
+        .to.be.fulfilled;
+    });
+  });
+
+  // LLMO-7418: the create-or-adopt core extracted from ensureSubworkspace so the async
+  // provisioning worker can reuse it without the settle poll or the canonical persist. These
+  // tests cover the extraction itself; the underlying claim-filter/504-recovery behavior is
+  // already covered exhaustively via ensureSubworkspace above — not re-duplicated here.
+  describe('createOrAdoptSubworkspaceCandidate', () => {
+    it('creates a fresh workspace when no adoptable family match exists', async () => {
+      const transport = makeTransport();
+      const claim = { brandCollection: makeBrandCollection() };
+
+      const result = await createOrAdoptSubworkspaceCandidate(
+        transport,
+        PARENT_WS,
+        EXPECTED_TITLE,
+        log,
+        claim,
+      );
+
+      expect(result).to.deep.equal({ workspaceId: SUB_WS, freshlyCreated: true });
+      expect(transport.createSubworkspace)
+        .to.have.been.calledOnceWithExactly(PARENT_WS, EXPECTED_TITLE);
+    });
+
+    it('adopts an existing same-title family match instead of creating a duplicate', async () => {
+      const transport = makeTransport({
+        listWorkspaceFamily: sinon.stub().resolves([
+          { id: 'existing-ws', title: EXPECTED_TITLE, status: 'created' },
+        ]),
+      });
+      const claim = { brandCollection: makeBrandCollection() };
+
+      const result = await createOrAdoptSubworkspaceCandidate(
+        transport,
+        PARENT_WS,
+        EXPECTED_TITLE,
+        log,
+        claim,
+      );
+
+      expect(result).to.deep.equal({ workspaceId: 'existing-ws', freshlyCreated: false });
+      expect(transport.createSubworkspace).to.not.have.been.called;
+    });
+
+    it('recovers via family adoption on a 504 ambiguous-create timeout', async () => {
+      const transport = makeTransport({
+        createSubworkspace: sinon.stub().rejects(new SerenityTransportError(504, 'timeout')),
+        listWorkspaceFamily: sinon.stub().resolves([
+          { id: 'recovered-ws', title: EXPECTED_TITLE, status: 'created' },
+        ]),
+      });
+      const claim = { brandCollection: makeBrandCollection() };
+
+      const result = await createOrAdoptSubworkspaceCandidate(
+        transport,
+        PARENT_WS,
+        EXPECTED_TITLE,
+        log,
+        claim,
+      );
+
+      expect(result).to.deep.equal({ workspaceId: 'recovered-ws', freshlyCreated: false });
+    });
+
+    it('re-throws a non-504 create failure', async () => {
+      const transport = makeTransport({
+        createSubworkspace: sinon.stub().rejects(new Error('boom')),
+      });
+      const claim = { brandCollection: makeBrandCollection() };
+
+      await expect(
+        createOrAdoptSubworkspaceCandidate(transport, PARENT_WS, EXPECTED_TITLE, log, claim),
+      ).to.be.rejectedWith('boom');
+    });
+
+    it('throws 502 when create returns no workspace id', async () => {
+      const transport = makeTransport({ createSubworkspace: sinon.stub().resolves({}) });
+      const claim = { brandCollection: makeBrandCollection() };
+
+      await expect(
+        createOrAdoptSubworkspaceCandidate(transport, PARENT_WS, EXPECTED_TITLE, log, claim),
+      ).to.be.rejectedWith(/returned no workspace id/);
+    });
+
+    it('refuses a workspace id that IS the org parent', async () => {
+      const transport = makeTransport({
+        createSubworkspace: sinon.stub().resolves({ id: PARENT_WS }),
+      });
+      const claim = { brandCollection: makeBrandCollection() };
+
+      await expect(
+        createOrAdoptSubworkspaceCandidate(transport, PARENT_WS, EXPECTED_TITLE, log, claim),
+      ).to.be.rejectedWith(/must not be the organization parent workspace/);
+    });
+
+    // Does NOT persist anything and does NOT poll — that is the whole point of the extraction
+    // (the worker polls the returned candidate itself, across possibly-many invocations).
+    it('does not call getWorkspaceStatus (no settle poll) or touch the brand (no persist)', async () => {
+      const transport = makeTransport();
+      const claim = { brandCollection: makeBrandCollection() };
+
+      await createOrAdoptSubworkspaceCandidate(transport, PARENT_WS, EXPECTED_TITLE, log, claim);
+
+      expect(transport.getWorkspaceStatus).to.not.have.been.called;
+    });
+  });
+
+  describe('subworkspaceTitle', () => {
+    it('returns the brand name', () => {
+      expect(subworkspaceTitle(makeBrand({ name: 'Adobe Express' }))).to.equal('Adobe Express');
+    });
+
+    it('hard-fails when the brand has no name', () => {
+      expect(() => subworkspaceTitle(makeBrand({ name: '' })))
+        .to.throw(/requires a brand name/);
     });
   });
 });
