@@ -64,6 +64,9 @@ function createContext(params = {}, data = {}, overrides = {}) {
       params: { spaceCatId: ORG_ID, brandId: 'all', ...params },
       data: { siteId: SITE_ID, ...data },
       log: { error: sinon.stub(), info: sinon.stub(), warn: sinon.stub() },
+      attributes: {
+        authInfo: { isS2SConsumer: () => overrides.isS2SConsumer ?? false },
+      },
       dataAccess: {
         Site: { postgrestService: client },
         Organization: {
@@ -1677,6 +1680,8 @@ describe('URL Inspector Handlers', () => {
     let resolveBrandUuidStub;
     let resolveBrandWorkspaceStub;
     let getUrlPromptsStub;
+    let createElementsTransportStub;
+    let resolveSemrushImsTokenStub;
     let createUrlInspectorPromptsByUrlHandler;
 
     beforeEach(async () => {
@@ -1687,6 +1692,8 @@ describe('URL Inspector Handlers', () => {
         parentWorkspaceId: PARENT_WORKSPACE_ID,
       });
       getUrlPromptsStub = sinon.stub().resolves([]);
+      createElementsTransportStub = sinon.stub().returns({ fetchElement: sinon.stub() });
+      resolveSemrushImsTokenStub = sinon.stub().resolves('test-ims-token');
 
       ({ createUrlInspectorPromptsByUrlHandler } = await esmock(
         '../../../src/controllers/llmo/llmo-url-inspector.js',
@@ -1698,13 +1705,13 @@ describe('URL Inspector Handlers', () => {
             resolveBrandWorkspace: resolveBrandWorkspaceStub,
           },
           '../../../src/support/elements/elements-transport.js': {
-            createElementsTransport: sinon.stub().returns({ fetchElement: sinon.stub() }),
+            createElementsTransport: createElementsTransportStub,
           },
           '../../../src/support/elements/elements-service.js': {
             createElementsService: sinon.stub().returns({ getUrlPrompts: getUrlPromptsStub }),
           },
           '../../../src/support/utils.js': {
-            resolveSemrushImsToken: sinon.stub().resolves('test-ims-token'),
+            resolveSemrushImsToken: resolveSemrushImsTokenStub,
           },
         },
       ));
@@ -1839,6 +1846,39 @@ describe('URL Inspector Handlers', () => {
       }));
       // Semrush path never touches the Mysticat RPC.
       expect(rpcStub).to.not.have.been.called;
+    });
+
+    it('skips IMS token resolution and builds an S2S transport for an S2S consumer', async () => {
+      getUrlPromptsStub.resolves([]);
+      const { context } = createContext(
+        { brandId: BRAND_UUID },
+        { url: 'https://example.com/a' },
+        { isS2SConsumer: true },
+      );
+      const handler = createUrlInspectorPromptsByUrlHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+
+      expect(response.status).to.equal(200);
+      expect(resolveSemrushImsTokenStub).to.not.have.been.called;
+      expect(createElementsTransportStub).to.have.been.calledWith(
+        sinon.match({ isS2SConsumer: true, imsToken: undefined }),
+      );
+    });
+
+    it('builds a regular (non-S2S) transport and resolves an IMS token for a normal caller', async () => {
+      getUrlPromptsStub.resolves([]);
+      const { context } = createContext(
+        { brandId: BRAND_UUID },
+        { url: 'https://example.com/a' },
+      );
+      const handler = createUrlInspectorPromptsByUrlHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+
+      expect(response.status).to.equal(200);
+      expect(resolveSemrushImsTokenStub).to.have.been.calledOnce;
+      expect(createElementsTransportStub).to.have.been.calledWith(
+        sinon.match({ isS2SConsumer: false, imsToken: 'test-ims-token' }),
+      );
     });
 
     it('passes the raw (un-normalized) model to Semrush, not the Mysticat-enum value', async () => {

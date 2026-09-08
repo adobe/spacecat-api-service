@@ -823,9 +823,16 @@ export function createUrlInspectorPromptsByUrlHandler(
 
       if (eligible) {
         try {
-          const imsToken = await resolveSemrushImsToken(ctx, ctx.log, 'url-inspector-prompts-by-url');
+          // S2S consumers authenticate to the upstream Semrush gateway with an Apikey, not a
+          // forwarded IMS bearer token (see elements.js's ElementsController.buildService for
+          // the same pattern) - resolveSemrushImsToken's default fallback would otherwise
+          // reject the S2S JWT (authInfo.getType() === 'jwt', not 'ims').
+          const isS2SConsumer = ctx?.attributes?.authInfo?.isS2SConsumer?.() ?? false;
+          const imsToken = isS2SConsumer
+            ? undefined
+            : await resolveSemrushImsToken(ctx, ctx.log, 'url-inspector-prompts-by-url');
           const service = createElementsService(
-            createElementsTransport({ env: ctx.env, imsToken }),
+            createElementsTransport({ env: ctx.env, imsToken, isS2SConsumer }),
             ctx.log,
           );
           // Semrush and Mysticat use different model vocabularies (UI platform

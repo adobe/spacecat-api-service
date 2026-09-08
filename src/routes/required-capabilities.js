@@ -412,7 +412,9 @@ const routeRequiredCapabilities = {
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/domain-urls': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/url-prompts': 'brand:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/url-prompts': 'brand:read',
-  'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/prompts-by-url': 'brand:read',
+  // The 'all' variant returns org-wide (cross-brand) data, so it's gated on organization:read
+  // rather than brand:read, unlike its :brandId-scoped sibling below.
+  'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/prompts-by-url': 'organization:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/prompts-by-url': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/filter-dimensions': 'brand:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/filter-dimensions': 'brand:read',
