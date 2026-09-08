@@ -2229,6 +2229,13 @@ describe('resolveLanguageId', () => {
     };
     expect(await resolveLanguageId(transport, 'xx')).to.equal(null);
   });
+
+  it('returns null for a null/empty languageCode without ever calling the transport (early-return guard)', async () => {
+    const transport = { listLanguages: sinon.stub().resolves({ items: [] }) };
+    expect(await resolveLanguageId(transport, null)).to.equal(null);
+    expect(await resolveLanguageId(transport, '')).to.equal(null);
+    expect(transport.listLanguages).to.not.have.been.called;
+  });
 });
 
 describe('listLanguageCatalog', () => {

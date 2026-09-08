@@ -87,7 +87,10 @@ export function clearLanguageCache() {
  * rely on the caller having lowercased its input. An unresolved code returns
  * `null` (400 `unknownLanguage` at the call sites) —
  * by design, per LLMO-7420: no Adobe-side mapping change should be needed
- * when Semrush adds or renames a language.
+ * when Semrush adds or renames a language. The leading `hasText` guard is
+ * defense-in-depth, not redundant with the caller's normalization — this
+ * function is also called directly in tests and does not assume its input
+ * was ever passed through `normalizeLanguageCode`.
  * @param {SerenityTransport} transport
  */
 export async function resolveLanguageId(transport, languageCode, log) {
