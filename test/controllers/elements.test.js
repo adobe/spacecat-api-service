@@ -199,14 +199,12 @@ describe('ElementsController', () => {
   let createElementsServiceStub;
   let createElementsTransportStub;
   let exchangePromiseTokenStub;
-  let resolveBrandUuidStub;
   let MockElementsTransportError;
   let getWorkspaceResourcesStub;
   let createSerenityTransportStub;
   let ElementsController;
 
   beforeEach(async () => {
-    resolveBrandUuidStub = sinon.stub().resolves(BRAND_ID);
     resolveBrandWorkspaceStub = sinon.stub().resolves({
       mode: 'subworkspace', workspaceId: SUB_WORKSPACE_ID, parentWorkspaceId: WORKSPACE_ID,
     });
@@ -265,9 +263,6 @@ describe('ElementsController', () => {
       '../../src/support/brands-storage.js': {
         getBrandIdentity: getBrandIdentityStub,
         getBrandBySite: getBrandBySiteStub,
-      },
-      '../../src/support/prompts-storage.js': {
-        resolveBrandUuid: resolveBrandUuidStub,
       },
       '../../src/support/serenity/workspace-resolver.js': {
         resolveBrandWorkspace: resolveBrandWorkspaceStub,
