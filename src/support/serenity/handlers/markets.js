@@ -88,6 +88,9 @@ export function clearLanguageCache() {
  * @param {SerenityTransport} transport
  */
 export async function resolveLanguageId(transport, languageCode, log) {
+  if (!hasText(languageCode)) {
+    return null;
+  }
   const now = Date.now();
   if (languageCache.expiresAt <= now) {
     const resp = await transport.listLanguages();
@@ -95,6 +98,9 @@ export async function resolveLanguageId(transport, languageCode, log) {
     languageCache.byCode.clear();
     for (const item of items) {
       if (hasText(item?.code) && hasText(item?.id)) {
+        // BCP-47 tags are case-insensitive (RFC 5646) — lowercase both the catalog's `code`
+        // here and the input below so `zh-Hans` and `zh-hans` are the same cache key. Do not
+        // "fix" this to preserve casing.
         languageCache.byCode.set(String(item.code).toLowerCase(), String(item.id));
       }
     }
@@ -110,9 +116,6 @@ export async function resolveLanguageId(transport, languageCode, log) {
       /* c8 ignore stop */
     }
     languageCache.expiresAt = now + LANGUAGE_CACHE_TTL_MS;
-  }
-  if (!hasText(languageCode)) {
-    return null;
   }
   return languageCache.byCode.get(String(languageCode).toLowerCase()) || null;
 }
@@ -1017,8 +1020,9 @@ export async function listGlobalModelCatalog(transport) {
  * 404/405 catalog (returns an empty list) so a transient upstream gap
  * degrades to "no filter" rather than an error.
  * @param {SerenityTransport} transport
+ * @param {any} [log] - logger, used to surface a dropped-entries warning.
  */
-export async function listLanguageCatalog(transport) {
+export async function listLanguageCatalog(transport, log) {
   let rawItems = [];
   try {
     const resp = await transport.listLanguages();
@@ -1030,8 +1034,15 @@ export async function listLanguageCatalog(transport) {
       throw e;
     }
   }
-  const items = rawItems
-    .filter((l) => l && typeof l === 'object' && hasText(l.name) && hasText(l.code))
+  const usable = rawItems.filter((l) => l && typeof l === 'object' && hasText(l.name));
+  const withCode = usable.filter((l) => hasText(l.code));
+  if (withCode.length < usable.length) {
+    log?.warn?.(
+      'listLanguageCatalog: dropped entries missing code — upstream field shape may have changed',
+      { droppedCount: usable.length - withCode.length },
+    );
+  }
+  const items = withCode
     .map((l) => ({
       id: hasText(l.id) ? String(l.id) : null,
       name: String(l.name),

@@ -1413,7 +1413,7 @@ function SerenityController(context, log, env) {
         return forbidden('User does not have access to this organization');
       }
       const transport = buildTransport(ctx, imsToken);
-      const result = await listLanguageCatalog(transport);
+      const result = await listLanguageCatalog(transport, log);
       return createResponse(result, 200);
     } catch (e) {
       // Org-level route: no authorize()/workspace resolution here.

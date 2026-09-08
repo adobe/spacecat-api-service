@@ -12637,7 +12637,7 @@ SerenityLanguage:
       description: English language name as Semrush spells it. Metadata/fallback text only — not a resolution key (LLMO-7420).
     code:
       type: string
-      description: BCP-47 language code (e.g. zh-Hans, zh-Hant, fil) — the stable identifier a client persists and later sends back as languageCode (LLMO-7420).
+      description: BCP-47 language code (e.g. zh-Hans, zh-Hant, fil) — the stable identifier a client persists and later sends back as languageCode (LLMO-7420). Matching is case-insensitive (RFC 5646); store and send it as returned here, exact casing is not significant.
 
 SerenityLanguageListResponse:
   type: object

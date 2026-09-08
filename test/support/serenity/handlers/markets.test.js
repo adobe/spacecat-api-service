@@ -25,6 +25,7 @@ import {
   handleListModels,
   handleUpdateModels,
   listLanguageCatalog,
+  resolveLanguageId,
   resolveLocation,
   clearLanguageCache,
   clearTagCache,
@@ -2196,6 +2197,35 @@ describe('handlers/markets.js — handleUpdateModels', () => {
   });
 });
 
+describe('resolveLanguageId', () => {
+  beforeEach(() => {
+    clearLanguageCache();
+  });
+
+  // Regression test for the LLMO-7309 root cause: the old English-name-matching
+  // approach collapsed zh-Hans/zh-Hant to the same "Chinese" name and could not
+  // disambiguate them. Direct code resolution must keep them distinct.
+  it('resolves zh-Hans and zh-Hant to their distinct catalog ids (script-subtag disambiguation)', async () => {
+    const transport = {
+      listLanguages: sinon.stub().resolves({
+        items: [
+          { id: 'lang-zhcn', name: 'Chinese Simplified', code: 'zh-Hans' },
+          { id: 'lang-zhtw', name: 'Chinese Traditional', code: 'zh-Hant' },
+        ],
+      }),
+    };
+    expect(await resolveLanguageId(transport, 'zh-hans')).to.equal('lang-zhcn');
+    expect(await resolveLanguageId(transport, 'zh-hant')).to.equal('lang-zhtw');
+  });
+
+  it('returns null for a code not present in the catalog (no name-matching fallback)', async () => {
+    const transport = {
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English', code: 'en' }] }),
+    };
+    expect(await resolveLanguageId(transport, 'xx')).to.equal(null);
+  });
+});
+
 describe('listLanguageCatalog', () => {
   it('returns the Semrush language catalog, name-sorted, dropping nameless/codeless rows', async () => {
     const transport = {
@@ -2213,6 +2243,32 @@ describe('listLanguageCatalog', () => {
       { id: 'l-en', name: 'English', code: 'en' },
       { id: 'l-fr', name: 'French', code: 'fr' },
     ]);
+  });
+
+  it('warns when entries are dropped for missing code', async () => {
+    const transport = {
+      listLanguages: sinon.stub().resolves({
+        items: [
+          { id: 'l-en', name: 'English', code: 'en' },
+          { id: 'l-nocode', name: 'NoCode' }, // no code → dropped, should warn
+        ],
+      }),
+    };
+    const log = fakeLog();
+    await listLanguageCatalog(transport, log);
+    expect(log.warn).to.have.been.calledWithMatch(
+      'listLanguageCatalog: dropped entries missing code — upstream field shape may have changed',
+      { droppedCount: 1 },
+    );
+  });
+
+  it('does not warn when no entries are dropped', async () => {
+    const transport = {
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'l-en', name: 'English', code: 'en' }] }),
+    };
+    const log = fakeLog();
+    await listLanguageCatalog(transport, log);
+    expect(log.warn).to.not.have.been.called;
   });
 
   it('tolerates a 404/405 catalog by returning an empty list', async () => {
