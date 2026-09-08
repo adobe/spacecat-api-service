@@ -352,13 +352,16 @@ function PreflightController(ctx, log, env) {
       // Emit the terminal-state observability log (shared with the Mystique path).
       logPreflightOutcome(log, PREFLIGHT_PROCESS_AUDW, job);
 
-      // Preflight-shaped metadata allowlist. Retains `metadata.payload` (a superset
-      // of what the ASO preflight MFE reads: payload.{step,reason,errorCode,...}),
-      // plus jobType/tags, but never any top-level token field (e.g. promiseToken).
-      // Preflight jobs carry no token — it travels on the SQS message, not the
-      // record — so returning the payload leaks nothing. Metadata is guaranteed
-      // present: loadJobScopedToCaller admitted this job by its metadata.jobType.
+      // Preflight-shaped metadata allowlist. Projects an explicit field allowlist —
+      // jobType/tags plus payload.{step,reason,errorCode,siteId,urls} — rather than
+      // returning the verbatim `metadata.payload`. Returning the whole payload would
+      // reintroduce the SEC-5 leak one level deeper if payload ever grew a sensitive
+      // field. The allowlisted payload fields are exactly what the ASO preflight MFE
+      // reads (payload.{step,reason,errorCode}); step/reason/errorCode must survive.
+      // Metadata is guaranteed present: loadJobScopedToCaller admitted this job by its
+      // metadata.jobType. `payload` may be absent on a malformed record — guard it.
       const metadata = job.getMetadata();
+      const payload = metadata.payload ?? {};
 
       return ok({
         jobId: job.getId(),
@@ -375,7 +378,13 @@ function PreflightController(ctx, log, env) {
         metadata: {
           jobType: metadata.jobType,
           tags: metadata.tags,
-          payload: metadata.payload,
+          payload: {
+            step: payload.step,
+            reason: payload.reason,
+            errorCode: payload.errorCode,
+            siteId: payload.siteId,
+            urls: payload.urls,
+          },
         },
       });
     } catch (error) {

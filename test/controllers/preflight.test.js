@@ -1536,6 +1536,117 @@ describe('Preflight Controller', () => {
       expect(body.metadata.promiseToken).to.be.undefined;
       expect(JSON.stringify(body)).to.not.include('should-never-be-returned');
     });
+
+    it('projects a payload field allowlist — keeps MFE fields, drops an injected extra', async () => {
+      // The DTO must project payload.{step,reason,errorCode,siteId,urls} explicitly,
+      // not the verbatim payload. A future/rogue field on payload (here `secret`)
+      // must not survive; the MFE-read fields must.
+      const jobWithExtraPayloadField = {
+        ...mockJob,
+        getMetadata: () => ({
+          jobType: 'preflight',
+          tags: ['preflight'],
+          payload: {
+            siteId: 'test-site-123',
+            urls: ['https://main--example-site.aem.page/test.html'],
+            step: 'suggest',
+            reason: 'user cancelled',
+            errorCode: 'CANCELLED',
+            secret: 'SECRET-PAYLOAD-do-not-leak',
+          },
+        }),
+      };
+      mockDataAccess.AsyncJob.findById = sandbox.stub().resolves(jobWithExtraPayloadField);
+      mockDataAccess.Site.findById = sandbox.stub().resolves(mockSite);
+
+      const context = { params: { jobId } };
+      const response = await preflightController.getPreflightJobStatusAndResult(context);
+      expect(response.status).to.equal(200);
+
+      const body = await response.json();
+      // Allowlisted fields are present.
+      expect(body.metadata.payload.step).to.equal('suggest');
+      expect(body.metadata.payload.reason).to.equal('user cancelled');
+      expect(body.metadata.payload.errorCode).to.equal('CANCELLED');
+      expect(body.metadata.payload.siteId).to.equal('test-site-123');
+      expect(body.metadata.payload.urls).to.deep.equal(['https://main--example-site.aem.page/test.html']);
+      // Exactly the allowlist — nothing else.
+      expect(Object.keys(body.metadata.payload).sort())
+        .to.deep.equal(['errorCode', 'reason', 'siteId', 'step', 'urls']);
+      // The injected extra field is dropped, from body and any log line.
+      expect(body.metadata.payload.secret).to.be.undefined;
+      expect(JSON.stringify(body)).to.not.include('SECRET-PAYLOAD-do-not-leak');
+      const allLogArgs = [
+        ...loggerStub.debug.getCalls(),
+        ...loggerStub.info.getCalls(),
+        ...loggerStub.warn.getCalls(),
+        ...loggerStub.error.getCalls(),
+      ].map((c) => JSON.stringify(c.args)).join(' ');
+      expect(allLogArgs).to.not.include('SECRET-PAYLOAD-do-not-leak');
+    });
+
+    it('returns 200 for a legitimately-owned job and never logs a token on the success path', async () => {
+      // The token-absence regression was originally asserted only on the gate-rejected
+      // (404) path, yet the `JSON.stringify(job)` logging risk lived on the return
+      // path. Assert the success (200) path too: an owned preflight job that happens to
+      // carry a top-level token is returned, and no token appears in any log line.
+      const TOKEN = 'SECRET-PROMISE-TOKEN-success-path';
+      const ownedJobWithToken = {
+        ...mockJob,
+        getMetadata: () => ({
+          jobType: 'preflight',
+          tags: ['preflight'],
+          promiseToken: TOKEN,
+          payload: {
+            siteId: 'test-site-123',
+            urls: ['https://main--example-site.aem.page/test.html'],
+            step: 'identify',
+          },
+        }),
+      };
+      mockDataAccess.AsyncJob.findById = sandbox.stub().resolves(ownedJobWithToken);
+      mockDataAccess.Site.findById = sandbox.stub().resolves(mockSite);
+      loggerStub.debug.resetHistory();
+      loggerStub.info.resetHistory();
+      loggerStub.warn.resetHistory();
+      loggerStub.error.resetHistory();
+
+      const context = { params: { jobId } };
+      const response = await preflightController.getPreflightJobStatusAndResult(context);
+      expect(response.status).to.equal(200);
+
+      const body = await response.json();
+      // The token is neither echoed in the DTO nor written to any log line.
+      expect(body.metadata.promiseToken).to.be.undefined;
+      expect(JSON.stringify(body)).to.not.include(TOKEN);
+      const allLogArgs = [
+        ...loggerStub.debug.getCalls(),
+        ...loggerStub.info.getCalls(),
+        ...loggerStub.warn.getCalls(),
+        ...loggerStub.error.getCalls(),
+      ].map((c) => JSON.stringify(c.args)).join(' ');
+      expect(allLogArgs).to.not.include(TOKEN);
+    });
+
+    it('returns 200 with an empty payload allowlist for a job whose metadata has no payload', async () => {
+      // A malformed/partially-written preflight record (metadata present — it passed
+      // the jobType gate — but no payload) must not throw; the DTO returns an
+      // all-undefined payload allowlist.
+      const jobNoPayload = {
+        ...mockJob,
+        getMetadata: () => ({ jobType: 'preflight', tags: ['preflight'] }),
+      };
+      mockDataAccess.AsyncJob.findById = sandbox.stub().resolves(jobNoPayload);
+      mockDataAccess.Site.findById = sandbox.stub().resolves(mockSite);
+
+      const context = { params: { jobId } };
+      const response = await preflightController.getPreflightJobStatusAndResult(context);
+      // Note: with no payload.siteId, ownership cannot be resolved, so the primitive
+      // fails closed (404) rather than returning the job — see async-job-access.
+      expect(response.status).to.equal(404);
+      const body = await response.json();
+      expect(body).to.deep.equal({ message: `Job with ID ${jobId} not found` });
+    });
   });
 });
 

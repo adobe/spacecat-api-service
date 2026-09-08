@@ -28,12 +28,17 @@ import AccessControlUtil from './access-control-util.js';
  *     `allowedJobTypes` is reported as *not found* (404), never revealing that a job
  *     of a different type exists. An endpoint scoped to `['preflight']` therefore can
  *     never be used to read a `serenity-classify-prompts` (token-bearing) job.
- *  2. **owner scoping** — when `resolveOwnerSiteId` yields a siteId, the caller must
- *     hold access to that site (the same org-membership check `site:read` routes
- *     already enforce via {@link AccessControlUtil#hasAccess}). A caller without
- *     access gets 404 (again, no existence disclosure). Job types with no owning
- *     site (e.g. `site-detection`, whose metadata carries `{ domain, hlxVersion }`
- *     and no siteId) omit the resolver and are scoped by jobType only.
+ *  2. **owner scoping** — when a `resolveOwnerSiteId` resolver is supplied, the caller
+ *     must hold access to the site it yields (the same org-membership check `site:read`
+ *     routes already enforce via {@link AccessControlUtil#hasAccess}). A caller without
+ *     access gets 404 (again, no existence disclosure). This scoping is **fail-closed**:
+ *     if a resolver is supplied but yields no siteId (a job that should be owned but
+ *     carries no owner — a malformed or partially-written record), the job is denied
+ *     (404) rather than returned. Only job types with no owning site at all
+ *     (e.g. `site-detection`, whose metadata carries `{ domain, hlxVersion }` and no
+ *     siteId) omit the resolver entirely; those are intentionally scoped by jobType
+ *     only. "No resolver supplied" (ownerless, allowed) is thus distinct from "resolver
+ *     supplied but empty" (owned-but-unresolvable, denied).
  *
  * The caller projects a response DTO from the returned job — this primitive never
  * returns raw metadata to the client.
@@ -63,8 +68,16 @@ export async function loadJobScopedToCaller(context, {
     return { error: notFound(`Job with ID ${jobId} not found`) };
   }
 
-  const siteId = resolveOwnerSiteId ? resolveOwnerSiteId(job) : undefined;
-  if (hasText(siteId)) {
+  // Distinguish "no resolver supplied" (ownerless job type — jobType-only scope,
+  // allowed) from "resolver supplied but empty" (a job that should be owned but
+  // resolves to no siteId — fail closed, deny). Returning the job in the latter case
+  // would be a fail-open default in a security primitive.
+  if (resolveOwnerSiteId) {
+    const siteId = resolveOwnerSiteId(job);
+    if (!hasText(siteId)) {
+      log?.warn?.(`[async-job-access] job ${jobId} has an owner resolver but no resolvable siteId; denying`);
+      return { error: notFound(`Job with ID ${jobId} not found`) };
+    }
     const site = await dataAccess.Site.findById(siteId);
     if (!site) {
       log?.warn?.(`[async-job-access] job ${jobId} references missing site ${siteId}; denying`);
