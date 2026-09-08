@@ -551,6 +551,7 @@ const routeFacsCapabilities = {
 
       // Site LLMO surfaces — read side
       'GET /sites/:siteId/llmo/brand-claims': 'llmo/can_view',
+      'GET /sites/:siteId/llmo/brand-claims/weeks': 'llmo/can_view',
       'GET /sites/:siteId/llmo/config': 'llmo/can_view',
       'GET /sites/:siteId/llmo/customer-intent': 'llmo/can_view',
       'GET /sites/:siteId/llmo/data': 'llmo/can_view',
