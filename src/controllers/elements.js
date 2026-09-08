@@ -380,11 +380,26 @@ async function authorizeOrgAccess(ctx) {
   // S2S pattern: Layer 1 in required-capabilities.js gates entry to the route,
   // this is Layer 2, the controller-level capability check).
   const isAdmin = accessControl.hasAdminAccess();
+  const isS2SConsumer = ctx?.attributes?.authInfo?.isS2SConsumer?.() ?? false;
   const s2sResult = isAdmin
     ? { allowed: false }
     : await accessControl.hasS2SCapability(CAP_ORG_READ_ALL);
+  const log = ctx?.log;
+  const requestId = ctx?.invocation?.id || 'unknown';
+  const route = `${ctx?.pathInfo?.method || 'GET'} ${ctx?.pathInfo?.suffix || 'elements-route'}`;
   if (!isAdmin && !s2sResult.allowed && !await accessControl.hasAccess(organization)) {
+    // Only an S2S caller's denial is an ACL audit event - a regular user simply lacking
+    // org membership is the expected, unremarkable path (hasS2SCapability returns
+    // reason=not-s2s for them) and would otherwise flood the log on every such request.
+    if (isS2SConsumer) {
+      log?.info(`[acl] Denied ${route} - reason=${s2sResult.reason} clientId=${s2sResult.clientId || 'n/a'} consumerId=${s2sResult.consumerId || 'n/a'} requestId=${requestId}`);
+    }
     return { error: forbidden('User does not have access to this organization') };
+  }
+  if (s2sResult.allowed) {
+    // Audit trail for cross-tenant reads (READALL_CAPABILITY_DESIGN.md): every successful
+    // Layer 2 pass by an S2S consumer must log clientId, consumerId, capability, and requestId.
+    log?.info(`[s2s] ${route} granted clientId=${s2sResult.clientId || 'n/a'} consumerId=${s2sResult.consumerId || 'n/a'} capability=${CAP_ORG_READ_ALL} organizationId=${spaceCatId} requestId=${requestId}`);
   }
   return { organization };
 }
@@ -741,6 +756,14 @@ export default function ElementsController(context, log, env) {
       const auth = await authorizeOrg(ctx);
       if (auth.error) {
         return auth.error;
+      }
+      // This probe forwards the CALLER'S OWN IMS token to check THEIR access to the linked
+      // Semrush workspace - it has no meaning for an S2S consumer, which authenticates with a
+      // JWT (not IMS) and, once past authorizeOrg's organization:readAll check above, is already
+      // permitted to read any customer's data. Short-circuit here rather than falling through to
+      // resolveElementsImsToken/requireImsBearer, which would reject the S2S JWT with a 401.
+      if (ctx?.attributes?.authInfo?.isS2SConsumer?.()) {
+        return ok({ hasAccess: true });
       }
       // Forward the caller's own IMS token (x-promise-token flow, falling back to Authorization) so
       // the upstream auth check is scoped to THIS user, then probe the resource-allowance endpoint.

@@ -150,14 +150,24 @@ function fakeContext({
   withBrandSemrushProject = false,
   promiseToken = undefined,
   postgrestClient = { from: sinon.stub() },
+  log = fakeLog(),
+  invocationId = 'req-1',
 } = {}) {
   const BrandSemrushProject = withBrandSemrushProject
     ? { allByBrandId: sinon.stub().resolves(brandSemrushProjects) }
     : undefined;
+  let suffix;
+  try {
+    suffix = new URL(url).pathname;
+  } catch {
+    suffix = undefined;
+  }
   return {
     params: { spaceCatId: ORG_ID, brandId: BRAND_ID, ...params },
     request: { url },
     pathInfo: {
+      method: 'GET',
+      suffix,
       headers: {
         ...(bearer ? { authorization: `Bearer ${bearer}` } : {}),
         ...(promiseToken ? { 'x-promise-token': promiseToken } : {}),
@@ -172,6 +182,8 @@ function fakeContext({
       ...(BrandSemrushProject && { BrandSemrushProject }),
     },
     _spacecatBrands: spacecatBrands,
+    log,
+    invocation: { id: invocationId },
   };
 }
 
@@ -458,6 +470,48 @@ describe('ElementsController', () => {
       expect(createElementsTransportStub).to.have.been.calledWith(
         sinon.match({ isS2SConsumer: false, imsToken: IMS_TOKEN }),
       );
+    });
+
+    it('logs a [s2s] audit line with clientId/consumerId/capability/requestId on a granted read', async () => {
+      accessControlHasS2SCapabilityStub.resolves({
+        allowed: true, clientId: 'client-abc', consumerId: 'consumer-123',
+      });
+      const ctx = fakeContext({
+        isS2SConsumer: true, authType: 'jwt', bearer: null, invocationId: 'req-audit-1',
+      });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
+      expect(res.status).to.equal(200);
+      expect(ctx.log.info).to.have.been.calledWithMatch(
+        /^\[s2s\] .*granted clientId=client-abc consumerId=consumer-123 capability=organization:readAll/,
+      );
+      expect(ctx.log.info).to.have.been.calledWithMatch(/requestId=req-audit-1/);
+    });
+
+    it('logs an [acl] denial line with reason/clientId/consumerId when an S2S consumer is denied', async () => {
+      accessControlHasS2SCapabilityStub.resolves({
+        allowed: false, reason: 'missing-capability', clientId: 'client-abc', consumerId: 'consumer-123',
+      });
+      accessControlHasAccessStub.resolves(false);
+      const ctx = fakeContext({
+        isS2SConsumer: true, authType: 'jwt', bearer: null, invocationId: 'req-audit-2',
+      });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
+      expect(res.status).to.equal(403);
+      expect(ctx.log.info).to.have.been.calledWithMatch(
+        /^\[acl\] Denied .*reason=missing-capability clientId=client-abc consumerId=consumer-123/,
+      );
+      expect(ctx.log.info).to.have.been.calledWithMatch(/requestId=req-audit-2/);
+    });
+
+    it('does not log an [acl] denial line for a regular (non-S2S) user lacking org access', async () => {
+      accessControlHasAccessStub.resolves(false);
+      const ctx = fakeContext();
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
+      expect(res.status).to.equal(403);
+      expect(ctx.log.info).to.not.have.been.calledWithMatch(/^\[acl\]/);
     });
   });
 
@@ -1159,6 +1213,20 @@ describe('ElementsController', () => {
       const body = await readBody(res);
       expect(body).to.deep.equal({ hasAccess: true });
       expect(getWorkspaceResourcesStub).to.have.been.calledOnce;
+    });
+
+    it('returns 200 { hasAccess: true } immediately for an S2S consumer, without probing upstream', async () => {
+      accessControlHasS2SCapabilityStub.resolves({ allowed: true });
+      const ctx = fakeContext({
+        url: accessUrl(), isS2SConsumer: true, authType: 'jwt', bearer: null,
+      });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.checkAccess(ctx);
+      expect(res.status).to.equal(200);
+      const body = await readBody(res);
+      expect(body).to.deep.equal({ hasAccess: true });
+      expect(getWorkspaceResourcesStub).to.not.have.been.called;
+      expect(exchangePromiseTokenStub).to.not.have.been.called;
     });
 
     it('forwards the resolved workspace id and the caller IMS token to the transport', async () => {
