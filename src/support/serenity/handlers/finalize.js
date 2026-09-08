@@ -65,11 +65,10 @@ const sliceKey = (geoTargetId, languageCode) => `${Number(geoTargetId)}::${Strin
  * is a PERMANENT failure: `publishFailed` with `permanent: true` (alert, no retry).
  *
  * Retry semantics differ per step. Model sync (diff-based) and publish are
- * idempotent. Prompt push is NOT: handleCreatePrompts unconditionally creates
- * each input upstream, so a re-fire would duplicate prompts in Semrush. The
- * DRS-completion *trigger* (an audit-worker/SQS job, a separate repo) must
- * therefore deliver the prompt payload exactly once — it is intentionally NOT
- * wired here; this is the reusable mechanism it will call.
+ * idempotent. Prompt push is idempotent too, as of the create-endpoint upsert:
+ * handleCreatePrompts REPLACES the tags of a text the project already holds
+ * rather than posting it again, so a re-fire re-states the payload instead of
+ * duplicating it (and reports those rows in `updated`, not `created`).
  *
  * @param {object} transport - Serenity REST transport.
  * @param {object} dataAccess - SpaceCat data-access layer.
@@ -117,8 +116,10 @@ export async function finalizeSerenityProjects(
   // 1. Push prompts. publish:false so the single authoritative publish happens
   //    in step 3 after models are also set — never an empty/half-populated
   //    publish.
-  /** @type {{created: Array, skipped: Array, failed: Array}} */
-  let prompts = { created: [], skipped: [], failed: [] };
+  /** @type {{created: Array, updated?: Array, skipped: Array, failed: Array}} */
+  let prompts = {
+    created: [], updated: [], skipped: [], failed: [],
+  };
   const promptInputs = Array.isArray(body?.prompts) ? body.prompts : [];
   if (promptInputs.length > 0) {
     prompts = await handleCreatePrompts(
@@ -237,7 +238,12 @@ export async function finalizeSerenityProjects(
   // requested for the brand but every push failed, the projects are still empty
   // drafts — skip publish for ALL of them (the trigger retries the prompt push).
   const promptsRequested = promptInputs.length > 0;
-  if (promptsRequested && prompts.created.length === 0) {
+  // Counts updates as well as creates: handleCreatePrompts is an upsert, so a
+  // re-fire against a brand whose prompts already exist lands every row in
+  // `updated` with `created` empty. Gating on `created` alone would read that as
+  // "every push failed" and refuse to publish a fully populated project.
+  const promptsWritten = prompts.created.length + (prompts.updated?.length ?? 0);
+  if (promptsRequested && promptsWritten === 0) {
     log?.warn?.(
       'finalizeSerenityProjects: every prompt push failed — skipping publish to avoid '
       + 'publishing empty projects',
