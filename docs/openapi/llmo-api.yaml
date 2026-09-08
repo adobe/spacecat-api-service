@@ -1898,13 +1898,26 @@ llmo-brand-claims:
       schema:
         type: string
         example: 'gpt-4.1'
+    - name: week
+      in: query
+      required: false
+      description: >
+        ISO week (`YYYY-Www`) of the run to retrieve (e.g. `2026-W17`), as
+        returned by `GET /sites/{siteId}/llmo/brand-claims/weeks`. If omitted,
+        the latest available run is returned. Takes precedence over `date` when
+        both are set; `model` takes precedence over both.
+      schema:
+        type: string
+        pattern: '^\d{4}-W\d{2}$'
+        example: '2026-W17'
     - name: date
       in: query
       required: false
       description: >
         Any date (YYYY-MM-DD) within the ISO week of the run to retrieve (e.g.
         `2026-04-22`). If omitted, the latest available run is returned. If
-        `model` is also set, `model` takes precedence for key selection.
+        `week` is also set, `week` takes precedence; `model` takes precedence
+        over both.
       schema:
         type: string
         format: date
@@ -1918,9 +1931,11 @@ llmo-brand-claims:
       The data files are `.json.gz` compressed and can be very large (100MB+ uncompressed),
       so this endpoint returns a presigned URL rather than the data directly.
 
-      Runs are stored per ISO week. With no `date`, the latest available run is
-      returned; with `date`, the run for that date's ISO week is returned. The
-      optional `model` query parameter selects a legacy model-specific file.
+      Runs are stored per ISO week. With no selector, the latest available run is
+      returned. A `week` (`YYYY-Www`, as returned by `.../brand-claims/weeks`)
+      selects that week directly; a `date` resolves to its ISO week (`week` wins
+      if both are set). The optional `model` query parameter selects a legacy
+      model-specific file and takes precedence over both.
 
       S3 key convention:
       - Latest run: newest `brand_claims/llmo/{siteId}/{YYYY-Www}/data.json.gz` (falls back to the legacy `brand_claims/llmo/{siteId}/data.json.gz` before migration)

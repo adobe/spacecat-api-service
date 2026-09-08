@@ -94,10 +94,11 @@ async function latestWeekKey(s3, bucketName, siteId, log) {
  * so this endpoint returns a presigned URL rather than the data directly.
  *
  * Runs are stored per ISO week (`{siteId}/{YYYY-Www}/data.json.gz`). With no
- * `date`, the latest week is served (falling back to the legacy flat
- * `{siteId}/data.json.gz` for sites not yet migrated); with `date`, the run for
- * that date's ISO week is served. A `model` selects a legacy flat
- * `{model}.json.gz` file, unchanged.
+ * selector, the latest week is served (falling back to the legacy flat
+ * `{siteId}/data.json.gz` for sites not yet migrated). A `week` (`YYYY-Www`, as
+ * returned by the weeks-listing endpoint) keys that week directly; a `date`
+ * (`YYYY-MM-DD`) resolves to its ISO week; `week` wins if both are set. A
+ * `model` selects a legacy flat `{model}.json.gz` file, unchanged.
  *
  * @param {object} context - The request context containing log, s3, env, and params
  * @returns {Promise<Response>} The brand claims presigned URL response
@@ -105,7 +106,7 @@ async function latestWeekKey(s3, bucketName, siteId, log) {
 export async function handleBrandClaims(context) {
   const { log, s3 } = context;
   const { siteId } = context.params;
-  const { model, date } = context.data;
+  const { model, date, week } = context.data;
 
   if (!s3 || !s3.s3Client) {
     return badRequest('S3 storage is not configured for this environment');
@@ -121,12 +122,20 @@ export async function handleBrandClaims(context) {
   }
 
   // Model files are managed flat (not week-partitioned) and take precedence;
-  // `date` resolves directly to its week (validated only here, where it is
-  // actually used); otherwise default to the legacy flat key and upgrade it to
-  // the latest week (via a list) inside the try below.
+  // `week` (a `YYYY-Www` returned by the weeks-listing endpoint) keys its folder
+  // directly; `date` resolves to its ISO week; otherwise default to the legacy
+  // flat key and upgrade it to the latest week (via a list) inside the try below.
+  // `week` and `date` are two spellings of the same selector — `week` wins when
+  // both are set (it needs no date→week conversion). Each is validated only in
+  // the branch that uses it.
   let s3Key;
   if (model) {
     s3Key = `${CLAIMS_PREFIX}/${siteId}/${model}.json.gz`;
+  } else if (week) {
+    if (!WEEK_RE.test(week)) {
+      return badRequest('Invalid week parameter: expected YYYY-Www format');
+    }
+    s3Key = `${CLAIMS_PREFIX}/${siteId}/${week}/data.json.gz`;
   } else if (date) {
     // Round-trip parse (UTC): rejects unparseable dates AND ones JS silently
     // rolls over (e.g. 2026-02-30 -> Mar 2), which would key the wrong week.
@@ -139,12 +148,18 @@ export async function handleBrandClaims(context) {
     s3Key = `${CLAIMS_PREFIX}/${siteId}/data.json.gz`;
   }
 
-  log.info(`Getting brand claims for site ${siteId}, model: ${model || 'default'}${date ? `, date: ${date}` : ''}`);
+  let selectorLog = '';
+  if (week) {
+    selectorLog = `, week: ${week}`;
+  } else if (date) {
+    selectorLog = `, date: ${date}`;
+  }
+  log.info(`Getting brand claims for site ${siteId}, model: ${model || 'default'}${selectorLog}`);
 
   try {
     const { getSignedUrl, GetObjectCommand } = s3;
 
-    if (!model && !date) {
+    if (!model && !week && !date) {
       const latest = await latestWeekKey(s3, bucketName, siteId, log);
       if (latest) {
         s3Key = latest;

@@ -154,6 +154,46 @@ describe('handleBrandClaims', () => {
     expect(signedKey()).to.equal(`brand_claims/llmo/${TEST_SITE_ID}/2026-W17/data.json.gz`);
   });
 
+  it('serves an explicit week without listing', async () => {
+    const context = { ...baseContext, data: { week: '2026-W17' } };
+
+    const result = await handleBrandClaims(context);
+
+    expect(result.status).to.equal(200);
+    // No list call — the week keys its folder directly.
+    expect(mockS3Send.getCall(0).args[0]).to.be.instanceOf(HeadObjectCommand);
+    expect(signedKey()).to.equal(`brand_claims/llmo/${TEST_SITE_ID}/2026-W17/data.json.gz`);
+  });
+
+  it('prefers week over date when both are supplied', async () => {
+    const context = { ...baseContext, data: { week: '2026-W17', date: '2026-01-05' } };
+
+    const result = await handleBrandClaims(context);
+
+    expect(result.status).to.equal(200);
+    expect(signedKey()).to.equal(`brand_claims/llmo/${TEST_SITE_ID}/2026-W17/data.json.gz`);
+  });
+
+  it('returns 400 for a malformed week', async () => {
+    const context = { ...baseContext, data: { week: '2026-17' } };
+
+    const result = await handleBrandClaims(context);
+
+    expect(result.status).to.equal(400);
+    expect((await result.json()).message).to.equal('Invalid week parameter: expected YYYY-Www format');
+    expect(mockS3Send).not.to.have.been.called;
+  });
+
+  it('returns 400 for a week with a path separator (no key probing)', async () => {
+    const context = { ...baseContext, data: { week: '../secrets' } };
+
+    const result = await handleBrandClaims(context);
+
+    expect(result.status).to.equal(400);
+    expect((await result.json()).message).to.equal('Invalid week parameter: expected YYYY-Www format');
+    expect(mockS3Send).not.to.have.been.called;
+  });
+
   it('returns 400 for an invalid date', async () => {
     const context = { ...baseContext, data: { date: 'not-a-date' } };
 
