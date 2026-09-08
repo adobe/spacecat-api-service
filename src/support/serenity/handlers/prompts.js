@@ -26,7 +26,7 @@ import {
 } from '../tag-tree.js';
 import {
   DIMENSION, ORIGIN_VALUE, INTENT_VALUE, PROXY_CREATE_SOURCE_VALUE,
-  canonicalizeSource, SOURCE_VALUES, rootNameOfDimension,
+  canonicalizeSource, SOURCE_VALUES, rootNameOfDimension, dimensionOfRootName,
 } from '../prompt-tags.js';
 import { classifyPromptIntents } from '../intent-classification.js';
 import { logPromptDeleteEvent } from '../prompt-delete-log.js';
@@ -1222,6 +1222,189 @@ export function parseUpdatePromptBody(body) {
   return { ok: true, text, tagIds };
 }
 
+/**
+ * The dimension a built tag belongs to: its root breadcrumb (`path[0]`), or its
+ * own name when it IS a root. Folded through {@link dimensionOfRootName} because
+ * a root's name is not always the bare dimension key (`$abv_tags$intent`).
+ *
+ * @param {{ name: string, path: Array<{ id: string, name: string }> | null }} tag
+ * @returns {string}
+ */
+function tagDimensionOf(tag) {
+  const rootName = Array.isArray(tag.path) && tag.path.length > 0
+    ? tag.path[0].name
+    : tag.name;
+  return dimensionOfRootName(rootName);
+}
+
+/**
+ * The tag ids an UPSERT must carry over from the prompt it rewrites.
+ *
+ * The tag write is a FULL replace and a CSV row supplies only `category` ids.
+ * `type` and `intent` are recomputed from the text, but `origin` and `source` are
+ * CREATE-only facts an edit never re-derives — the PATCH endpoint gets them
+ * echoed back by the client, and an upsert has no such echo. Without this a CSV
+ * import would strip every prompt's authorship, or relabel an AI-onboarded prompt
+ * as this dialog's `human`/`config`.
+ *
+ * One tag per dimension: a second can only have come from the additive create
+ * this replaces, so collapsing to the first — the one the UI already shows —
+ * heals the duplicate without changing what anyone sees.
+ *
+ * CONTRACT THIS RESTS ON: the dimension is read from the tag's root breadcrumb
+ * (`path[0]`), so the unfiltered `listPromptsByTags` response must carry the same
+ * `path` shape `buildPromptDto` consumes. It does today. If that ever drifts,
+ * `tagDimensionOf` falls back to the tag's own leaf name, no dimension matches,
+ * and the replace silently strips authorship — the exact relabel this exists to
+ * prevent. That failure is open and quiet, so it is logged rather than left to be
+ * discovered in the data.
+ *
+ * @param {any} item - the upstream prompt item.
+ * @param {any} [log]
+ * @param {string} [projectId] - log context only.
+ * @returns {string[]}
+ */
+function carryOverTagIdsOf(item, log, projectId) {
+  const tags = buildTagsOf(item);
+  const carried = [DIMENSION.ORIGIN, DIMENSION.SOURCE]
+    .map((dimension) => tags.find((t) => t.id && tagDimensionOf(t) === dimension))
+    .filter(Boolean)
+    .map((t) => /** @type {{ id: string }} */ (t).id);
+  // Narrow on purpose: a prompt that genuinely carries no tags is unremarkable, but
+  // one WITH tags that resolves neither dimension is the breadcrumb-drift signature.
+  if (carried.length === 0 && tags.length > 0) {
+    log?.warn?.('serenity upsert: stored prompt resolved no origin/source tag — authorship will be dropped by the replace', {
+      projectId, semrushPromptId: item?.id, tagCount: tags.length,
+    });
+  }
+  return carried;
+}
+
+/** Paging cap, so a mis-paging upstream cannot spin a Lambda. 20k prompts. */
+export const MAX_PROMPT_INDEX_PAGES = 20;
+
+/**
+ * Builds the `text -> stored prompt` index an upsert resolves against.
+ *
+ * Lists and matches locally rather than using the upstream `search` filter,
+ * whose matching semantics are not pinned by the vendor contract — an upsert that
+ * mis-identifies a prompt would rewrite the WRONG row's tags.
+ *
+ * LIVE-LAYER READ, like every other `listPromptsByTags` caller: a prompt staged
+ * in an unpublished draft is invisible here and falls through to the create path
+ * (the pre-existing behavior), never a wrong-row rewrite.
+ *
+ * `byText` is exact and wins; `byLower` is the fallback, because being
+ * case-sensitive where upstream's own dedupe is not would send a case variant
+ * back down the create path and straight into the additive attach.
+ *
+ * @param {SerenityTransport} transport
+ * @param {string} semrushWorkspaceId
+ * @param {string} projectId
+ * @param {any} [log]
+ * @returns {Promise<{ byText: Map<string, { semrushPromptId: string,
+ *   carryOverTagIds: string[] }>, byLower: Map<string, { semrushPromptId: string,
+ *   carryOverTagIds: string[] }> }>}
+ */
+export async function buildExistingPromptIndex(transport, semrushWorkspaceId, projectId, log) {
+  /** @type {Map<string, { semrushPromptId: string, carryOverTagIds: string[] }>} */
+  const byText = new Map();
+  /** @type {Map<string, { semrushPromptId: string, carryOverTagIds: string[] }>} */
+  const byLower = new Map();
+  for (let page = 1; page <= MAX_PROMPT_INDEX_PAGES; page += 1) {
+    // eslint-disable-next-line no-await-in-loop -- paging is inherently sequential
+    const resp = await transport.listPromptsByTags(semrushWorkspaceId, projectId, {
+      tag_ids: [], page, limit: MAX_PAGE_LIMIT,
+    });
+    const items = Array.isArray(resp?.items) ? resp.items : [];
+    for (const item of items) {
+      // Trimmed to match `normalizePromptInput`, which trims before comparing.
+      const text = String(item?.name ?? '').trim();
+      const id = item?.id ? String(item.id) : '';
+      if (text && id) {
+        const entry = {
+          semrushPromptId: id,
+          carryOverTagIds: carryOverTagIdsOf(item, log, projectId),
+        };
+        if (!byText.has(text)) {
+          byText.set(text, entry);
+        }
+        if (!byLower.has(text.toLowerCase())) {
+          byLower.set(text.toLowerCase(), entry);
+        }
+      }
+    }
+    if (items.length < MAX_PAGE_LIMIT) {
+      return { byText, byLower };
+    }
+  }
+  // Past the cap the index is incomplete: later rows resolve as "new" and take the
+  // create path — the pre-existing behavior. Degraded, not broken, but worth a signal.
+  log?.warn?.('serenity upsert: prompt index hit the page cap — later prompts may be treated as new', {
+    projectId, pages: MAX_PROMPT_INDEX_PAGES,
+  });
+  return { byText, byLower };
+}
+
+/**
+ * Looks an input's text up in a {@link buildExistingPromptIndex} result.
+ *
+ * @param {{ byText: Map<string, any>, byLower: Map<string, any> } | undefined} index
+ * @param {string} text
+ * @returns {{ semrushPromptId: string, carryOverTagIds: string[] } | undefined}
+ */
+export function findStoredPrompt(index, text) {
+  if (!index) {
+    return undefined;
+  }
+  return index.byText.get(text) ?? index.byLower.get(text.toLowerCase());
+}
+
+/**
+ * One project's batched UPSERT tag writes: a single replace-mode tag write, then
+ * a best-effort authorship stamp.
+ *
+ * Order matters — the tag write is the point of the operation, so a failed stamp
+ * is logged rather than fatal. The reverse would let a cosmetic failure discard
+ * the write the caller asked for.
+ *
+ * @param {SerenityTransport} transport
+ * @param {string} semrushWorkspaceId
+ * @param {string} projectId
+ * @param {Array<{ semrushPromptId: string, tagIds: string[] }>} updates
+ * @param {string} callerId
+ * @param {any} [log]
+ * @returns {Promise<void>} rejects when the tag write itself fails.
+ */
+export async function applyUpsertTagWrites(
+  transport,
+  semrushWorkspaceId,
+  projectId,
+  updates,
+  callerId,
+  log,
+) {
+  await transport.updatePromptTagsByIds(
+    semrushWorkspaceId,
+    projectId,
+    updates.map((u) => ({ id: u.semrushPromptId, references: u.tagIds, replace: true })),
+  );
+  try {
+    await transport.patchPromptsMetadataBatch(
+      semrushWorkspaceId,
+      projectId,
+      updates.map((u) => ({
+        promptId: u.semrushPromptId,
+        metadata: buildUpdateMetadata(callerId),
+      })),
+    );
+  } catch (e) {
+    log?.warn?.('serenity upsert: tags replaced but the authorship stamp failed — Last modified is stale', {
+      projectId, count: updates.length, error: e?.message,
+    });
+  }
+}
+
 export async function mapLimit(items, limit, mapper) {
   const out = new Array(items.length);
   let i = 0;
@@ -1248,6 +1431,13 @@ export async function mapLimit(items, limit, mapper) {
  * Each input must carry `(geoTargetId, languageCode, text, tagIds)`. Inputs
  * are grouped by slice; the matching BrandSemrushProject row resolves the
  * upstream project; publish runs once per affected project at the end.
+ *
+ * UPSERT, not create-only: an input whose text already exists in the resolved
+ * project has its tags REPLACED (reported in `updated`) instead of being posted
+ * again. The upstream create folds a repeated text into `existing_count` but
+ * still ATTACHES the tag_ids it is given, so posting again silently stacked a
+ * second category onto the prompt and the change could never be undone. Costs one
+ * listing per affected project; the tag writes are batched per project.
  *
  * Two independent switches suppress that end-of-call publish:
  *   - `body.deferPublish` (serenity-docs#32 CSV-chunking): a draft-only write;
@@ -1322,6 +1512,16 @@ export async function handleCreatePrompts(
     log,
     { originValue, sourceValue: PROXY_CREATE_SOURCE_VALUE },
   );
+  // UPSERT: the same injector built for an EDIT — no `originValue`/`sourceValue`,
+  // so `source` is left untouched (see makePromptTagInjector's contract and
+  // handleUpdatePrompt, which builds it the same way). The stored producer is
+  // carried over explicitly by `carryOverTagIdsOf` instead.
+  const injectStoredTags = makePromptTagInjector(
+    transport,
+    semrushWorkspaceId,
+    classifyPromptType,
+    log,
+  );
   // Unified layer (serenity-docs#32): batch-classify every distinct text ONCE
   // under the shared request deadline, then thread the resolved map into each
   // per-item injection below (a per-item LLM call would be far too slow).
@@ -1342,8 +1542,40 @@ export async function handleCreatePrompts(
   );
   const injectComputedIntent = makeIntentInjector(transport, semrushWorkspaceId, intentByText, log);
 
-  const results = await mapLimit(inputs, BULK_CREATE_CONCURRENCY, async (raw) => {
-    const { value: input, reason } = normalizePromptInput(raw);
+  // UPSERT: normalize once up front so every input's owning project is known
+  // before the fan-out, then index each affected project's prompts a single time.
+  const normalizedInputs = inputs.map((raw) => {
+    const { value, reason } = normalizePromptInput(raw);
+    const project = value
+      ? projectsBySlice.get(`${value.geoTargetId}:${value.languageCode}`)
+      : undefined;
+    return {
+      raw,
+      input: value,
+      reason,
+      projectId: project ? project.getSemrushProjectId() : null,
+    };
+  });
+  /** @type {Map<string, { byText: Map<string, any>, byLower: Map<string, any> }>} */
+  const promptIndexByProject = new Map();
+  await Promise.all(
+    [...new Set(normalizedInputs.map((n) => n.projectId).filter(Boolean))].map(
+      async (projectId) => {
+        promptIndexByProject.set(
+          /** @type {string} */ (projectId),
+          await buildExistingPromptIndex(
+            transport,
+            semrushWorkspaceId,
+            /** @type {string} */ (projectId),
+            log,
+          ),
+        );
+      },
+    ),
+  );
+
+  const results = await mapLimit(normalizedInputs, BULK_CREATE_CONCURRENCY, async (entry) => {
+    const { raw, input, reason } = entry;
     if (!input) {
       return {
         skipped: {
@@ -1352,8 +1584,7 @@ export async function handleCreatePrompts(
         },
       };
     }
-    const project = projectsBySlice.get(`${input.geoTargetId}:${input.languageCode}`);
-    if (!project) {
+    if (!entry.projectId) {
       return {
         skipped: {
           text: input.text,
@@ -1361,8 +1592,35 @@ export async function handleCreatePrompts(
         },
       };
     }
-    const projectId = project.getSemrushProjectId();
+    const { projectId } = entry;
+    const stored = findStoredPrompt(promptIndexByProject.get(projectId), input.text);
     try {
+      if (stored) {
+        // REPLACE the existing prompt's tags. The stored authorship rides along so
+        // the full replace cannot strip it; deduped because a caller that supplied
+        // one of those ids itself would otherwise write it twice.
+        //
+        // `source` is dropped from the input: it is a per-item CREATE override
+        // (LLMO-6556), and leaving it on would make the injector resolve-and-append
+        // ITS source id next to the carried-over stored one — two values in a
+        // dimension that must hold exactly one. PATCH never carries it either.
+        const { source: _, ...editable } = input;
+        let typed = await injectStoredTags(projectId, {
+          ...editable,
+          tagIds: [...new Set([...input.tagIds, ...stored.carryOverTagIds])],
+        });
+        typed = await injectComputedIntent(projectId, typed);
+        return {
+          updated: {
+            semrushPromptId: stored.semrushPromptId,
+            geoTargetId: typed.geoTargetId,
+            languageCode: input.languageCode,
+            text: typed.text,
+            tagIds: typed.tagIds,
+          },
+          affectedProjectId: projectId,
+        };
+      }
       // Unified layer: strip caller-supplied type/origin/source/intent, then inject
       // the computed type, derived origin, producing source, and classified intent.
       // The two injectors act on disjoint dimensions, so chaining composes cleanly.
@@ -1412,26 +1670,90 @@ export async function handleCreatePrompts(
   });
 
   const created = [];
+  const updated = [];
   const skipped = [];
   const failed = [];
   const affectedProjectIds = [];
+  /** @type {Map<string, Array<{ semrushPromptId: string, tagIds: string[] }>>} */
+  const updatesByProject = new Map();
+  // Collapsed by upstream prompt id, LAST ROW WINS. Two rows carrying the same text
+  // resolve to the SAME stored prompt, so without this the replace batch would carry
+  // two items for one id — and upstream tie-breaking within a single atomic batch is
+  // not pinned by the vendor contract, so the surviving tag set would be arbitrary.
+  // Collapsing here rather than just before the write also keeps `updated` honest:
+  // one prompt changed is one entry, not two. Mirrors the create path, where upstream
+  // folds a repeated text into `existing_count`.
+  /** @type {Map<string, { projectId: string, entry: any }>} */
+  const updatedById = new Map();
   for (const r of results) {
     if (r.created) {
       // `rollbackProjectId` is internal bookkeeping for reconcilePublishErrors' rollback below;
       // stripped before the response is returned.
       created.push({ ...r.created, rollbackProjectId: r.affectedProjectId });
       affectedProjectIds.push(r.affectedProjectId);
+    } else if (r.updated) {
+      // NO `rollbackProjectId`: reconcilePublishErrors rolls a quota-rejected
+      // project back by DELETING what this request staged, and an updated prompt
+      // pre-existed the request.
+      updatedById.set(r.updated.semrushPromptId, {
+        projectId: r.affectedProjectId,
+        entry: r.updated,
+      });
     } else if (r.skipped) {
       skipped.push(r.skipped);
     } else if (r.failed) {
       failed.push(r.failed);
     }
   }
+  for (const { projectId, entry } of updatedById.values()) {
+    updated.push(entry);
+    affectedProjectIds.push(projectId);
+    const pending = updatesByProject.get(projectId) ?? [];
+    pending.push({ semrushPromptId: entry.semrushPromptId, tagIds: entry.tagIds });
+    updatesByProject.set(projectId, pending);
+  }
+
+  // One batched replace-mode tag write per project — the upstream write takes an
+  // array, so a chunk touching N existing prompts costs one call, not N.
+  await Promise.all([...updatesByProject].map(async ([projectId, pending]) => {
+    try {
+      await applyUpsertTagWrites(
+        transport,
+        semrushWorkspaceId,
+        projectId,
+        pending,
+        callerId,
+        log,
+      );
+    } catch (e) {
+      // The project's batch failed whole, so none of its tags moved — never report
+      // an update that did not land.
+      const quota = isMeteredQuota(e);
+      if (quota) {
+        await alertQuotaRejection({
+          orgId, brandId, workspaceId: semrushWorkspaceId, caseType: 'brandCarveExhausted', dimension: 'prompts',
+        }, env, log);
+      }
+      for (let i = updated.length - 1; i >= 0; i -= 1) {
+        if (pending.some((p) => p.semrushPromptId === updated[i].semrushPromptId)) {
+          const [item] = updated.splice(i, 1);
+          failed.push({
+            text: item.text,
+            geoTargetId: item.geoTargetId,
+            languageCode: item.languageCode,
+            status: quota ? 409 : (e.status || 500),
+            ...(quota ? { error: ERROR_CODES.QUOTA_EXCEEDED } : {}),
+            message: redactUpstreamMessage(e),
+          });
+        }
+      }
+    }
+  }));
 
   // Tag cache invalidation: a new prompt may introduce a new tag (or
   // resurrect a tag whose last prompt was previously deleted), so any
   // project that received a successful create must drop its cached
-  // tag set on this container.
+  // tag set on this container. An upsert resolves-or-creates a category too.
   for (const pid of new Set(affectedProjectIds)) {
     invalidateTagCacheForProject(semrushWorkspaceId, pid);
   }
@@ -1440,11 +1762,16 @@ export async function handleCreatePrompts(
   // later non-deferred call; return early flagged not-published.
   if (deferPublish) {
     log?.info?.('serenity create-prompts: deferPublish set — prompts written as draft, publish skipped', {
-      brandId, created: created.length, skipped: skipped.length, failed: failed.length,
+      brandId,
+      created: created.length,
+      updated: updated.length,
+      skipped: skipped.length,
+      failed: failed.length,
     });
     return {
       // eslint-disable-next-line no-unused-vars -- omit the bookkeeping field
       created: created.map(({ rollbackProjectId, ...rest }) => rest),
+      updated,
       skipped,
       failed,
       published: false,
@@ -1481,6 +1808,7 @@ export async function handleCreatePrompts(
   return {
     // eslint-disable-next-line no-unused-vars -- destructuring-omit to strip the bookkeeping field
     created: created.map(({ rollbackProjectId, ...rest }) => rest),
+    updated,
     skipped,
     failed,
     published: true,

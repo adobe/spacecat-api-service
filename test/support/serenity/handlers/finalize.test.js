@@ -135,6 +135,22 @@ describe('finalizeSerenityProjects (publish-after-populate)', () => {
     expect(out.published).to.be.empty;
   });
 
+  it('still publishes when every prompt UPSERTED rather than being created', async () => {
+    // handleCreatePrompts is an upsert, so a re-fire against a brand whose prompts
+    // already exist reports them in `updated` with `created` empty. Gating on
+    // `created` alone would read a fully populated project as "every push failed".
+    handleCreatePrompts.resolves({
+      created: [], updated: [{ text: 'q' }], skipped: [], failed: [],
+    });
+    const body = {
+      prompts: [{ text: 'q', geoTargetId: 2840, languageCode: 'en' }],
+      models: [{ geoTargetId: 2840, languageCode: 'en', modelIds: ['m1'] }],
+    };
+    const out = await finalizeSerenityProjects(transport, dataAccess, BRAND, WS, body, noopLog);
+    expect(transport.publishProject).to.have.been.calledOnceWith(WS, 'proj-1');
+    expect(out.publishSkipped).to.be.empty;
+  });
+
   it('skips publish for a project with no models set (noModels)', async () => {
     // prompts ok, but no models supplied at all
     const body = { prompts: [{ text: 'q', geoTargetId: 2840, languageCode: 'en' }] };
