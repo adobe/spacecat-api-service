@@ -174,8 +174,25 @@ describe('LlmoController — onboardSiteOnly (LLMO-5606)', () => {
         organizationId: 'org123',
         baseURL: 'https://example.com',
         dataFolder: 'dev/example-com',
+        detectedCdn: null,
         status: 'processing',
       });
+    });
+
+    it('echoes a non-null detectedCdn from performLlmoOnboarding (LLMO client CDN pre-fill)', async () => {
+      performLlmoOnboardingStub.resolves({
+        siteId: 'site123',
+        organizationId: 'org123',
+        baseURL: 'https://example.com',
+        dataFolder: 'dev/example-com',
+        detectedCdn: 'cloudflare',
+        message: 'LLMO onboarding completed successfully',
+      });
+
+      const res = await invoke();
+
+      const body = await res.json();
+      expect(body.detectedCdn).to.equal('cloudflare');
     });
 
     it('threads siteOnly: true into performLlmoOnboarding and passes no `say`', async () => {
