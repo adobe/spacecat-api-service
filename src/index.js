@@ -104,6 +104,7 @@ import ImsOrgAccessController from './controllers/ims-org-access.js';
 import FeatureFlagsController from './controllers/feature-flags.js';
 import AutofixChecksController from './controllers/autofix-checks.js';
 import DrsBpPgAuditController from './controllers/drs-bp-pg-audit.js';
+import LaunchDarklyController from './controllers/launchdarkly.js';
 import routeRequiredCapabilities, { INTERNAL_ROUTES } from './routes/required-capabilities.js';
 import routeFacsCapabilities from './routes/facs-capabilities.js';
 import { secondaryResolvers } from './support/facs-secondary-resolvers.js';
@@ -306,6 +307,7 @@ async function run(request, context) {
     const taskManagementController = TaskManagementController(context);
     const onboardingController = OnboardingController(context, log, context.env);
     const promptSuggestionSchedulesController = PromptSuggestionSchedulesController(context);
+    const launchDarklyController = LaunchDarklyController(context);
 
     const routeHandlers = getRouteHandlers(
       auditsController,
@@ -376,6 +378,7 @@ async function run(request, context) {
       redirectsController,
       auditPolicyController,
       promptSuggestionSchedulesController,
+      launchDarklyController,
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);

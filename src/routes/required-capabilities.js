@@ -180,6 +180,9 @@ export const INTERNAL_ROUTES = [
   'GET /tools/api-keys',
   // URL preview proxy - UI-only utility for iframe rendering; not for S2S consumers
   'GET /tools/proxy',
+  // LaunchDarkly raw flag passthrough - admin-only via hasAdminAccess(); exploratory
+  // internal tooling endpoint, not for S2S consumers
+  'GET /tools/launchdarkly/flags',
   // Insights orchestration - admin-only via hasAdminAccess(); not for S2S consumers
   'POST /ephemeral-run/batch',
   'GET /ephemeral-run/batch/:batchId/status',
