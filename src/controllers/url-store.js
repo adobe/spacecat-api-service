@@ -35,10 +35,38 @@ const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 500;
 
 /**
+ * Returns the canonical short form for a YouTube watch URL, or null if `urlObj` is not a
+ * YouTube watch URL carrying a `v` video id.
+ *
+ * YouTube watch URLs (youtube.com/watch?v=VIDEO_ID) identify the video via the `v` query
+ * param, which the generic canonicalization below strips — collapsing every video to
+ * https://www.youtube.com/watch. We instead convert to the short form
+ * https://youtu.be/VIDEO_ID (id in the path, so it survives query stripping). This mirrors
+ * the spacecat-audit-worker offsite-brand-presence `normalizeYoutubeUrl`, so a video added
+ * by a customer and the same video discovered by brand-presence map to the same row.
+ *
+ * @param {URL} urlObj - Parsed URL (hostname already lowercased)
+ * @returns {string|null} - `https://youtu.be/<id>`, or null when not an applicable URL
+ */
+function youTubeWatchShortForm(urlObj) {
+  const isYouTubeHost = urlObj.hostname === 'youtube.com'
+    || urlObj.hostname.endsWith('.youtube.com');
+  const isWatchPath = urlObj.pathname === '/watch' || urlObj.pathname === '/watch/';
+  if (isYouTubeHost && isWatchPath) {
+    const videoId = urlObj.searchParams.get('v');
+    if (videoId && /^[A-Za-z0-9_-]+$/.test(videoId)) {
+      return `https://youtu.be/${videoId}`;
+    }
+  }
+  return null;
+}
+
+/**
  * Canonicalizes a URL by:
  * - Lowercasing the hostname
  * - Stripping port, trailing dot, trailing slash
- * - Removing query parameters
+ * - Removing query parameters (YouTube watch URLs are first converted to the
+ *   https://youtu.be/<id> short form so the video id is not lost)
  * - Prepending https:// schema if missing
  * @param {string} url - The URL to canonicalize
  * @returns {string} - Canonicalized URL
@@ -52,6 +80,14 @@ function canonicalizeUrl(url) {
 
   // Remove port
   urlObj.port = '';
+
+  // YouTube watch URLs carry the video id in the `v` query param, which the query strip
+  // below would drop. Convert to the https://youtu.be/<id> short form (already https, no
+  // trailing slash) and return early.
+  const youTubeShortForm = youTubeWatchShortForm(urlObj);
+  if (youTubeShortForm) {
+    return youTubeShortForm;
+  }
 
   // Remove query parameters
   urlObj.search = '';
