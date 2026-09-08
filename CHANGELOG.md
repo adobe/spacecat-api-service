@@ -1,3 +1,10 @@
+## [1.798.1](https://github.com/adobe/spacecat-api-service/compare/v1.798.0...v1.798.1) (2026-09-08)
+
+
+### Bug Fixes
+
+* **dto:** back-fill legacy top-level documentPath from v2 changeDetails.target (SITES-49140) ([#3186](https://github.com/adobe/spacecat-api-service/issues/3186)) ([4a78188](https://github.com/adobe/spacecat-api-service/commit/4a78188263fbe60524bf35e553c84b87e10872cb))
+
 # [1.798.0](https://github.com/adobe/spacecat-api-service/compare/v1.797.1...v1.798.0) (2026-09-08)
 
 
