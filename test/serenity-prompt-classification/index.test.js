@@ -41,7 +41,9 @@ describe('serenity-prompt-classification worker entry', () => {
   let sandbox;
   let exchangeAndPersistStub;
   let invalidateStub;
+  let isRetryableJobError;
   let NeedsReauthError;
+  let retryableJobError;
   let run;
 
   let classifyPromptsHandlerStub;
@@ -54,12 +56,17 @@ describe('serenity-prompt-classification worker entry', () => {
     classifyPromptsHandlerStub = sandbox.stub().resolves({ created: [] });
     bulkTagsHandlerStub = sandbox.stub().resolves({ outcome: 'SUCCEEDED' });
 
-    ({ NeedsReauthError } = await import('../../src/support/serenity/async-job-runner.js'));
+    ({
+      NeedsReauthError,
+      isRetryableJobError,
+      retryableJobError,
+    } = await import('../../src/support/serenity/async-job-runner.js'));
 
     ({ run } = await esmock('../../src/serenity-prompt-classification/index.js', {
       '../../src/support/serenity/async-job-runner.js': {
         exchangeAndPersistPromiseToken: exchangeAndPersistStub,
         invalidateJobPromiseToken: invalidateStub,
+        isRetryableJobError,
         NeedsReauthError,
       },
       '../../src/support/serenity/handlers/classify-prompts-job.js': {
@@ -153,22 +160,19 @@ describe('serenity-prompt-classification worker entry', () => {
     expect(job.save).to.have.been.called;
   });
 
-  it('transfers token ownership when a bulk publish recovery job is requeued', async () => {
+  it('leaves a bulk job IN_PROGRESS and rethrows when the handler requests SQS retry', async () => {
     const job = makeJob();
     const context = makeContext(job);
     exchangeAndPersistStub.resolves('access-token');
-    bulkTagsHandlerStub.resolves({
-      outcome: 'PARTIAL_FAILURE',
-      requeuedJobId: 'bulk-publish-recovery',
-    });
+    bulkTagsHandlerStub.rejects(retryableJobError('retry publish'));
 
-    await run({ jobId: 'job-123', type: 'serenity-bulk-tags' }, context);
+    await expect(run({ jobId: 'job-123', type: 'serenity-bulk-tags' }, context))
+      .to.be.rejectedWith('retry publish');
 
     expect(bulkTagsHandlerStub).to.have.been.calledOnceWith(context, job, 'access-token');
-    expect(job.getStatus()).to.equal('COMPLETED');
-    expect(job.getResult().requeuedJobId).to.equal('bulk-publish-recovery');
+    expect(job.getStatus()).to.equal('IN_PROGRESS');
+    expect(job.getResult()).to.equal(undefined);
     expect(invalidateStub).not.to.have.been.called;
-    expect(job.save).to.have.been.called;
   });
 
   it('marks the job FAILED with JOB_FAILED when the handler throws', async () => {

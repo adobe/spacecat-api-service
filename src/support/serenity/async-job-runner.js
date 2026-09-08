@@ -69,6 +69,20 @@ export class NeedsReauthError extends Error {
   }
 }
 
+export function retryableJobError(message, cause) {
+  const error = new Error(message, { cause });
+  error.name = 'RetryableJobError';
+  /** @type {any} */ (error).code = 'RETRY_JOB';
+  /** @type {any} */ (error).retryJob = true;
+  return error;
+}
+
+export function isRetryableJobError(error) {
+  return error instanceof Error
+    && /** @type {any} */ (error).code === 'RETRY_JOB'
+    && /** @type {any} */ (error).retryJob === true;
+}
+
 const REAUTH_STATUS_PATTERN = /status: (401|403)\b/;
 
 /**

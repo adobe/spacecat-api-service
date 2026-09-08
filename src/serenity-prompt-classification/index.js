@@ -24,6 +24,7 @@ import sqs from '../support/sqs.js';
 import {
   exchangeAndPersistPromiseToken,
   invalidateJobPromiseToken,
+  isRetryableJobError,
   NeedsReauthError,
 } from '../support/serenity/async-job-runner.js';
 import {
@@ -175,6 +176,10 @@ export async function run(message, context) {
     // would also kill the requeued job's copy before it ever runs.
     tokenOwnershipTransferred = Boolean(result?.requeuedJobId);
   } catch (error) {
+    if (isRetryableJobError(error)) {
+      log.warn(`[serenity-job-runner] Job ${jobId} remains IN_PROGRESS for SQS retry: ${error.message}`);
+      throw error;
+    }
     log.error(`[serenity-job-runner] Job ${jobId} failed: ${error.message}`);
     job.setStatus('FAILED');
     job.setError({

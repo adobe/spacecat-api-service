@@ -3331,7 +3331,6 @@ describe('SerenityController', () => {
         const controller = SerenityController({ env: {} }, fakeLog(), {});
         const result = {
           outcome: 'PARTIAL_FAILURE',
-          requeuedJobId: '11111111-1111-4111-8111-111111111111',
           matchedCount: 2,
           updatedCount: 1,
           unchangedCount: 0,
@@ -3356,31 +3355,7 @@ describe('SerenityController', () => {
         expect(body.jobType).to.equal('bulkTags');
         expect(body.status).to.equal('COMPLETED');
         expect(body.result.outcome).to.equal('PARTIAL_FAILURE');
-        expect(body.result.requeuedJobId)
-          .to.equal('11111111-1111-4111-8111-111111111111');
         expect(body.error).to.equal(null);
-      });
-
-      it('allows the originating brand to poll a returned bulk publish-recovery job id', async () => {
-        const recoveryJobId = '11111111-1111-4111-8111-111111111111';
-        const controller = SerenityController({ env: {} }, fakeLog(), {});
-        const response = await controller.getPromptsJobStatus(
-          ctxWithJob(makeAsyncJob({
-            id: recoveryJobId,
-            status: 'IN_PROGRESS',
-            jobType: 'serenity-bulk-tags',
-            brandId: BRAND,
-          }), { jobId: recoveryJobId }),
-        );
-
-        expect(response.status).to.equal(200);
-        expect(await readBody(response)).to.deep.equal({
-          jobId: recoveryJobId,
-          jobType: 'bulkTags',
-          status: 'IN_PROGRESS',
-          result: null,
-          error: null,
-        });
       });
 
       it('sanitizes a FAILED job error to the documented public envelope', async () => {

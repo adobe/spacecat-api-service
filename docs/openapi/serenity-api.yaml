@@ -361,10 +361,10 @@ v2-serenity-prompts-bulk-tags:
       same unexpired key and canonical request returns the original job/result.
       A request with a new key (or no key) creates a new worker-time evaluation.
       Publish is project-wide and occurs only when at least one prompt update
-      landed. A failed publish creates a bounded publish-only recovery job using
-      the current worker credential chain; `result.requeuedJobId` identifies it.
-      Recovery never reapplies the prompt mutation. Zero-match and unchanged-only
-      jobs do not publish.
+      landed. A failed publish leaves the same job `IN_PROGRESS` and triggers a
+      bounded SQS retry in a persisted publish-only phase. Recovery never
+      reapplies the prompt mutation. Zero-match and unchanged-only jobs do not
+      publish.
     operationId: bulkTagSerenityPrompts
     security:
       - session_token: []
@@ -448,8 +448,8 @@ v2-serenity-prompts-job-by-id:
       the project publish succeeded. For `bulkTags`, inspect
       `result.outcome`: `PARTIAL_FAILURE` accompanies item failures and/or a
       failed publish, with item details paged through `failureCursor`.
-      `result.publish.state=SKIPPED` means no update landed. A failed publish can
-      return `result.requeuedJobId` for its bounded publish-only recovery job.
+      `result.publish.state=SKIPPED` means no update landed. Transient publish
+      failures keep the job `IN_PROGRESS` while bounded publish-only retries run.
     operationId: getSerenityPromptsJobStatus
     security:
       - session_token: []

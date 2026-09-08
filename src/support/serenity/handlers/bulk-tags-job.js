@@ -18,7 +18,7 @@ import { createSerenityTransport } from '../rest-transport.js';
 import { ERROR_CODES, isUpstreamGone } from '../errors.js';
 import { resolveProject } from '../subworkspace-projects.js';
 import { readTagTreeSnapshot, incompatibleTaxonomyError } from '../tag-tree.js';
-import { createAndEnqueueJob } from '../async-job-runner.js';
+import { createAndEnqueueJob, retryableJobError } from '../async-job-runner.js';
 import {
   assertPromptTagLimit,
   BULK_CREATE_CONCURRENCY,
@@ -169,16 +169,24 @@ function acceptedJobResponse(job, replayed) {
 }
 
 /**
- * Enqueues a publish-only follow-up while transferring the current job's
- * already-exchanged promise token. The depth cap prevents a persistent upstream
- * publish failure from creating an unbounded job chain.
+ * Persists a publish-only resume phase, then fails the current SQS delivery so
+ * the same IN_PROGRESS job is retried. The existing job id remains the polling
+ * handle and no credential handoff or second-job enqueue is required.
  *
  * @param {object} context
- * @param {object} job
+ * @param {{
+ *   getId: () => string,
+ *   getResult?: () => object | null,
+ *   setMetadata: (metadata: object) => void,
+ *   setResult: (result: object) => void,
+ *   save: () => Promise<void>,
+ * }} job
  * @param {object} metadata
- * @returns {Promise<string | null>}
+ * @param {object} result
+ * @param {unknown} cause
+ * @returns {Promise<boolean>}
  */
-async function requeuePublishRecovery(context, job, metadata) {
+async function retryFailedPublish(context, job, metadata, result, cause) {
   const recoveryDepth = Number.isInteger(metadata.publishRecoveryDepth)
     ? metadata.publishRecoveryDepth
     : 0;
@@ -187,21 +195,16 @@ async function requeuePublishRecovery(context, job, metadata) {
       `[serenity-bulk-tags] Publish recovery depth ${recoveryDepth} reached max `
       + `${MAX_PUBLISH_RECOVERY_DEPTH} for job ${job.getId()}`,
     );
-    return null;
+    return false;
   }
-  const recoveryJob = await createAndEnqueueJob(context, {
-    jobType: BULK_TAGS_JOB_TYPE,
-    promiseToken: metadata.promiseToken,
-    promisePair: metadata.promisePair,
-    metadata: {
-      brandId: metadata.brandId,
-      workspaceId: metadata.workspaceId,
-      projectId: metadata.projectId,
-      publishRecoveryPending: true,
-      publishRecoveryDepth: recoveryDepth + 1,
-    },
+  job.setMetadata({
+    ...metadata,
+    publishRecoveryPending: true,
+    publishRecoveryDepth: recoveryDepth + 1,
   });
-  return recoveryJob.getId();
+  job.setResult(result);
+  await job.save();
+  throw retryableJobError('Project publish failed; retrying publish-only phase', cause);
 }
 
 /**
@@ -222,34 +225,38 @@ async function recoverFailedPublish(context, job, metadata, transport) {
     metadata.projectId ? [metadata.projectId] : [],
     context.log,
   );
-  if (publishErrors.length === 0) {
-    return {
-      outcome: 'SUCCEEDED',
-      matchedCount: 0,
-      updatedCount: 0,
-      unchangedCount: 0,
-      failureCount: 0,
-      failures: [],
-      publish: { state: 'SUCCEEDED', error: null },
-    };
-  }
-  const requeuedJobId = await requeuePublishRecovery(context, job, metadata);
-  return {
-    outcome: 'PARTIAL_FAILURE',
+  const result = job.getResult?.() ?? {
     matchedCount: 0,
     updatedCount: 0,
     unchangedCount: 0,
     failureCount: 0,
     failures: [],
+  };
+  if (publishErrors.length === 0) {
+    return {
+      ...result,
+      outcome: result.failureCount === 0 ? 'SUCCEEDED' : 'PARTIAL_FAILURE',
+      publish: { state: 'SUCCEEDED', error: null },
+    };
+  }
+  const retrying = await retryFailedPublish(
+    context,
+    job,
+    metadata,
+    result,
+    publishErrors[0],
+  );
+  return {
+    ...result,
+    outcome: 'PARTIAL_FAILURE',
     publish: {
       state: 'FAILED',
       error: {
         code: ERROR_CODES.SERENITY_UPSTREAM_ERROR,
         message: 'The project could not be published',
-        retryable: requeuedJobId !== null,
+        retryable: retrying,
       },
     },
-    ...(requeuedJobId ? { requeuedJobId } : {}),
   };
 }
 
@@ -589,9 +596,12 @@ export async function handleBulkTagsSubworkspace(
 /**
  * @param {object} context
  * @param {{
+ *   getId: () => string,
  *   getMetadata: () => any,
- *   setMetadata?: (metadata: object) => void,
- *   save?: () => Promise<void>,
+ *   getResult?: () => object | null,
+ *   setMetadata: (metadata: object) => void,
+ *   setResult: (result: object) => void,
+ *   save: () => Promise<void>,
  * }} job
  * @param {string} accessToken
  * @param {SerenityTransport} [injectedTransport]
@@ -727,7 +737,6 @@ export async function bulkTagsHandler(context, job, accessToken, injectedTranspo
    *   error: null | { code: string, message: string, retryable: boolean },
    * }} */
   let publish = { state: 'SKIPPED', error: null };
-  let requeuedJobId = null;
   if (updatedCount > 0) {
     const publishErrors = await publishAffected(
       transport,
@@ -738,13 +747,20 @@ export async function bulkTagsHandler(context, job, accessToken, injectedTranspo
     if (publishErrors.length === 0) {
       publish = { state: 'SUCCEEDED', error: null };
     } else {
-      requeuedJobId = await requeuePublishRecovery(context, job, metadata);
+      const result = {
+        matchedCount: workItems.length,
+        updatedCount,
+        unchangedCount,
+        failureCount: failures.length,
+        failures,
+      };
+      await retryFailedPublish(context, job, metadata, result, publishErrors[0]);
       publish = {
         state: 'FAILED',
         error: {
           code: ERROR_CODES.SERENITY_UPSTREAM_ERROR,
           message: 'The project could not be published',
-          retryable: requeuedJobId !== null,
+          retryable: false,
         },
       };
     }
@@ -759,7 +775,6 @@ export async function bulkTagsHandler(context, job, accessToken, injectedTranspo
     failureCount: failures.length,
     failures,
     publish,
-    ...(requeuedJobId ? { requeuedJobId } : {}),
   };
 }
 
