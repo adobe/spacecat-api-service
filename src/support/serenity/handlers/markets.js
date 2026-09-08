@@ -81,8 +81,11 @@ export function clearLanguageCache() {
  * fallback. `languageCode` is expected already normalized by the caller via
  * `normalizeLanguageCode` (lowercased, `LANGUAGE_TAG_REGEX`-validated); the
  * catalog's `code` is lowercased on the way into the cache so a live-catalog
- * value like `zh-Hans` still matches the lowercase input `zh-hans`. An
- * unresolved code returns `null` (400 `unknownLanguage` at the call sites) —
+ * value like `zh-Hans` still matches the lowercase input `zh-hans`. Matching
+ * is intentionally case-insensitive regardless of caller normalization
+ * (BCP-47 tags are case-insensitive per RFC 5646) — this function does not
+ * rely on the caller having lowercased its input. An unresolved code returns
+ * `null` (400 `unknownLanguage` at the call sites) —
  * by design, per LLMO-7420: no Adobe-side mapping change should be needed
  * when Semrush adds or renames a language.
  * @param {SerenityTransport} transport
@@ -117,7 +120,7 @@ export async function resolveLanguageId(transport, languageCode, log) {
     }
     languageCache.expiresAt = now + LANGUAGE_CACHE_TTL_MS;
   }
-  return languageCache.byCode.get(String(languageCode).toLowerCase()) || null;
+  return languageCache.byCode.get(String(languageCode).toLowerCase()) ?? null;
 }
 
 /**
@@ -1042,6 +1045,11 @@ export async function listLanguageCatalog(transport, log) {
       { droppedCount: usable.length - withCode.length },
     );
   }
+  // Pre-existing asymmetry, intentionally not tightened here: an entry with a `code` but no
+  // usable `id` still appears in this catalog listing (id: null), but resolveLanguageId's
+  // byCode map only admits entries where BOTH id and code are present, so such an entry can
+  // never actually resolve. A caller offering this list as picker options can surface a
+  // language that then 400s unknownLanguage at create time.
   const items = withCode
     .map((l) => ({
       id: hasText(l.id) ? String(l.id) : null,
