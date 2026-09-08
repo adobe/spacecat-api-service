@@ -4542,10 +4542,13 @@ describe('LlmoController', () => {
       };
     });
 
-    it('validates LLMO access, triggers the audit, and returns 202', async () => {
+    it('validates LLMO access, triggers the prerequisite + claims audits, and returns 202', async () => {
       const result = await controller.requestBrandClaims(reqCtx);
       expect(result.status).to.equal(202);
-      expect(reqCtx.sqs.sendMessage).to.have.been.calledOnce;
+      // Prerequisite audits (offsite-brand-presence, wikipedia-analysis) fire before brand-claims.
+      expect(reqCtx.sqs.sendMessage).to.have.been.calledThrice;
+      const types = reqCtx.sqs.sendMessage.getCalls().map((c) => c.args[1].type);
+      expect(types).to.deep.equal(['offsite-brand-presence', 'wikipedia-analysis', 'brand-claims']);
     });
 
     it('returns 403 when LLMO access validation fails', async () => {
