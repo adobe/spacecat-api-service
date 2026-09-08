@@ -34,6 +34,9 @@ import {
   reconcilePublishErrors,
   resolveSort,
   buildUpdateMetadata,
+  buildExistingPromptIndex,
+  findStoredPrompt,
+  applyUpsertTagWrites,
   DEFAULT_PAGE_LIMIT,
   MAX_PAGE_LIMIT,
   MAX_TAG_IDS,
@@ -221,6 +224,14 @@ export async function handleCreatePromptsSubworkspace(
       normalizeCustomerTags: true,
     },
   );
+  // UPSERT: the EDIT-shaped injector (no originValue/sourceValue). Lockstep with
+  // the flat twin handleCreatePrompts.
+  const injectStoredTags = makePromptTagInjector(
+    transport,
+    workspaceId,
+    classifyPromptType,
+    log,
+  );
   // Unified layer (serenity-docs#32): batch-classify every distinct text ONCE
   // under the shared request deadline, then thread the resolved map into each
   // per-item injection below.
@@ -241,8 +252,37 @@ export async function handleCreatePromptsSubworkspace(
   );
   const injectComputedIntent = makeIntentInjector(transport, workspaceId, intentByText, log);
 
-  const results = await mapLimit(inputs, BULK_CREATE_CONCURRENCY, async (raw) => {
-    const { value: input, reason } = normalizePromptInput(raw);
+  // UPSERT — lockstep with the flat twin handleCreatePrompts; see its docblock for
+  // why a repeated text must REPLACE tags rather than be posted again.
+  const normalizedInputs = inputs.map((raw) => {
+    const { value, reason } = normalizePromptInput(raw);
+    const project = value
+      ? projectsBySlice.get(sliceKey(value.geoTargetId, value.languageCode))
+      : undefined;
+    return {
+      raw, input: value, reason, projectId: project ? String(project.id) : null,
+    };
+  });
+  /** @type {Map<string, { byText: Map<string, any>, byLower: Map<string, any> }>} */
+  const promptIndexByProject = new Map();
+  await Promise.all(
+    [...new Set(normalizedInputs.map((n) => n.projectId).filter(Boolean))].map(
+      async (projectId) => {
+        promptIndexByProject.set(
+          /** @type {string} */ (projectId),
+          await buildExistingPromptIndex(
+            transport,
+            workspaceId,
+            /** @type {string} */ (projectId),
+            log,
+          ),
+        );
+      },
+    ),
+  );
+
+  const results = await mapLimit(normalizedInputs, BULK_CREATE_CONCURRENCY, async (entry) => {
+    const { raw, input, reason } = entry;
     if (!input) {
       return {
         skipped: {
@@ -251,8 +291,7 @@ export async function handleCreatePromptsSubworkspace(
         },
       };
     }
-    const project = projectsBySlice.get(sliceKey(input.geoTargetId, input.languageCode));
-    if (!project) {
+    if (!entry.projectId) {
       return {
         skipped: {
           text: input.text,
@@ -260,12 +299,33 @@ export async function handleCreatePromptsSubworkspace(
         },
       };
     }
-    const projectId = String(project.id);
+    const { projectId } = entry;
+    const stored = findStoredPrompt(promptIndexByProject.get(projectId), input.text);
     try {
-      // Unified layer: strip caller-supplied type/source/intent, then inject the
-      // computed type + independent `origin`/`source` values and
-      // the classified intent (serenity-docs#32). The injectors act on disjoint
-      // dimensions.
+      if (stored) {
+        // REPLACE the existing prompt's tags; stored authorship rides along.
+        // `source` is dropped for the same reason as the flat twin: a per-item
+        // CREATE override would resolve a second value into a one-value dimension.
+        const { source: _, ...editable } = input;
+        let typed = await injectStoredTags(projectId, {
+          ...editable,
+          tagIds: [...new Set([...input.tagIds, ...stored.carryOverTagIds])],
+        });
+        typed = await injectComputedIntent(projectId, typed);
+        return {
+          updated: {
+            semrushPromptId: stored.semrushPromptId,
+            geoTargetId: typed.geoTargetId,
+            languageCode: input.languageCode,
+            text: typed.text,
+            tagIds: typed.tagIds,
+          },
+          affectedProjectId: projectId,
+        };
+      }
+      // Unified layer: strip caller-supplied type/origin/source/intent, then inject
+      // the computed type, derived origin, producing source, and classified intent.
+      // The injectors act on disjoint dimensions.
       let typed = await injectComputedTags(projectId, input);
       typed = await injectComputedIntent(projectId, typed);
       // Intentional (not an inconsistency to fix): each item stamps its OWN
@@ -316,21 +376,70 @@ export async function handleCreatePromptsSubworkspace(
   });
 
   const created = [];
+  const updated = [];
   const skipped = [];
   const failed = [];
   const affectedProjectIds = [];
+  /** @type {Map<string, Array<{ semrushPromptId: string, tagIds: string[] }>>} */
+  const updatesByProject = new Map();
+  // Collapsed by upstream prompt id, LAST ROW WINS — see the flat twin
+  // handleCreatePrompts for why (duplicate ids in one atomic replace batch are
+  // undefined upstream, and `updated` must not count one prompt twice).
+  /** @type {Map<string, { projectId: string, entry: any }>} */
+  const updatedById = new Map();
   for (const r of results) {
     if (r.created) {
       // `rollbackProjectId` is internal bookkeeping for reconcilePublishErrors' rollback below;
       // stripped before the response is returned.
       created.push({ ...r.created, rollbackProjectId: r.affectedProjectId });
       affectedProjectIds.push(r.affectedProjectId);
+    } else if (r.updated) {
+      // NO `rollbackProjectId` — the quota rollback DELETEs, and an updated prompt
+      // pre-existed this request.
+      updatedById.set(r.updated.semrushPromptId, {
+        projectId: r.affectedProjectId,
+        entry: r.updated,
+      });
     } else if (r.skipped) {
       skipped.push(r.skipped);
     } else if (r.failed) {
       failed.push(r.failed);
     }
   }
+  for (const { projectId, entry } of updatedById.values()) {
+    updated.push(entry);
+    affectedProjectIds.push(projectId);
+    const pending = updatesByProject.get(projectId) ?? [];
+    pending.push({ semrushPromptId: entry.semrushPromptId, tagIds: entry.tagIds });
+    updatesByProject.set(projectId, pending);
+  }
+
+  // One batched replace-mode tag write per project.
+  await Promise.all([...updatesByProject].map(async ([projectId, pending]) => {
+    try {
+      await applyUpsertTagWrites(transport, workspaceId, projectId, pending, callerId, log);
+    } catch (e) {
+      const quota = isMeteredQuota(e);
+      if (quota) {
+        await alertQuotaRejection({
+          orgId, brandId, workspaceId, caseType: 'brandCarveExhausted', dimension: 'prompts',
+        }, env, log);
+      }
+      for (let i = updated.length - 1; i >= 0; i -= 1) {
+        if (pending.some((p) => p.semrushPromptId === updated[i].semrushPromptId)) {
+          const [item] = updated.splice(i, 1);
+          failed.push({
+            text: item.text,
+            geoTargetId: item.geoTargetId,
+            languageCode: item.languageCode,
+            status: quota ? 409 : (e.status || 500),
+            ...(quota ? { error: ERROR_CODES.QUOTA_EXCEEDED } : {}),
+            message: redactUpstreamMessage(e),
+          });
+        }
+      }
+    }
+  }));
 
   for (const pid of new Set(affectedProjectIds)) {
     invalidateTagCacheForProject(workspaceId, pid);
@@ -338,11 +447,16 @@ export async function handleCreatePromptsSubworkspace(
 
   if (deferPublish) {
     log?.info?.('serenity create-prompts (subworkspace): deferPublish set — prompts written as draft, publish skipped', {
-      workspaceId, created: created.length, skipped: skipped.length, failed: failed.length,
+      workspaceId,
+      created: created.length,
+      updated: updated.length,
+      skipped: skipped.length,
+      failed: failed.length,
     });
     return {
       // eslint-disable-next-line no-unused-vars -- omit the bookkeeping field
       created: created.map(({ rollbackProjectId, ...rest }) => rest),
+      updated,
       skipped,
       failed,
       published: false,
@@ -376,6 +490,7 @@ export async function handleCreatePromptsSubworkspace(
   return {
     // eslint-disable-next-line no-unused-vars -- destructuring-omit to strip the bookkeeping field
     created: created.map(({ rollbackProjectId, ...rest }) => rest),
+    updated,
     skipped,
     failed,
     published: true,

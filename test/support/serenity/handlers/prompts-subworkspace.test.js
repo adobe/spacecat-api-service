@@ -263,6 +263,101 @@ describe('prompts-subworkspace handlers', () => {
       expect(transport.createPromptsWithMetadata).not.to.have.been.called;
     });
 
+    // Lockstep with the flat twin: an existing text must REPLACE its tags rather
+    // than go down the create path, where the upstream write folds the text into
+    // `existing_count` but still attaches the tag ids — the accumulation bug.
+    it('REPLACES tags for a text the project already holds, instead of creating again', async () => {
+      const transport = makeTransport({
+        listPromptsByTags: sinon.stub().resolves({
+          items: [{
+            id: 'sem-existing',
+            name: 'p',
+            tags: [{
+              id: 'source-ai',
+              name: 'ai',
+              parent_id: TAG_IDS.sourceRoot,
+              path: [{ id: TAG_IDS.sourceRoot, name: 'source' }],
+            }],
+          }],
+        }),
+        updatePromptTagsByIds: sinon.stub().resolves(),
+        patchPromptsMetadataBatch: sinon.stub().resolves(),
+      });
+
+      const result = await handleCreatePromptsSubworkspace(transport, WS, {
+        prompts: [{
+          text: 'p', tagIds: ['tag-new'], geoTargetId: 2840, languageCode: 'en',
+        }],
+      }, log);
+
+      expect(transport.createPromptsWithMetadata).to.not.have.been.called;
+      expect(result.created).to.be.an('array').that.is.empty;
+      expect(result.updated).to.have.length(1);
+      expect(result.updated[0].semrushPromptId).to.equal('sem-existing');
+
+      const [, , items] = transport.updatePromptTagsByIds.firstCall.args;
+      expect(items[0]).to.include({ id: 'sem-existing', replace: true });
+      expect(items[0].references).to.include('tag-new');
+      // `source` is a creation fact — carried over, never restamped as `config`.
+      expect(items[0].references).to.include('source-ai');
+      expect(items[0].references).to.not.include(TAG_IDS.sourceConfig);
+    });
+
+    // Lockstep coverage for the flat twin's "moves updates into `failed` when the
+    // batched tag write throws". The twin resolves its workspace id differently
+    // (`workspaceId` vs `semrushWorkspaceId`), so a copy-paste divergence in this
+    // catch block would otherwise go undetected.
+    // Lockstep with the flat twin's collapse test.
+    it('collapses two rows with the same text into ONE replace item, last row winning', async () => {
+      const transport = makeTransport({
+        listPromptsByTags: sinon.stub().resolves({
+          items: [{ id: 'sem-existing', name: 'p', tags: [] }],
+        }),
+        updatePromptTagsByIds: sinon.stub().resolves(),
+        patchPromptsMetadataBatch: sinon.stub().resolves(),
+      });
+
+      const result = await handleCreatePromptsSubworkspace(transport, WS, {
+        prompts: [
+          {
+            text: 'p', tagIds: ['tag-first'], geoTargetId: 2840, languageCode: 'en',
+          },
+          {
+            text: 'p', tagIds: ['tag-last'], geoTargetId: 2840, languageCode: 'en',
+          },
+        ],
+      }, log);
+
+      expect(result.updated).to.have.length(1);
+      const [, , items] = transport.updatePromptTagsByIds.firstCall.args;
+      expect(items).to.have.length(1);
+      expect(items[0].references).to.include('tag-last');
+      expect(items[0].references).to.not.include('tag-first');
+    });
+
+    it('moves updates into `failed` when the batched tag write throws', async () => {
+      const transport = makeTransport({
+        listPromptsByTags: sinon.stub().resolves({
+          items: [{ id: 'sem-existing', name: 'p', tags: [] }],
+        }),
+        updatePromptTagsByIds: sinon.stub().rejects(new Error('upstream 500')),
+        patchPromptsMetadataBatch: sinon.stub().resolves(),
+      });
+
+      const result = await handleCreatePromptsSubworkspace(transport, WS, {
+        prompts: [{
+          text: 'p', tagIds: ['tag-new'], geoTargetId: 2840, languageCode: 'en',
+        }],
+      }, log);
+
+      // Never report an update that did not land.
+      expect(result.updated).to.be.an('array').that.is.empty;
+      expect(result.failed).to.have.length(1);
+      expect(result.failed[0]).to.include({
+        text: 'p', geoTargetId: 2840, languageCode: 'en', status: 500,
+      });
+    });
+
     it('creates prompts by id on the resolved project and publishes once', async () => {
       const transport = makeTransport();
       const result = await handleCreatePromptsSubworkspace(transport, WS, {
@@ -410,6 +505,7 @@ describe('prompts-subworkspace handlers', () => {
       // the per-item failed.message must be redacted, never echoed to the client.
       const leak = 'Semrush POST https://gw.internal/workspaces/ws/projects/p/prompts failed: 500';
       const transport = makeTransport({
+        listPromptsByTags: sinon.stub().resolves({ items: [] }),
         createPromptsWithMetadata: sinon.stub().rejects(new SerenityTransportError(500, leak)),
       });
       const result = await handleCreatePromptsSubworkspace(transport, WS, {
@@ -426,6 +522,7 @@ describe('prompts-subworkspace handlers', () => {
 
     it('defaults a statusless create failure to status 500', async () => {
       const transport = makeTransport({
+        listPromptsByTags: sinon.stub().resolves({ items: [] }),
         createPromptsWithMetadata: sinon.stub().rejects(new Error('no status')),
       });
       const result = await handleCreatePromptsSubworkspace(transport, WS, {
@@ -1017,6 +1114,7 @@ describe('prompts-subworkspace — defensive branch coverage', () => {
   // degrades to '' rather than the literal string "undefined".
   it('handleCreatePromptsSubworkspace: semrushPromptId is empty string when createPromptsWithMetadata returns no items', async () => {
     const transport = makeTransport({
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
       createPromptsWithMetadata: sinon.stub().resolves({}),
     });
     const result = await handleCreatePromptsSubworkspace(transport, WS, {

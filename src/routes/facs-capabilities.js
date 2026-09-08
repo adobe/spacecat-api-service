@@ -196,8 +196,7 @@ const routeFacsCapabilities = {
     'POST /hooks/site-detection/cdn/:hookSecret', // hookSecret in path
     'POST /hooks/site-detection/rum/:hookSecret', // hookSecret in path
     'POST /webhooks/github', // HMAC-signed webhook
-    'GET /slack/events', // Slack signature verification
-    'POST /slack/events', // Slack signature verification
+    'POST /slack/events', // Slack signature verification (slackSignatureWrapper)
     'POST /slack/channels/invite-by-user-id', // Slack-internal
     'GET /trigger', // internal scheduler
 
