@@ -35,6 +35,10 @@ import {
   bulkTagsHandler,
   BULK_TAGS_JOB_TYPE,
 } from '../support/serenity/handlers/bulk-tags-job.js';
+import {
+  isRateLimited,
+  isSemrushTransportError,
+} from '../support/serenity/errors.js';
 
 // `wrap`'s runtime default export and `imsClientWrapper`'s runtime named export
 // both exist (`@adobe/helix-shared-wrap/src/wrap.js`,
@@ -108,6 +112,80 @@ const HANDLERS = {
   [CLASSIFY_PROMPTS_JOB_TYPE]: classifyPromptsHandler,
   [BULK_TAGS_JOB_TYPE]: bulkTagsHandler,
 };
+
+const TRANSIENT_NETWORK_ERROR_CODES = new Set([
+  'EAI_AGAIN',
+  'ECONNREFUSED',
+  'ECONNRESET',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+  'ENOTFOUND',
+  'EPIPE',
+  'ETIMEDOUT',
+  'UND_ERR_BODY_TIMEOUT',
+  'UND_ERR_CONNECT_TIMEOUT',
+  'UND_ERR_HEADERS_TIMEOUT',
+  'UND_ERR_SOCKET',
+]);
+const TRANSIENT_NETWORK_ERROR_NAMES = new Set(['AbortError', 'TimeoutError']);
+
+/**
+ * Recognises only explicit network/timeout signals, including a fetch TypeError
+ * whose cause carries the actual socket code. Plain TypeError/RangeError and
+ * arbitrary application errors deliberately do not match.
+ *
+ * @param {unknown} error
+ * @returns {boolean}
+ */
+function isTransientNetworkError(error) {
+  let current = error;
+  const seen = new Set();
+  for (let depth = 0; depth < 4 && current && typeof current === 'object'; depth += 1) {
+    if (seen.has(current)) {
+      return false;
+    }
+    seen.add(current);
+    const candidate = /** @type {{ code?: unknown, name?: unknown, cause?: unknown }} */ (
+      current
+    );
+    if (isRateLimited(current)) {
+      return true;
+    }
+    if (isSemrushTransportError(current)) {
+      const { status } = current;
+      if (typeof status === 'number' && Number.isInteger(status) && status >= 500) {
+        return true;
+      }
+    }
+    const code = typeof candidate.code === 'string' ? candidate.code : '';
+    const name = typeof candidate.name === 'string' ? candidate.name : '';
+    if (TRANSIENT_NETWORK_ERROR_CODES.has(code) || TRANSIENT_NETWORK_ERROR_NAMES.has(name)) {
+      return true;
+    }
+    current = candidate.cause;
+  }
+  return false;
+}
+
+/**
+ * Public retryability is intentionally narrower than "not a 4xx": only typed
+ * upstream 5xx/rate-limit failures and known transport/network failures qualify.
+ *
+ * @param {unknown} error
+ * @returns {boolean}
+ */
+function isRetryableFailure(error) {
+  if (isRateLimited(error)) {
+    return true;
+  }
+  if (isSemrushTransportError(error)) {
+    const { status } = error;
+    return typeof status === 'number' && Number.isInteger(status)
+      ? status >= 500
+      : isTransientNetworkError(error);
+  }
+  return isTransientNetworkError(error);
+}
 
 /**
  * @param {object} message - the SQS message body (already JSON-parsed by
@@ -185,7 +263,7 @@ export async function run(message, context) {
     job.setError({
       code: error.code ?? 'JOB_FAILED',
       message: error.message,
-      retryable: !(Number.isInteger(error.status) && error.status < 500),
+      retryable: isRetryableFailure(error),
     });
   }
 

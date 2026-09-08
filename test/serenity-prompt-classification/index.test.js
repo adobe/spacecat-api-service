@@ -15,6 +15,8 @@ import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import esmock from 'esmock';
+import { ProjectEngineApiError } from '@adobe/spacecat-shared-project-engine-client';
+import { SerenityTransportError } from '../../src/support/serenity/rest-transport.js';
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -175,7 +177,7 @@ describe('serenity-prompt-classification worker entry', () => {
     expect(invalidateStub).not.to.have.been.called;
   });
 
-  it('marks the job FAILED with JOB_FAILED when the handler throws', async () => {
+  it('marks unknown application errors non-retryable', async () => {
     const job = makeJob();
     const context = makeContext(job);
     exchangeAndPersistStub.resolves('access-token');
@@ -185,10 +187,83 @@ describe('serenity-prompt-classification worker entry', () => {
 
     expect(job.getStatus()).to.equal('FAILED');
     expect(job.getError()).to.deep.equal({
-      code: 'JOB_FAILED', message: 'classification blew up', retryable: true,
+      code: 'JOB_FAILED', message: 'classification blew up', retryable: false,
     });
     expect(invalidateStub).to.have.been.called;
     expect(job.save).to.have.been.called;
+  });
+
+  it('marks plain TypeError and RangeError application bugs non-retryable', async () => {
+    exchangeAndPersistStub.resolves('access-token');
+    classifyPromptsHandlerStub.onFirstCall().rejects(new TypeError('bad property access'));
+    classifyPromptsHandlerStub.onSecondCall().rejects(new RangeError('bad range'));
+    const typeJob = makeJob();
+    const rangeJob = makeJob();
+
+    await run(
+      { jobId: 'job-123', type: 'serenity-classify-prompts' },
+      makeContext(typeJob),
+    );
+    await run(
+      { jobId: 'job-123', type: 'serenity-classify-prompts' },
+      makeContext(rangeJob),
+    );
+
+    expect(typeJob.getError().retryable).to.equal(false);
+    expect(rangeJob.getError().retryable).to.equal(false);
+  });
+
+  it('marks a known network failure retryable', async () => {
+    const job = makeJob();
+    const context = makeContext(job);
+    exchangeAndPersistStub.resolves('access-token');
+    classifyPromptsHandlerStub.rejects(
+      Object.assign(new Error('socket reset'), { code: 'ECONNRESET' }),
+    );
+
+    await run({ jobId: 'job-123', type: 'serenity-classify-prompts' }, context);
+
+    expect(job.getError()).to.deep.equal({
+      code: 'ECONNRESET', message: 'socket reset', retryable: true,
+    });
+  });
+
+  it('marks typed upstream 5xx retryable and 4xx non-retryable', async () => {
+    exchangeAndPersistStub.resolves('access-token');
+    classifyPromptsHandlerStub.onFirstCall()
+      .rejects(new SerenityTransportError(503, 'upstream unavailable'));
+    classifyPromptsHandlerStub.onSecondCall()
+      .rejects(new SerenityTransportError(400, 'bad upstream request'));
+    const serverJob = makeJob();
+    const clientJob = makeJob();
+
+    await run(
+      { jobId: 'job-123', type: 'serenity-classify-prompts' },
+      makeContext(serverJob),
+    );
+    await run(
+      { jobId: 'job-123', type: 'serenity-classify-prompts' },
+      makeContext(clientJob),
+    );
+
+    expect(serverJob.getError().retryable).to.equal(true);
+    expect(clientJob.getError().retryable).to.equal(false);
+  });
+
+  it('marks a wrapped upstream timeout retryable', async () => {
+    const job = makeJob();
+    const context = makeContext(job);
+    exchangeAndPersistStub.resolves('access-token');
+    classifyPromptsHandlerStub.rejects(new ProjectEngineApiError(
+      undefined,
+      'GET',
+      null,
+      { cause: new SerenityTransportError(504, 'request timed out') },
+    ));
+
+    await run({ jobId: 'job-123', type: 'serenity-classify-prompts' }, context);
+
+    expect(job.getError().retryable).to.equal(true);
   });
 
   it('drops a duplicate delivery for a job already in a terminal state, without re-exchanging the token', async () => {

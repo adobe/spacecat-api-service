@@ -21,6 +21,7 @@ import { INTENT_ROOT_NAME } from '../../../../src/support/serenity/prompt-tags.j
 import { SerenityTransportError } from '../../../../src/support/serenity/rest-transport.js';
 import { ERROR_CODES } from '../../../../src/support/serenity/errors.js';
 import { clearTagCache } from '../../../../src/support/serenity/handlers/markets.js';
+import * as tagTreeModule from '../../../../src/support/serenity/tag-tree.js';
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -88,6 +89,38 @@ function makeDataAccess(findBySliceResult) {
       findBySlice: sinon.stub().resolves(findBySliceResult),
     },
   };
+}
+
+function updateTagSnapshot() {
+  const root = {
+    id: TAG_IDS.categoryRoot,
+    name: 'category',
+    parentId: null,
+    childrenCount: 1,
+    promptsCount: 0,
+    rootName: 'category',
+    rootId: TAG_IDS.categoryRoot,
+    depth: 1,
+    fullPath: [{ id: TAG_IDS.categoryRoot, name: 'category' }],
+    compatibility: { state: 'canonical', reason: null },
+  };
+  const target = {
+    id: TAG_IDS.categoryRunningShoes,
+    name: 'Running Shoes',
+    parentId: TAG_IDS.categoryRoot,
+    childrenCount: 0,
+    promptsCount: 0,
+    rootName: 'category',
+    rootId: TAG_IDS.categoryRoot,
+    depth: 2,
+    fullPath: [
+      { id: TAG_IDS.categoryRoot, name: 'category' },
+      { id: TAG_IDS.categoryRunningShoes, name: 'Running Shoes' },
+    ],
+    compatibility: { state: 'canonical', reason: null },
+  };
+  const items = [root, target];
+  return { items, byId: new Map(items.map((item) => [item.id, item])) };
 }
 
 const validBody = {
@@ -934,6 +967,128 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
         fakeLog(),
       )).to.be.rejected.then((err) => expect(err.status).to.equal(400));
       expect(transport.createProjectTags).to.not.have.been.called;
+    });
+  });
+
+  describe('update tag snapshot freshness', () => {
+    async function loadHandler(readTagTreeSnapshot, resolveProject = sinon.stub()) {
+      return esmock('../../../../src/support/serenity/handlers/tags.js', {
+        '../../../../src/support/serenity/tag-tree.js': {
+          ...tagTreeModule,
+          readTagTreeSnapshot,
+        },
+        '../../../../src/support/serenity/subworkspace-projects.js': {
+          resolveProject,
+        },
+      });
+    }
+
+    it('force-refreshes the flat taxonomy snapshot for a re-parent', async () => {
+      const readTagTreeSnapshot = sinon.stub().resolves(updateTagSnapshot());
+      const handler = await loadHandler(readTagTreeSnapshot);
+      const transport = makeTransport();
+      const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
+      const log = fakeLog();
+
+      await handler.handleUpdateTag(
+        transport,
+        dataAccess,
+        BRAND,
+        WORKSPACE,
+        TAG_IDS.categoryRunningShoes,
+        {
+          name: 'Running Shoes',
+          parentId: TAG_IDS.categoryRoot,
+          geoTargetId: 2840,
+          languageCode: 'en',
+        },
+        log,
+      );
+
+      expect(readTagTreeSnapshot).to.have.been.calledOnceWithExactly(
+        transport,
+        WORKSPACE,
+        'proj-1',
+        log,
+        { forceRefresh: true },
+      );
+    });
+
+    it('uses the default cached flat snapshot path for a name-only update', async () => {
+      const readTagTreeSnapshot = sinon.stub().resolves(updateTagSnapshot());
+      const handler = await loadHandler(readTagTreeSnapshot);
+      const transport = makeTransport();
+      const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
+      const log = fakeLog();
+
+      await handler.handleUpdateTag(
+        transport,
+        dataAccess,
+        BRAND,
+        WORKSPACE,
+        TAG_IDS.categoryRunningShoes,
+        { name: 'Renamed', geoTargetId: 2840, languageCode: 'en' },
+        log,
+      );
+
+      expect(readTagTreeSnapshot).to.have.been.calledOnceWithExactly(
+        transport,
+        WORKSPACE,
+        'proj-1',
+        log,
+      );
+    });
+
+    it('force-refreshes the subworkspace taxonomy snapshot for a re-parent', async () => {
+      const readTagTreeSnapshot = sinon.stub().resolves(updateTagSnapshot());
+      const resolveProject = sinon.stub().resolves({ id: 'proj-sub-1' });
+      const handler = await loadHandler(readTagTreeSnapshot, resolveProject);
+      const transport = makeTransport();
+      const log = fakeLog();
+
+      await handler.handleUpdateTagSubworkspace(
+        transport,
+        WORKSPACE,
+        TAG_IDS.categoryRunningShoes,
+        {
+          name: 'Running Shoes',
+          parentId: TAG_IDS.categoryRoot,
+          geoTargetId: 2840,
+          languageCode: 'en',
+        },
+        log,
+      );
+
+      expect(readTagTreeSnapshot).to.have.been.calledOnceWithExactly(
+        transport,
+        WORKSPACE,
+        'proj-sub-1',
+        log,
+        { forceRefresh: true },
+      );
+    });
+
+    it('uses the default cached subworkspace snapshot path for a name-only update', async () => {
+      const readTagTreeSnapshot = sinon.stub().resolves(updateTagSnapshot());
+      const resolveProject = sinon.stub().resolves({ id: 'proj-sub-1' });
+      const handler = await loadHandler(readTagTreeSnapshot, resolveProject);
+      const transport = makeTransport();
+      const log = fakeLog();
+
+      await handler.handleUpdateTagSubworkspace(
+        transport,
+        WORKSPACE,
+        TAG_IDS.categoryRunningShoes,
+        { name: 'Renamed', geoTargetId: 2840, languageCode: 'en' },
+        log,
+      );
+
+      expect(readTagTreeSnapshot).to.have.been.calledOnceWithExactly(
+        transport,
+        WORKSPACE,
+        'proj-sub-1',
+        log,
+      );
     });
   });
 
@@ -1870,6 +2025,230 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
           expect(err.code).to.equal('tagNotFound');
         });
       expect(transport.updateProjectTag).to.not.have.been.called;
+    });
+  });
+
+  describe('buildTagImpact / handleTagImpact / If-Match delete guard', () => {
+    let handler;
+    const query = { geoTargetId: 2840, languageCode: 'en' };
+
+    beforeEach(async () => {
+      handler = await import('../../../../src/support/serenity/handlers/tags.js');
+    });
+
+    function impactTransport(overrides = {}) {
+      return makeTransport({
+        listPromptsByTags: sinon.stub().resolves({ items: [] }),
+        ...overrides,
+      });
+    }
+
+    it('returns tagNotFound for an impact target absent from the tree', async () => {
+      const transport = impactTransport();
+
+      await expect(handler.buildTagImpact(
+        transport,
+        WORKSPACE,
+        'proj-1',
+        'missing',
+        fakeLog(),
+      )).to.be.rejected.then((error) => {
+        expect(error.status).to.equal(404);
+        expect(error.code).to.equal(ERROR_CODES.TAG_NOT_FOUND);
+      });
+      expect(transport.listPromptsByTags).not.to.have.been.called;
+    });
+
+    it('refuses a dimension root impact target', async () => {
+      const transport = impactTransport();
+
+      await expect(handler.buildTagImpact(
+        transport,
+        WORKSPACE,
+        'proj-1',
+        TAG_IDS.categoryRoot,
+        fakeLog(),
+      )).to.be.rejected.then((error) => {
+        expect(error.status).to.equal(400);
+        expect(error.message).to.match(/dimension root/);
+      });
+      expect(transport.listPromptsByTags).not.to.have.been.called;
+    });
+
+    it('refuses a server-owned impact target', async () => {
+      const transport = impactTransport();
+
+      await expect(handler.buildTagImpact(
+        transport,
+        WORKSPACE,
+        'proj-1',
+        TAG_IDS.intentTask,
+        fakeLog(),
+      )).to.be.rejected.then((error) => {
+        expect(error.status).to.equal(400);
+        expect(error.message).to.match(/server-owned "intent"/);
+      });
+      expect(transport.listPromptsByTags).not.to.have.been.called;
+    });
+
+    it('refuses a read-only impact target', async () => {
+      const levels = dimensionTreeLevels();
+      levels[''] = levels[''].map((root) => (
+        root.id === TAG_IDS.tagRoot ? { ...root, children_count: 1 } : root
+      ));
+      levels[TAG_IDS.tagRoot] = [{
+        id: 'read-only-tag',
+        name: 'Bad__Name',
+        parent_id: TAG_IDS.tagRoot,
+        children_count: 0,
+        path: [{ id: TAG_IDS.tagRoot, name: 'tag' }],
+      }];
+      const transport = impactTransport({
+        listProjectTags: makeListProjectTagsStub(levels),
+      });
+
+      await expect(handler.buildTagImpact(
+        transport,
+        WORKSPACE,
+        'proj-1',
+        'read-only-tag',
+        fakeLog(),
+      )).to.be.rejected.then((error) => {
+        expect(error.status).to.equal(409);
+        expect(error.code).to.equal(ERROR_CODES.INCOMPATIBLE_TAG_TAXONOMY);
+      });
+      expect(transport.listPromptsByTags).not.to.have.been.called;
+    });
+
+    it('returns stable impact revisions for a canonical leaf with zero affected prompts', async () => {
+      const transport = impactTransport();
+      const first = await handler.buildTagImpact(
+        transport,
+        WORKSPACE,
+        'proj-1',
+        TAG_IDS.subCategoryHuman,
+        fakeLog(),
+      );
+      clearTagCache();
+      const second = await handler.buildTagImpact(
+        transport,
+        WORKSPACE,
+        'proj-1',
+        TAG_IDS.subCategoryHuman,
+        fakeLog(),
+      );
+
+      expect(first).to.include({
+        tagId: TAG_IDS.subCategoryHuman,
+        descendantCount: 0,
+        affectedPromptCount: 0,
+        complete: true,
+      });
+      expect(first.deletedIds).to.deep.equal([TAG_IDS.subCategoryHuman]);
+      expect(first.revision).to.match(/^"[A-Za-z0-9_-]+"$/);
+      expect(second.revision).to.equal(first.revision);
+    });
+
+    it('routes flat impact through the persisted project and hides delete bookkeeping', async () => {
+      const transport = impactTransport();
+      const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
+
+      const result = await handler.handleTagImpact(
+        transport,
+        dataAccess,
+        BRAND,
+        WORKSPACE,
+        TAG_IDS.subCategoryHuman,
+        query,
+        fakeLog(),
+      );
+
+      expect(result.status).to.equal(200);
+      expect(result.body).to.include({
+        tagId: TAG_IDS.subCategoryHuman,
+        affectedPromptCount: 0,
+      });
+      expect(result.body).not.to.have.property('deletedIds');
+    });
+
+    it('routes subworkspace impact through the live project and hides delete bookkeeping', async () => {
+      const resolveProject = sinon.stub().resolves({ id: 'proj-sub-1' });
+      const subworkspaceHandler = await esmock(
+        '../../../../src/support/serenity/handlers/tags.js',
+        {
+          '../../../../src/support/serenity/subworkspace-projects.js': {
+            resolveProject,
+          },
+        },
+      );
+      const transport = impactTransport();
+
+      const result = await subworkspaceHandler.handleTagImpactSubworkspace(
+        transport,
+        WORKSPACE,
+        TAG_IDS.subCategoryHuman,
+        query,
+        fakeLog(),
+      );
+
+      expect(resolveProject).to.have.been.calledOnce;
+      expect(result.status).to.equal(200);
+      expect(result.body).not.to.have.property('deletedIds');
+    });
+
+    it('proceeds with deletion when If-Match equals the current impact revision', async () => {
+      const transport = impactTransport();
+      const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
+      const impact = await handler.buildTagImpact(
+        transport,
+        WORKSPACE,
+        'proj-1',
+        TAG_IDS.subCategoryHuman,
+        fakeLog(),
+      );
+
+      const result = await handler.handleDeleteTag(
+        transport,
+        dataAccess,
+        BRAND,
+        WORKSPACE,
+        TAG_IDS.subCategoryHuman,
+        query,
+        fakeLog(),
+        impact.revision,
+      );
+
+      expect(result.status).to.equal(204);
+      expect(transport.deleteProjectTags).to.have.been.calledOnceWithExactly(
+        WORKSPACE,
+        'proj-1',
+        [TAG_IDS.subCategoryHuman],
+      );
+      expect(transport.publishProject).to.have.been.calledOnceWithExactly(
+        WORKSPACE,
+        'proj-1',
+      );
+    });
+
+    it('throws impactStale and does not delete when If-Match differs', async () => {
+      const transport = impactTransport();
+      const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
+
+      await expect(handler.handleDeleteTag(
+        transport,
+        dataAccess,
+        BRAND,
+        WORKSPACE,
+        TAG_IDS.subCategoryHuman,
+        query,
+        fakeLog(),
+        '"stale-impact"',
+      )).to.be.rejected.then((error) => {
+        expect(error.status).to.equal(412);
+        expect(error.code).to.equal(ERROR_CODES.IMPACT_STALE);
+      });
+      expect(transport.deleteProjectTags).not.to.have.been.called;
+      expect(transport.publishProject).not.to.have.been.called;
     });
   });
 

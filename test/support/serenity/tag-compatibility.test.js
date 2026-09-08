@@ -33,4 +33,51 @@ describe('tag compatibility classification', () => {
         { state: 'readOnly', reason: 'ambiguousPath' },
       ]);
   });
+
+  it('marks a case-variant plain-tag root read-only', () => {
+    const [item] = classifyTagCompatibility([{
+      id: 'root',
+      name: 'Tag',
+      fullPath: [{ id: 'root', name: 'Tag' }],
+    }]);
+
+    expect(item.compatibility).to.deep.equal({
+      state: 'readOnly',
+      reason: 'caseVariantRoot',
+    });
+  });
+
+  it('marks separator-bearing names read-only', () => {
+    const [item] = classifyTagCompatibility([{
+      id: 'bad',
+      name: 'Campaign__Q1',
+      fullPath: [
+        { id: 'root', name: 'tag' },
+        { id: 'bad', name: 'Campaign__Q1' },
+      ],
+    }]);
+
+    expect(item.compatibility).to.deep.equal({
+      state: 'readOnly',
+      reason: 'separatorInName',
+    });
+  });
+
+  it('marks plain tags deeper than three levels read-only', () => {
+    const [item] = classifyTagCompatibility([{
+      id: 'deep',
+      name: 'Too Deep',
+      fullPath: [
+        { id: 'root', name: 'tag' },
+        { id: 'family', name: 'Family' },
+        { id: 'leaf', name: 'Leaf' },
+        { id: 'deep', name: 'Too Deep' },
+      ],
+    }]);
+
+    expect(item.compatibility).to.deep.equal({
+      state: 'readOnly',
+      reason: 'unsupportedDepth',
+    });
+  });
 });

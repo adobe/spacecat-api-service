@@ -17,6 +17,7 @@ import {
   acceptBulkTags,
   applyBulkTagOperation,
   bulkTagsHandler,
+  MAX_BULK_TAG_SEARCH_LENGTH,
   matchesBulkTagFacets,
   pageBulkFailures,
   parseBulkTagsBody,
@@ -149,6 +150,16 @@ describe('bulk tags job request and tree semantics', () => {
       tagIds: ['child'],
       filter: { tagFilterMode: 'faceted-v1', search: ' shoes ' },
     }).filter).to.deep.equal({ tagIds: [], tagFilterMode: 'faceted-v1', search: 'shoes' });
+    expect(() => parseBulkTagsBody({
+      geoTargetId: 1,
+      languageCode: 'en',
+      operation: 'assign',
+      tagIds: ['child'],
+      filter: {
+        tagFilterMode: 'faceted-v1',
+        search: 'x'.repeat(MAX_BULK_TAG_SEARCH_LENGTH + 1),
+      },
+    })).to.throw(`filter.search must not exceed ${MAX_BULK_TAG_SEARCH_LENGTH} characters`);
   });
 
   it('assigns a child with its parent and removes a parent subtree', () => {
@@ -449,6 +460,42 @@ describe('bulkTagsHandler worker accounting', () => {
     expect(transport.publishProject).to.have.been.calledOnceWith('ws', 'project');
     expect(result.publish).to.deep.equal({ state: 'SUCCEEDED', error: null });
   });
+
+  for (const depth of [2, 4]) {
+    it(`persists and retries a failed publish-only recovery from depth ${depth}`, async () => {
+      const transport = workerTransport([]);
+      transport.publishProject.rejects(new Error('publish still failed'));
+      const priorResult = {
+        matchedCount: 3,
+        updatedCount: 2,
+        unchangedCount: 1,
+        failureCount: 0,
+        failures: [],
+      };
+      const job = workerJob([], {
+        publishRecoveryPending: true,
+        publishRecoveryDepth: depth,
+      });
+      job.setResult(priorResult);
+
+      let retryError;
+      try {
+        await bulkTagsHandler({ env: {}, log: {} }, job, 'token', transport);
+      } catch (error) {
+        retryError = error;
+      }
+
+      expect(isRetryableJobError(retryError)).to.equal(true);
+      expect(job.getMetadata()).to.deep.include({
+        publishRecoveryPending: true,
+        publishRecoveryDepth: depth + 1,
+      });
+      expect(job.getResult()).to.equal(priorResult);
+      expect(job.save).to.have.been.calledOnce;
+      expect(transport.listProjectTags).not.to.have.been.called;
+      expect(transport.listPromptsByTags).not.to.have.been.called;
+    });
+  }
 
   it('does not publish a zero-match job', async () => {
     const transport = workerTransport([]);

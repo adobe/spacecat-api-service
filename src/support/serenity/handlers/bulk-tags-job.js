@@ -42,6 +42,7 @@ import { dimensionOfRootName, isServerOwnedDimension } from '../prompt-tags.js';
 export const BULK_TAGS_JOB_TYPE = 'serenity-bulk-tags';
 export const BULK_TAGS_PUBLIC_JOB_TYPE = 'bulkTags';
 export const BULK_FAILURE_PAGE_LIMIT = 100;
+export const MAX_BULK_TAG_SEARCH_LENGTH = 500;
 const MAX_PUBLISH_RECOVERY_DEPTH = 5;
 
 function codedError(message, status, code, details) {
@@ -300,6 +301,14 @@ export function parseBulkTagsBody(body) {
     maximum: MAX_TAG_FILTER_VALUES,
     tooLargeCode: ERROR_CODES.TAG_FILTER_TOO_LARGE,
   });
+  const search = typeof filter.search === 'string' ? filter.search.trim() : '';
+  if (search.length > MAX_BULK_TAG_SEARCH_LENGTH) {
+    throw codedError(
+      `filter.search must not exceed ${MAX_BULK_TAG_SEARCH_LENGTH} characters`,
+      400,
+      ERROR_CODES.INVALID_REQUEST,
+    );
+  }
   return {
     geoTargetId,
     languageCode,
@@ -308,9 +317,7 @@ export function parseBulkTagsBody(body) {
     filter: {
       tagIds: filterTagIds,
       tagFilterMode: 'faceted-v1',
-      ...(typeof filter.search === 'string' && filter.search.trim()
-        ? { search: filter.search.trim() }
-        : {}),
+      ...(search ? { search } : {}),
     },
   };
 }

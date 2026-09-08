@@ -34,7 +34,10 @@ import {
   listFacetedPrompts,
 } from '../../../src/support/serenity/handlers/prompts.js';
 import {
+  cacheTagTreeSnapshot,
   clearTagCache,
+  deleteCachedTagTreeSnapshotIfSame,
+  getCachedTagTreeSnapshot,
   invalidateTagCacheForProject,
   listProjectTagTree,
 } from '../../../src/support/serenity/handlers/markets.js';
@@ -399,6 +402,35 @@ describe('remaining plain-tags regression coverage', () => {
       expect(refreshed.items[0].name).to.equal('category');
       expect(reused).to.equal(refreshed);
       expect(listProjectTags).to.have.been.calledTwice;
+    });
+
+    it('evicts a rejected snapshot load so a later call re-hits transport and succeeds', async () => {
+      const listProjectTags = sinon.stub();
+      listProjectTags.onFirstCall().rejects(new Error('transient tree read failure'));
+      listProjectTags.onSecondCall().resolves({
+        page: 1,
+        total: 1,
+        items: [tagNode('tag-root', 'tag', null, null)],
+      });
+      const transport = { listProjectTags };
+
+      await expect(readTagTreeSnapshot(transport, WS, PROJECT, fakeLog()))
+        .to.be.rejectedWith('transient tree read failure');
+      const result = await readTagTreeSnapshot(transport, WS, PROJECT, fakeLog());
+
+      expect(result.byId.get('tag-root').name).to.equal('tag');
+      expect(listProjectTags).to.have.been.calledTwice;
+    });
+
+    it('does not evict a newer replacement when deleting an older cached value', () => {
+      const older = Promise.resolve({ generation: 'old' });
+      const newer = Promise.resolve({ generation: 'new' });
+      cacheTagTreeSnapshot(WS, PROJECT, older);
+      cacheTagTreeSnapshot(WS, PROJECT, newer);
+
+      deleteCachedTagTreeSnapshotIfSame(WS, PROJECT, older);
+
+      expect(getCachedTagTreeSnapshot(WS, PROJECT)).to.equal(newer);
     });
 
     it('refreshes a project snapshot after the short TTL expires', async () => {

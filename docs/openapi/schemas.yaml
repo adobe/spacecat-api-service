@@ -12307,7 +12307,7 @@ SerenityBulkTagsRequest:
       additionalProperties: false
       required: [tagFilterMode]
       properties:
-        search: { type: string }
+        search: { type: string, maxLength: 500 }
         tagIds:
           type: array
           maxItems: 50

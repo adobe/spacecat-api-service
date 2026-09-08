@@ -191,19 +191,20 @@ function parsedQuery(context) {
   return out;
 }
 
+const PUBLIC_JOB_ERROR_CODES = new Set([
+  ERROR_CODES.INVALID_REQUEST,
+  ERROR_CODES.PROMPT_NOT_FOUND,
+  ERROR_CODES.SERENITY_UPSTREAM_ERROR,
+  ERROR_CODES.TAG_LIMIT_EXCEEDED,
+  ERROR_CODES.INCOMPATIBLE_TAG_TAXONOMY,
+  ERROR_CODES.PROMPT_CORPUS_INCOMPLETE,
+]);
+
 function publicJobError(error) {
   if (!error || typeof error !== 'object') {
     return null;
   }
-  const allowedCodes = new Set([
-    ERROR_CODES.INVALID_REQUEST,
-    ERROR_CODES.PROMPT_NOT_FOUND,
-    ERROR_CODES.SERENITY_UPSTREAM_ERROR,
-    ERROR_CODES.TAG_LIMIT_EXCEEDED,
-    ERROR_CODES.INCOMPATIBLE_TAG_TAXONOMY,
-    ERROR_CODES.PROMPT_CORPUS_INCOMPLETE,
-  ]);
-  const code = allowedCodes.has(error.code) ? error.code : ERROR_CODES.JOB_FAILED;
+  const code = PUBLIC_JOB_ERROR_CODES.has(error.code) ? error.code : ERROR_CODES.JOB_FAILED;
   let message = 'The background job failed';
   if (code === ERROR_CODES.SERENITY_UPSTREAM_ERROR) {
     message = 'Upstream request failed';

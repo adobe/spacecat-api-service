@@ -887,12 +887,15 @@ export async function handleUpdateTag(
     throw marketNotFound();
   }
   const projectId = row.getSemrushProjectId();
-  const snapshot = await readTagTreeSnapshot(
-    transport,
-    semrushWorkspaceId,
-    projectId,
-    log,
-  );
+  const snapshot = parsed.parentId !== undefined
+    ? await readTagTreeSnapshot(
+      transport,
+      semrushWorkspaceId,
+      projectId,
+      log,
+      { forceRefresh: true },
+    )
+    : await readTagTreeSnapshot(transport, semrushWorkspaceId, projectId, log);
   const snapshotTarget = snapshot.byId.get(id);
   const snapshotParent = parsed.parentId ? snapshot.byId.get(parsed.parentId) : null;
   const incompatible = [snapshotTarget, snapshotParent]
@@ -978,7 +981,15 @@ export async function handleUpdateTagSubworkspace(
     throw marketNotFound();
   }
   const projectId = String(project.id);
-  const snapshot = await readTagTreeSnapshot(transport, workspaceId, projectId, log);
+  const snapshot = parsed.parentId !== undefined
+    ? await readTagTreeSnapshot(
+      transport,
+      workspaceId,
+      projectId,
+      log,
+      { forceRefresh: true },
+    )
+    : await readTagTreeSnapshot(transport, workspaceId, projectId, log);
   const snapshotTarget = snapshot.byId.get(id);
   const snapshotParent = parsed.parentId ? snapshot.byId.get(parsed.parentId) : null;
   const incompatible = [snapshotTarget, snapshotParent]
@@ -1138,9 +1149,10 @@ export async function buildTagImpact(transport, semrushWorkspaceId, projectId, t
       400,
     );
   }
-  if (isServerOwnedDimension(target.rootName)) {
+  const dimension = dimensionOfRootName(target.rootName);
+  if (isServerOwnedDimension(dimension)) {
     throw new ErrorWithStatusCode(
-      `a value of the server-owned "${target.rootName}" dimension cannot be deleted`,
+      `a value of the server-owned "${dimension}" dimension cannot be deleted`,
       400,
     );
   }

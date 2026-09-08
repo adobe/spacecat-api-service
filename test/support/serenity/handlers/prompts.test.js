@@ -27,6 +27,9 @@ import {
   validateDeferPublish,
   validateAsync,
   reconcilePublishErrors,
+  listAllProjectPrompts,
+  normalizePromptTagSelection,
+  resolveFacetedTagFilter,
   resolveCallerId,
   buildCreateMetadata,
   buildUpdateMetadata,
@@ -54,6 +57,59 @@ use(sinonChai);
 const BRAND = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
 const WORKSPACE = 'workspace-1';
 
+function fakeLog() {
+  return {
+    debug: sinon.stub(),
+    info: sinon.stub(),
+    warn: sinon.stub(),
+    error: sinon.stub(),
+  };
+}
+
+function promptTagSnapshot() {
+  const item = (id, name, depth, fullPath, compatibility = {
+    state: 'canonical',
+    reason: null,
+  }) => ({
+    id,
+    name,
+    parentId: fullPath.at(-2)?.id ?? null,
+    rootName: 'tag',
+    rootId: 'tag-root',
+    depth,
+    fullPath,
+    childrenCount: 0,
+    promptsCount: 0,
+    compatibility,
+  });
+  const root = { id: 'tag-root', name: 'tag' };
+  const familyA = { id: 'family-a', name: 'Family A' };
+  const familyB = { id: 'family-b', name: 'Family B' };
+  const familyC = { id: 'family-c', name: 'Family C' };
+  const middleC = { id: 'middle-c', name: 'Middle C' };
+  const items = [
+    item(root.id, root.name, 1, [root]),
+    item(familyA.id, familyA.name, 2, [root, familyA]),
+    item('leaf-a-1', 'Leaf A1', 3, [root, familyA, { id: 'leaf-a-1', name: 'Leaf A1' }]),
+    item('leaf-a-2', 'Leaf A2', 3, [root, familyA, { id: 'leaf-a-2', name: 'Leaf A2' }]),
+    item(familyB.id, familyB.name, 2, [root, familyB]),
+    item('leaf-b', 'Leaf B', 3, [root, familyB, { id: 'leaf-b', name: 'Leaf B' }]),
+    item(familyC.id, familyC.name, 2, [root, familyC]),
+    item(middleC.id, middleC.name, 3, [root, familyC, middleC]),
+    item('too-deep', 'Too Deep', 4, [
+      root,
+      familyC,
+      middleC,
+      { id: 'too-deep', name: 'Too Deep' },
+    ]),
+    item('read-only', 'Bad__Name', 2, [
+      root,
+      { id: 'read-only', name: 'Bad__Name' },
+    ], { state: 'readOnly', reason: 'separatorInName' }),
+  ];
+  return { items, byId: new Map(items.map((entry) => [entry.id, entry])) };
+}
+
 describe('plain tag limits', () => {
   it('rejects rather than truncates an over-limit tag selection', () => {
     let thrown;
@@ -76,6 +132,116 @@ describe('plain tag limits', () => {
     await expect(capUpdateTagIds(tagIds)).to.be.rejected.then((error) => {
       expect(error.status).to.equal(409);
       expect(error.code).to.equal(ERROR_CODES.TAG_LIMIT_EXCEEDED);
+    });
+  });
+});
+
+describe('faceted prompt guard helpers', () => {
+  afterEach(() => sinon.restore());
+
+  it('fails closed when the complete prompt corpus reaches the 20K ceiling', async () => {
+    const fullPage = Array.from({ length: 200 }, (_, index) => ({ id: `prompt-${index}` }));
+    const listPromptsByTags = sinon.stub().resolves({ items: fullPage });
+
+    await expect(listAllProjectPrompts(
+      { listPromptsByTags },
+      WORKSPACE,
+      'project-1',
+      {},
+      fakeLog(),
+    )).to.be.rejected.then((error) => {
+      expect(error.status).to.equal(503);
+      expect(error.code).to.equal(ERROR_CODES.PROMPT_CORPUS_INCOMPLETE);
+    });
+    expect(listPromptsByTags).to.have.callCount(100);
+  });
+
+  it('rejects unknown, root, read-only, and unsupported-depth facet ids', async () => {
+    const snapshot = promptTagSnapshot();
+    for (const tagId of ['missing', 'tag-root', 'read-only', 'too-deep']) {
+      // eslint-disable-next-line no-await-in-loop
+      await expect(resolveFacetedTagFilter(
+        {},
+        WORKSPACE,
+        'project-1',
+        [tagId],
+        fakeLog(),
+        snapshot,
+      )).to.be.rejected.then((error) => {
+        expect(error.status).to.equal(400);
+        expect(error.code).to.equal(ERROR_CODES.INVALID_TAG_FILTER);
+      });
+    }
+  });
+
+  it('expands a selected family into OR alternatives and keeps families as AND groups', async () => {
+    const result = await resolveFacetedTagFilter(
+      {},
+      WORKSPACE,
+      'project-1',
+      ['family-a', 'leaf-b'],
+      fakeLog(),
+      promptTagSnapshot(),
+    );
+
+    expect(result.groups).to.have.lengthOf(2);
+    expect([...result.groups[0]]).to.have.members(['family-a', 'leaf-a-1', 'leaf-a-2']);
+    expect([...result.groups[1]]).to.deep.equal(['leaf-b']);
+    expect(result.candidateIds).to.have.members([
+      'family-a',
+      'leaf-a-1',
+      'leaf-a-2',
+      'leaf-b',
+    ]);
+  });
+
+  it('auto-adds a depth-3 plain tag parent on prompt replacement', async () => {
+    const result = await normalizePromptTagSelection(
+      {},
+      WORKSPACE,
+      'project-1',
+      ['leaf-a-1'],
+      fakeLog(),
+      promptTagSnapshot(),
+    );
+
+    expect(result).to.have.members(['leaf-a-1', 'family-a']);
+  });
+
+  it('rejects dimension roots on prompt replacement', async () => {
+    await expect(normalizePromptTagSelection(
+      {},
+      WORKSPACE,
+      'project-1',
+      ['tag-root'],
+      fakeLog(),
+      promptTagSnapshot(),
+    )).to.be.rejected.then((error) => {
+      expect(error.status).to.equal(400);
+      expect(error.code).to.equal(ERROR_CODES.INVALID_TAG_FILTER);
+    });
+  });
+
+  it('enforces MAX_PROMPT_TAG_IDS after required parent insertion', async () => {
+    const tagIds = [
+      'leaf-a-1',
+      ...Array.from({ length: 49 }, (_, index) => `retained-${index}`),
+    ];
+
+    await expect(normalizePromptTagSelection(
+      {},
+      WORKSPACE,
+      'project-1',
+      tagIds,
+      fakeLog(),
+      promptTagSnapshot(),
+    )).to.be.rejected.then((error) => {
+      expect(error.status).to.equal(409);
+      expect(error.code).to.equal(ERROR_CODES.TAG_LIMIT_EXCEEDED);
+      expect(error.details).to.deep.include({
+        attemptedCount: 51,
+        maxPromptTagIds: 50,
+      });
     });
   });
 });
@@ -121,15 +287,6 @@ function makeDataAccess(projects) {
       allByBrandId: sinon.stub().resolves(projects),
       findBySlice: sinon.stub(),
     },
-  };
-}
-
-function fakeLog() {
-  return {
-    debug: sinon.stub(),
-    info: sinon.stub(),
-    warn: sinon.stub(),
-    error: sinon.stub(),
   };
 }
 
