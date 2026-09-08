@@ -509,6 +509,35 @@ async function authorizeBrandSubWorkspace(ctx, log) {
   return { workspaceId, brandUuid, brand };
 }
 
+/**
+ * Resolves the `CBF_brand` value for a brand-scoped element call.
+ *
+ * Returns the brand's trimmed display name, or `undefined` when it has none — in which
+ * case the element falls back to brand-agnostic counts (any tracked brand in the
+ * response), which is the pre-LLMO-7443 behavior and inflates the numbers. That fallback
+ * is deliberate (a data-quality gap degrades a metric rather than 500-ing a dashboard),
+ * so it is logged rather than raised.
+ *
+ * The trim is what keeps the warning honest: `hasText` is `!!str && isString(str)` and
+ * does NOT trim, so a whitespace-only name is "text" by that test while being useless as
+ * a filter value. Deriving both the log decision and the emitted value from the same
+ * trimmed string means the log can never claim a brand-agnostic fallback while the
+ * payload actually carries a garbage `CBF_brand` (and vice versa).
+ *
+ * @param {object} [brand] - Brand identity (`{ id, name }`) from authorizeBrandSubWorkspace.
+ * @param {object} log - Logger.
+ * @param {string} route - Handler name, for the warning.
+ * @returns {string|undefined} Trimmed brand name, or undefined when unusable.
+ */
+function resolveBrandFilterName(brand, log, route) {
+  const name = typeof brand?.name === 'string' ? brand.name.trim() : '';
+  if (!name) {
+    log.warn(`elements: brand has no display name - ${route} falls back to brand-agnostic counts`, { brandId: brand?.id });
+    return undefined;
+  }
+  return name;
+}
+
 export default function ElementsController(context, log, env) {
   if (!isNonEmptyObject(context)) {
     throw new Error('Context required');
@@ -1183,19 +1212,13 @@ export default function ElementsController(context, log, env) {
       }
 
       // Brand-scope the element to this brand's mentions (CBF_brand); without it the
-      // per-topic aggregates count any tracked brand in the topic's responses. A brand
-      // with no display name falls back to the old brand-agnostic (inflated) counts —
-      // warn so that is traceable rather than silent.
-      if (!hasText(brand?.name)) {
-        log.warn('elements: brand has no display name - listTopics falls back to brand-agnostic counts', { brandId });
-      }
-
+      // per-topic aggregates count any tracked brand in the topic's responses.
       const topics = await service.getTopics(workspaceId, {
         model: query.model || query.platform,
         startDate: hasText(startDate) ? startDate : undefined,
         endDate: hasText(endDate) ? endDate : undefined,
         projectIds,
-        brandName: brand?.name,
+        brandName: resolveBrandFilterName(brand, log, 'listTopics'),
       });
 
       return cachedOk({ topics, totalCount: topics.length });
@@ -1275,19 +1298,14 @@ export default function ElementsController(context, log, env) {
       }
 
       // Brand-scope the element to this brand's mentions (CBF_brand); see the payload
-      // builder's header for why the sub-workspace alone is not sufficient. A brand with
-      // no display name falls back to brand-agnostic counts — warn rather than fail.
-      if (!hasText(brand?.name)) {
-        log.warn('elements: brand has no display name - listTopicPrompts falls back to brand-agnostic counts', { brandId });
-      }
-
+      // builder's header for why the sub-workspace alone is not sufficient.
       const allPrompts = await service.getTopicPrompts(workspaceId, {
         topic,
         model: query.model || query.platform,
         startDate: hasText(startDate) ? startDate : undefined,
         endDate: hasText(endDate) ? endDate : undefined,
         projectIds,
-        brandName: brand?.name,
+        brandName: resolveBrandFilterName(brand, log, 'listTopicPrompts'),
       });
 
       // Client-side pagination (mirrors listOwnedUrls); totalCount is the full count.

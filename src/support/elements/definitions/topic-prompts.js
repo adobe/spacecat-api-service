@@ -43,6 +43,11 @@ import { resolveElementModel } from '../constants.js';
  *    counts ANY tracked brand appearing in the topic's responses, so competitor mentions
  *    inflate the brand's mentions/visibility/citations. The column is `CBF_brand`, NOT
  *    `CBF_ws_brand`. `CBF_brand_urls` remains un-sent (it scopes URL lists, not mentions).
+ *  - `CBF_brand` is an ATTRIBUTION filter, not a row filter: it changes each row's
+ *    mentions/citations/visibility but never the row set. Verified twice — an all-topics
+ *    probe returned the same 1520 rows with and without it, and the case/alias probe
+ *    returned an identical 45-row set for a matching name, a non-matching name and an
+ *    alias. So `totalCount`, `promptCount` and pagination are unaffected by brand scoping.
  */
 
 /**
@@ -72,9 +77,16 @@ function toNumberOrNull(value) {
  * @param {string[]} [params.projectIds] - Multiple Semrush project ids to OR together
  *   (`CBF_project`); takes precedence over `projectId` when both are given.
  * @param {string} [params.brandName] - Brand display name to scope mentions/visibility/
- *   citations to this brand (`CBF_brand`). Omitted → brand-agnostic (counts any tracked
- *   brand in the topic's responses). Sent as the brand's display name; exact-name matching
- *   is what the live probe covered — whether Semrush also resolves aliases is [unverified].
+ *   citations to this brand (`CBF_brand`). Omitted, blank or whitespace-only →
+ *   brand-agnostic (counts any tracked brand in the topic's responses).
+ *   VERIFIED live 2026-09-08 (Lovesac, topic "Lovesac Furniture and Accessories",
+ *   2026-08-17..2026-08-23): matching is **exact and CASE-SENSITIVE**, and registered
+ *   aliases are **NOT** resolved — `Lovesac` → 315 mentions, while `lovesac` → 0 and the
+ *   registered alias `PillowSac` → 0, over an identical 45-row set. So this value must be
+ *   the brand's exact Semrush-tracked name: any casing/rename/alias divergence between
+ *   `brands.name` and Semrush silently zeroes the counts, which is indistinguishable from
+ *   a genuine "no presence". That is why a blank name falls back to brand-agnostic rather
+ *   than sending a value that cannot match.
  * @returns {object} Semrush element request payload.
  */
 export function buildTopicPromptsPayload({
@@ -91,8 +103,15 @@ export function buildTopicPromptsPayload({
   // (verified live against the Brand Presence MFE, which sends this filter — see the
   // module header). Wrapped in a single-value `or` block to match the CBF_model/
   // CBF_topic/CBF_project shape below; functionally identical to the MFE's bare `eq`.
-  if (brandName) {
-    advancedFilters.push({ op: 'or', filters: [{ op: 'eq', val: brandName, col: 'CBF_brand' }] });
+  //
+  // Trimmed here, and treated as absent when the result is empty, so the invariant holds
+  // for EVERY caller: a blank or whitespace-only name must fall back to brand-agnostic
+  // rather than send `CBF_brand: "   "`, which matches no brand and would silently zero
+  // the counts — indistinguishable from a real "no presence". Note `hasText` does NOT
+  // trim (`!!str && isString(str)`), so guarding with it here would not catch "   ".
+  const scopedBrand = typeof brandName === 'string' ? brandName.trim() : '';
+  if (scopedBrand) {
+    advancedFilters.push({ op: 'or', filters: [{ op: 'eq', val: scopedBrand, col: 'CBF_brand' }] });
   }
   // Topic scoping: the bare topic name on CBF_topic (verified live). Absent → all topics.
   if (topic) {

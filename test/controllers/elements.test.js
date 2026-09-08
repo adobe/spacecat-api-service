@@ -224,6 +224,8 @@ describe('ElementsController', () => {
       getUrlInspectorStats: sinon.stub().resolves(URL_INSPECTOR_STATS_RESULT),
       getDomainUrls: sinon.stub().resolves({ urls: [], totalCount: 0 }),
       getOwnedUrlProjects: sinon.stub().resolves([{ region: 'US', projectId: 'proj-1' }]),
+      getTopics: sinon.stub().resolves([]),
+      getTopicPrompts: sinon.stub().resolves([]),
     };
     createElementsServiceStub = sinon.stub().returns(serviceStub);
     createElementsTransportStub = sinon.stub().returns({ fetchElement: sinon.stub() });
@@ -1962,6 +1964,56 @@ describe('ElementsController', () => {
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       const res = await ctrl.getUrlInspectorPromptsCount(ctx);
       expect(res.status).to.equal(502);
+    });
+  });
+
+  // ─── listTopics / listTopicPrompts brand scoping (LLMO-7443) ──────────────
+  describe('listTopics / listTopicPrompts brand scoping', () => {
+    const TOPIC = '3 ft Bean Bag';
+    const topicsUrl = (qs = '') => `https://api.example.com/v2/orgs/${ORG_ID}`
+      + `/brands/${BRAND_ID}/serenity/brand-presence/topics${qs}`;
+    const promptsUrlForTopic = (qs = '') => `https://api.example.com/v2/orgs/${ORG_ID}`
+      + `/brands/${BRAND_ID}/serenity/brand-presence/topics/${encodeURIComponent(TOPIC)}/prompts${qs}`;
+
+    const topicsCtx = (overrides = {}) => fakeContext({
+      url: topicsUrl(),
+      withBrandSemrushProject: true,
+      brandSemrushProjects: [makeBrandSemrushProject({ getSemrushProjectId: () => 'proj-1' })],
+      ...overrides,
+    });
+
+    it('passes the brand display name to getTopics as brandName (CBF_brand)', async () => {
+      const ctx = topicsCtx();
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      await ctrl.listTopics(ctx);
+      const [, params] = serviceStub.getTopics.firstCall.args;
+      expect(params.brandName).to.equal('Adobe Brand');
+    });
+
+    it('passes the brand display name to getTopicPrompts as brandName (CBF_brand)', async () => {
+      const ctx = topicsCtx({
+        url: promptsUrlForTopic(),
+        params: { topicId: encodeURIComponent(TOPIC) },
+      });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      await ctrl.listTopicPrompts(ctx);
+      const [, params] = serviceStub.getTopicPrompts.firstCall.args;
+      expect(params.brandName).to.equal('Adobe Brand');
+    });
+
+    // Fail-open: a brand with no usable display name must degrade to brand-agnostic
+    // counts rather than send a garbage CBF_brand, and must say so in the log.
+    // `hasText` does not trim, so whitespace-only is the case that would slip through
+    // a naive guard — assert it explicitly.
+    it('omits brandName and warns when the brand name is whitespace-only', async () => {
+      getBrandIdentityStub.resolves({ id: BRAND_ID, name: '   ' });
+      const log = fakeLog();
+      const ctx = topicsCtx();
+      const ctrl = ElementsController(ctx, log, ENV);
+      await ctrl.listTopics(ctx);
+      const [, params] = serviceStub.getTopics.firstCall.args;
+      expect(params.brandName).to.be.undefined;
+      expect(log.warn.calledWithMatch(/falls back to brand-agnostic counts/)).to.equal(true);
     });
   });
 
