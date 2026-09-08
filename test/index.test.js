@@ -11,6 +11,7 @@
  */
 
 import { Request } from '@adobe/fetch';
+import crypto from 'crypto';
 import { expect, use } from 'chai';
 import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
@@ -208,6 +209,117 @@ describe('Index Tests', () => {
 
     expect(resp.status).to.equal(404);
     expect(resp.headers.plain()['x-error']).to.equal('wrong path format');
+  });
+
+  // VULN-39365. These exercise the REAL middleware chain in src/index.js, not the wrapper in
+  // isolation: a correct slackSignatureWrapper that is mis-ordered or not mounted would leave
+  // the original forged-payload vulnerability live while the unit tests still passed.
+  //
+  // A `url_verification` body is used deliberately -- SlackController short-circuits it before
+  // initialising Bolt, so these assert the middleware chain without standing up a Slack app.
+  describe('Slack signature verification (wired through main)', () => {
+    const slackPath = '/slack/events';
+    const slackBody = JSON.stringify({ type: 'url_verification', challenge: 'challenge-token' });
+
+    const sign = (body, timestamp) => `v0=${crypto
+      .createHmac('sha256', slackSigningSecret)
+      .update(`v0:${timestamp}:${body}`, 'utf8')
+      .digest('hex')}`;
+
+    const slackRequest = (body, headers) => new Request(`${baseUrl}${slackPath}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...headers },
+      body,
+    });
+
+    beforeEach(() => {
+      // Deliberately set ONLY `suffix`, which in production comes from the Lambda adapter and
+      // NOT from enrichPathInfo. `method` and `headers` are left unset so they must be
+      // populated by the real enrichPathInfo in the chain -- otherwise these tests would
+      // supply the pathInfo the wrapper reads and would stay green even if a future `.with()`
+      // reorder broke the ordering they exist to protect.
+      context.pathInfo.suffix = slackPath;
+      delete context.pathInfo.method;
+      delete context.pathInfo.headers;
+    });
+
+    it('rejects an unsigned POST before it reaches the Slack controller', async () => {
+      const resp = await main(slackRequest(slackBody), context);
+
+      expect(resp.status).to.equal(401);
+      expect(resp.headers.plain()['x-error']).to.equal('slack signature verification failed');
+      // Proves the wrapper ran BEFORE the controller: otherwise the url_verification
+      // short-circuit would have echoed the challenge back.
+      expect(await resp.text()).to.not.contain('challenge-token');
+    });
+
+    it('rejects a POST signed with the wrong secret', async () => {
+      const timestamp = `${Math.floor(Date.now() / 1000)}`;
+      const forged = `v0=${crypto.createHmac('sha256', 'not-the-secret').update(`v0:${timestamp}:${slackBody}`, 'utf8').digest('hex')}`;
+
+      const resp = await main(slackRequest(slackBody, {
+        'x-slack-request-timestamp': timestamp,
+        'x-slack-signature': forged,
+      }), context);
+
+      expect(resp.status).to.equal(401);
+    });
+
+    it('lets a correctly signed POST through with its body still parseable', async () => {
+      const timestamp = `${Math.floor(Date.now() / 1000)}`;
+
+      const resp = await main(slackRequest(slackBody, {
+        'x-slack-request-timestamp': timestamp,
+        'x-slack-signature': sign(slackBody, timestamp),
+      }), context);
+
+      // Reaching the controller AND echoing the challenge proves bodyData still parsed the
+      // body after the wrapper consumed a clone of it.
+      expect(resp.status).to.equal(200);
+      expect(await resp.json()).to.deep.equal({ challenge: 'challenge-token' });
+    });
+
+    it('verifies a signed form-urlencoded interactive payload end to end', async () => {
+      // Slack posts interactive payloads (button clicks, modals) as form-urlencoded and signs
+      // the ENCODED body. This is the shape that reaches privileged handlers like approveOrg.
+      const payload = JSON.stringify({ type: 'block_actions', actions: [{ action_id: 'noop' }] });
+      const body = `payload=${encodeURIComponent(payload)}`;
+      const timestamp = `${Math.floor(Date.now() / 1000)}`;
+
+      const resp = await main(slackRequest(body, {
+        'content-type': 'application/x-www-form-urlencoded',
+        'x-slack-request-timestamp': timestamp,
+        'x-slack-signature': sign(body, timestamp),
+      }), context);
+
+      // Two things are under test, and both are proven by getting PAST these two layers:
+      //  1. the signature verified over the form-encoded bytes (not a 401), and
+      //  2. bodyData still parsed the body after the wrapper read a clone of it -- a broken
+      //     clone would surface as bodyData's own 400 'error parsing request body'.
+      // What Bolt then does with the payload is the controller's business, not this test's.
+      const xError = resp.headers.plain()['x-error'];
+      expect(resp.status).to.not.equal(401);
+      expect(xError).to.not.equal('slack signature verification failed');
+      expect(xError).to.not.equal('error parsing request body');
+    });
+
+    it('does not process Slack events over GET', async () => {
+      // The GET route is gone. The wrapper guards every non-preflight method on this suffix,
+      // so an unsigned GET is rejected at the signature layer rather than reaching a handler.
+      const resp = await main(new Request(`${baseUrl}${slackPath}`), context);
+
+      expect(resp.status).to.equal(401);
+      expect(await resp.text()).to.not.contain('challenge-token');
+    });
+
+    it('still answers an OPTIONS preflight on the Slack route', async () => {
+      const resp = await main(
+        new Request(`${baseUrl}${slackPath}`, { method: 'OPTIONS' }),
+        context,
+      );
+
+      expect(resp.status).to.equal(204);
+    });
   });
 
   it('handles options request', async () => {
