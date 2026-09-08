@@ -302,6 +302,15 @@ describe('serenity project-provisioning: createProvisionAndPublishProject', () =
       expect(err.code).to.equal('mainBrandBenchmarkInvariant');
       expect(transport.publishProject).to.not.have.been.called;
       expect(transport.deleteProject).to.have.been.calledOnceWith(WS, 'proj-1');
+      // cleanupAndRethrow already logged this failure (workspaceId/projectId/
+      // count/cleanedUp) — marked so the controller's mapError does not log it
+      // a second time (MysticatBot review: observability shape must match the
+      // sub-workspace path, which has no cleanup step and logs it once there).
+      expect(err.serenityLogged).to.equal(true);
+      expect(log.error).to.have.been.calledWithMatch(
+        'provisionProject: provisioning failed; upstream project cleaned up',
+        sinon.match({ count: err.count, cleanedUp: true }),
+      );
     });
 
     it('does not re-check the published view after a successful publish (publish is asynchronous)', async () => {

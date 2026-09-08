@@ -202,11 +202,20 @@ function mapError(e, log, reqCtx = {}) {
     // error token in the response envelope; falls back to the status-based
     // default for plain throws.
     const errorToken = e.code && hasText(e.code) ? e.code : errorTokenForStatus(status);
-    if (e.code === ERROR_CODES.MAIN_BRAND_BENCHMARK_INVARIANT) {
+    // `serenityLogged` is set ad hoc by project-provisioning.js's
+    // cleanupAndRethrow, not declared on ErrorWithStatusCode itself.
+    const alreadyLogged = /** @type {{ serenityLogged?: boolean }} */ (e).serenityLogged;
+    if (e.code === ERROR_CODES.MAIN_BRAND_BENCHMARK_INVARIANT && !alreadyLogged) {
       // The client-facing message is deliberately generic (LLMO-7421 review) —
       // log the workspace/project/count detail server-side only, via the
-      // error's own properties.
-      log?.error?.(`Serenity controller error ${JSON.stringify(reqCtx)}`, e);
+      // error's own properties. Skipped when `e.serenityLogged` is already set
+      // (project-provisioning.js's cleanupAndRethrow logged this exact failure
+      // on the flat provisioning path) so both provisioning paths log the
+      // invariant exactly once, not twice on one path and once on the other.
+      // reqCtx passed as a structured field, not string-interpolated into the
+      // message, so it can't be mistaken for (or exploit) log-format control
+      // characters in a caller-controlled value (MysticatBot review).
+      log?.error?.('Serenity controller error', { reqCtx, error: e });
     }
     return createResponse(
       { error: errorToken, message: safeError(e.message) },

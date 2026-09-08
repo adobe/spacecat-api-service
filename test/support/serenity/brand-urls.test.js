@@ -608,7 +608,9 @@ describe('brand-urls helpers', () => {
       // as data pollution (SERENITY_BENCHMARK_DELETE_DIVERGENCE), not a
       // correctness problem.
       const warn = sandbox.stub();
-      const deleteError = Object.assign(new Error('delete failed'), { status: 404 });
+      const deleteError = Object.assign(new Error('delete failed'), {
+        status: 404, name: 'ProjectEngineApiError',
+      });
       const transport = {
         listBenchmarks: sandbox.stub().resolves({
           aio_benchmarks: [{ id: 'own-1', main_brand: false, domain: 'https://www.acme.com/x' }],
@@ -627,7 +629,9 @@ describe('brand-urls helpers', () => {
       expect(transport.createBenchmarks).to.have.been.calledOnce;
       expect(warn).to.have.been.calledWithMatch(
         'brand-urls: SERENITY_BENCHMARK_DELETE_DIVERGENCE',
-        sinon.match({ benchmarkId: 'own-1', error: 'delete failed', status: 404 }),
+        sinon.match({
+          benchmarkId: 'own-1', error: 'delete failed', status: 404, name: 'ProjectEngineApiError',
+        }),
       );
     });
 

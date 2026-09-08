@@ -169,7 +169,10 @@ export async function createProvisionAndPublishProject(
   // half-provisioned project is never left for a caller to mistakenly persist
   // as complete.
   /**
-   * @param {Error} e - the original failure; always rethrown after cleanup.
+   * @param {Error & { count?: number, serenityLogged?: boolean }} e - the
+   *   original failure; always rethrown after cleanup. `count` is set only by
+   *   `MainBrandBenchmarkInvariantError`; `serenityLogged` is written below,
+   *   never read on entry.
    * @returns {Promise<never>}
    */
   const cleanupAndRethrow = async (e) => {
@@ -190,9 +193,23 @@ export async function createProvisionAndPublishProject(
         ? `${caller}: provisioning failed; upstream project cleaned up`
         : `${caller}: orphaned upstream project after provisioning failure`,
       {
-        ...logContext, semrushWorkspaceId, semrushProjectId, error: e.message, cleanedUp,
+        ...logContext,
+        semrushWorkspaceId,
+        semrushProjectId,
+        error: e.message,
+        // Present only for MainBrandBenchmarkInvariantError; undefined (and
+        // dropped) for every other failure this function handles.
+        count: e.count,
+        cleanedUp,
       },
     );
+    // This log call already carries workspaceId/projectId/count server-side —
+    // mark it so mapError's own dedicated log for the benchmark invariant
+    // (controllers/serenity.js) does not re-log the same failure a second
+    // time. The sub-workspace path has no cleanup step and never sets this,
+    // so mapError's log remains its only (and sole) log there — same
+    // once-per-failure shape on both provisioning paths (MysticatBot review).
+    e.serenityLogged = true;
     throw e;
   };
 

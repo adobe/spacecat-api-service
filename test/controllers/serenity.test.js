@@ -23,6 +23,7 @@ import { brandPointerReloader } from '../../src/controllers/serenity.js';
 // ProjectEngineApiError by `instanceof`. The mapError tests below must feed those real types
 // (a bare mock class would not be recognised → would wrongly fall through to the generic 500).
 import { SerenityTransportError as RealSerenityTransportError } from '../../src/support/serenity/serenity-transport-error.js';
+import { MainBrandBenchmarkInvariantError } from '../../src/support/serenity/errors.js';
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -1230,6 +1231,48 @@ describe('SerenityController', () => {
       expect(response.status).to.equal(201);
       expect(handlers.handleCreateMarket).to.have.been.calledOnce;
       expect(handlers.handleCreateMarketSubworkspace).to.not.have.been.called;
+    });
+
+    it('createMarket maps MainBrandBenchmarkInvariantError to a generic 502 and logs server-side (MysticatBot review)', async () => {
+      // Simulates the sub-workspace path: nothing upstream of mapError sets
+      // `serenityLogged`, so this is the error's only log.
+      const err = new MainBrandBenchmarkInvariantError('ws-1', 'proj-1', { count: 0 });
+      handlers.handleCreateMarket.rejects(err);
+      const log = fakeLog();
+      const controller = SerenityController({ env: {} }, log, {});
+      const response = await controller.createMarket(fakeContext({
+        data: {
+          market: 'us', languageCode: 'en', brandDomain: 'x.com', brandNames: ['X'],
+        },
+      }));
+      expect(response.status).to.equal(502);
+      const body = await readBody(response);
+      expect(body.error).to.equal('mainBrandBenchmarkInvariant');
+      // Client-facing message stays generic — no workspace/project id leak.
+      expect(body.message).to.not.include('ws-1');
+      expect(body.message).to.not.include('proj-1');
+      expect(log.error).to.have.been.calledOnce;
+      expect(log.error).to.have.been.calledWithMatch(
+        'Serenity controller error',
+        sinon.match({ error: sinon.match({ workspaceId: 'ws-1', projectId: 'proj-1', count: 0 }) }),
+      );
+    });
+
+    it('createMarket does not double-log MainBrandBenchmarkInvariantError already logged upstream (flat path cleanup)', async () => {
+      // Simulates the flat path: project-provisioning.js's cleanupAndRethrow
+      // already logged this exact failure (and marked it) before rethrowing.
+      const err = new MainBrandBenchmarkInvariantError('ws-1', 'proj-1', { count: 2 });
+      err.serenityLogged = true;
+      handlers.handleCreateMarket.rejects(err);
+      const log = fakeLog();
+      const controller = SerenityController({ env: {} }, log, {});
+      const response = await controller.createMarket(fakeContext({
+        data: {
+          market: 'us', languageCode: 'en', brandDomain: 'x.com', brandNames: ['X'],
+        },
+      }));
+      expect(response.status).to.equal(502);
+      expect(log.error).to.not.have.been.called;
     });
 
     it('bulkDeletePrompts routes to the flat handler in flat mode', async () => {

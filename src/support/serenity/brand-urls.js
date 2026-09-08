@@ -526,7 +526,14 @@ export async function ensureOwnBrandBenchmark(
       // correctness problem — greppable token so it's alertable rather than
       // silently accumulating.
       log?.warn?.('brand-urls: SERENITY_BENCHMARK_DELETE_DIVERGENCE — could not delete unflagged own-domain benchmark before recreate; stale benchmark left behind', {
-        workspaceId, projectId, benchmarkId: domainMatch.id, error: e?.message, status: e?.status,
+        workspaceId,
+        projectId,
+        benchmarkId: domainMatch.id,
+        error: e?.message,
+        status: e?.status,
+        // Distinguishes ProjectEngineApiError from SerenityTransportError (and
+        // any other thrown shape) during incident triage.
+        name: e?.name,
       });
     }
   }
