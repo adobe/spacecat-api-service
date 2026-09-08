@@ -617,6 +617,29 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
     expect(transport.createPromptsWithMetadata).not.to.have.been.called;
   });
 
+  it('rejects an over-limit CREATE tag set before project lookup or tag injection', async () => {
+    const transport = { createPromptsWithMetadata: sinon.stub() };
+    const dataAccess = makeDataAccess([]);
+
+    await expect(handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      prompts: [{
+        text: 'over limit',
+        tagIds: Array.from({ length: 51 }, (_, index) => `tag-${index}`),
+        geoTargetId: 2840,
+        languageCode: 'en',
+      }],
+    }, fakeLog())).to.be.rejected.then((error) => {
+      expect(error.status).to.equal(409);
+      expect(error.code).to.equal(ERROR_CODES.TAG_LIMIT_EXCEEDED);
+      expect(error.details).to.deep.equal({
+        attemptedCount: 51,
+        maxPromptTagIds: 50,
+      });
+    });
+    expect(dataAccess.BrandSemrushProject.allByBrandId).not.to.have.been.called;
+    expect(transport.createPromptsWithMetadata).not.to.have.been.called;
+  });
+
   // Branch coverage: body with no `prompts` key → Array.isArray fallback to []
   // → 400 fires from the empty-array check.
   it('400s when body has no prompts field at all', async () => {
@@ -913,7 +936,7 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
     );
   });
 
-  it('caps a bulk-create tagIds array at MAX_TAG_IDS (50), mirroring the list-read query cap', async () => {
+  it('never truncates a bulk-create tagIds array above MAX_TAG_IDS (50)', async () => {
     const project = makeProject({
       semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
     });
@@ -927,22 +950,19 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
     };
     const tooMany = Array.from({ length: 55 }, (_, i) => `tag-${i}`);
 
-    const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+    await expect(handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
       prompts: [{
         text: 'hello', geoTargetId: 2840, languageCode: 'en', tagIds: tooMany,
       }],
-    }, fakeLog());
-
-    // The MAX_TAG_IDS cap bounds the CALLER's tags (50); the server-derived
-    // origin, producing source, and classified intent are injected on top, so
-    // the stored set is the 50 capped caller tags plus three computed ids.
-    expect(result.created[0].tagIds).to.have.lengthOf(53);
-    expect(result.created[0].tagIds).to.deep.equal(
-      [
-        ...tooMany.slice(0, 50),
-        TAG_IDS.originHuman, TAG_IDS.sourceConfig, TAG_IDS.intentInformational,
-      ],
-    );
+    }, fakeLog())).to.be.rejected.then((error) => {
+      expect(error.status).to.equal(409);
+      expect(error.code).to.equal(ERROR_CODES.TAG_LIMIT_EXCEEDED);
+      expect(error.details).to.deep.equal({
+        attemptedCount: 55,
+        maxPromptTagIds: 50,
+      });
+    });
+    expect(transport.createPromptsWithMetadata).not.to.have.been.called;
   });
 
   it('skips a create row when tagIds sanitizes to empty (every entry malformed)', async () => {

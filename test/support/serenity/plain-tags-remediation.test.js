@@ -33,7 +33,11 @@ import {
   listAllProjectPrompts,
   listFacetedPrompts,
 } from '../../../src/support/serenity/handlers/prompts.js';
-import { listProjectTagTree } from '../../../src/support/serenity/handlers/markets.js';
+import {
+  clearTagCache,
+  invalidateTagCacheForProject,
+  listProjectTagTree,
+} from '../../../src/support/serenity/handlers/markets.js';
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -156,12 +160,13 @@ function impactFixture() {
 
 describe('remaining plain-tags regression coverage', () => {
   afterEach(async () => {
+    clearTagCache();
     sinon.restore();
     await esmock.purge();
   });
 
   describe('acceptBulkTags concurrency and snapshot reuse', () => {
-    it('loads the taxonomy once on the normal faceted acceptance path', async () => {
+    it('loads taxonomy once and enqueues without scanning the prompt corpus', async () => {
       const job = {
         getId: () => 'job-1',
         getStatus: () => 'IN_PROGRESS',
@@ -188,18 +193,29 @@ describe('remaining plain-tags regression coverage', () => {
           jobId: 'job-1',
           jobType: 'bulkTags',
           status: 'IN_PROGRESS',
-          matchedCount: 1,
           replayed: false,
         },
       });
       expect(transport.listProjectTags).to.have.callCount(2);
       expect(transport.listProjectTags.getCalls().map((call) => call.args[2].parentId))
         .to.deep.equal(['', 'tag-root']);
+      expect(transport.listPromptsByTags).not.to.have.been.called;
       expect(createAndEnqueueJob).to.have.been.calledOnce;
+      expect(createAndEnqueueJob.firstCall.args[1].metadata).to.deep.include({
+        normalizedFilter: {
+          groups: [['family']],
+          candidateIds: ['family'],
+        },
+      });
+      expect(createAndEnqueueJob.firstCall.args[1].metadata).not.to.have.property('promptIds');
+      expect(createAndEnqueueJob.firstCall.args[1].metadata).not.to.have.property('matchedCount');
     });
 
-    it('rejects an over-limit accepted snapshot before enqueueing', async () => {
-      const createAndEnqueueJob = sinon.stub();
+    it('does not synchronously preflight an over-limit worker-time prompt', async () => {
+      const createAndEnqueueJob = sinon.stub().resolves({
+        getId: () => 'job-2',
+        getStatus: () => 'IN_PROGRESS',
+      });
       const { acceptBulkTags } = await loadBulkModule(createAndEnqueueJob);
       const transport = bulkTransport();
       transport.listPromptsByTags.resolves({
@@ -211,7 +227,7 @@ describe('remaining plain-tags regression coverage', () => {
       const body = bulkBody();
       body.filter.tagIds = [];
 
-      await expect(acceptBulkTags({
+      const result = await acceptBulkTags({
         context: { dataAccess: { AsyncJob: {} } },
         transport,
         brandId: BRAND,
@@ -221,11 +237,11 @@ describe('remaining plain-tags regression coverage', () => {
         body,
         callerId: 'caller',
         log: fakeLog(),
-      })).to.be.rejected.then((error) => {
-        expect(error.status).to.equal(409);
-        expect(error.code).to.equal('tagLimitExceeded');
       });
-      expect(createAndEnqueueJob).not.to.have.been.called;
+
+      expect(result.status).to.equal(202);
+      expect(transport.listPromptsByTags).not.to.have.been.called;
+      expect(createAndEnqueueJob).to.have.been.calledOnce;
     });
 
     it('loads and replays the winning job after a concurrent create conflict without dispatching twice', async () => {
@@ -277,7 +293,6 @@ describe('remaining plain-tags regression coverage', () => {
           jobId: 'winner-job',
           jobType: 'bulkTags',
           status: 'IN_PROGRESS',
-          matchedCount: 1,
           replayed: true,
         },
       });
@@ -328,6 +343,78 @@ describe('remaining plain-tags regression coverage', () => {
   });
 
   describe('readTagTreeSnapshot completeness and compatibility', () => {
+    it('reuses one short-lived project snapshot', async () => {
+      const listProjectTags = pagedTreeStub({
+        '': [tagNode('tag-root', 'tag', null, null, 1)],
+        'tag-root': [tagNode(
+          'family',
+          'Family',
+          'tag-root',
+          [{ id: 'tag-root', name: 'tag' }],
+        )],
+      });
+      const transport = { listProjectTags };
+
+      const first = await readTagTreeSnapshot(transport, WS, PROJECT, fakeLog());
+      const second = await readTagTreeSnapshot(transport, WS, PROJECT, fakeLog());
+
+      expect(second).to.equal(first);
+      expect(listProjectTags).to.have.callCount(2);
+    });
+
+    it('invalidates a cached project snapshot through the shared tag-cache hook', async () => {
+      const listProjectTags = pagedTreeStub({
+        '': [tagNode('tag-root', 'tag', null, null)],
+      });
+      const transport = { listProjectTags };
+
+      await readTagTreeSnapshot(transport, WS, PROJECT, fakeLog());
+      invalidateTagCacheForProject(WS, PROJECT);
+      await readTagTreeSnapshot(transport, WS, PROJECT, fakeLog());
+
+      expect(listProjectTags).to.have.callCount(2);
+    });
+
+    it('force-refreshes and replaces a cached project snapshot', async () => {
+      let rootName = 'tag';
+      const listProjectTags = sinon.stub().callsFake(() => Promise.resolve({
+        page: 1,
+        total: 1,
+        items: [tagNode('tag-root', rootName, null, null)],
+      }));
+      const transport = { listProjectTags };
+
+      const cached = await readTagTreeSnapshot(transport, WS, PROJECT, fakeLog());
+      rootName = 'category';
+      const refreshed = await readTagTreeSnapshot(
+        transport,
+        WS,
+        PROJECT,
+        fakeLog(),
+        { forceRefresh: true },
+      );
+      const reused = await readTagTreeSnapshot(transport, WS, PROJECT, fakeLog());
+
+      expect(cached.items[0].name).to.equal('tag');
+      expect(refreshed.items[0].name).to.equal('category');
+      expect(reused).to.equal(refreshed);
+      expect(listProjectTags).to.have.been.calledTwice;
+    });
+
+    it('refreshes a project snapshot after the short TTL expires', async () => {
+      const clock = sinon.useFakeTimers({ now: Date.now() });
+      const listProjectTags = pagedTreeStub({
+        '': [tagNode('tag-root', 'tag', null, null)],
+      });
+      const transport = { listProjectTags };
+
+      await readTagTreeSnapshot(transport, WS, PROJECT, fakeLog());
+      clock.tick(5_001);
+      await readTagTreeSnapshot(transport, WS, PROJECT, fakeLog());
+
+      expect(listProjectTags).to.have.been.calledTwice;
+    });
+
     it('exhausts every page of a level and includes the final page in the snapshot', async () => {
       const rootPath = [{ id: 'tag-root', name: 'tag' }];
       const children = Array.from({ length: 101 }, (_, index) => (
@@ -702,7 +789,7 @@ describe('remaining plain-tags regression coverage', () => {
         log,
       )).to.be.rejected.then((error) => {
         expect(error.status).to.equal(503);
-        expect(error.code).to.equal('tagTreeReadIncomplete');
+        expect(error.code).to.equal('promptCorpusIncomplete');
       });
       expect(listPromptsByTags).to.have.callCount(100);
       expect(log.warn).to.have.been.calledOnceWith(

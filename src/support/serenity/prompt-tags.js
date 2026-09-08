@@ -635,20 +635,17 @@ export function canonicalizeSource(value) {
 }
 
 /**
- * Backwards-compatible source canonicalization helper. Origin is intentionally
- * ignored: authorship and producing system are independent dimensions.
+ * Source canonicalization helper. Authorship and producing system are
+ * independent dimensions.
  *
  * `null` propagates from {@link canonicalizeSource}: "do not tag this prompt",
  * never a substituted default (mirrors `canonicalizeSource`'s own contract).
  *
  * @param {unknown} source - a raw or already-canonical `prompts.source` value.
- * @param {string | null | undefined} _ - retained origin argument for API compatibility
- *   (`ai`/`human`) for THIS write, or `undefined`/`null` on a path that never
- *   derives origin (e.g. an UPDATE, where `origin` is never re-derived).
  * @returns {string | null} the `source`-dimension tag slug to attach, or
  *   `null` when the prompt must not be tagged at all.
  */
-export function deriveSource(source, _) {
+export function deriveSource(source) {
   return canonicalizeSource(source);
 }
 

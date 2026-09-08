@@ -274,32 +274,30 @@ describe('serenity prompt-tags taxonomy', () => {
 
   describe('deriveSource compatibility helper', () => {
     it('keeps config independent of origin', () => {
-      expect(deriveSource('config', ORIGIN_VALUE.AI)).to.equal('config');
+      expect(deriveSource('config')).to.equal('config');
     });
 
     it('leaves `config` + origin `human` as config (the producer wins)', () => {
-      expect(deriveSource('config', ORIGIN_VALUE.HUMAN)).to.equal('config');
+      expect(deriveSource('config')).to.equal('config');
     });
 
     it('keeps llm-generated as its own producing system regardless of origin', () => {
-      expect(deriveSource('llm-generated', ORIGIN_VALUE.HUMAN)).to.equal('llm-generated');
-      expect(deriveSource('llm-generated', ORIGIN_VALUE.AI)).to.equal('llm-generated');
-      expect(deriveSource('llm-generated', undefined)).to.equal('llm-generated');
+      expect(deriveSource('llm-generated')).to.equal('llm-generated');
     });
 
     it('leaves a specific producer untouched — origin carries no information for it', () => {
-      expect(deriveSource('gsc', ORIGIN_VALUE.HUMAN)).to.equal('gsc');
-      expect(deriveSource('drs', ORIGIN_VALUE.AI)).to.equal('drs');
+      expect(deriveSource('gsc')).to.equal('gsc');
+      expect(deriveSource('drs')).to.equal('drs');
     });
 
     it('canonicalizes before folding (case/underscore variants)', () => {
-      expect(deriveSource('CONFIG', ORIGIN_VALUE.AI)).to.equal('config');
-      expect(deriveSource('LLM_GENERATED', ORIGIN_VALUE.HUMAN)).to.equal('llm-generated');
+      expect(deriveSource('CONFIG')).to.equal('config');
+      expect(deriveSource('LLM_GENERATED')).to.equal('llm-generated');
     });
 
     it('propagates canonicalizeSource\'s null (do-not-tag) rather than substituting a default', () => {
-      expect(deriveSource('', ORIGIN_VALUE.AI)).to.equal(null);
-      expect(deriveSource(undefined, ORIGIN_VALUE.AI)).to.equal(null);
+      expect(deriveSource('')).to.equal(null);
+      expect(deriveSource(undefined)).to.equal(null);
     });
   });
 

@@ -153,7 +153,9 @@ v2-serenity-prompts:
           application/json:
             schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
       '503':
-        description: The complete faceted taxonomy or prompt cohort could not be established.
+        description: |
+          The complete faceted taxonomy (`tagTreeReadIncomplete`) or prompt
+          cohort (`promptCorpusIncomplete`) could not be established.
         content:
           application/json:
             schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
@@ -193,6 +195,11 @@ v2-serenity-prompts:
       '400': { $ref: './responses.yaml#/400' }
       '404':
         description: Organization, brand, or workspace not found, or serenity is not active for the organization.
+      '409':
+        description: A prompt supplied more than 50 caller-owned tag ids (`tagLimitExceeded`).
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
       '502':
         description: Upstream returned a non-2xx response.
         content:
@@ -342,19 +349,20 @@ v2-serenity-prompts-bulk-tags:
     tags: [serenity]
     summary: Assign or remove tags from all prompts matching a project-local filter
     description: |
-      Freezes the matching prompt-id population before returning 202. Assignment
-      and removal requests preflight the accepted snapshot against the 50-id
-      prompt limit. Taxonomy expansion is computed once and filtering plus
-      preflight share one corpus pass. The worker re-reads the current prompt
-      corpus and current taxonomy before making write decisions.
+      Validates the mutation ids and freezes the normalized faceted filter before
+      returning 202; it does not synchronously scan the prompt corpus. The worker
+      force-refreshes the taxonomy, performs the bounded 20,000-prompt scan, and
+      applies the frozen OR-within-family / AND-across-family filter semantics to
+      the worker-time cohort. If a resulting prompt would exceed the 50-id limit,
+      that item fails with `tagLimitExceeded` without being written; other
+      matching prompts continue.
 
       `Idempotency-Key` replay is request deduplication, not a retry command: the
       same unexpired key and canonical request returns the original job/result.
-      To retry a terminal partial failure, submit the same set operation with a
-      new key (or no key). Assign/remove are set-idempotent, so already-completed
-      prompt writes become unchanged; the worker still retries project publish,
-      even when the retry matches no remaining prompts. Publish is project-wide
-      and may include other changes already staged in the same upstream draft.
+      A request with a new key (or no key) creates a new worker-time evaluation.
+      Publish is project-wide and occurs only when at least one prompt update
+      landed, or when the job metadata explicitly marks recovery of its own
+      prior failed publish. Zero-match and unchanged-only jobs do not publish.
     operationId: bulkTagSerenityPrompts
     security:
       - session_token: []
@@ -389,6 +397,11 @@ v2-serenity-prompts-bulk-tags:
       '404': { $ref: './responses.yaml#/404' }
       '409':
         description: Tag limit, incompatible taxonomy, or idempotency conflict.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '503':
+        description: The complete taxonomy required to validate mutation/filter ids could not be established.
         content:
           application/json:
             schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
@@ -433,6 +446,8 @@ v2-serenity-prompts-job-by-id:
       the project publish succeeded. For `bulkTags`, inspect
       `result.outcome`: `PARTIAL_FAILURE` accompanies item failures and/or a
       failed publish, with item details paged through `failureCursor`.
+      `result.publish.state=SKIPPED` means no update landed and no explicit
+      failed-publish recovery was pending.
     operationId: getSerenityPromptsJobStatus
     security:
       - session_token: []

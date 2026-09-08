@@ -816,7 +816,7 @@ describe('markets-subworkspace handlers', () => {
       );
       expect(res.status).to.equal(201);
       // The taxonomy is provisioned by resolving the tree; this project already
-      // carries all five roots and every closed value, so nothing is created.
+      // carries all six roots and every closed value, so nothing is created.
       expect(transport.createProjectTags).to.not.have.been.called;
       // models attached
       expect(transport.addAiModel).to.have.been.calledWith(WS, 'new-proj', 'm-1');
@@ -1907,7 +1907,7 @@ describe('markets-subworkspace — defensive branch coverage', () => {
   // `createPromptsWithMetadata` is ATOMIC on an unresolvable id — it 500s and writes
   // nothing — so the handler must fail before it builds the call, not after.
   it('generateAndAttachPrompts: 502s when the standard prompt tag ids cannot be resolved', async () => {
-    // The five roots exist; no closed value under any of them does, and the
+    // The six roots exist; no closed value under any of them does, and the
     // create echoes nothing back. `provisionDimensionTree` fails closed, so the
     // handler never reaches a prompt write holding an unresolved id.
     const transport = makeTransport({

@@ -217,7 +217,6 @@ const FIXTURES = {
         jobId: '00000000-0000-4000-8000-000000000001',
         jobType: 'bulkTags',
         status: 'IN_PROGRESS',
-        matchedCount: 1,
         replayed: false,
       },
     },
@@ -999,6 +998,7 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
             handleCreatePrompts: handlerStubs.handleCreatePrompts,
             handleUpdatePrompt: handlerStubs.handleUpdatePrompt,
             handleBulkDeletePrompts: handlerStubs.handleBulkDeletePrompts,
+            assertCreatePromptTagLimits: () => {},
           },
           '../../src/support/serenity/handlers/markets.js': {
             handleListMarkets: handlerStubs.handleListMarkets,

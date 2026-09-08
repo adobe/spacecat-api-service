@@ -23,6 +23,7 @@ import { brandPointerReloader } from '../../src/controllers/serenity.js';
 // ProjectEngineApiError by `instanceof`. The mapError tests below must feed those real types
 // (a bare mock class would not be recognised → would wrongly fall through to the generic 500).
 import { SerenityTransportError as RealSerenityTransportError } from '../../src/support/serenity/serenity-transport-error.js';
+import { assertCreatePromptTagLimits } from '../../src/support/serenity/handlers/prompts.js';
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -96,6 +97,7 @@ function fakeContext({
   brand = makeBrandModel(),
   env = {},
   promiseToken = undefined,
+  headers = {},
 } = {}) {
   return {
     env,
@@ -103,6 +105,7 @@ function fakeContext({
       headers: {
         ...(bearer ? { authorization: `Bearer ${bearer}` } : {}),
         ...(promiseToken ? { 'x-promise-token': promiseToken } : {}),
+        ...headers,
       },
     },
     attributes: {
@@ -167,6 +170,8 @@ describe('SerenityController', () => {
     handleDeleteTagSubworkspace: sinon.stub(),
     handleTagImpact: sinon.stub(),
     handleTagImpactSubworkspace: sinon.stub(),
+    handleBulkTags: sinon.stub(),
+    handleBulkTagsSubworkspace: sinon.stub(),
   };
   let decommissionStub;
   let ensureSubworkspaceStub;
@@ -257,6 +262,7 @@ describe('SerenityController', () => {
         handleCreatePrompts: handlers.handleCreatePrompts,
         handleUpdatePrompt: handlers.handleUpdatePrompt,
         handleBulkDeletePrompts: handlers.handleBulkDeletePrompts,
+        assertCreatePromptTagLimits,
       },
       '../../src/support/serenity/handlers/markets.js': {
         handleListMarkets: handlers.handleListMarkets,
@@ -342,8 +348,8 @@ describe('SerenityController', () => {
       '../../src/support/serenity/handlers/bulk-tags-job.js': {
         BULK_TAGS_JOB_TYPE: 'serenity-bulk-tags',
         BULK_TAGS_PUBLIC_JOB_TYPE: 'bulkTags',
-        handleBulkTags: sinon.stub(),
-        handleBulkTagsSubworkspace: sinon.stub(),
+        handleBulkTags: handlers.handleBulkTags,
+        handleBulkTagsSubworkspace: handlers.handleBulkTagsSubworkspace,
         pageBulkFailures: (result) => result,
       },
     })).default;
@@ -1270,6 +1276,44 @@ describe('SerenityController', () => {
       expect(options.callerId).to.equal('unknown');
     });
 
+    it('bulkTagPrompts dispatches flat arguments and reads Idempotency-Key case-insensitively', async () => {
+      const data = {
+        geoTargetId: 2840,
+        languageCode: 'en',
+        operation: 'assign',
+        tagIds: ['tag-1'],
+        filter: { tagIds: [], tagFilterMode: 'faceted-v1' },
+      };
+      handlers.handleBulkTags.resolves({
+        status: 202,
+        body: {
+          jobId: 'job-1', jobType: 'bulkTags', status: 'IN_PROGRESS', replayed: false,
+        },
+      });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({
+        data,
+        headers: { 'iDeMpOtEnCy-KeY': 'flat-key' },
+      });
+
+      const response = await controller.bulkTagPrompts(ctx);
+
+      expect(response.status).to.equal(202);
+      expect(handlers.handleBulkTags).to.have.been.calledOnceWith(
+        ctx,
+        { name: 'transport' },
+        ctx.dataAccess,
+        BRAND,
+        ORG,
+        WORKSPACE,
+        data,
+        'unknown',
+        'flat-key',
+        sinon.match.object,
+      );
+      expect(handlers.handleBulkTagsSubworkspace).not.to.have.been.called;
+    });
+
     it('createTag routes to the flat handler in flat mode and returns its status', async () => {
       handlers.handleCreateTag.resolves({
         status: 201,
@@ -1348,6 +1392,35 @@ describe('SerenityController', () => {
       expect(response.status).to.equal(403);
       expect(handlers.handleUpdateTag).to.not.have.been.called;
       expect(handlers.handleUpdateTagSubworkspace).to.not.have.been.called;
+    });
+
+    it('getTagImpact dispatches flat arguments and returns the revision as ETag', async () => {
+      handlers.handleTagImpact.resolves({
+        status: 200,
+        body: {
+          tagId: 'tag-1',
+          revision: '"impact-revision"',
+          affectedPromptCount: 2,
+        },
+      });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({ params: { tagId: 'tag-1' } });
+      ctx.request = { url: 'https://x?geoTargetId=2840&languageCode=en' };
+
+      const response = await controller.getTagImpact(ctx);
+
+      expect(response.status).to.equal(200);
+      expect(response.headers.get('etag')).to.equal('"impact-revision"');
+      expect(handlers.handleTagImpact).to.have.been.calledOnceWith(
+        { name: 'transport' },
+        ctx.dataAccess,
+        BRAND,
+        WORKSPACE,
+        'tag-1',
+        { geoTargetId: 2840, languageCode: 'en' },
+        sinon.match.object,
+      );
+      expect(handlers.handleTagImpactSubworkspace).not.to.have.been.called;
     });
 
     it('deleteTag requires the :tagId path param', async () => {
@@ -2000,6 +2073,28 @@ describe('SerenityController', () => {
       expect(handlers.handleDeleteTag).to.not.have.been.called;
     });
 
+    it('getTagImpact dispatches subworkspace arguments', async () => {
+      handlers.handleTagImpactSubworkspace.resolves({
+        status: 200,
+        body: { tagId: 'tag-1', revision: '"subworkspace-revision"' },
+      });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({ params: { tagId: 'tag-1' } });
+      ctx.request = { url: 'https://x?geoTargetId=2840&languageCode=en' };
+
+      const response = await controller.getTagImpact(ctx);
+
+      expect(response.status).to.equal(200);
+      expect(handlers.handleTagImpactSubworkspace).to.have.been.calledOnceWith(
+        { name: 'transport' },
+        'subworkspace-ws-1',
+        'tag-1',
+        { geoTargetId: 2840, languageCode: 'en' },
+        sinon.match.object,
+      );
+      expect(handlers.handleTagImpact).not.to.have.been.called;
+    });
+
     it('bulkDeletePrompts routes to the subworkspace handler in subworkspace mode', async () => {
       handlers.handleBulkDeletePromptsSubworkspace.resolves({ deleted: 0, failed: [] });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
@@ -2015,6 +2110,45 @@ describe('SerenityController', () => {
       await controller.bulkDeletePrompts(fakeContext({ data: { prompts: [] } }));
       const options = handlers.handleBulkDeletePromptsSubworkspace.firstCall.args[4];
       expect(options.callerId).to.equal('unknown');
+    });
+
+    it('bulkTagPrompts reads Idempotency-Key from Headers-like objects in subworkspace mode', async () => {
+      const data = {
+        geoTargetId: 2840,
+        languageCode: 'en',
+        operation: 'remove',
+        tagIds: ['tag-1'],
+        filter: { tagIds: [], tagFilterMode: 'faceted-v1' },
+      };
+      handlers.handleBulkTagsSubworkspace.resolves({
+        status: 202,
+        body: {
+          jobId: 'job-2', jobType: 'bulkTags', status: 'IN_PROGRESS', replayed: false,
+        },
+      });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const headers = {
+        get: sinon.stub().callsFake((name) => (
+          name.toLowerCase() === 'idempotency-key' ? 'headers-key' : null
+        )),
+      };
+      const ctx = fakeContext({ data, headers });
+
+      const response = await controller.bulkTagPrompts(ctx);
+
+      expect(response.status).to.equal(202);
+      expect(handlers.handleBulkTagsSubworkspace).to.have.been.calledOnceWith(
+        ctx,
+        { name: 'transport' },
+        BRAND,
+        ORG,
+        'subworkspace-ws-1',
+        data,
+        'unknown',
+        'headers-key',
+        sinon.match.object,
+      );
+      expect(handlers.handleBulkTags).not.to.have.been.called;
     });
 
     it('listTags routes to the subworkspace handler in subworkspace mode', async () => {
@@ -3124,6 +3258,28 @@ describe('SerenityController', () => {
         expect(response.status).to.equal(400);
         expect(createAndEnqueueJobStub).to.not.have.been.called;
       });
+
+      it('409s without enqueueing an async create whose caller tag set exceeds 50', async () => {
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const response = await controller.createPrompts(fakeContext({
+          data: {
+            async: true,
+            prompts: [{
+              text: 'over limit',
+              geoTargetId: 2840,
+              languageCode: 'en',
+              tagIds: Array.from({ length: 51 }, (_, index) => `tag-${index}`),
+            }],
+          },
+        }));
+
+        expect(response.status).to.equal(409);
+        expect(await readBody(response)).to.deep.include({
+          error: 'tagLimitExceeded',
+          details: { attemptedCount: 51, maxPromptTagIds: 50 },
+        });
+        expect(createAndEnqueueJobStub).not.to.have.been.called;
+      });
     });
 
     describe('getPromptsJobStatus — async job polling (serenity-docs#33 Layer 1)', () => {
@@ -3175,7 +3331,6 @@ describe('SerenityController', () => {
         const result = {
           outcome: 'PARTIAL_FAILURE',
           matchedCount: 2,
-          processedCount: 2,
           updatedCount: 1,
           unchangedCount: 0,
           failureCount: 1,
@@ -3227,6 +3382,33 @@ describe('SerenityController', () => {
         });
         expect(JSON.stringify(body)).not.to.include('NEEDS_REAUTH');
         expect(JSON.stringify(body)).not.to.include('promiseToken');
+      });
+
+      it('surfaces promptCorpusIncomplete as a retryable public worker failure', async () => {
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const response = await controller.getPromptsJobStatus(
+          ctxWithJob(makeAsyncJob({
+            status: 'FAILED',
+            jobType: 'serenity-bulk-tags',
+            error: {
+              code: 'promptCorpusIncomplete',
+              message: 'Unable to read the complete prompt cohort',
+              retryable: true,
+            },
+          })),
+        );
+
+        expect(await readBody(response)).to.deep.equal({
+          jobId: JOB,
+          jobType: 'bulkTags',
+          status: 'FAILED',
+          result: null,
+          error: {
+            code: 'promptCorpusIncomplete',
+            message: 'Unable to read the complete prompt cohort',
+            retryable: true,
+          },
+        });
       });
 
       it('does not expose an upstream URL from a FAILED job error', async () => {

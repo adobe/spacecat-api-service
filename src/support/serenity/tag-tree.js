@@ -46,7 +46,13 @@
 
 import { ErrorWithStatusCode } from '../utils.js';
 import { ERROR_CODES } from './errors.js';
-import { listProjectTagTree } from './handlers/markets.js';
+import {
+  cacheTagTreeSnapshot,
+  deleteCachedTagTreeSnapshotIfSame,
+  getCachedTagTreeSnapshot,
+  invalidateTagCacheForProject,
+  listProjectTagTree,
+} from './handlers/markets.js';
 import {
   DIMENSION,
   DIMENSION_PROVISION_ORDER,
@@ -228,7 +234,9 @@ export async function ensureChildren(
       missing,
       parentId ? { parentId } : {},
     );
+    invalidateTagCacheForProject(semrushWorkspaceId, projectId);
   } catch (e) {
+    invalidateTagCacheForProject(semrushWorkspaceId, projectId);
     // Upstream answers 500 on a duplicate (parent, name). Between our read and
     // our create, a concurrent writer — possibly another resolution inside this
     // same request — may have minted exactly the names we asked for. Re-read
@@ -648,7 +656,7 @@ export async function findTagsInTree(transport, semrushWorkspaceId, projectId, t
  *   byId: Map<string, TagTreeSnapshotItem>,
  * }>}
  */
-export async function readTagTreeSnapshot(
+async function loadTagTreeSnapshot(
   transport,
   semrushWorkspaceId,
   projectId,
@@ -713,6 +721,46 @@ export async function readTagTreeSnapshot(
     items,
     byId: new Map(items.map((item) => [item.id, item])),
   };
+}
+
+/**
+ * Reads the complete draft taxonomy, reusing a short-lived project-keyed
+ * in-flight/completed snapshot when safe. Mutation handlers invalidate the
+ * project entry. Safety-critical worker drift validation passes
+ * `forceRefresh: true`, which bypasses and replaces any cached snapshot.
+ *
+ * @param {SerenityTransport} transport
+ * @param {string} semrushWorkspaceId
+ * @param {string} projectId
+ * @param {object} [log]
+ * @param {object} [options]
+ * @param {boolean} [options.forceRefresh=false]
+ * @returns {Promise<{
+ *   items: TagTreeSnapshotItem[],
+ *   byId: Map<string, TagTreeSnapshotItem>,
+ * }>}
+ */
+export async function readTagTreeSnapshot(
+  transport,
+  semrushWorkspaceId,
+  projectId,
+  log,
+  { forceRefresh = false } = {},
+) {
+  if (!forceRefresh) {
+    const cached = getCachedTagTreeSnapshot(semrushWorkspaceId, projectId);
+    if (cached) {
+      return /** @type {ReturnType<typeof loadTagTreeSnapshot>} */ (cached);
+    }
+  }
+  const pending = loadTagTreeSnapshot(transport, semrushWorkspaceId, projectId, log);
+  cacheTagTreeSnapshot(semrushWorkspaceId, projectId, pending);
+  try {
+    return await pending;
+  } catch (error) {
+    deleteCachedTagTreeSnapshotIfSame(semrushWorkspaceId, projectId, pending);
+    throw error;
+  }
 }
 
 export function incompatibleTaxonomyError(items) {

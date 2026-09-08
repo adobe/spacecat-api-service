@@ -241,6 +241,28 @@ describe('prompts-subworkspace handlers', () => {
   });
 
   describe('handleCreatePromptsSubworkspace', () => {
+    it('rejects an over-limit CREATE tag set before resolving projects or injecting tags', async () => {
+      const transport = makeTransport();
+
+      await expect(handleCreatePromptsSubworkspace(transport, WS, {
+        prompts: [{
+          text: 'over limit',
+          tagIds: Array.from({ length: 51 }, (_, index) => `tag-${index}`),
+          geoTargetId: 2840,
+          languageCode: 'en',
+        }],
+      }, log)).to.be.rejected.then((error) => {
+        expect(error.status).to.equal(409);
+        expect(error.code).to.equal(ERROR_CODES.TAG_LIMIT_EXCEEDED);
+        expect(error.details).to.deep.equal({
+          attemptedCount: 51,
+          maxPromptTagIds: 50,
+        });
+      });
+      expect(transport.listProjects).not.to.have.been.called;
+      expect(transport.createPromptsWithMetadata).not.to.have.been.called;
+    });
+
     it('creates prompts by id on the resolved project and publishes once', async () => {
       const transport = makeTransport();
       const result = await handleCreatePromptsSubworkspace(transport, WS, {

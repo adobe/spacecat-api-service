@@ -628,45 +628,99 @@ export async function handleDeleteMarket(
 
 // 60s TTL bounds cross-Lambda-container staleness (multiple warm containers
 // each hold an independent Map). Same-container freshness comes from the
-// `invalidateTagCacheForProject` call wired into every mutating prompts
-// handler (POST /prompts, PATCH, bulk-delete). Together: writes are visible
-// immediately on the same container, and at most ~60s late on a peer.
+// `invalidateTagCacheForProject` call wired into every mutating prompt/tag
+// handler. Together: writes are visible immediately on the same container,
+// and at most ~60s late on a peer.
 const TAG_CACHE_TTL_MS = 60 * 1000;
+// Taxonomy snapshots drive validation as well as display, so keep their peer-
+// container staleness window much shorter. Worker drift checks explicitly
+// force-refresh instead of trusting even this bounded cache.
+const TAG_TREE_SNAPSHOT_CACHE_TTL_MS = 5 * 1000;
 const TAG_CACHE_MAX_ENTRIES = 512;
 const tagCache = new Map();
+const tagTreeSnapshotCache = new Map();
 
 function tagCacheKey(semrushWorkspaceId, projectId) {
   return `${semrushWorkspaceId}::${projectId}`;
 }
 
 /**
- * Removes the cached tag set for one (workspace, project). Called by any
- * handler that mutates prompts in that project so the next /serenity/tags
- * read sees the new set without waiting for TTL.
+ * Removes every cached tag view for one (workspace, project). Called by any
+ * handler that mutates prompts or taxonomy in that project so flat tag reads
+ * and complete taxonomy snapshots both observe the write without waiting for
+ * their TTL.
  */
 export function invalidateTagCacheForProject(semrushWorkspaceId, projectId) {
-  tagCache.delete(tagCacheKey(semrushWorkspaceId, projectId));
+  const key = tagCacheKey(semrushWorkspaceId, projectId);
+  tagCache.delete(key);
+  tagTreeSnapshotCache.delete(key);
 }
 
 export function clearTagCache() {
   tagCache.clear();
+  tagTreeSnapshotCache.clear();
 }
 
-/* c8 ignore start -- LRU eviction only fires past TAG_CACHE_MAX_ENTRIES (512
+/**
+ * @param {string} semrushWorkspaceId
+ * @param {string} projectId
+ * @returns {unknown}
+ */
+export function getCachedTagTreeSnapshot(semrushWorkspaceId, projectId) {
+  const key = tagCacheKey(semrushWorkspaceId, projectId);
+  const cached = tagTreeSnapshotCache.get(key);
+  if (!cached || cached.expiresAt <= Date.now()) {
+    tagTreeSnapshotCache.delete(key);
+    return undefined;
+  }
+  return cached.value;
+}
+
+/* c8 ignore start -- eviction only fires past TAG_CACHE_MAX_ENTRIES (512
    distinct (workspace, project) tuples held in this container). The guard
-   is defensive against tagCache.delete failing silently; exercising it in a
+   is defensive against Map.delete failing silently; exercising it in a
    unit test would require seeding 512 cache entries which is wasted work for
    a branch the runtime hits only under unusual scale. */
-function evictTagCacheIfNeeded() {
-  while (tagCache.size >= TAG_CACHE_MAX_ENTRIES) {
-    const oldest = tagCache.keys().next().value;
+function evictTagCacheIfNeeded(cache) {
+  while (cache.size >= TAG_CACHE_MAX_ENTRIES) {
+    const oldest = cache.keys().next().value;
     if (oldest === undefined) {
       break;
     }
-    tagCache.delete(oldest);
+    cache.delete(oldest);
   }
 }
 /* c8 ignore stop */
+
+/**
+ * @param {string} semrushWorkspaceId
+ * @param {string} projectId
+ * @param {unknown} value
+ */
+export function cacheTagTreeSnapshot(semrushWorkspaceId, projectId, value) {
+  const key = tagCacheKey(semrushWorkspaceId, projectId);
+  tagTreeSnapshotCache.delete(key);
+  evictTagCacheIfNeeded(tagTreeSnapshotCache);
+  tagTreeSnapshotCache.set(key, {
+    value,
+    expiresAt: Date.now() + TAG_TREE_SNAPSHOT_CACHE_TTL_MS,
+  });
+}
+
+/**
+ * Removes a failed in-flight snapshot without deleting a newer force-refresh
+ * that replaced it under the same project key.
+ *
+ * @param {string} semrushWorkspaceId
+ * @param {string} projectId
+ * @param {unknown} value
+ */
+export function deleteCachedTagTreeSnapshotIfSame(semrushWorkspaceId, projectId, value) {
+  const key = tagCacheKey(semrushWorkspaceId, projectId);
+  if (tagTreeSnapshotCache.get(key)?.value === value) {
+    tagTreeSnapshotCache.delete(key);
+  }
+}
 
 /**
  * Project-keyed tag aggregation core, shared by the flat and subworkspace tag
@@ -755,7 +809,7 @@ export async function listTagsForProject(transport, semrushWorkspaceId, projectI
   // delete-then-set refreshes Map insertion order so evictTagCacheIfNeeded()
   // (LRU-by-insertion-order) treats this entry as freshest.
   tagCache.delete(cacheKey);
-  evictTagCacheIfNeeded();
+  evictTagCacheIfNeeded(tagCache);
   tagCache.set(cacheKey, { items: sorted, expiresAt: now + TAG_CACHE_TTL_MS });
   return { items: sorted, complete: true };
 }
@@ -769,10 +823,11 @@ export async function listTagsForProject(transport, semrushWorkspaceId, projectI
  * until the project is published (verified live 2026-07-01). Pages through the
  * level bounded by a ceiling, mirroring the standalone-tag walk.
  *
- * Unlike {@link listTagsForProject} (prompt-derived, flat, cached), this reads the
+ * Unlike {@link listTagsForProject} (prompt-derived and flat), this reads the
  * registered standalone tags keyed by their upstream ids — the ids the nested
- * create + re-parent endpoints operate on — so it is NOT cached (a just-created or
- * re-parented tag must show immediately).
+ * create + re-parent endpoints operate on. Individual levels are not cached;
+ * complete derived snapshots are cached briefly by `readTagTreeSnapshot`, with
+ * project-scoped mutation invalidation.
  *
  * @param {SerenityTransport} transport
  * @param {string} semrushWorkspaceId - Semrush (sub-)workspace id.

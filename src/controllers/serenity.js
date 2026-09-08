@@ -36,6 +36,7 @@ import {
   validateAsync,
   BULK_PROMPTS_MAX_ITEMS,
   resolveCallerId,
+  assertCreatePromptTagLimits,
 } from '../support/serenity/handlers/prompts.js';
 import { createAndEnqueueJob } from '../support/serenity/async-job-runner.js';
 import { CLASSIFY_PROMPTS_JOB_TYPE } from '../support/serenity/handlers/classify-prompts-job.js';
@@ -195,14 +196,18 @@ function publicJobError(error) {
     return null;
   }
   const allowedCodes = new Set([
-    'invalidRequest', 'promptNotFound', 'serenityUpstreamError',
-    'tagLimitExceeded', 'incompatibleTagTaxonomy',
+    ERROR_CODES.INVALID_REQUEST,
+    ERROR_CODES.PROMPT_NOT_FOUND,
+    ERROR_CODES.SERENITY_UPSTREAM_ERROR,
+    ERROR_CODES.TAG_LIMIT_EXCEEDED,
+    ERROR_CODES.INCOMPATIBLE_TAG_TAXONOMY,
+    ERROR_CODES.PROMPT_CORPUS_INCOMPLETE,
   ]);
-  const code = allowedCodes.has(error.code) ? error.code : 'jobFailed';
+  const code = allowedCodes.has(error.code) ? error.code : ERROR_CODES.JOB_FAILED;
   let message = 'The background job failed';
-  if (code === 'serenityUpstreamError') {
+  if (code === ERROR_CODES.SERENITY_UPSTREAM_ERROR) {
     message = 'Upstream request failed';
-  } else if (code !== 'jobFailed' && typeof error.message === 'string') {
+  } else if (code !== ERROR_CODES.JOB_FAILED && typeof error.message === 'string') {
     message = safeError(error.message).slice(0, 256) || message;
   }
   return {
@@ -685,6 +690,7 @@ function SerenityController(context, log, env) {
             400,
           );
         }
+        assertCreatePromptTagLimits(prompts);
         const job = await createAndEnqueueJob(ctx, {
           jobType: CLASSIFY_PROMPTS_JOB_TYPE,
           metadata: {
@@ -858,10 +864,7 @@ function SerenityController(context, log, env) {
       }
       const transport = buildTransport(ctx, imsToken);
       const callerId = resolveCallerId(ctx);
-      const headers = ctx?.pathInfo?.headers ?? {};
-      const idempotencyKey = Object.entries(headers).find(
-        ([name]) => name.toLowerCase() === 'idempotency-key',
-      )?.[1];
+      const idempotencyKey = headerValue(ctx?.pathInfo?.headers, 'idempotency-key');
       const result = auth.mode === 'subworkspace'
         ? await handleBulkTagsSubworkspace(
           ctx,

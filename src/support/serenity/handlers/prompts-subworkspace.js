@@ -17,7 +17,10 @@ import { hasText } from '@adobe/spacecat-shared-utils';
 import { ErrorWithStatusCode } from '../../utils.js';
 import { ERROR_CODES, isMeteredQuota, isUpstreamGone } from '../errors.js';
 import { normalizeGeoTargetId, normalizeLanguageCode } from '../validation.js';
-import { invalidateTagCacheForProject } from './markets.js';
+import {
+  invalidateTagCacheForProject,
+  MAX_TAG_FILTER_VALUES,
+} from './markets.js';
 import {
   buildPromptDto,
   normalizePromptInput,
@@ -37,6 +40,7 @@ import {
   validateTagIds,
   listFacetedPrompts,
   capUpdateTagIds,
+  assertCreatePromptTagLimits,
   BULK_CREATE_CONCURRENCY,
   BULK_PROMPTS_MAX_ITEMS,
   deleteProjectBatches,
@@ -91,7 +95,7 @@ export async function handleListPromptsSubworkspace(transport, workspaceId, quer
   const limit = Math.min(requestedLimit, MAX_PAGE_LIMIT);
   const search = hasText(query?.search) ? String(query.search).trim() : undefined;
   const tagIds = validateTagIds(query?.tagIds, {
-    maximum: MAX_TAG_IDS,
+    maximum: query?.tagFilterMode === 'faceted-v1' ? MAX_TAG_FILTER_VALUES : MAX_TAG_IDS,
     tooLargeCode: query?.tagFilterMode === 'faceted-v1'
       ? ERROR_CODES.TAG_FILTER_TOO_LARGE
       : ERROR_CODES.INVALID_TAG_FILTER,
@@ -199,6 +203,7 @@ export async function handleCreatePromptsSubworkspace(
       400,
     );
   }
+  assertCreatePromptTagLimits(inputs);
   const deferPublish = validateDeferPublish(body);
 
   const projectsBySlice = await buildSliceProjectMap(transport, workspaceId, log);

@@ -138,6 +138,10 @@ export function isRateLimited(e) {
  * every code currently emitted by the serenity surface.
  */
 export const ERROR_CODES = Object.freeze({
+  INVALID_REQUEST: 'invalidRequest',
+  PROMPT_NOT_FOUND: 'promptNotFound',
+  SERENITY_UPSTREAM_ERROR: 'serenityUpstreamError',
+  JOB_FAILED: 'jobFailed',
   MARKET_NOT_FOUND: 'marketNotFound',
   INVALID_TAG_FILTER: 'invalidTagFilter',
   TAG_FILTER_TOO_LARGE: 'tagFilterTooLarge',
@@ -145,6 +149,7 @@ export const ERROR_CODES = Object.freeze({
   IMPACT_UNAVAILABLE: 'impactUnavailable',
   IMPACT_STALE: 'impactStale',
   TAG_TREE_READ_INCOMPLETE: 'tagTreeReadIncomplete',
+  PROMPT_CORPUS_INCOMPLETE: 'promptCorpusIncomplete',
   UNSUPPORTED_TAG_FILTER: 'unsupportedTagFilter',
   IDEMPOTENCY_CONFLICT: 'idempotencyConflict',
   INCOMPATIBLE_TAG_TAXONOMY: 'incompatibleTagTaxonomy',

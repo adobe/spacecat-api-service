@@ -38,6 +38,7 @@ import {
   incompatibleTaxonomyError,
 } from '../tag-tree.js';
 import { republish } from '../brand-urls.js';
+import { invalidateTagCacheForProject } from './markets.js';
 
 /** @typedef {import('../rest-transport.js').SerenityTransport} SerenityTransport */
 
@@ -120,7 +121,7 @@ function parseParentId(raw) {
  * its dimension while every carrying prompt stays attached.
  *
  * An explicit `null` is rejected. Under the dimension-root model the root level
- * is reserved for the five dimension roots, so promoting a tag to a root is never
+ * is reserved for the six dimension roots, so promoting a tag to a root is never
  * a legal request -- it would produce a tag with no dimension.
  *
  * @param {object} body - the raw request body.
@@ -326,7 +327,7 @@ async function readTagDto(
 }
 
 /**
- * The id of an OPEN dimension's root tag, provisioning the five dimension roots
+ * The id of an OPEN dimension's root tag, provisioning the six dimension roots
  * if the project predates them. An open-dimension create with no `parentId`
  * hangs the new value directly under this root.
  *
@@ -923,6 +924,7 @@ export async function handleUpdateTag(
     id,
     { name, parentId: parentIdToSend },
   );
+  invalidateTagCacheForProject(semrushWorkspaceId, projectId);
   const { parentId: updatedParentId } = pickTagIds(updated, parentIdToSend);
   log?.info?.('handleUpdateTag: updated tag', {
     brandId, geoTargetId, languageCode, tagId: id, name, parentId: parentIdToSend,
@@ -1008,6 +1010,7 @@ export async function handleUpdateTagSubworkspace(
     id,
     { name, parentId: parentIdToSend },
   );
+  invalidateTagCacheForProject(workspaceId, projectId);
   const { parentId: updatedParentId } = pickTagIds(updated, parentIdToSend);
   log?.info?.('handleUpdateTagSubworkspace: updated tag', {
     geoTargetId, languageCode, tagId: id, name, parentId: parentIdToSend,
@@ -1250,6 +1253,7 @@ async function deleteResolvedTag(
     );
   }
   await transport.deleteProjectTags(semrushWorkspaceId, projectId, deletedIds);
+  invalidateTagCacheForProject(semrushWorkspaceId, projectId);
   await republish(transport, semrushWorkspaceId, projectId, log);
   return { deletedIds };
 }
@@ -1350,6 +1354,19 @@ export async function handleDeleteTagSubworkspace(
   return { status: 204, deletedIds };
 }
 
+/**
+ * Resolves a flat-mode market and returns its complete tag-delete impact
+ * snapshot without exposing the internal `deletedIds` bookkeeping field.
+ *
+ * @param {SerenityTransport} transport
+ * @param {object} dataAccess
+ * @param {string} brandId
+ * @param {string} semrushWorkspaceId
+ * @param {string} tagId
+ * @param {object} query
+ * @param {object} [log]
+ * @returns {Promise<{status: number, body: object}>}
+ */
 export async function handleTagImpact(
   transport,
   dataAccess,
@@ -1380,6 +1397,17 @@ export async function handleTagImpact(
   return { status: 200, body };
 }
 
+/**
+ * Resolves a subworkspace-mode market and returns its complete tag-delete
+ * impact snapshot without exposing the internal `deletedIds` bookkeeping field.
+ *
+ * @param {SerenityTransport} transport
+ * @param {string} workspaceId
+ * @param {string} tagId
+ * @param {object} query
+ * @param {object} [log]
+ * @returns {Promise<{status: number, body: object}>}
+ */
 export async function handleTagImpactSubworkspace(
   transport,
   workspaceId,

@@ -23,6 +23,8 @@ import {
 } from '../../../../src/support/serenity/handlers/bulk-tags-job.js';
 import { SerenityTransportError } from '../../../../src/support/serenity/rest-transport.js';
 import { rootNameOfDimension } from '../../../../src/support/serenity/prompt-tags.js';
+import { readTagTreeSnapshot } from '../../../../src/support/serenity/tag-tree.js';
+import { clearTagCache } from '../../../../src/support/serenity/handlers/markets.js';
 
 const SERVER_OWNED_DIMENSIONS = ['intent', 'type', 'source', 'origin'];
 
@@ -74,17 +76,21 @@ function serverOwnedTransport(dimension, prompts = []) {
   });
 }
 
-function workerJob(promptIds, overrides = {}) {
+function workerJob(_promptIds, overrides = {}) {
+  let metadata = {
+    workspaceId: 'ws',
+    projectId: 'project',
+    tagIds: ['family'],
+    operation: 'assign',
+    normalizedFilter: { groups: [], candidateIds: [] },
+    ...overrides,
+  };
   return {
-    getMetadata: () => ({
-      workspaceId: 'ws',
-      projectId: 'project',
-      tagIds: ['family'],
-      operation: 'assign',
-      promptIds,
-      matchedCount: promptIds.length,
-      ...overrides,
-    }),
+    getMetadata: () => metadata,
+    setMetadata: (next) => {
+      metadata = next;
+    },
+    save: sinon.stub().resolves(),
   };
 }
 
@@ -103,6 +109,11 @@ const snapshot = {
   items: [],
 };
 snapshot.items = [...snapshot.byId.values()];
+
+afterEach(() => {
+  clearTagCache();
+  sinon.restore();
+});
 
 describe('bulk tags job request and tree semantics', () => {
   it('validates the target slice, operation, mutation ids, and faceted filter mode', () => {
@@ -152,7 +163,6 @@ describe('bulk tags job result paging', () => {
     const result = pageBulkFailures({
       outcome: 'PARTIAL_FAILURE',
       matchedCount: 101,
-      processedCount: 101,
       updatedCount: 0,
       unchangedCount: 0,
       failureCount: 101,
@@ -219,11 +229,44 @@ describe('acceptBulkTags idempotency', () => {
         jobId: existing.getId(),
         jobType: 'bulkTags',
         status: 'IN_PROGRESS',
-        matchedCount: 4,
         replayed: true,
       },
     });
     expect(findById).to.have.been.calledOnce;
+  });
+
+  it('echoes a completed job outcome on idempotent replay', async () => {
+    const hash = requestHash(body);
+    const existing = {
+      getId: () => '11111111-1111-4111-8111-111111111111',
+      getStatus: () => 'COMPLETED',
+      getResult: () => ({ outcome: 'PARTIAL_FAILURE' }),
+      getMetadata: () => ({
+        requestHash: hash,
+        idempotencyExpiresAt: Date.now() + 60_000,
+      }),
+    };
+
+    const replay = await acceptBulkTags({
+      context: {
+        dataAccess: { AsyncJob: { findById: sinon.stub().resolves(existing) } },
+      },
+      transport: {},
+      brandId: 'brand',
+      orgId: 'org',
+      workspaceId: 'ws',
+      projectId: 'project',
+      body,
+      callerId: 'caller',
+      idempotencyKey: 'same-key',
+      log: {},
+    });
+
+    expect(replay.body).to.deep.include({
+      status: 'COMPLETED',
+      outcome: 'PARTIAL_FAILURE',
+      replayed: true,
+    });
   });
 
   it('rejects a reused key whose request fingerprint differs', async () => {
@@ -252,6 +295,7 @@ describe('acceptBulkTags ownership guards', () => {
   for (const operation of ['assign', 'remove']) {
     it(`rejects ${operation} of a canonical server-owned descendant before enqueue`, async () => {
       for (const dimension of SERVER_OWNED_DIMENSIONS) {
+        clearTagCache();
         const transport = serverOwnedTransport(dimension);
 
         // eslint-disable-next-line no-await-in-loop
@@ -289,7 +333,6 @@ describe('bulkTagsHandler worker accounting', () => {
     expect(result).to.deep.include({
       outcome: 'SUCCEEDED',
       matchedCount: 1,
-      processedCount: 1,
       updatedCount: 1,
       unchangedCount: 0,
       failureCount: 0,
@@ -297,6 +340,46 @@ describe('bulkTagsHandler worker accounting', () => {
     expect(transport.updatePromptTagsByIds).to.have.been.calledOnce;
     expect(transport.publishProject).to.have.been.calledOnceWith('ws', 'project');
     expect(result.publish).to.deep.equal({ state: 'SUCCEEDED', error: null });
+  });
+
+  it('applies the acceptance-normalized facet groups to the worker-time corpus', async () => {
+    const transport = workerTransport([
+      { id: 'both', tags: [{ id: 'facet-a' }, { id: 'facet-b' }] },
+      { id: 'only-a', tags: [{ id: 'facet-a' }] },
+      { id: 'only-b', tags: [{ id: 'facet-b' }] },
+    ]);
+    const result = await bulkTagsHandler(
+      { env: {}, log: {} },
+      workerJob([], {
+        normalizedFilter: {
+          groups: [['facet-a'], ['facet-b']],
+          candidateIds: ['facet-a', 'facet-b'],
+          search: 'shoe',
+        },
+      }),
+      'token',
+      transport,
+    );
+
+    expect(result).to.deep.include({
+      matchedCount: 1,
+      updatedCount: 1,
+      unchangedCount: 0,
+      failureCount: 0,
+    });
+    expect(transport.listPromptsByTags).to.have.been.calledOnceWith(
+      'ws',
+      'project',
+      sinon.match({
+        tag_ids: ['facet-a', 'facet-b'],
+        search: 'shoe',
+      }),
+    );
+    expect(transport.updatePromptTagsByIds).to.have.been.calledOnceWith(
+      'ws',
+      'project',
+      [sinon.match({ id: 'both' })],
+    );
   });
 
   it('continues after an individual prompt update fails', async () => {
@@ -308,23 +391,60 @@ describe('bulkTagsHandler worker accounting', () => {
     const result = await bulkTagsHandler({ env: {}, log: {} }, workerJob(['one', 'two', 'gone']), 'token', transport);
     expect(result).to.deep.include({
       outcome: 'PARTIAL_FAILURE',
-      processedCount: 3,
       updatedCount: 1,
       unchangedCount: 0,
-      failureCount: 2,
+      failureCount: 1,
     });
-    expect(result.failures.map((failure) => failure.semrushPromptId)).to.deep.equal(['one', 'gone']);
+    expect(result.failures.map((failure) => failure.semrushPromptId)).to.deep.equal(['one']);
     expect(transport.updatePromptTagsByIds).to.have.been.calledTwice;
   });
 
-  it('publishes an unchanged retry so a prior publish failure can be recovered', async () => {
+  it('does not publish an unchanged-only job without a recovery marker', async () => {
     const transport = workerTransport([{ id: 'one', tags: [{ id: 'family' }] }]);
     const result = await bulkTagsHandler({ env: {}, log: {} }, workerJob(['one']), 'token', transport);
     expect(result).to.deep.include({
       outcome: 'SUCCEEDED', updatedCount: 0, unchangedCount: 1, failureCount: 0,
     });
     expect(transport.updatePromptTagsByIds).not.to.have.been.called;
+    expect(transport.publishProject).not.to.have.been.called;
+    expect(result.publish).to.deep.equal({ state: 'SKIPPED', error: null });
+  });
+
+  it('publishes an unchanged recovery job only when metadata marks a prior failed publish', async () => {
+    const transport = workerTransport([{ id: 'one', tags: [{ id: 'family' }] }]);
+    const job = workerJob(['one'], { publishRecoveryPending: true });
+
+    const result = await bulkTagsHandler({ env: {}, log: {} }, job, 'token', transport);
+
+    expect(result).to.deep.include({
+      outcome: 'SUCCEEDED', updatedCount: 0, unchangedCount: 1, failureCount: 0,
+    });
+    expect(transport.updatePromptTagsByIds).not.to.have.been.called;
     expect(transport.publishProject).to.have.been.calledOnceWith('ws', 'project');
+    expect(result.publish).to.deep.equal({ state: 'SUCCEEDED', error: null });
+    expect(job.getMetadata()).not.to.have.property('publishRecoveryPending');
+    expect(job.save).to.have.been.calledOnce;
+  });
+
+  it('does not publish a zero-match job', async () => {
+    const transport = workerTransport([]);
+
+    const result = await bulkTagsHandler(
+      { env: {}, log: {} },
+      workerJob([]),
+      'token',
+      transport,
+    );
+
+    expect(result).to.deep.include({
+      outcome: 'SUCCEEDED',
+      matchedCount: 0,
+      updatedCount: 0,
+      unchangedCount: 0,
+      failureCount: 0,
+    });
+    expect(result.publish).to.deep.equal({ state: 'SKIPPED', error: null });
+    expect(transport.publishProject).not.to.have.been.called;
   });
 
   it('fails the job with 409 incompatibleTagTaxonomy when a requested tag disappeared', async () => {
@@ -420,7 +540,11 @@ describe('bulkTagsHandler worker accounting', () => {
 
     const result = await bulkTagsHandler(
       { env: {}, log: {} },
-      workerJob(['gone']),
+      workerJob([], {
+        normalizedFilter: undefined,
+        promptIds: ['gone'],
+        matchedCount: 1,
+      }),
       'token',
       transport,
     );
@@ -431,7 +555,8 @@ describe('bulkTagsHandler worker accounting', () => {
       message: 'The prompt no longer exists',
       retryable: false,
     }]);
-    expect(transport.publishProject).to.have.been.calledOnceWith('ws', 'project');
+    expect(transport.publishProject).not.to.have.been.called;
+    expect(result.publish).to.deep.equal({ state: 'SKIPPED', error: null });
   });
 
   it('maps an upstream 404 during update to a non-retryable promptNotFound failure', async () => {
@@ -456,10 +581,11 @@ describe('bulkTagsHandler worker accounting', () => {
   it('marks a publish failure as a partial failure with a retryable public error', async () => {
     const transport = workerTransport([{ id: 'one', tags: [] }]);
     transport.publishProject.rejects(new Error('publish failed'));
+    const job = workerJob(['one']);
 
     const result = await bulkTagsHandler(
       { env: {}, log: {} },
-      workerJob(['one']),
+      job,
       'token',
       transport,
     );
@@ -473,5 +599,39 @@ describe('bulkTagsHandler worker accounting', () => {
         retryable: true,
       },
     });
+    expect(job.getMetadata().publishRecoveryPending).to.equal(true);
+    expect(job.save).to.have.been.calledOnce;
+  });
+
+  it('force-refreshes worker taxonomy validation instead of trusting an acceptance cache', async () => {
+    let rootName = 'tag';
+    const transport = {
+      ...workerTransport([{ id: 'one', tags: [] }]),
+      listProjectTags: sinon.stub().callsFake((_ws, _project, options = {}) => Promise.resolve({
+        items: options.parentId
+          ? [{
+            id: 'family',
+            name: 'Family',
+            parent_id: 'root',
+            children_count: 0,
+            path: [{ id: 'root', name: rootName }],
+          }]
+          : [{ id: 'root', name: rootName, children_count: 1 }],
+      })),
+    };
+    await readTagTreeSnapshot(transport, 'ws', 'project', {});
+    rootName = 'origin';
+
+    await expect(bulkTagsHandler(
+      { env: {}, log: {} },
+      workerJob(['one']),
+      'token',
+      transport,
+    )).to.be.rejected.then((error) => {
+      expect(error.status).to.equal(409);
+      expect(error.code).to.equal('incompatibleTagTaxonomy');
+    });
+    expect(transport.listProjectTags).to.have.callCount(4);
+    expect(transport.updatePromptTagsByIds).not.to.have.been.called;
   });
 });

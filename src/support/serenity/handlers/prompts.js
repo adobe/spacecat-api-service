@@ -39,6 +39,7 @@ import { classifyTagCompatibility } from '../tag-compatibility.js';
 import { logPromptDeleteEvent } from '../prompt-delete-log.js';
 
 /** @typedef {import('../rest-transport.js').SerenityTransport} SerenityTransport */
+/** @typedef {Awaited<ReturnType<typeof readTagTreeSnapshot>>['items'][number]} TagTreeItem */
 /**
  * @typedef {NonNullable<Awaited<
  *   ReturnType<SerenityTransport['listPromptsByTags']>
@@ -625,10 +626,26 @@ export async function listAllProjectPrompts(
     upstreamPromptsScanned: items.length,
   });
   const error = new ErrorWithStatusCode('Unable to read the complete prompt cohort', 503);
-  error.code = ERROR_CODES.TAG_TREE_READ_INCOMPLETE;
+  error.code = ERROR_CODES.PROMPT_CORPUS_INCOMPLETE;
   throw error;
 }
 
+/**
+ * Resolves a public faceted-v1 selection into OR-within-family groups and the
+ * expanded upstream candidate ids used for the bounded prompt scan.
+ *
+ * @param {SerenityTransport} transport
+ * @param {string} semrushWorkspaceId
+ * @param {string} projectId
+ * @param {string[]} tagIds
+ * @param {object} [log]
+ * @param {Awaited<ReturnType<typeof readTagTreeSnapshot>>} [snapshot]
+ * @returns {Promise<{
+ *   groups: Set<string>[],
+ *   candidateIds: string[],
+ *   compatibilityById: Map<string, TagTreeItem['compatibility']>,
+ * }>}
+ */
 export async function resolveFacetedTagFilter(
   transport,
   semrushWorkspaceId,
@@ -654,8 +671,9 @@ export async function resolveFacetedTagFilter(
     error.code = ERROR_CODES.INVALID_TAG_FILTER;
     throw error;
   }
+  const validSelected = /** @type {TagTreeItem[]} */ (selected);
   const groups = new Map();
-  for (const item of selected) {
+  for (const item of validSelected) {
     const familyId = item.fullPath[1]?.id ?? item.id;
     if (!groups.has(familyId)) {
       groups.set(familyId, new Set());
@@ -679,6 +697,19 @@ export async function resolveFacetedTagFilter(
   };
 }
 
+/**
+ * Normalizes a complete prompt tag replacement by retaining unknown/read-only
+ * ids verbatim and adding the required depth-2 parent for every canonical
+ * depth-3 plain tag.
+ *
+ * @param {SerenityTransport} transport
+ * @param {string} semrushWorkspaceId
+ * @param {string} projectId
+ * @param {string[]} tagIds
+ * @param {object} [log]
+ * @param {Awaited<ReturnType<typeof readTagTreeSnapshot>>} [snapshot]
+ * @returns {Promise<string[]>}
+ */
 export async function normalizePromptTagSelection(
   transport,
   semrushWorkspaceId,
@@ -1077,12 +1108,9 @@ function validTagIds(raw) {
 }
 
 /**
- * {@link validTagIds} plus a flat cap at {@link MAX_TAG_IDS} -- the same cap the
- * tagIds *query* filter already enforces above, so a bulk write can't fan out
- * further than a bulk read is allowed to. Used by {@link normalizePromptInput}
- * (CREATE) only: {@link parseUpdatePromptBody} (UPDATE) uses {@link validTagIds}
- * directly and applies {@link capUpdateTagIds} afterward instead, because a flat
- * positional slice is only safe when the server-derived ids are added AFTER it.
+ * {@link validTagIds} plus a fail-loud cap at {@link MAX_TAG_IDS}. Used by
+ * {@link normalizePromptInput} (CREATE) only; UPDATE applies the same raw-input
+ * limit in {@link parseUpdatePromptBody}. Caller ids are never sliced.
  *
  * This cap bounds the CALLER-supplied tags only. The server-derived dimension
  * tags (`type`, `origin`, `source`, `intent`) are injected downstream by
@@ -1090,15 +1118,30 @@ function validTagIds(raw) {
  * and are intentionally EXEMPT from the user-facing cap — a write may
  * therefore carry up to `MAX_TAG_IDS` + 4 ids. They must never be dropped to
  * fit the cap: a prompt missing its `type`/`origin`/`source`/`intent` tag is
- * invisible to that dimension's filter. On CREATE this holds trivially, since
- * the computed ids are appended by the injector after this slice runs, never
- * supplied by the caller pre-slice.
+ * invisible to that dimension's filter.
  *
  * @param {unknown} raw
  * @returns {string[]}
  */
 function sanitizeTagIds(raw) {
-  return validTagIds(raw).slice(0, MAX_TAG_IDS);
+  if (Array.isArray(raw)) {
+    assertPromptTagLimit(raw);
+  }
+  return validTagIds(raw);
+}
+
+/**
+ * Rejects any caller-supplied CREATE tag set over the public prompt limit
+ * before project resolution, classification, or server-managed tag injection.
+ *
+ * @param {Array<{ tagIds?: unknown }>} inputs
+ */
+export function assertCreatePromptTagLimits(inputs) {
+  for (const input of inputs) {
+    if (Array.isArray(input?.tagIds)) {
+      assertPromptTagLimit(input.tagIds);
+    }
+  }
 }
 
 /**
@@ -1606,6 +1649,7 @@ export async function handleCreatePrompts(
       400,
     );
   }
+  assertCreatePromptTagLimits(inputs);
   const deferPublish = validateDeferPublish(body);
 
   const projects = await dataAccess.BrandSemrushProject.allByBrandId(brandId);

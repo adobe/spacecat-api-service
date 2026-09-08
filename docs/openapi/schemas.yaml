@@ -12212,7 +12212,10 @@ SerenityPromptsJobStatus:
         - { $ref: '#/SerenityTagImpact' }
         - { type: 'null' }
     error:
-      description: The sanitized public failure envelope once FAILED; null otherwise.
+      description: |
+        The sanitized public failure envelope once FAILED; null otherwise.
+        `promptCorpusIncomplete` is retryable and means the worker reached the
+        observable 20,000-prompt ceiling without proving the cohort complete.
       oneOf:
         - type: object
           additionalProperties: false
@@ -12220,7 +12223,7 @@ SerenityPromptsJobStatus:
           properties:
             code:
               type: string
-              enum: [invalidRequest, promptNotFound, serenityUpstreamError, tagLimitExceeded, incompatibleTagTaxonomy, jobFailed]
+              enum: [invalidRequest, promptNotFound, serenityUpstreamError, tagLimitExceeded, incompatibleTagTaxonomy, promptCorpusIncomplete, jobFailed]
             message: { type: string }
             retryable: { type: boolean }
         - { type: 'null' }
@@ -12314,19 +12317,23 @@ SerenityBulkTagsRequest:
 
 SerenityBulkTagsAccepted:
   type: object
-  required: [jobId, jobType, status, matchedCount, replayed]
+  description: |
+    Acceptance/replay envelope. Matching is worker-owned, so a newly accepted
+    response does not claim a prompt count. A replay of a terminal completed job
+    may echo its business `outcome`.
+  required: [jobId, jobType, status, replayed]
   properties:
     jobId: { type: string, format: uuid }
     jobType: { type: string, enum: [bulkTags] }
     status: { type: string, enum: [IN_PROGRESS, COMPLETED, FAILED] }
-    matchedCount: { type: integer, minimum: 0 }
     replayed: { type: boolean }
+    outcome: { type: string, enum: [SUCCEEDED, PARTIAL_FAILURE] }
 
 SerenityBulkTagsResult:
   type: object
   additionalProperties: false
   required:
-    [outcome, matchedCount, processedCount, updatedCount, unchangedCount, failureCount, failuresPage, publish]
+    [outcome, matchedCount, updatedCount, unchangedCount, failureCount, failuresPage, publish]
   properties:
     outcome:
       type: string
@@ -12335,8 +12342,10 @@ SerenityBulkTagsResult:
         Explicit business outcome. `PARTIAL_FAILURE` means at least one prompt
         failed or the final project publish failed even though the AsyncJob
         status is `COMPLETED`.
-    matchedCount: { type: integer, minimum: 0 }
-    processedCount: { type: integer, minimum: 0 }
+    matchedCount:
+      type: integer
+      minimum: 0
+      description: Prompts matched by the frozen normalized filter during the worker-time corpus scan.
     updatedCount: { type: integer, minimum: 0 }
     unchangedCount: { type: integer, minimum: 0 }
     failureCount: { type: integer, minimum: 0 }
@@ -12360,7 +12369,12 @@ SerenityBulkTagsResult:
       type: object
       required: [state, error]
       properties:
-        state: { type: string, enum: [SUCCEEDED, FAILED] }
+        state:
+          type: string
+          enum: [SUCCEEDED, FAILED, SKIPPED]
+          description: |
+            `SKIPPED` means no prompt update landed and the job did not carry an
+            explicit prior-failed-publish recovery marker.
         error:
           oneOf:
             - type: object
@@ -12857,7 +12871,8 @@ SerenityErrorResponse:
   description: |
     Unified error envelope for the /serenity/* surface. `error` is a stable
     machine-readable token (`invalidRequest`, `serenityUpstreamError`,
-    `sliceExists`, etc.); `message` is a sanitized human-readable summary.
+    `promptCorpusIncomplete`, `sliceExists`, etc.); `message` is a sanitized
+    human-readable summary.
     Provider-specific detail (upstream HTTP status, raw body) is deliberately
     NOT exposed — it is logged server-side instead.
   required: [error, message]

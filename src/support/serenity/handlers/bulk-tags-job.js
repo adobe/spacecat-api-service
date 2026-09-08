@@ -153,6 +153,20 @@ function idempotencyJobId(scope) {
   ].join('-');
 }
 
+function acceptedJobResponse(job, replayed) {
+  const outcome = job.getResult?.()?.outcome;
+  return {
+    status: replayed ? 200 : 202,
+    body: {
+      jobId: job.getId(),
+      jobType: BULK_TAGS_PUBLIC_JOB_TYPE,
+      status: job.getStatus(),
+      replayed,
+      ...(['SUCCEEDED', 'PARTIAL_FAILURE'].includes(outcome) ? { outcome } : {}),
+    },
+  };
+}
+
 /**
  * @param {any} body
  * @returns {{
@@ -170,11 +184,15 @@ export function parseBulkTagsBody(body) {
     throw codedError(
       'geoTargetId and languageCode identify one active project',
       400,
-      'invalidRequest',
+      ERROR_CODES.INVALID_REQUEST,
     );
   }
   if (!['assign', 'remove'].includes(body?.operation)) {
-    throw codedError('operation must be assign or remove', 400, 'invalidRequest');
+    throw codedError(
+      'operation must be assign or remove',
+      400,
+      ERROR_CODES.INVALID_REQUEST,
+    );
   }
   const tagIds = validateTagIds(body?.tagIds, { required: true });
   const filter = body?.filter && typeof body.filter === 'object' ? body.filter : {};
@@ -212,29 +230,32 @@ export function parseBulkTagsBody(body) {
  * @param {string} options.orgId
  * @param {string} options.workspaceId
  * @param {string} options.projectId
- * @param {any} options.body
+ * @param {ReturnType<typeof parseBulkTagsBody>} options.parsed
  * @param {string} options.callerId
  * @param {string | null} [options.idempotencyKey]
  * @param {object} [options.log]
  * @returns {Promise<{ status: number, body: object }>}
  */
-export async function acceptBulkTags({
+async function acceptParsedBulkTags({
   context,
   transport,
   brandId,
   orgId,
   workspaceId,
   projectId,
-  body,
+  parsed,
   callerId,
   idempotencyKey,
   log,
 }) {
-  const parsed = parseBulkTagsBody(body);
   const hash = canonicalHash(parsed);
   const key = idempotencyKey == null ? null : String(idempotencyKey).trim();
   if (key && key.length > 256) {
-    throw codedError('Idempotency-Key must not exceed 256 characters', 400, 'invalidRequest');
+    throw codedError(
+      'Idempotency-Key must not exceed 256 characters',
+      400,
+      ERROR_CODES.INVALID_REQUEST,
+    );
   }
   const scope = `${orgId}:${brandId}:${projectId}:${callerId}:${key ?? ''}`;
   const now = Date.now();
@@ -250,16 +271,7 @@ export async function acceptBulkTags({
           ERROR_CODES.IDEMPOTENCY_CONFLICT,
         );
       }
-      return {
-        status: 200,
-        body: {
-          jobId: existing.getId(),
-          jobType: BULK_TAGS_PUBLIC_JOB_TYPE,
-          status: existing.getStatus(),
-          matchedCount: existingMetadata.matchedCount,
-          replayed: true,
-        },
-      };
+      return acceptedJobResponse(existing, true);
     }
     if (existing) {
       await existing.remove();
@@ -300,27 +312,14 @@ export async function acceptBulkTags({
     log,
     snapshot,
   );
-  // Freezing the acceptance-time prompt ids requires one bounded corpus read.
-  // Filter and preflight in the same pass, and reuse one pre-expanded mutation
-  // set, so the synchronous path does not repeatedly walk either collection.
-  const corpus = await listAllProjectPrompts(transport, workspaceId, projectId, {
-    tagIds: resolvedFilter.candidateIds,
-    search: parsed.filter.search,
-  }, log);
-  const mutationIds = buildBulkTagMutationIds(parsed.operation, selected, snapshot);
-  const prompts = [];
-  for (const prompt of corpus) {
-    if (matchesBulkTagFacets(prompt, resolvedFilter.groups)) {
-      applyBulkTagOperation(
-        promptTagIds(prompt),
-        parsed.operation,
-        selected,
-        snapshot,
-        mutationIds,
-      );
-      prompts.push(prompt);
-    }
-  }
+  // Persist the acceptance-time facet expansion rather than prompt ids. The
+  // worker owns the bounded corpus scan, while OR-within-family/AND-across-
+  // family membership remains deterministic even if the taxonomy later grows.
+  const normalizedFilter = {
+    groups: resolvedFilter.groups.map((group) => [...group].sort()),
+    candidateIds: [...resolvedFilter.candidateIds].sort(),
+    ...(parsed.filter.search ? { search: parsed.filter.search } : {}),
+  };
 
   let job;
   try {
@@ -336,8 +335,7 @@ export async function acceptBulkTags({
         languageCode: parsed.languageCode,
         operation: parsed.operation,
         tagIds: parsed.tagIds,
-        promptIds: prompts.map((prompt) => String(prompt.id)),
-        matchedCount: prompts.length,
+        normalizedFilter,
         ...(key ? {
           requestHash: hash,
           idempotencyExpiresAt: now + BULK_IDEMPOTENCY_TTL_SECONDS * 1000,
@@ -360,27 +358,50 @@ export async function acceptBulkTags({
         ERROR_CODES.IDEMPOTENCY_CONFLICT,
       );
     }
-    return {
-      status: 200,
-      body: {
-        jobId: raced.getId(),
-        jobType: BULK_TAGS_PUBLIC_JOB_TYPE,
-        status: raced.getStatus(),
-        matchedCount: racedMetadata.matchedCount,
-        replayed: true,
-      },
-    };
+    return acceptedJobResponse(raced, true);
   }
-  return {
-    status: 202,
-    body: {
-      jobId: job.getId(),
-      jobType: BULK_TAGS_PUBLIC_JOB_TYPE,
-      status: job.getStatus(),
-      matchedCount: prompts.length,
-      replayed: false,
-    },
-  };
+  return acceptedJobResponse(job, false);
+}
+
+/**
+ * @param {object} options
+ * @param {object} options.context
+ * @param {SerenityTransport} options.transport
+ * @param {string} options.brandId
+ * @param {string} options.orgId
+ * @param {string} options.workspaceId
+ * @param {string} options.projectId
+ * @param {any} options.body
+ * @param {string} options.callerId
+ * @param {string | null} [options.idempotencyKey]
+ * @param {object} [options.log]
+ * @returns {Promise<{ status: number, body: object }>}
+ */
+export async function acceptBulkTags({
+  context,
+  transport,
+  brandId,
+  orgId,
+  workspaceId,
+  projectId,
+  body,
+  callerId,
+  idempotencyKey,
+  log,
+}) {
+  const parsed = parseBulkTagsBody(body);
+  return acceptParsedBulkTags({
+    context,
+    transport,
+    brandId,
+    orgId,
+    workspaceId,
+    projectId,
+    parsed,
+    callerId,
+    idempotencyKey,
+    log,
+  });
 }
 
 /**
@@ -417,14 +438,14 @@ export async function handleBulkTags(
   if (!row) {
     throw codedError('No market for this brand and slice', 404, ERROR_CODES.MARKET_NOT_FOUND);
   }
-  return acceptBulkTags({
+  return acceptParsedBulkTags({
     context,
     transport,
     brandId,
     orgId,
     workspaceId,
     projectId: row.getSemrushProjectId(),
-    body: parsed,
+    parsed,
     callerId,
     idempotencyKey,
     log,
@@ -465,14 +486,14 @@ export async function handleBulkTagsSubworkspace(
   if (!project) {
     throw codedError('No market for this brand and slice', 404, ERROR_CODES.MARKET_NOT_FOUND);
   }
-  return acceptBulkTags({
+  return acceptParsedBulkTags({
     context,
     transport,
     brandId,
     orgId,
     workspaceId,
     projectId: String(project.id),
-    body: parsed,
+    parsed,
     callerId,
     idempotencyKey,
     log,
@@ -481,7 +502,11 @@ export async function handleBulkTagsSubworkspace(
 
 /**
  * @param {object} context
- * @param {{ getMetadata: () => any }} job
+ * @param {{
+ *   getMetadata: () => any,
+ *   setMetadata?: (metadata: object) => void,
+ *   save?: () => Promise<void>,
+ * }} job
  * @param {string} accessToken
  * @param {SerenityTransport} [injectedTransport]
  * @returns {Promise<object>}
@@ -495,6 +520,7 @@ export async function bulkTagsHandler(context, job, accessToken, injectedTranspo
     metadata.workspaceId,
     metadata.projectId,
     context.log,
+    { forceRefresh: true },
   );
   const requestedTagIds = Array.isArray(metadata.tagIds) ? metadata.tagIds : [];
   const selected = requestedTagIds.map((id) => snapshot.byId.get(id)).filter(Boolean);
@@ -509,21 +535,47 @@ export async function bulkTagsHandler(context, job, accessToken, injectedTranspo
     );
   }
   const mutationIds = buildBulkTagMutationIds(metadata.operation, selected, snapshot);
+  const { normalizedFilter } = metadata;
+  const hasNormalizedFilter = normalizedFilter
+    && Array.isArray(normalizedFilter.groups)
+    && Array.isArray(normalizedFilter.candidateIds);
+  const filterGroups = hasNormalizedFilter
+    ? normalizedFilter.groups.map((group) => new Set(group.map(String)))
+    : [];
   const currentPrompts = await listAllProjectPrompts(
     transport,
     metadata.workspaceId,
     metadata.projectId,
-    undefined,
+    hasNormalizedFilter
+      ? {
+        tagIds: normalizedFilter.candidateIds.map(String),
+        ...(typeof normalizedFilter.search === 'string'
+          ? { search: normalizedFilter.search }
+          : {}),
+      }
+      : undefined,
     context.log,
   );
-  const byId = new Map(currentPrompts.map((prompt) => [String(prompt.id), prompt]));
-  const outcomes = await mapLimit(metadata.promptIds, BULK_CREATE_CONCURRENCY, async (promptId) => {
-    const prompt = byId.get(promptId);
+  const currentPromptsById = new Map(
+    currentPrompts.map((prompt) => [String(prompt.id), prompt]),
+  );
+  const workItems = hasNormalizedFilter
+    ? currentPrompts
+      .filter((prompt) => matchesBulkTagFacets(prompt, filterGroups))
+      .map((prompt) => ({ promptId: String(prompt.id), prompt }))
+    : (Array.isArray(metadata.promptIds) ? metadata.promptIds : []).map((promptId) => ({
+      promptId: String(promptId),
+      prompt: currentPromptsById.get(String(promptId)),
+    }));
+  const outcomes = await mapLimit(workItems, BULK_CREATE_CONCURRENCY, async ({
+    promptId,
+    prompt,
+  }) => {
     if (!prompt) {
       return {
         failure: {
           semrushPromptId: promptId,
-          code: 'promptNotFound',
+          code: ERROR_CODES.PROMPT_NOT_FOUND,
           message: 'The prompt no longer exists',
           retryable: false,
         },
@@ -563,7 +615,9 @@ export async function bulkTagsHandler(context, job, accessToken, injectedTranspo
       return {
         failure: {
           semrushPromptId: promptId,
-          code: isUpstreamGone(error) ? 'promptNotFound' : 'serenityUpstreamError',
+          code: isUpstreamGone(error)
+            ? ERROR_CODES.PROMPT_NOT_FOUND
+            : ERROR_CODES.SERENITY_UPSTREAM_ERROR,
           message: isUpstreamGone(error)
             ? 'The prompt no longer exists'
             : 'The prompt could not be updated',
@@ -576,29 +630,50 @@ export async function bulkTagsHandler(context, job, accessToken, injectedTranspo
   const updatedCount = outcomes.filter((outcome) => outcome.updated).length;
   const unchangedCount = outcomes.filter((outcome) => outcome.unchanged).length;
 
-  invalidateTagCacheForProject(metadata.workspaceId, metadata.projectId);
-  const publishErrors = await publishAffected(
-    transport,
-    metadata.workspaceId,
-    metadata.projectId ? [metadata.projectId] : [],
-    context.log,
-  );
-  const publish = publishErrors.length === 0
-    ? { state: 'SUCCEEDED', error: null }
-    : {
-      state: 'FAILED',
-      error: {
-        code: 'serenityUpstreamError',
-        message: 'The project could not be published',
-        retryable: true,
-      },
-    };
+  if (updatedCount > 0) {
+    invalidateTagCacheForProject(metadata.workspaceId, metadata.projectId);
+  }
+  const isPublishRecovery = metadata.publishRecoveryPending === true;
+  /** @type {{
+   *   state: 'SKIPPED' | 'SUCCEEDED' | 'FAILED',
+   *   error: null | { code: string, message: string, retryable: boolean },
+   * }} */
+  let publish = { state: 'SKIPPED', error: null };
+  if (updatedCount > 0 || isPublishRecovery) {
+    const publishErrors = await publishAffected(
+      transport,
+      metadata.workspaceId,
+      metadata.projectId ? [metadata.projectId] : [],
+      context.log,
+    );
+    if (publishErrors.length === 0) {
+      publish = { state: 'SUCCEEDED', error: null };
+      if (isPublishRecovery && typeof job.setMetadata === 'function') {
+        const nextMetadata = { ...metadata };
+        delete nextMetadata.publishRecoveryPending;
+        job.setMetadata(nextMetadata);
+        await job.save?.();
+      }
+    } else {
+      publish = {
+        state: 'FAILED',
+        error: {
+          code: ERROR_CODES.SERENITY_UPSTREAM_ERROR,
+          message: 'The project could not be published',
+          retryable: true,
+        },
+      };
+      if (typeof job.setMetadata === 'function') {
+        job.setMetadata({ ...metadata, publishRecoveryPending: true });
+        await job.save?.();
+      }
+    }
+  }
   return {
-    outcome: failures.length === 0 && publish.state === 'SUCCEEDED'
+    outcome: failures.length === 0 && publish.state !== 'FAILED'
       ? 'SUCCEEDED'
       : 'PARTIAL_FAILURE',
-    matchedCount: metadata.matchedCount,
-    processedCount: metadata.matchedCount,
+    matchedCount: workItems.length,
     updatedCount,
     unchangedCount,
     failureCount: failures.length,

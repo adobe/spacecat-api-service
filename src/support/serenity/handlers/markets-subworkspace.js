@@ -687,7 +687,7 @@ export async function handleCreateMarketSubworkspace(
   // so classification can later apply intent/origin/type values per prompt and the
   // Categories surface has a `category` root to hang customer categories under.
   // Idempotent (resolve-before-create), and unconditional: every project carries
-  // exactly the five dimension roots, whether or not it has prompts yet.
+  // exactly the six dimension roots, whether or not it has prompts yet.
   const provisioned = await provisionDimensionTree(transport, workspaceId, projectId, log);
 
   // Attach the selected AI models (LLMs) to the project before populating /
