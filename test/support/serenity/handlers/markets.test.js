@@ -2205,17 +2205,22 @@ describe('resolveLanguageId', () => {
   // Regression test for the LLMO-7309 root cause: the old English-name-matching
   // approach collapsed zh-Hans/zh-Hant to the same "Chinese" name and could not
   // disambiguate them. Direct code resolution must keep them distinct.
-  it('resolves zh-Hans and zh-Hant to their distinct catalog ids (script-subtag disambiguation)', async () => {
+  it('resolves zh-Hans, zh-Hant, and fil — the LLMO-7309 motivating regression scenarios', async () => {
     const transport = {
       listLanguages: sinon.stub().resolves({
         items: [
-          { id: 'lang-zhcn', name: 'Chinese Simplified', code: 'zh-Hans' },
-          { id: 'lang-zhtw', name: 'Chinese Traditional', code: 'zh-Hant' },
+          { id: 'lang-zh-s', name: 'Chinese Simplified', code: 'zh-Hans' },
+          { id: 'lang-zh-t', name: 'Chinese Traditional', code: 'zh-Hant' },
+          { id: 'lang-fil', name: 'Filipino', code: 'fil' },
         ],
       }),
     };
-    expect(await resolveLanguageId(transport, 'zh-hans')).to.equal('lang-zhcn');
-    expect(await resolveLanguageId(transport, 'zh-hant')).to.equal('lang-zhtw');
+    expect(await resolveLanguageId(transport, 'zh-hans')).to.equal('lang-zh-s');
+    expect(await resolveLanguageId(transport, 'zh-hant')).to.equal('lang-zh-t');
+    expect(await resolveLanguageId(transport, 'fil')).to.equal('lang-fil');
+    // The bare primary subtag must NOT resolve when only script-qualified entries exist —
+    // proves there is no `.split('-')[0]`-style fallback lurking anywhere in this path.
+    expect(await resolveLanguageId(transport, 'zh')).to.equal(null);
   });
 
   it('returns null for a code not present in the catalog (no name-matching fallback)', async () => {
