@@ -750,6 +750,16 @@ export default function ElementsController(context, log, env) {
    *   - a real error status (404 no workspace / org / brand, 403 no SpaceCat org access,
    *     502 upstream 5xx / timeout, 503 misconfig) — INDETERMINATE, not a denial; the UI
    *     treats these as "assume access" so a transient blip no longer flashes the banner.
+   *
+   * S2S EXCEPTION: for an S2S consumer, this always returns `{ hasAccess: true }` once
+   * `authorizeOrg` has granted access to the organization/brand, WITHOUT probing the
+   * upstream User Manager resource-allowance endpoint at all (see the short-circuit below).
+   * An S2S consumer authorized for a brand gets access to all of that brand's Semrush
+   * elements — there is no narrower, per-workspace S2S grant this probe could usefully
+   * check. One consequence: if the Semrush-side `SEMRUSH_ADMIN_ELEMENT_API_KEY` credential
+   * itself lost access to a specific brand's workspace, this endpoint would NOT reflect
+   * that for S2S callers (only actual data-fetching calls would fail); it only ever
+   * reflects the caller's own org/brand authorization, never Semrush-side credential health.
    */
   const checkAccess = async (ctx) => {
     try {
@@ -759,10 +769,11 @@ export default function ElementsController(context, log, env) {
       }
       // This probe forwards the CALLER'S OWN IMS token to check THEIR access to the linked
       // Semrush workspace - it has no meaning for an S2S consumer, which authenticates with a
-      // JWT (not IMS) and, once past authorizeOrg's org-scoped organization:read check above,
-      // is already confirmed to own this specific organization. Short-circuit here rather than
-      // falling through to resolveElementsImsToken/requireImsBearer, which would reject the S2S
-      // JWT with a 401.
+      // JWT (not IMS) and, once past authorizeOrg's hasAccess(organization) check above, is
+      // already confirmed to own this specific organization (and, once authorized, has access
+      // to all of its Semrush elements - see the S2S EXCEPTION note above). Short-circuit here
+      // rather than falling through to resolveElementsImsToken/requireImsBearer, which would
+      // reject the S2S JWT with a 401.
       if (ctx?.attributes?.authInfo?.isS2SConsumer?.()) {
         return ok({ hasAccess: true });
       }

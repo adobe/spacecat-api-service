@@ -593,14 +593,14 @@ describe('createElementsTransport', () => {
       expect(JSON.parse(init.body)).to.deep.equal({ render_data: payload });
     });
 
-    it('throws 401 when SEMRUSH_ADMIN_ELEMENT_API_KEY is missing', async () => {
+    it('throws 503 when SEMRUSH_ADMIN_ELEMENT_API_KEY is missing (server config gap, not caller auth failure)', async () => {
       const transport = createElementsTransport({
         env: { SEO_API_BASE_URL: S2S_BASE_URL },
         isS2SConsumer: true,
       });
       await expect(transport.fetchElement(WORKSPACE_ID, ELEMENT_ID, {}))
         .to.be.rejected.then((err) => {
-          expect(err).to.have.property('status', 401);
+          expect(err).to.have.property('status', 503);
         });
     });
 

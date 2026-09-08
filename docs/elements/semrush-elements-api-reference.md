@@ -469,7 +469,12 @@ The Elements transport reuses the same `SEMRUSH_PROJECTS_BASE_URL` already confi
 
 ### S2S Elements Access
 
-An S2S consumer holding the `organization:readAll` capability can call the same Elements routes as a regular user, but the upstream request shape differs:
+An S2S consumer holding the `brand:read` capability can call all 21 Elements/brand-presence routes, exactly like a regular user — there is no dedicated cross-tenant capability (no `organization:readAll`/`brand:readAll`) for this feature. Authorization works in two layers:
+
+1. **Layer 1** (`s2sAuthWrapper`, `src/routes/required-capabilities.js`): the consumer's registered `capabilities` (in its `Consumer` DB row) must include `brand:read` — every one of the 21 routes requires it.
+2. **Layer 2** (`authorizeOrgAccess` in `controllers/elements.js`): the same, **unmodified** `AccessControlUtil.hasAccess(organization)` check a human session-token user goes through. This checks whether the target `:spaceCatId`'s IMS org ID appears in the caller's own JWT `tenants` claim. An S2S consumer must be issued a session token (via `POST /auth/s2s/login`, naming the target customer's `imsOrgId`) for this to succeed — see `docs/s2s/SEMRUSH_SERENITY_ACCESS_GUIDE.md` for the full consumer-facing flow.
+
+Once authorized, the upstream request shape differs from the regular (IMS) path:
 
 | | Regular (IMS bearer) | S2S consumer |
 |---|---|---|
@@ -480,3 +485,7 @@ An S2S consumer holding the `organization:readAll` capability can call the same 
 | Response shape | unchanged | unchanged |
 
 `workspaceId` and `elementId` are the same values either way. The S2S vs. regular branch is decided once per request in `ElementsController.buildService()` (`ctx.attributes.authInfo.isS2SConsumer()`) and threaded into `createElementsTransport({ isS2SConsumer })`; `elements-service.js` is unaware of the distinction and calls `transport.fetchElement(...)` identically in both cases.
+
+A missing `SEMRUSH_ADMIN_ELEMENT_API_KEY` is treated as a server-side config gap (503), not a caller auth failure (401) — consistent with how a missing `SEO_API_BASE_URL`/`SEMRUSH_PROJECTS_BASE_URL` is handled.
+
+**Other routes depending on the Elements transport.** Two routes outside this controller also call `createElementsTransport`/`createElementsService` — `GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/prompts-by-url` and its `:brandId` variant, both in `src/controllers/llmo/llmo-url-inspector.js` (handled by `createUrlInspectorPromptsByUrlHandler`). They are gated on the same `brand:read` capability at Layer 1, but their handler does not yet have an `isS2SConsumer` branch — an S2S consumer holding `brand:read` will pass Layer 1 for these two routes but then get a 401 when the handler tries to resolve an IMS token. This is a pre-existing gap, not addressed by this feature.

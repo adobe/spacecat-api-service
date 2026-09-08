@@ -97,7 +97,15 @@ function buildHeaders(imsToken) {
 
 function buildS2SHeaders(apiKey) {
   if (!hasText(apiKey)) {
-    throw new ElementsTransportError(401, 'Missing SEMRUSH_ADMIN_ELEMENT_API_KEY for S2S Elements transport');
+    // A missing SEMRUSH_ADMIN_ELEMENT_API_KEY is a server-side config gap, not a caller
+    // auth failure - 503 (matching baseUrlFromEnvVar's missing-env-var case) so mapError()
+    // doesn't misreport it as "the S2S consumer's credentials are bad" (its 401/403 branch
+    // is reserved for actual upstream authorization failures).
+    throw new ErrorWithStatusCode(
+      'SEMRUSH_ADMIN_ELEMENT_API_KEY is not set. Configure it via Vault '
+      + '(dx_mysticat/<env>/api-service) or .env for local dev.',
+      503,
+    );
   }
   return {
     Authorization: `Apikey ${apiKey}`,
