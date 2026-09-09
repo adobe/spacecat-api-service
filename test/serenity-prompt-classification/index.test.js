@@ -55,6 +55,7 @@ describe('serenity-prompt-classification worker entry', () => {
   let claimJobLeaseStub;
   let clearJobLeaseStub;
   let provisionWorkspaceHandlerStub;
+  let createMarketJobHandlerStub;
 
   beforeEach(async () => {
     sandbox = sinon.createSandbox();
@@ -67,6 +68,7 @@ describe('serenity-prompt-classification worker entry', () => {
     claimJobLeaseStub = sandbox.stub().resolves(true);
     clearJobLeaseStub = sandbox.stub();
     provisionWorkspaceHandlerStub = sandbox.stub().resolves({ provisioningStatus: 'ready' });
+    createMarketJobHandlerStub = sandbox.stub().resolves({ status: 201, body: {} });
 
     ({
       NeedsReauthError,
@@ -101,6 +103,10 @@ describe('serenity-prompt-classification worker entry', () => {
       '../../src/support/serenity/handlers/provision-workspace-job.js': {
         provisionWorkspaceHandler: provisionWorkspaceHandlerStub,
         PROVISION_WORKSPACE_JOB_TYPE: 'serenity-provision-workspace',
+      },
+      '../../src/support/serenity/handlers/create-market-job.js': {
+        createMarketJobHandler: createMarketJobHandlerStub,
+        CREATE_MARKET_JOB_TYPE: 'serenity-create-market',
       },
     }));
   });
@@ -204,6 +210,21 @@ describe('serenity-prompt-classification worker entry', () => {
     expect(invalidateStub).to.have.been.called;
   });
 
+  it('dispatches serenity-create-market to createMarketJobHandler (PR-C, LLMO-7352/LLMO-7418)', async () => {
+    const job = makeJob();
+    const context = makeContext(job);
+    exchangeAndPersistStub.resolves('access-token');
+
+    await run({ jobId: 'job-123', type: 'serenity-create-market' }, context);
+
+    expect(createMarketJobHandlerStub).to.have.been.calledOnceWith(context, job, 'access-token');
+    expect(job.getStatus()).to.equal('COMPLETED');
+    expect(job.getResult()).to.deep.equal({ status: 201, body: {} });
+    // This job never self-requeues or chains further — it is always the LAST hop, so the token
+    // must be invalidated like any other terminal job.
+    expect(invalidateStub).to.have.been.called;
+  });
+
   it('does not invalidate the promise token when the handler self-requeued (token ownership transferred)', async () => {
     const job = makeJob();
     const context = makeContext(job);
@@ -230,6 +251,19 @@ describe('serenity-prompt-classification worker entry', () => {
     expect(job.getStatus()).to.equal('IN_PROGRESS');
     expect(job.getResult()).to.equal(undefined);
     expect(invalidateStub).not.to.have.been.called;
+  });
+
+  it('does not invalidate the promise token when the handler chained a follow-up job (PR-C, LLMO-7418)', async () => {
+    const job = makeJob();
+    const context = makeContext(job);
+    exchangeAndPersistStub.resolves('access-token');
+    provisionWorkspaceHandlerStub.resolves({ provisioningStatus: 'ready', chainedJobId: 'chained-job-1' });
+
+    await run({ jobId: 'job-123', type: 'serenity-provision-workspace' }, context);
+
+    expect(job.getStatus()).to.equal('COMPLETED');
+    expect(invalidateStub).to.not.have.been.called;
+    expect(job.save).to.have.been.called;
   });
 
   it('marks unknown application errors non-retryable', async () => {

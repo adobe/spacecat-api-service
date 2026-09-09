@@ -12,6 +12,7 @@
 
 // @ts-check
 
+import { hasText } from '@adobe/spacecat-shared-utils';
 import { NEEDS_REAUTH_ERROR_CODE } from './async-job-runner.js';
 import {
   enqueueSemrushMarketGeneration,
@@ -174,4 +175,19 @@ export function toGenerationJobDto(job) {
     createdAt: job.getCreatedAt?.(),
     updatedAt: job.getUpdatedAt?.(),
   };
+}
+
+/**
+ * The brand's display name for a generation request: the explicit `brandDisplayName`, else the
+ * first `brandNames` entry, else empty.
+ *
+ * Moved here from serenity.js during the LLMO-7352/7418 rebase: its only consumers are now the
+ * two orchestration modules that own the market-create and activate bodies, and the controller
+ * no longer builds a generation request itself.
+ */
+export function resolveBrandName(body) {
+  if (hasText(body?.brandDisplayName)) {
+    return body.brandDisplayName;
+  }
+  return Array.isArray(body?.brandNames) ? (body.brandNames[0] ?? '') : '';
 }
