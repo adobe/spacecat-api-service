@@ -427,7 +427,7 @@ const FIXTURES = {
     controllerMethod: 'listOrgLanguages',
     handlerName: 'listLanguageCatalog',
     handlerResult: {
-      items: [{ id: 'lang-en', name: 'English' }],
+      items: [{ id: 'lang-en', name: 'English', code: 'en' }],
     },
   },
   // Unlike the rest of this file's fixtures, this operation is served by
@@ -889,7 +889,10 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
               isSerenityActiveForBrand: () => Promise.resolve(true),
             },
             '../../src/support/access-control-util.js': {
-              default: { fromContext: () => ({ hasAccess: () => Promise.resolve(true) }) },
+              default: {
+                fromContext: () => ({ hasAccess: () => Promise.resolve(true) }),
+                isS2SConsumer: () => false,
+              },
             },
             // authorizeBrandSubWorkspace (used by listTopicPrompts) resolves the brand
             // UUID via prompts-storage before resolving the sub-workspace.

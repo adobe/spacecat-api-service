@@ -1,3 +1,10 @@
+## [1.799.3](https://github.com/adobe/spacecat-api-service/compare/v1.799.2...v1.799.3) (2026-09-09)
+
+
+### Bug Fixes
+
+* **serenity:** resolve languageCode by Semrush BCP-47 code, not English name ([#3221](https://github.com/adobe/spacecat-api-service/issues/3221)) ([23aef8c](https://github.com/adobe/spacecat-api-service/commit/23aef8c694a5221111fd0cd0a0d1dcf5cd27052f)), closes [#3183](https://github.com/adobe/spacecat-api-service/issues/3183) [Hi#level](https://github.com/Hi/issues/level) [#1919](https://github.com/adobe/spacecat-api-service/issues/1919) [#1919](https://github.com/adobe/spacecat-api-service/issues/1919) [#1919](https://github.com/adobe/spacecat-api-service/issues/1919) [#1919](https://github.com/adobe/spacecat-api-service/issues/1919)
+
 ## [1.799.2](https://github.com/adobe/spacecat-api-service/compare/v1.799.1...v1.799.2) (2026-09-09)
 
 

@@ -141,6 +141,7 @@ function brandSemrushProjectsFor(ids) {
 function fakeContext({
   bearer = IMS_TOKEN,
   authType = 'ims',
+  isS2SConsumer = false,
   params = {},
   url = `https://api.example.com/v2/orgs/${ORG_ID}/brands/${BRAND_ID}/serenity/brand-presence/url-inspector/filter-dimensions`,
   org = { getId: () => ORG_ID },
@@ -149,21 +150,32 @@ function fakeContext({
   withBrandSemrushProject = false,
   promiseToken = undefined,
   postgrestClient = { from: sinon.stub() },
+  log = fakeLog(),
+  invocationId = 'req-1',
+  s2sConsumer = undefined,
 } = {}) {
   const BrandSemrushProject = withBrandSemrushProject
     ? { allByBrandId: sinon.stub().resolves(brandSemrushProjects) }
     : undefined;
+  let suffix;
+  try {
+    suffix = new URL(url).pathname;
+  } catch {
+    suffix = undefined;
+  }
   return {
     params: { spaceCatId: ORG_ID, brandId: BRAND_ID, ...params },
     request: { url },
     pathInfo: {
+      method: 'GET',
+      suffix,
       headers: {
         ...(bearer ? { authorization: `Bearer ${bearer}` } : {}),
         ...(promiseToken ? { 'x-promise-token': promiseToken } : {}),
       },
     },
     attributes: {
-      authInfo: { getType: () => authType },
+      authInfo: { getType: () => authType, isS2SConsumer: () => isS2SConsumer },
     },
     dataAccess: {
       Organization: { findById: sinon.stub().resolves(org) },
@@ -171,6 +183,9 @@ function fakeContext({
       ...(BrandSemrushProject && { BrandSemrushProject }),
     },
     _spacecatBrands: spacecatBrands,
+    log,
+    invocation: { id: invocationId },
+    s2sConsumer,
   };
 }
 
@@ -249,6 +264,7 @@ describe('ElementsController', () => {
     const MockAccessControlUtil = {
       default: {
         fromContext: () => ({ hasAccess: accessControlHasAccessStub }),
+        isS2SConsumer: (ctx) => ctx?.attributes?.authInfo?.isS2SConsumer?.() ?? false,
       },
     };
 
@@ -394,6 +410,116 @@ describe('ElementsController', () => {
     });
   });
 
+  // ─── S2S consumer access ──────────────────────────────────────────────────
+
+  describe('S2S consumer access', () => {
+    // authorizeOrgAccess makes its decision solely via the pre-existing, unmodified
+    // accessControl.hasAccess(organization) call - identical to a regular session-token
+    // user (e.g. an S2S JWT carrying a `tenants` claim naming the target org passes
+    // hasAccess() via authInfo.hasOrganization(), exactly like a human user would). The
+    // only S2S-specific addition is the [s2s]/[acl] audit-log observation below.
+
+    it('grants access when hasAccess() succeeds for an S2S consumer', async () => {
+      const ctx = fakeContext({ isS2SConsumer: true, authType: 'jwt', bearer: null });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
+      expect(res.status).to.equal(200);
+    });
+
+    it('returns 403 when hasAccess() denies an S2S consumer', async () => {
+      accessControlHasAccessStub.resolves(false);
+      const ctx = fakeContext({ isS2SConsumer: true, authType: 'jwt', bearer: null });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
+      expect(res.status).to.equal(403);
+    });
+
+    it('skips IMS token resolution and builds an S2S transport for an S2S consumer', async () => {
+      const ctx = fakeContext({ isS2SConsumer: true, authType: 'jwt', bearer: null });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
+      expect(res.status).to.equal(200);
+      expect(exchangePromiseTokenStub).to.not.have.been.called;
+      expect(createElementsTransportStub).to.have.been.calledWith(
+        sinon.match({ isS2SConsumer: true, imsToken: undefined }),
+      );
+    });
+
+    it('builds a regular (non-S2S) transport for a normal IMS caller', async () => {
+      const ctx = fakeContext();
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
+      expect(res.status).to.equal(200);
+      expect(createElementsTransportStub).to.have.been.calledWith(
+        sinon.match({ isS2SConsumer: false, imsToken: IMS_TOKEN }),
+      );
+    });
+
+    it('logs a [s2s] audit line with clientId/consumerId/organizationId/requestId on a granted read', async () => {
+      const s2sConsumer = { getClientId: () => 'client-abc', getId: () => 'consumer-123' };
+      const ctx = fakeContext({
+        isS2SConsumer: true,
+        authType: 'jwt',
+        bearer: null,
+        invocationId: 'req-audit-1',
+        s2sConsumer,
+      });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
+      expect(res.status).to.equal(200);
+      expect(ctx.log.info).to.have.been.calledWithMatch(
+        /^\[s2s\] .*granted clientId=client-abc consumerId=consumer-123 organizationId=/,
+      );
+      expect(ctx.log.info).to.have.been.calledWithMatch(/requestId=req-audit-1/);
+    });
+
+    it('logs an [acl] denial line with clientId/consumerId when an S2S consumer is denied', async () => {
+      const s2sConsumer = { getClientId: () => 'client-abc', getId: () => 'consumer-123' };
+      accessControlHasAccessStub.resolves(false);
+      const ctx = fakeContext({
+        isS2SConsumer: true,
+        authType: 'jwt',
+        bearer: null,
+        invocationId: 'req-audit-2',
+        s2sConsumer,
+      });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
+      expect(res.status).to.equal(403);
+      expect(ctx.log.info).to.have.been.calledWithMatch(
+        /^\[acl\] Denied .*reason=no-org-access clientId=client-abc consumerId=consumer-123/,
+      );
+      expect(ctx.log.info).to.have.been.calledWithMatch(/requestId=req-audit-2/);
+    });
+
+    it('falls back to "n/a" in the audit log when context.s2sConsumer is not set', async () => {
+      const ctx = fakeContext({ isS2SConsumer: true, authType: 'jwt', bearer: null });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
+      expect(res.status).to.equal(200);
+      expect(ctx.log.info).to.have.been.calledWithMatch(
+        /^\[s2s\] .*granted clientId=n\/a consumerId=n\/a/,
+      );
+    });
+
+    it('does not log [s2s]/[acl] lines for a regular (non-S2S) user', async () => {
+      const ctx = fakeContext();
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      await ctrl.listUrlInspectorFilterDimensions(ctx);
+      expect(ctx.log.info).to.not.have.been.calledWithMatch(/^\[s2s\]/);
+      expect(ctx.log.info).to.not.have.been.calledWithMatch(/^\[acl\]/);
+    });
+
+    it('does not log an [acl] denial line for a regular (non-S2S) user lacking org access', async () => {
+      accessControlHasAccessStub.resolves(false);
+      const ctx = fakeContext();
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
+      expect(res.status).to.equal(403);
+      expect(ctx.log.info).to.not.have.been.calledWithMatch(/^\[acl\]/);
+    });
+  });
+
   // ─── x-promise-token support ──────────────────────────────────────────────
 
   describe('x-promise-token support', () => {
@@ -481,6 +607,30 @@ describe('ElementsController', () => {
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
       expect(res.status).to.equal(403);
+    });
+
+    it('maps a 401 ElementsTransportError to 502 (not 401) for an S2S consumer, logging the admin credential', async () => {
+      serviceStub.getUrlInspectorFilterDimensions
+        .rejects(new MockElementsTransportError(401, 'upstream auth failed'));
+      const ctx = fakeContext({ isS2SConsumer: true, authType: 'jwt', bearer: null });
+      const log = fakeLog();
+      const ctrl = ElementsController(ctx, log, ENV);
+      const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
+      expect(res.status).to.equal(502);
+      const body = await readBody(res);
+      expect(body.error).to.equal('elementsUpstreamError');
+      expect(log.error).to.have.been.calledWithMatch(/SEMRUSH_ADMIN_ELEMENT_API_KEY/);
+    });
+
+    it('maps a 403 ElementsTransportError to 502 (not 403) for an S2S consumer', async () => {
+      serviceStub.getUrlInspectorFilterDimensions
+        .rejects(new MockElementsTransportError(403, 'forbidden'));
+      const ctx = fakeContext({ isS2SConsumer: true, authType: 'jwt', bearer: null });
+      const log = fakeLog();
+      const ctrl = ElementsController(ctx, log, ENV);
+      const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
+      expect(res.status).to.equal(502);
+      expect(log.error).to.have.been.calledWithMatch(/SEMRUSH_ADMIN_ELEMENT_API_KEY/);
     });
 
     it('maps other ElementsTransportError statuses to 502', async () => {
@@ -806,7 +956,9 @@ describe('ElementsController', () => {
 
     it('calls getPrompts with the brand SUB-workspace ID and parsed filters', async () => {
       const ctx = fakeContext({
-        url: promptsUrl('?model=perplexity&tag=type__branded,category__Brand&projectId=proj-a,proj-b'),
+        url: promptsUrl(`?model=perplexity&tag=type__branded,category__Brand&projectId=${PROJECT_ID_A},${PROJECT_ID_B}`),
+        withBrandSemrushProject: true,
+        brandSemrushProjects: brandSemrushProjectsFor([PROJECT_ID_A, PROJECT_ID_B]),
       });
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       await ctrl.listPrompts(ctx);
@@ -814,9 +966,29 @@ describe('ElementsController', () => {
         model: 'perplexity',
         platform: undefined,
         tags: ['type__branded', 'category__Brand'],
-        projectIds: ['proj-a', 'proj-b'],
+        projectIds: [PROJECT_ID_A, PROJECT_ID_B],
         enrichUserIntent: false,
       });
+    });
+
+    it('returns 403 when a caller-supplied projectId is not owned by this brand', async () => {
+      const ctx = fakeContext({
+        url: promptsUrl(`?projectId=${PROJECT_ID_A}`),
+        withBrandSemrushProject: true,
+        brandSemrushProjects: brandSemrushProjectsFor([PROJECT_ID_B]),
+      });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listPrompts(ctx);
+      expect(res.status).to.equal(403);
+      expect(serviceStub.getPrompts).to.not.have.been.called;
+    });
+
+    it('returns 400 when a projectId is not a valid UUID', async () => {
+      const ctx = fakeContext({ url: promptsUrl('?projectId=not-a-uuid') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listPrompts(ctx);
+      expect(res.status).to.equal(400);
+      expect(serviceStub.getPrompts).to.not.have.been.called;
     });
 
     it('uses the Elements-specific filter mode for repeated tagPath filters', async () => {
@@ -853,7 +1025,7 @@ describe('ElementsController', () => {
     });
 
     it('passes enrichUserIntent: true to getPrompts when ?userIntent=true', async () => {
-      const ctx = fakeContext({ url: promptsUrl('?projectId=proj-a&userIntent=true') });
+      const ctx = fakeContext({ url: promptsUrl('?userIntent=true') });
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       await ctrl.listPrompts(ctx);
       const [, params] = serviceStub.getPrompts.firstCall.args;
@@ -879,11 +1051,15 @@ describe('ElementsController', () => {
     });
 
     it('accepts the project_id snake_case alias for projectId', async () => {
-      const ctx = fakeContext({ url: promptsUrl('?project_id=proj-x') });
+      const ctx = fakeContext({
+        url: promptsUrl(`?project_id=${PROJECT_ID_A}`),
+        withBrandSemrushProject: true,
+        brandSemrushProjects: brandSemrushProjectsFor([PROJECT_ID_A]),
+      });
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       await ctrl.listPrompts(ctx);
       const [, params] = serviceStub.getPrompts.firstCall.args;
-      expect(params.projectIds).to.deep.equal(['proj-x']);
+      expect(params.projectIds).to.deep.equal([PROJECT_ID_A]);
     });
 
     it('trims blank CSV entries', async () => {
@@ -1125,6 +1301,19 @@ describe('ElementsController', () => {
       const body = await readBody(res);
       expect(body).to.deep.equal({ hasAccess: true });
       expect(getWorkspaceResourcesStub).to.have.been.calledOnce;
+    });
+
+    it('returns 200 { hasAccess: true } immediately for an S2S consumer, without probing upstream', async () => {
+      const ctx = fakeContext({
+        url: accessUrl(), isS2SConsumer: true, authType: 'jwt', bearer: null,
+      });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.checkAccess(ctx);
+      expect(res.status).to.equal(200);
+      const body = await readBody(res);
+      expect(body).to.deep.equal({ hasAccess: true });
+      expect(getWorkspaceResourcesStub).to.not.have.been.called;
+      expect(exchangePromiseTokenStub).to.not.have.been.called;
     });
 
     it('forwards the resolved workspace id and the caller IMS token to the transport', async () => {
