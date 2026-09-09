@@ -40,6 +40,7 @@ import {
   updateProvisioningJobId,
   promoteProvisioningReady,
   promoteProvisioningFailed,
+  cancelProvisioningAttempt,
 } from '../../src/support/brands-storage.js';
 
 use(sinonChai);
@@ -4762,6 +4763,45 @@ describe('brands-storage', () => {
         await expect(promoteProvisioningFailed({
           brandId: BRAND_ID, attemptId: ATTEMPT_ID, error: 'terminal failure', postgrestClient,
         })).to.be.rejectedWith('Failed to promote provisioning to failed: boom');
+      });
+    });
+
+    describe('cancelProvisioningAttempt (LLMO-7418 external-review Finding 3)', () => {
+      it('throws when postgrestClient is missing', async () => {
+        await expect(cancelProvisioningAttempt({ brandId: BRAND_ID, postgrestClient: null }))
+          .to.be.rejectedWith('PostgREST client is required');
+      });
+
+      it('cancels whatever pending attempt exists, with no attempt_id filter', async () => {
+        const postgrestClient = createCapturingClient({
+          brands: { data: { id: BRAND_ID }, error: null },
+        });
+
+        const result = await cancelProvisioningAttempt({ brandId: BRAND_ID, postgrestClient });
+
+        expect(result).to.equal(true);
+        expect(postgrestClient.capturedCalls.update).to.deep.equal([{
+          table: 'brands',
+          row: {
+            semrush_provisioning_status: 'failed',
+            semrush_provisioning_error: 'Brand was deactivated while a provisioning attempt was '
+              + 'in flight; the attempt was cancelled',
+          },
+        }]);
+      });
+
+      it('returns false when there was no pending attempt to cancel', async () => {
+        const postgrestClient = createTableMockClient({ brands: { data: null, error: null } });
+        const result = await cancelProvisioningAttempt({ brandId: BRAND_ID, postgrestClient });
+        expect(result).to.equal(false);
+      });
+
+      it('throws a generic error on a database failure', async () => {
+        const postgrestClient = createTableMockClient({
+          brands: { data: null, error: { message: 'boom' } },
+        });
+        await expect(cancelProvisioningAttempt({ brandId: BRAND_ID, postgrestClient }))
+          .to.be.rejectedWith('Failed to cancel provisioning attempt: boom');
       });
     });
   });

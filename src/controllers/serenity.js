@@ -95,6 +95,7 @@ import AccessControlUtil from '../support/access-control-util.js';
 import { isServicePrincipal, resolveBrandUuid } from '../support/prompts-storage.js';
 import {
   getBrandAliases, getBrandUrlSources, getBrandCompetitors, updateBrand, getBrandBaseSiteId,
+  cancelProvisioningAttempt,
 } from '../support/brands-storage.js';
 import { ErrorWithStatusCode, resolveSemrushImsToken as resolveImsTokenViaPromise } from '../support/utils.js';
 import {
@@ -2195,6 +2196,22 @@ function SerenityController(context, log, env) {
           });
           throw saveError;
         }
+      }
+      // LLMO-7418 external-review Finding 3: cancel any in-flight async provisioning attempt so a
+      // worker hop still mid-flight can't later flip `status` back to `active`, resurrecting the
+      // brand we just deactivated — promoteProvisioningReady's own CAS has no way to know this
+      // deactivate happened. Best-effort: a failure here must never fail the deactivate itself,
+      // which has already fully succeeded by this point.
+      try {
+        await cancelProvisioningAttempt({
+          brandId: /** @type {string} */ (auth.brandUuid),
+          postgrestClient: ctx.dataAccess.services.postgrestClient,
+        });
+      } catch (cancelError) {
+        log.error('serenity deactivate: failed to cancel an in-flight provisioning attempt (best-effort)', {
+          brandId: auth.brandUuid,
+          error: cancelError?.message,
+        });
       }
       log.info('serenity deactivate: completed', {
         brandId: auth.brandUuid,

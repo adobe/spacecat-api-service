@@ -189,6 +189,7 @@ describe('SerenityController', () => {
   let getBrandUrlSourcesStub;
   let getBrandCompetitorsStub;
   let updateBrandStub;
+  let cancelProvisioningAttemptStub;
   let accessControlHasAccessStub;
   let ensureMarketSiteStub;
   let resolveSiteIdentityStub;
@@ -228,6 +229,7 @@ describe('SerenityController', () => {
     // (the Brand model has no site_id setter). Resolves by default; specific
     // tests override it to reject (409 conflict / transient divergence).
     updateBrandStub = sinon.stub().resolves({ getId: () => BRAND, getStatus: () => 'active' });
+    cancelProvisioningAttemptStub = sinon.stub().resolves(false);
     accessControlHasAccessStub = sinon.stub().resolves(true);
     ensureMarketSiteStub = sinon.stub().resolves('site-uuid-1');
     resolveSiteIdentityStub = sinon.stub().resolves({ domain: 'resolved.example.com', primaryUrl: 'resolved.example.com' });
@@ -327,6 +329,7 @@ describe('SerenityController', () => {
         getBrandCompetitors: getBrandCompetitorsStub,
         updateBrand: updateBrandStub,
         getBrandBaseSiteId: getBrandBaseSiteIdStub,
+        cancelProvisioningAttempt: cancelProvisioningAttemptStub,
       },
       '../../src/support/serenity/site-linkage.js': {
         ensureMarketSite: ensureMarketSiteStub,
@@ -2931,6 +2934,21 @@ describe('SerenityController', () => {
       // The pointer is cleared (disconnect) — the workspace itself is never deleted.
       expect(brand.setSemrushSubWorkspaceId).to.have.been.calledWith(null);
       expect(brand.setStatus).to.have.been.calledWith('pending');
+      expect(brand.save).to.have.been.called;
+      // LLMO-7418 external-review Finding 3: cancels any in-flight async provisioning attempt so
+      // a late worker hop can't resurrect this brand back to active.
+      expect(cancelProvisioningAttemptStub).to.have.been.calledOnceWith({
+        brandId: BRAND,
+        postgrestClient: sinon.match.any,
+      });
+    });
+
+    it('deactivate does not fail when cancelling an in-flight provisioning attempt itself throws (best-effort)', async () => {
+      cancelProvisioningAttemptStub.rejects(new Error('db blip'));
+      const brand = makeBrandModel({ getSemrushSubWorkspaceId: () => 'subworkspace-ws-1' });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.deactivate(fakeContext({ brand }));
+      expect(response.status).to.equal(200);
       expect(brand.save).to.have.been.called;
     });
 

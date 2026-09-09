@@ -2131,3 +2131,51 @@ export async function promoteProvisioningFailed({
   }
   return Boolean(data);
 }
+
+/**
+ * Cancels whatever provisioning attempt is currently `pending` for a brand, unconditionally —
+ * called by `/serenity/deactivate` (LLMO-7418 external-review Finding 3).
+ *
+ * `promoteProvisioningReady`'s own CAS predicate (`attempt_id` + `semrush_provisioning_status =
+ * 'pending'`) never checks the brand's own lifecycle `status` column, so a legitimate deactivate
+ * running concurrently with an in-flight async attempt was invisible to it: the attempt's later
+ * ready-promotion would still match and silently flip `status` back to `active`, resurrecting a
+ * brand the caller had just deliberately deactivated. Rather than teach `promoteProvisioningReady`
+ * brand-lifecycle semantics it otherwise has no reason to know, this reuses the EXISTING,
+ * already-tested supersede mechanism: `provisionWorkspaceHandler`'s own currency re-check at the
+ * top of every hop already stands down cleanly (`{ provisioningStatus: 'superseded' }`) the moment
+ * `semrush_provisioning_status` is no longer `'pending'` — this just needs to make that true.
+ *
+ * No `attempt_id` filter: `deactivate` does not track which attempt (if any) is in flight, and
+ * doesn't need to — cancelling whichever one is currently `pending` is exactly the right behavior
+ * regardless of its id. Best-effort by contract (the caller does not block deactivate's own
+ * success on this): a losing/no-op CAS just means there was nothing in flight to cancel.
+ *
+ * @param {object} params
+ * @param {string} params.brandId
+ * @param {object} params.postgrestClient
+ * @returns {Promise<boolean>} true if a pending attempt was found and cancelled, false if there
+ *   was none to cancel.
+ */
+export async function cancelProvisioningAttempt({ brandId, postgrestClient }) {
+  if (!postgrestClient?.from) {
+    throw new Error('PostgREST client is required');
+  }
+
+  const { data, error } = await postgrestClient
+    .from('brands')
+    .update({
+      semrush_provisioning_status: 'failed',
+      semrush_provisioning_error: 'Brand was deactivated while a provisioning attempt was in '
+        + 'flight; the attempt was cancelled',
+    })
+    .eq('id', brandId)
+    .eq('semrush_provisioning_status', 'pending')
+    .select('id')
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Failed to cancel provisioning attempt: ${error.message}`);
+  }
+  return Boolean(data);
+}
