@@ -609,9 +609,13 @@ export function createElementsService(transport, log) {
      * filter built from the caller-supplied `projectId`/`projectIds`; absent → the brand's
      * whole sub-workspace.
      *
+     * Brand scoping is a `CBF_brand` filter on `params.brandName`. The sub-workspace alone
+     * does NOT scope to the brand — it also holds the brand's tracked competitors — so
+     * omitting the name blends them into the sentiment counts (LLMO-7456).
+     *
      * @param {string} workspaceId - Semrush workspace UUID.
      * @param {object} params - Query params (model/platform, startDate, endDate, category,
-     *   projectId, projectIds).
+     *   projectId, projectIds, brandName).
      * @returns {Promise<{ weeklyTrends: object[] }>} Legacy contract.
      */
     async getSentimentOverview(workspaceId, params) {
@@ -673,7 +677,7 @@ export function createElementsService(transport, log) {
      */
     /* c8 ignore start -- LLMO-6620 POC endpoint; unit tests deferred (see url-prompts.js tests) */
     async getUrlPrompts(workspaceId, {
-      url, model, platform, startDate, endDate, category, projectIds = [],
+      url, model, platform, startDate, endDate, category, tagPaths, projectIds = [],
     }) {
       const ids = Array.isArray(projectIds)
         ? [...new Set(projectIds.filter(hasText))]
@@ -691,7 +695,7 @@ export function createElementsService(transport, log) {
             workspaceId,
             ELEMENT_IDS.URL_PROMPTS,
             buildUrlPromptsPayload({
-              url, model, platform, startDate, endDate, category, projectId,
+              url, model, platform, startDate, endDate, category, tagPaths, projectId,
             }),
           );
           return transformUrlPromptsResponse(raw);
@@ -774,7 +778,7 @@ export function createElementsService(transport, log) {
      * @returns {Promise<object[]>} Full owned-URL list (no traffic, no slice).
      */
     async getOwnedUrls(workspaceId, {
-      projects = [], model, platform, startDate, endDate, category,
+      projects = [], model, platform, startDate, endDate, category, tagPaths,
     }) {
       const scopes = projects.length > 0 ? projects : [{}];
       // Bound the per-project fan-out (2 element calls each) so a brand with many
@@ -789,7 +793,7 @@ export function createElementsService(transport, log) {
               workspaceId,
               ELEMENT_IDS.STATS_PER_URL,
               buildOwnedUrlsStatsPayload({
-                model, platform, startDate, endDate, category, projectId,
+                model, platform, startDate, endDate, category, tagPaths, projectId,
               }),
             ),
             transport.fetchElement(
@@ -798,7 +802,7 @@ export function createElementsService(transport, log) {
               // category applied here too (mirrors stats) so weekly sparklines and
               // aggregate totals share the same filter set.
               buildOwnedUrlsTrendPayload({
-                model, platform, startDate, endDate, category, projectId,
+                model, platform, startDate, endDate, category, tagPaths, projectId,
               }),
             ),
           ]);
@@ -835,7 +839,7 @@ export function createElementsService(transport, log) {
      */
     /* c8 ignore start -- LLMO-6160 POC endpoint; unit tests intentionally deferred */
     async getDomainUrls(workspaceId, {
-      projects = [], hostname, channel, model, platform, startDate, endDate, category,
+      projects = [], hostname, channel, model, platform, startDate, endDate, category, tagPaths,
       page, pageSize,
     }) {
       const scopes = projects.length > 0 ? projects : [{}];
@@ -850,7 +854,7 @@ export function createElementsService(transport, log) {
             workspaceId,
             ELEMENT_IDS.STATS_PER_URL,
             buildDomainUrlsPayload({
-              model, platform, startDate, endDate, category, projectId,
+              model, platform, startDate, endDate, category, tagPaths, projectId,
             }),
           );
           return { region, stats };
@@ -886,7 +890,7 @@ export function createElementsService(transport, log) {
      */
     /* c8 ignore start -- market-tracking-trends POC endpoint; unit tests intentionally deferred */
     async getMarketTrackingTrends(workspaceId, {
-      model, platform, startDate, endDate, projectId, projectIds, brandName,
+      model, platform, startDate, endDate, projectId, projectIds, brandName, tagPaths, category,
     }) {
       const resolvedProjectIds = projectId ? [projectId] : (projectIds ?? []);
       const [mentions, citations] = await Promise.all([
@@ -894,14 +898,14 @@ export function createElementsService(transport, log) {
           workspaceId,
           ELEMENT_IDS.TRENDS_MV,
           buildMarketMentionsTrendPayload({
-            model, platform, startDate, endDate, projectIds: resolvedProjectIds,
+            model, platform, startDate, endDate, projectIds: resolvedProjectIds, tagPaths, category,
           }),
         ),
         transport.fetchElement(
           workspaceId,
           ELEMENT_IDS.MARKET_CITATIONS_TREND,
           buildMarketCitationsTrendPayload({
-            model, platform, startDate, endDate, projectIds: resolvedProjectIds,
+            model, platform, startDate, endDate, projectIds: resolvedProjectIds, tagPaths, category,
           }),
         ),
       ]);
@@ -931,7 +935,7 @@ export function createElementsService(transport, log) {
      */
     /* c8 ignore start -- competitor-summary POC endpoint; unit tests intentionally deferred */
     async getCompetitorSummary(workspaceId, {
-      model, platform, startDate, endDate, projectId, projectIds, brandName,
+      model, platform, startDate, endDate, projectId, projectIds, brandName, tagPaths, category,
     }) {
       const resolvedProjectIds = projectId ? [projectId] : (projectIds ?? []);
       const [mentions, citations] = await Promise.all([
@@ -939,14 +943,26 @@ export function createElementsService(transport, log) {
           workspaceId,
           ELEMENT_IDS.TRENDS_MV,
           buildMarketMentionsTrendPayload({
-            model, platform, startDate, endDate, projectIds: resolvedProjectIds,
+            model,
+            platform,
+            startDate,
+            endDate,
+            projectIds: resolvedProjectIds,
+            tagPaths,
+            category,
           }),
         ),
         transport.fetchElement(
           workspaceId,
           ELEMENT_IDS.MARKET_CITATIONS_TREND,
           buildMarketCitationsTrendPayload({
-            model, platform, startDate, endDate, projectIds: resolvedProjectIds,
+            model,
+            platform,
+            startDate,
+            endDate,
+            projectIds: resolvedProjectIds,
+            tagPaths,
+            category,
           }),
         ),
       ]);
@@ -981,6 +997,7 @@ export function createElementsService(transport, log) {
      */
     async getBrandPresenceStats(workspaceId, {
       model, platform, startDate, endDate, projectId, projectIds, brandName, showTrends,
+      tagPaths, category,
     }) {
       const resolvedProjectIds = projectId ? [projectId] : projectIds;
 
@@ -992,6 +1009,8 @@ export function createElementsService(transport, log) {
           endDate: rangeEnd,
           projectIds: resolvedProjectIds,
           brandName,
+          tagPaths,
+          category,
         });
         const mentionsPayload = buildStatsMentionsPayload({
           model,
@@ -1000,6 +1019,8 @@ export function createElementsService(transport, log) {
           endDate: rangeEnd,
           projectIds: resolvedProjectIds,
           brandName,
+          tagPaths,
+          category,
         });
         const visibilityPayload = buildStatsVisibilityPayload({
           model,
@@ -1008,6 +1029,8 @@ export function createElementsService(transport, log) {
           endDate: rangeEnd,
           projectIds: resolvedProjectIds,
           brandName,
+          tagPaths,
+          category,
         });
         const citationsPayload = buildStatsCitationsPayload({
           model,
@@ -1016,6 +1039,8 @@ export function createElementsService(transport, log) {
           endDate: rangeEnd,
           projectIds: resolvedProjectIds,
           brandName,
+          tagPaths,
+          category,
         });
         const [totalExec, mentions, visibility, citations] = await Promise.all([
           transport.fetchElement(workspaceId, ELEMENT_IDS.TOTAL_EXECUTIONS, totalExecutionsPayload),
@@ -1096,7 +1121,7 @@ export function createElementsService(transport, log) {
      *   still returned, computed from whichever scopes succeeded.
      */
     async getUrlInspectorStats(workspaceId, {
-      projects = [], model, platform, startDate, endDate, category,
+      projects = [], model, platform, startDate, endDate, category, tagPaths,
     }) {
       // Only fan out over scopes that actually resolved to a Semrush project
       // id. A `projects` entry without one (e.g. a mixed array where one
@@ -1128,7 +1153,13 @@ export function createElementsService(transport, log) {
             workspaceId,
             ELEMENT_IDS.STATS_PER_URL,
             buildOwnedUrlsStatsPayload({
-              model, platform, startDate: rangeStart, endDate: rangeEnd, category, projectId,
+              model,
+              platform,
+              startDate: rangeStart,
+              endDate: rangeEnd,
+              category,
+              tagPaths,
+              projectId,
             }),
           );
           return { stats };
@@ -1230,7 +1261,7 @@ export function createElementsService(transport, log) {
      * }>}
      */
     async getKpiHeadlines(workspaceId, {
-      brandName, model, platform, startDate, endDate, projectId, projectIds, category,
+      brandName, model, platform, startDate, endDate, projectId, projectIds, category, tagPaths,
     }) {
       const resolvedProjectIds = projectId ? [projectId] : (projectIds ?? []);
       const [sov, brandVis] = await Promise.all([
@@ -1245,6 +1276,7 @@ export function createElementsService(transport, log) {
             endDate,
             projectIds: resolvedProjectIds,
             category,
+            tagPaths,
           }),
         ),
         transport.fetchElement(
@@ -1258,6 +1290,7 @@ export function createElementsService(transport, log) {
             endDate,
             projectIds: resolvedProjectIds,
             category,
+            tagPaths,
           }),
         ),
       ]);
@@ -1299,7 +1332,7 @@ export function createElementsService(transport, log) {
      * @returns {Promise<{value: number, comparisonValue: number | null}>}
      */
     async getSourceVisibilityHeadline(workspaceId, {
-      brandName, model, platform, startDate, endDate, projectId, projectIds, category,
+      brandName, model, platform, startDate, endDate, projectId, projectIds, category, tagPaths,
     }) {
       const resolvedProjectIds = projectId ? [projectId] : (projectIds ?? []);
       const callOpts = {
@@ -1320,7 +1353,14 @@ export function createElementsService(transport, log) {
         workspaceId,
         ELEMENT_IDS.KPI_SOURCE_VISIBILITY,
         buildSourceVisibilityPayload({
-          brandUrls, model, platform, startDate, endDate, projectIds: resolvedProjectIds, category,
+          brandUrls,
+          model,
+          platform,
+          startDate,
+          endDate,
+          projectIds: resolvedProjectIds,
+          category,
+          tagPaths,
         }),
         callOpts,
       );

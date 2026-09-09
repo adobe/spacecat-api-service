@@ -17,7 +17,10 @@ import { hasText } from '@adobe/spacecat-shared-utils';
 import { ErrorWithStatusCode } from '../../utils.js';
 import { ERROR_CODES, isMeteredQuota, isUpstreamGone } from '../errors.js';
 import { normalizeGeoTargetId, normalizeLanguageCode } from '../validation.js';
-import { invalidateTagCacheForProject } from './markets.js';
+import {
+  invalidateTagCacheForProject,
+  MAX_TAG_FILTER_VALUES,
+} from './markets.js';
 import {
   buildPromptDto,
   normalizePromptInput,
@@ -26,7 +29,6 @@ import {
   makeIntentInjector,
   validateDeferPublish,
   parseUpdatePromptBody,
-  capUpdateTagIds,
   mapLimit,
   publishAffected,
   reconcilePublishErrors,
@@ -38,6 +40,10 @@ import {
   DEFAULT_PAGE_LIMIT,
   MAX_PAGE_LIMIT,
   MAX_TAG_IDS,
+  validateTagIds,
+  listFacetedPrompts,
+  capUpdateTagIds,
+  assertCreatePromptTagLimits,
   BULK_CREATE_CONCURRENCY,
   BULK_PROMPTS_MAX_ITEMS,
   deleteProjectBatches,
@@ -91,9 +97,12 @@ export async function handleListPromptsSubworkspace(transport, workspaceId, quer
     ? query.limit : DEFAULT_PAGE_LIMIT;
   const limit = Math.min(requestedLimit, MAX_PAGE_LIMIT);
   const search = hasText(query?.search) ? String(query.search).trim() : undefined;
-  const tagIds = Array.isArray(query?.tagIds)
-    ? query.tagIds.slice(0, MAX_TAG_IDS).map(String).filter(Boolean)
-    : [];
+  const tagIds = validateTagIds(query?.tagIds, {
+    maximum: query?.tagFilterMode === 'faceted-v1' ? MAX_TAG_FILTER_VALUES : MAX_TAG_IDS,
+    tooLargeCode: query?.tagFilterMode === 'faceted-v1'
+      ? ERROR_CODES.TAG_FILTER_TOO_LARGE
+      : ERROR_CODES.INVALID_TAG_FILTER,
+  });
   // sort/order (LLMO-6289): validated against the metadata allow-list and
   // forwarded upstream — kept in lockstep with the flat-mode twin.
   const { sort, order } = resolveSort(query);
@@ -106,6 +115,24 @@ export async function handleListPromptsSubworkspace(transport, workspaceId, quer
     );
     err.code = ERROR_CODES.MARKET_NOT_FOUND;
     throw err;
+  }
+  if (query?.tagFilterMode === 'faceted-v1') {
+    return listFacetedPrompts(
+      transport,
+      workspaceId,
+      String(project.id),
+      {
+        geoTargetId,
+        languageCode,
+        page,
+        limit,
+        search,
+        sort,
+        order,
+        tagIds,
+      },
+      log,
+    );
   }
 
   // Each prompt's tags already carry their own parentage (see buildTagsOf), so
@@ -127,7 +154,7 @@ export async function handleListPromptsSubworkspace(transport, workspaceId, quer
   }
   return {
     items: items
-      .map((item) => buildPromptDto(geoTargetId, languageCode, item))
+      .map((item) => buildPromptDto(geoTargetId, languageCode, item, undefined))
       .filter(Boolean),
     total,
     page,
@@ -179,17 +206,23 @@ export async function handleCreatePromptsSubworkspace(
       400,
     );
   }
+  assertCreatePromptTagLimits(inputs);
   const deferPublish = validateDeferPublish(body);
 
   const projectsBySlice = await buildSliceProjectMap(transport, workspaceId, log);
-  // CREATE: origin comes from the trusted request-principal classification;
-  // source defaults independently to `config`.
+  // CREATE: user-authenticated write stamps independent `origin=human` and
+  // `source=config` values (see the flat-mode
+  // twin handleCreatePrompts, source-dimension.md §1).
   const injectComputedTags = makePromptTagInjector(
     transport,
     workspaceId,
     classifyPromptType,
     log,
-    { originValue, sourceValue: PROXY_CREATE_SOURCE_VALUE },
+    {
+      originValue,
+      sourceValue: PROXY_CREATE_SOURCE_VALUE,
+      normalizeCustomerTags: true,
+    },
   );
   // UPSERT: the EDIT-shaped injector (no originValue/sourceValue). Lockstep with
   // the flat twin handleCreatePrompts.
@@ -515,13 +548,7 @@ export async function handleUpdatePromptSubworkspace(
     };
   }
   const projectId = String(project.id);
-
-  // capUpdateTagIds guards against sanitizeTagIds' create-time cap strategy
-  // (see the flat-mode twin handleUpdatePrompt / capUpdateTagIds' docblock): a
-  // client echoing its prompt's full existing tag list at/beyond MAX_TAG_IDS
-  // would otherwise risk a closed-dimension id (origin/source — never
-  // re-derived on UPDATE) being silently dropped by a flat positional slice.
-  const cappedTagIds = await capUpdateTagIds(transport, workspaceId, projectId, nextTagIds, log);
+  const cappedTagIds = await capUpdateTagIds(nextTagIds);
 
   // Recompute the type AND intent tags from the NEW text BEFORE any upstream write
   // (see the flat-mode twin handleUpdatePrompt): the unified layer must run before
@@ -529,7 +556,13 @@ export async function handleUpdatePromptSubworkspace(
   // (serenity-docs#31, #32). No `originValue`: origin is never re-derived on edit
   // (origin-dimension.md §3 item 3); the stored origin the caller echoes rides
   // through the replace-mode tag write untouched.
-  const injectComputedTags = makePromptTagInjector(transport, workspaceId, classifyPromptType, log);
+  const injectComputedTags = makePromptTagInjector(
+    transport,
+    workspaceId,
+    classifyPromptType,
+    log,
+    { normalizeCustomerTags: true },
+  );
   const intentByText = await classifyPromptIntents(
     [nextText],
     {
