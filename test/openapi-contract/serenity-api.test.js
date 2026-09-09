@@ -139,6 +139,14 @@ const FIXTURES = {
         languageCode: 'en',
         text: 'sample',
       }],
+      // A live response always carries `updated` — the prompts whose text already
+      // existed and had their tags replaced rather than being created again.
+      updated: [{
+        semrushPromptId: 'sem-2',
+        geoTargetId: 2840,
+        languageCode: 'en',
+        text: 'already here',
+      }],
       skipped: [],
       failed: [],
       published: true,

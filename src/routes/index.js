@@ -505,7 +505,9 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/top-pages/:source/:geo': sitesController.getTopPages,
     'POST /sites/:siteId/graph': sitesController.getGraph,
 
-    'GET /slack/events': slackController.handleEvent,
+    // NOTE: there is deliberately no `GET /slack/events`. Slack only ever POSTs events and
+    // interactive payloads, and a GET carries no body to sign, so it could never satisfy the
+    // signature check in slackSignatureWrapper (VULN-39365).
     'POST /slack/events': slackController.handleEvent,
     'POST /slack/channels/invite-by-user-id': slackController.inviteUserToChannel,
     'GET /trigger': triggerHandler,

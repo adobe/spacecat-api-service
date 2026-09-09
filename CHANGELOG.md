@@ -1,3 +1,26 @@
+## [1.798.1](https://github.com/adobe/spacecat-api-service/compare/v1.798.0...v1.798.1) (2026-09-08)
+
+
+### Bug Fixes
+
+* **dto:** back-fill legacy top-level documentPath from v2 changeDetails.target (SITES-49140) ([#3186](https://github.com/adobe/spacecat-api-service/issues/3186)) ([4a78188](https://github.com/adobe/spacecat-api-service/commit/4a78188263fbe60524bf35e553c84b87e10872cb))
+
+# [1.798.0](https://github.com/adobe/spacecat-api-service/compare/v1.797.1...v1.798.0) (2026-09-08)
+
+
+### Bug Fixes
+
+* **security:** scope AsyncJob readers to the caller (SEC-5 IDOR) ([#3203](https://github.com/adobe/spacecat-api-service/issues/3203)) ([#3222](https://github.com/adobe/spacecat-api-service/issues/3222)) ([54f2c34](https://github.com/adobe/spacecat-api-service/commit/54f2c3473ba264ef2822bc60acab878af3941ca5)), closes [Hi#level](https://github.com/Hi/issues/level)
+* **security:** verify Slack request signatures on /slack/events ([#3229](https://github.com/adobe/spacecat-api-service/issues/3229)) ([933d0e8](https://github.com/adobe/spacecat-api-service/commit/933d0e807bc574c826aedbd08c30c2d5ade766d5)), closes [adobe/spacecat-shared#1920](https://github.com/adobe/spacecat-shared/issues/1920)
+* **serenity:** brand-scope topic prompts and topics with CBF_brand | LLMO-7443 ([#3230](https://github.com/adobe/spacecat-api-service/issues/3230)) ([00f64ae](https://github.com/adobe/spacecat-api-service/commit/00f64aeb66282d3442272b8ea64bf5ec59bb59a8))
+* **serenity:** CSV re-import updates prompt tags instead of stacking them | LLMO-7422 ([#3219](https://github.com/adobe/spacecat-api-service/issues/3219)) ([e5b9cd9](https://github.com/adobe/spacecat-api-service/commit/e5b9cd96611f52552f7e723f6ff7ccf5afa6a023)), closes [#3210](https://github.com/adobe/spacecat-api-service/issues/3210)
+* set CloudFront connector presign TTL to 12h | LLMO-7074 ([#3211](https://github.com/adobe/spacecat-api-service/issues/3211)) ([1592259](https://github.com/adobe/spacecat-api-service/commit/15922595c027ff5f6361689c596a2e3f41885d3f))
+
+
+### Features
+
+* **llmo-akamai:** single-marker failover cleanup for multi-hop OAE routing ([#3209](https://github.com/adobe/spacecat-api-service/issues/3209)) ([e195346](https://github.com/adobe/spacecat-api-service/commit/e19534603561dd73cee8b989335a1f3341ce7599))
+
 ## [1.797.1](https://github.com/adobe/spacecat-api-service/compare/v1.797.0...v1.797.1) (2026-09-07)
 
 
