@@ -152,11 +152,11 @@ describe('LlmoCloudflareController', () => {
   // ── getCloudflareConfig ──────────────────────────────────────────────────
 
   describe('getCloudflareConfig', () => {
-    it('returns the Cloudflare client ID', async () => {
+    it('returns the Cloudflare client ID and the server-derived target host', async () => {
       const res = await controller.getCloudflareConfig(mockContext);
       expect(res.status).to.equal(200);
       const body = await res.json();
-      expect(body.clientId).to.equal(CF_CLIENT_ID);
+      expect(body).to.deep.equal({ clientId: CF_CLIENT_ID, targetHost: TARGET_HOST });
     });
 
     it('returns 404 when site is not found', async () => {
@@ -190,48 +190,12 @@ describe('LlmoCloudflareController', () => {
       const res = await controller.getCloudflareConfig(mockContext);
       expect(res.status).to.equal(500);
     });
-  });
-
-  // ── getTargetHost ────────────────────────────────────────────────────────
-
-  describe('getTargetHost', () => {
-    it('returns the server-derived target host without deploying anything', async () => {
-      const res = await controller.getTargetHost(mockContext);
-      expect(res.status).to.equal(200);
-      const body = await res.json();
-      expect(body).to.deep.equal({ targetHost: TARGET_HOST });
-      expect(mockCfClient.deployWorkerScript).to.not.have.been.called;
-    });
-
-    it('returns 404 when site is not found', async () => {
-      mockContext.dataAccess.Site.findById.resolves(null);
-      const res = await controller.getTargetHost(mockContext);
-      expect(res.status).to.equal(404);
-    });
-
-    it('returns 403 when user does not have site access', async () => {
-      mockAccessControlUtil.hasAccess.resolves(false);
-      const res = await controller.getTargetHost(mockContext);
-      expect(res.status).to.equal(403);
-    });
-
-    it('returns 403 when user is not an LLMO administrator', async () => {
-      mockAccessControlUtil.hasLlmoCapabilityForSite.resolves(false);
-      const res = await controller.getTargetHost(mockContext);
-      expect(res.status).to.equal(403);
-    });
-
-    it('returns 501 for a subpath site (CDN auto-routing not supported)', async () => {
-      mockSite.getBaseURL = () => 'https://www.example.com/blog';
-      const res = await controller.getTargetHost(mockContext);
-      expect(res.status).to.equal(501);
-    });
 
     it('returns 500 when the target host cannot be derived from the site base URL', async () => {
       mockResolveCanonicalHost = () => {
         throw new Error('cannot derive host');
       };
-      const res = await controller.getTargetHost(mockContext);
+      const res = await controller.getCloudflareConfig(mockContext);
       expect(res.status).to.equal(500);
     });
   });

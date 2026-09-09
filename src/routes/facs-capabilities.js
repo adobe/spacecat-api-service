@@ -522,7 +522,6 @@ const routeFacsCapabilities = {
       'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/log-delivery': 'llmo/can_configure',
       'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/log-rescan': 'llmo/can_configure',
       'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/config': 'llmo/can_configure',
-      'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/target-host': 'llmo/can_configure',
       'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/accounts': 'llmo/can_configure',
       'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/zones': 'llmo/can_configure',
       'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/deploy': 'llmo/can_configure',

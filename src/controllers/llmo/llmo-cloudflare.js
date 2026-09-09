@@ -255,38 +255,27 @@ function LlmoCloudflareController(ctx) {
 
   /**
    * GET /sites/:siteId/llmo/cdn-onboard/cloudflare/config
-   * Returns the Cloudflare OAuth client ID for browser PKCE flow.
+   * Returns the Cloudflare OAuth client ID for browser PKCE flow, plus a read-only preview of
+   * the target host deployWorker would derive server-side when the caller omits targetHost —
+   * lets the frontend prefill/suggest a value before the user reaches the deploy step, without
+   * needing a Cloudflare token or performing any deploy side effect.
    */
   const getCloudflareConfig = async (context) => {
     const result = await getSiteAndCheckAccess(context);
     if (result.status) {
       return result;
     }
+    const { site } = result;
 
     const clientId = env.CLOUDFLARE_CLIENT_ID;
     if (!hasText(clientId)) {
       log.error('CLOUDFLARE_CLIENT_ID is not configured');
       return internalServerError('Cloudflare client ID is not configured');
     }
-    return ok({ clientId });
-  };
-
-  /**
-   * GET /sites/:siteId/llmo/cdn-onboard/cloudflare/target-host
-   * Read-only preview of the target host deployWorker would derive server-side when the caller
-   * omits targetHost — lets the frontend prefill/suggest a value before the user reaches the
-   * deploy step, without needing a Cloudflare token or performing any deploy side effect.
-   */
-  const getTargetHost = async (context) => {
-    const result = await getSiteAndCheckAccess(context);
-    if (result.status) {
-      return result;
-    }
-    const { site } = result;
 
     try {
       const targetHost = await resolveCanonicalHost(site.getBaseURL(), log);
-      return ok({ targetHost });
+      return ok({ clientId, targetHost });
     } catch (e) {
       log.error(auditLine(context, 'target-host', 'resolve-failed', {
         severity: 'error', siteId: site.getId(), error: e.message,
@@ -657,7 +646,6 @@ function LlmoCloudflareController(ctx) {
 
   return {
     getCloudflareConfig,
-    getTargetHost,
     listAccounts,
     listZones,
     deployWorker,

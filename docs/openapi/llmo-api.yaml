@@ -5945,64 +5945,36 @@ site-llmo-cloudflare-config:
     - $ref: './parameters.yaml#/siteId'
   get:
     operationId: getLlmoCloudflareConfig
-    summary: Get the Cloudflare OAuth client ID for the browser PKCE flow
+    summary: Get the Cloudflare OAuth client ID, and a preview of the deploy target host
     description: |
       Returns the Cloudflare OAuth client ID used by the onboarding UI to start a browser
       PKCE flow. The resulting Cloudflare token is then passed back to the other Cloudflare
       onboarding endpoints via the `x-cloudflare-token` header.
+
+      Also returns a read-only preview of the host `POST .../cloudflare/deploy` would derive
+      server-side when the caller omits `targetHost` (a bare apex such as `example.com` is
+      normalized to its `www` host, confirmed by following same-domain redirects). Lets the
+      onboarding UI suggest a value before the user reaches the deploy step, without a Cloudflare
+      token and without any deploy side effect.
 
       **Note:** This endpoint requires LLMO administrator access for the site.
     tags:
       - llmo
     responses:
       '200':
-        description: The Cloudflare OAuth client ID
+        description: The Cloudflare OAuth client ID and target host suggestion
         content:
           application/json:
             schema:
               type: object
               required:
                 - clientId
+                - targetHost
               properties:
                 clientId:
                   type: string
                   description: Cloudflare OAuth client ID
                   example: 'example-cloudflare-client-id'
-      '403':
-        $ref: './responses.yaml#/403'
-      '404':
-        $ref: './responses.yaml#/404'
-      '500':
-        $ref: './responses.yaml#/500'
-    security:
-      - session_token: [ ]
-
-site-llmo-cloudflare-target-host:
-  parameters:
-    - $ref: './parameters.yaml#/siteId'
-  get:
-    operationId: getLlmoCloudflareTargetHost
-    summary: Preview the target host that deploy would derive server-side
-    description: |
-      Read-only preview of the host `POST .../cloudflare/deploy` would derive server-side when
-      the caller omits `targetHost` (a bare apex such as `example.com` is normalized to its `www`
-      host, confirmed by following same-domain redirects). Lets the onboarding UI suggest a value
-      before the user reaches the deploy step, without a Cloudflare token and without any deploy
-      side effect.
-
-      **Note:** This endpoint requires LLMO administrator access for the site.
-    tags:
-      - llmo
-    responses:
-      '200':
-        description: The server-derived target host suggestion
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-                - targetHost
-              properties:
                 targetHost:
                   type: string
                   description: >-
