@@ -3034,6 +3034,130 @@ describe('SerenityController', () => {
         );
         expect(response.status).to.equal(400);
       });
+
+      // LLMO-7418 external-review Finding 8: a self-requeue or chained hand-off marks the FIRST
+      // hop COMPLETED immediately, even though the real work hasn't run yet. These tests confirm
+      // the endpoint follows the chain to its effective terminal status instead.
+      describe('chain/requeue following (LLMO-7418 external-review Finding 8)', () => {
+        const CHAINED_JOB = 'aaaaaaaa-1111-2222-3333-444444444444';
+        const FINAL_JOB = 'bbbbbbbb-1111-2222-3333-444444444444';
+
+        function ctxWithChain(jobsById, { jobId = JOB } = {}) {
+          const ctx = fakeContext({ params: { jobId } });
+          ctx.dataAccess.AsyncJob = {
+            findById: sinon.stub().callsFake((id) => Promise.resolve(jobsById[id] ?? null)),
+          };
+          return ctx;
+        }
+
+        it('follows a chainedJobId to the market-create job\'s own terminal status, not the provisioning job\'s premature COMPLETED', async () => {
+          const controller = SerenityController({ env: {} }, fakeLog(), {});
+          const finalResult = { status: 201, body: { projectId: 'proj-1' } };
+          const ctx = ctxWithChain({
+            [JOB]: makeAsyncJob({
+              id: JOB,
+              status: 'COMPLETED',
+              result: { provisioningStatus: 'ready', chainedJobId: CHAINED_JOB },
+            }),
+            [CHAINED_JOB]: makeAsyncJob({
+              id: CHAINED_JOB, status: 'COMPLETED', result: finalResult,
+            }),
+          });
+
+          const response = await controller.getPromptsJobStatus(ctx);
+          const body = await readBody(response);
+
+          // The ORIGINALLY-requested id is echoed back, not the chained job's.
+          expect(body.jobId).to.equal(JOB);
+          expect(body.status).to.equal('COMPLETED');
+          expect(body.result).to.deep.equal(finalResult);
+        });
+
+        it('follows a requeuedJobId and reports IN_PROGRESS while the chain is still settling', async () => {
+          const controller = SerenityController({ env: {} }, fakeLog(), {});
+          const ctx = ctxWithChain({
+            [JOB]: makeAsyncJob({
+              id: JOB, status: 'COMPLETED', result: { requeuedJobId: CHAINED_JOB },
+            }),
+            [CHAINED_JOB]: makeAsyncJob({ id: CHAINED_JOB, status: 'IN_PROGRESS', result: null }),
+          });
+
+          const response = await controller.getPromptsJobStatus(ctx);
+          const body = await readBody(response);
+
+          expect(body.jobId).to.equal(JOB);
+          expect(body.status).to.equal('IN_PROGRESS');
+          expect(body.result).to.equal(null);
+        });
+
+        it('follows a multi-hop chain (requeue then chained job) to its final terminal status', async () => {
+          const controller = SerenityController({ env: {} }, fakeLog(), {});
+          const finalResult = { status: 201, body: {} };
+          const ctx = ctxWithChain({
+            [JOB]: makeAsyncJob({
+              id: JOB, status: 'COMPLETED', result: { requeuedJobId: CHAINED_JOB },
+            }),
+            [CHAINED_JOB]: makeAsyncJob({
+              id: CHAINED_JOB,
+              status: 'COMPLETED',
+              result: { provisioningStatus: 'ready', chainedJobId: FINAL_JOB },
+            }),
+            [FINAL_JOB]: makeAsyncJob({ id: FINAL_JOB, status: 'COMPLETED', result: finalResult }),
+          });
+
+          const response = await controller.getPromptsJobStatus(ctx);
+          const body = await readBody(response);
+
+          expect(body.status).to.equal('COMPLETED');
+          expect(body.result).to.deep.equal(finalResult);
+        });
+
+        it('reports the last hop actually found when the chain names a dangling job id', async () => {
+          const controller = SerenityController({ env: {} }, fakeLog(), {});
+          const ctx = ctxWithChain({
+            [JOB]: makeAsyncJob({
+              id: JOB, status: 'COMPLETED', result: { chainedJobId: 'does-not-exist' },
+            }),
+          });
+
+          const response = await controller.getPromptsJobStatus(ctx);
+          const body = await readBody(response);
+
+          expect(response.status).to.equal(200);
+          expect(body.jobId).to.equal(JOB);
+          expect(body.status).to.equal('COMPLETED');
+          expect(body.result).to.deep.equal({ chainedJobId: 'does-not-exist' });
+        });
+
+        it('does not follow a chain when the first hop is not COMPLETED', async () => {
+          const controller = SerenityController({ env: {} }, fakeLog(), {});
+          const ctx = ctxWithChain({
+            [JOB]: makeAsyncJob({ id: JOB, status: 'IN_PROGRESS', result: null }),
+            [CHAINED_JOB]: makeAsyncJob({ id: CHAINED_JOB, status: 'COMPLETED', result: {} }),
+          });
+
+          const response = await controller.getPromptsJobStatus(ctx);
+          const body = await readBody(response);
+
+          expect(body.status).to.equal('IN_PROGRESS');
+        });
+
+        it('stops following after the hop cap, never loops forever on a cyclic chain', async () => {
+          const controller = SerenityController({ env: {} }, fakeLog(), {});
+          const jobA = 'cccccccc-1111-2222-3333-444444444444';
+          const jobB = 'dddddddd-1111-2222-3333-444444444444';
+          const ctx = ctxWithChain({
+            [JOB]: makeAsyncJob({ id: JOB, status: 'COMPLETED', result: { chainedJobId: jobA } }),
+            [jobA]: makeAsyncJob({ id: jobA, status: 'COMPLETED', result: { chainedJobId: jobB } }),
+            [jobB]: makeAsyncJob({ id: jobB, status: 'COMPLETED', result: { chainedJobId: jobA } }),
+          });
+
+          const response = await controller.getPromptsJobStatus(ctx);
+
+          // Must resolve (not hang) and still answer 200 with SOME terminal status.
+          expect(response.status).to.equal(200);
+        });
+      });
     });
 
     it('builds a working type classifier from the brand name + aliases and passes it to the handler (serenity-docs#31)', async () => {
