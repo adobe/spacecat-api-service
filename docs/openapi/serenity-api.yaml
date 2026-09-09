@@ -1182,12 +1182,21 @@ v2-serenity-activate:
           creation status, or another upstream call returns a non-2xx response.
           Fresh sub-workspace-only activation intentionally skips readiness
           polling, so it does not detect terminal creation status in that request.
+          Responses with an `error` field and no `markets` array use
+          `SerenityErrorResponse`.
         content:
           application/json:
             schema:
               anyOf:
                 - { $ref: './schemas.yaml#/SerenityActivateResponse' }
                 - { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '504':
+        description: >-
+          The sub-workspace remained in a transient provisioning state until the
+          readiness polling budget was exhausted.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
       '500': { $ref: './responses.yaml#/500' }
 
 v2-serenity-deactivate:

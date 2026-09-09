@@ -811,7 +811,7 @@ describe('workspace-lifecycle', () => {
       expect(transport.getWorkspaceStatus).to.have.been.calledTwice;
       expect(sleep).to.have.been.calledTwice;
       expect(localLog.error).to.have.been.calledOnceWithExactly(
-        'pollUntilCreated: SUBWORKSPACE_CREATION_TIMEOUT — readiness attempts exhausted',
+        'pollUntilCreated: SUBWORKSPACE_CREATION_TIMEOUT: readiness attempts exhausted',
         { workspaceId: SUB_WS },
       );
     });

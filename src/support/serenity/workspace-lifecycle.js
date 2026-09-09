@@ -122,7 +122,7 @@ export async function pollUntilCreated(
     await sleep(intervalMs);
   }
   log.error(
-    'pollUntilCreated: SUBWORKSPACE_CREATION_TIMEOUT — readiness attempts exhausted',
+    'pollUntilCreated: SUBWORKSPACE_CREATION_TIMEOUT: readiness attempts exhausted',
     { workspaceId },
   );
   throw new ErrorWithStatusCode('Subworkspace creation timed out', 504);
