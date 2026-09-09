@@ -12846,14 +12846,17 @@ SerenityModelListResponse:
 
 SerenityLanguage:
   type: object
-  required: [name]
+  required: [id, name, code]
   properties:
     id:
-      type: [string, 'null']
-      description: Semrush language catalog id (null when the catalog omits it).
+      type: string
+      description: Semrush language catalog id. An entry the upstream catalog returned without a usable id is dropped from this list entirely (LLMO-7420) — it could never resolve at createProject time, so it is never offered as an option.
     name:
       type: string
-      description: English language name as Semrush spells it (the match key).
+      description: English language name as Semrush spells it. Metadata/fallback text only — not a resolution key (LLMO-7420).
+    code:
+      type: string
+      description: BCP-47 language code (e.g. zh-Hans, zh-Hant, fil) — the stable identifier a client persists and later sends back as languageCode (LLMO-7420). Matching is case-insensitive (RFC 5646); store and send it as returned here, exact casing is not significant.
 
 SerenityLanguageListResponse:
   type: object
