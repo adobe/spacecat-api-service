@@ -6082,6 +6082,28 @@ describe('Brands Controller', () => {
       expect(response.status).to.equal(201);
     });
 
+    it('counts guidance length in code points, so 4000 emoji (8000 UTF-16 units) is accepted', async () => {
+      // Code-point counting matches the storage backstop; UTF-16 length would wrongly reject.
+      const response = await brandsController.createBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        data: { name: 'New Brand', brandContext: '🚀'.repeat(4000) },
+        dataAccess: mockDataAccess,
+        attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+      });
+      expect(response.status).to.equal(201);
+    });
+
+    it('rejects brand guidance longer than 4000 code points (4001 emoji)', async () => {
+      const response = await brandsController.createBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        data: { name: 'New Brand', brandContext: '🚀'.repeat(4001) },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
     it('returns 400 when params is undefined', async () => {
       const response = await brandsController.createBrandForOrg({
         ...context,

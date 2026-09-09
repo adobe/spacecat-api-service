@@ -13,6 +13,11 @@
 import { composeBaseURL, hasText } from '@adobe/spacecat-shared-utils';
 
 import { SERENITY_BRAND_SITE_TYPE } from './serenity/site-linkage.js';
+import {
+  BRAND_GUIDANCE_MAX_LENGTH,
+  codePointLength,
+  sanitizeGuidanceText,
+} from './brand-guidance.js';
 import { readFeatureFlagScopes, resolveFlagRowForBrand } from './feature-flags-storage.js';
 import {
   SERENITY_FEATURE_FLAG_NAME,
@@ -67,7 +72,18 @@ function normalizeNullableText(value, fieldName) {
     error.status = 400;
     throw error;
   }
-  const trimmed = value.trim();
+  // Strip unsafe control/invisible/bidi chars before trimming so leading/trailing
+  // whitespace exposed by their removal is also collapsed to null.
+  const trimmed = sanitizeGuidanceText(value).trim();
+  // Defense-in-depth cap at the persistence boundary, mirroring the controller's
+  // validateBrandGuidanceFields (both measure code points via codePointLength, so they
+  // agree on the limit). buildBrandRow/updateBrand are exported and reachable without
+  // the controller; without this backstop such a caller could persist unbounded text.
+  if (codePointLength(trimmed) > BRAND_GUIDANCE_MAX_LENGTH) {
+    const error = new Error(`${fieldName} must be at most ${BRAND_GUIDANCE_MAX_LENGTH} characters`);
+    error.status = 400;
+    throw error;
+  }
   return hasText(trimmed) ? trimmed : null;
 }
 
