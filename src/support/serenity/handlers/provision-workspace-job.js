@@ -200,6 +200,14 @@ export async function provisionWorkspaceHandler(context, job, accessToken) {
     }
 
     if (!candidate) {
+      // LLMO-7418 external-review Finding 4: every known caller now supplies `title` at enqueue
+      // time, but this is the worker's own last line of defense — a future HTTP call site that
+      // forgets it (exactly the bug this finding found, in 2 of the 4 `activate` async branches)
+      // must fail loudly here rather than silently asking Semrush to create an UNTITLED
+      // sub-workspace, which can never be found again by title-based adoption.
+      if (!hasText(title)) {
+        throw new Error(`provision-workspace-job: metadata.title is required to create a sub-workspace (brandId=${brandId})`);
+      }
       const claim = { brandCollection: dataAccess.Brand, selfBrandId: brandId };
       candidate = await createOrAdoptSubworkspaceCandidate(
         transport,
