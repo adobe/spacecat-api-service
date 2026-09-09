@@ -13,6 +13,11 @@
 import { composeBaseURL, hasText } from '@adobe/spacecat-shared-utils';
 
 import { SERENITY_BRAND_SITE_TYPE } from './serenity/site-linkage.js';
+import {
+  BRAND_GUIDANCE_MAX_LENGTH,
+  codePointLength,
+  sanitizeGuidanceText,
+} from './brand-guidance.js';
 import { readFeatureFlagScopes, resolveFlagRowForBrand } from './feature-flags-storage.js';
 import {
   SERENITY_FEATURE_FLAG_NAME,
@@ -53,40 +58,6 @@ function rethrowCheckViolation(error, fallbackMessage) {
   throw new Error(fallbackMessage);
 }
 
-/*
- * Free-text guidance fields (brandContext, mentionSentimentGuidance) are persisted
- * verbatim and later interpolated into the Claims-extraction LLM prompt, so we strip
- * characters that carry no legitimate meaning in guidance prose but can corrupt the
- * prompt, downstream logs/terminals, or a bidi-aware renderer:
- *   - C0 control chars except tab/newline/carriage-return (U+0000-U+001F minus \t\n\r)
- *   - DEL and the C1 control block (U+007F-U+009F)
- *   - zero-width / word-joiner / BOM (U+200B-U+200D, U+2060, U+FEFF)
- *   - line/paragraph separators (U+2028, U+2029) — break JSON-embedded-in-JS and forge log lines
- *   - bidirectional override & isolate controls -- the "Trojan Source" class
- *     (U+202A-U+202E, U+2066-U+2069)
- * Ordinary whitespace and all printable Unicode (incl. RTL letters, accents, emoji)
- * are preserved, so this is language-safe. Notably we do NOT strip lone surrogates
- * (U+D800-U+DFFF) here: without the RegExp `u` flag that range also matches each half
- * of a legitimate surrogate pair, which would delete every emoji / astral-plane
- * character. This is defense-in-depth, not a substitute for treating the stored text
- * as untrusted at prompt-assembly time (prompt-injection is owned by the LLM template).
- */
-const UNSAFE_TEXT_CHARS = new RegExp(
-  '[\\u0000-\\u0008\\u000B\\u000C\\u000E-\\u001F\\u007F-\\u009F'
-  + '\\u200B-\\u200D\\u2060\\uFEFF\\u2028\\u2029\\u202A-\\u202E\\u2066-\\u2069]',
-  'g',
-);
-
-// Defense-in-depth cap at the persistence boundary, mirroring the controller's
-// validateBrandGuidanceFields. buildBrandRow/updateBrand are exported and can be
-// reached without the controller; without this backstop such a caller could persist
-// unbounded text straight into the DB and the Claims-extraction prompt.
-const GUIDANCE_MAX_LENGTH = 4000;
-
-function sanitizeGuidanceText(value) {
-  return value.replace(UNSAFE_TEXT_CHARS, '');
-}
-
 function normalizeNullableText(value, fieldName) {
   if (value === undefined) {
     return undefined;
@@ -104,10 +75,12 @@ function normalizeNullableText(value, fieldName) {
   // Strip unsafe control/invisible/bidi chars before trimming so leading/trailing
   // whitespace exposed by their removal is also collapsed to null.
   const trimmed = sanitizeGuidanceText(value).trim();
-  // Length is measured on the sanitized+trimmed value (what is actually stored),
-  // using spread so an astral character straddling the boundary is counted as one.
-  if ([...trimmed].length > GUIDANCE_MAX_LENGTH) {
-    const error = new Error(`${fieldName} must be at most ${GUIDANCE_MAX_LENGTH} characters`);
+  // Defense-in-depth cap at the persistence boundary, mirroring the controller's
+  // validateBrandGuidanceFields (both measure code points via codePointLength, so they
+  // agree on the limit). buildBrandRow/updateBrand are exported and reachable without
+  // the controller; without this backstop such a caller could persist unbounded text.
+  if (codePointLength(trimmed) > BRAND_GUIDANCE_MAX_LENGTH) {
+    const error = new Error(`${fieldName} must be at most ${BRAND_GUIDANCE_MAX_LENGTH} characters`);
     error.status = 400;
     throw error;
   }

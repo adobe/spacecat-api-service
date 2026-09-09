@@ -167,6 +167,26 @@ describe('Customer Config Mapper', () => {
       expect(result.customer.brands[0].mentionSentimentGuidance).to.equal(null);
     });
 
+    it('strips control/invisible/bidi chars from legacy guidance (parity with the storage path)', () => {
+      // Good{U+202E bidi override}{U+200B zero-width}{NUL}{U+2028 line sep}text 🚀
+      const dirty = `Good${String.fromCharCode(0x202E)}${String.fromCharCode(0x200B)}`
+        + `${String.fromCharCode(0)}${String.fromCharCode(0x2028)}text 🚀`;
+      const llmoConfig = {
+        brands: {
+          aliases: [
+            { name: 'Test Brand', regions: ['US'] },
+          ],
+        },
+        claims: { brandContext: dirty },
+        categories: {},
+        topics: {},
+      };
+
+      const result = convertV1ToV2(llmoConfig, 'TestCo', 'test@org');
+      // Bidi/zero-width/control/line-separator removed; letters, space and emoji preserved.
+      expect(result.customer.brands[0].brandContext).to.equal('Goodtext 🚀');
+    });
+
     it('truncates over-length guidance on code-point boundaries (no split astral chars)', () => {
       const llmoConfig = {
         brands: {
