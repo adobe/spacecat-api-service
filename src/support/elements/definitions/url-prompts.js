@@ -11,6 +11,7 @@
  */
 
 import { resolveElementModel, isAllPlatforms } from '../constants.js';
+import { buildFacetedTagFilters } from './prompts.js';
 
 /**
  * Definitions for the URL Inspector "URL Prompts" element
@@ -65,7 +66,7 @@ import { resolveElementModel, isAllPlatforms } from '../constants.js';
  * @returns {object} Semrush element request payload.
  */
 export function buildUrlPromptsPayload({
-  url, model, platform, startDate, endDate, category, projectId,
+  url, model, platform, startDate, endDate, category, tagPaths, projectId,
 } = {}) {
   const requestedModel = model || platform;
   const advancedFilters = [
@@ -80,9 +81,7 @@ export function buildUrlPromptsPayload({
   if (!isAllPlatforms(requestedModel)) {
     advancedFilters.unshift({ op: 'eq', val: resolveElementModel(requestedModel), col: 'CBF_model' });
   }
-  if (category) {
-    advancedFilters.push({ op: 'eq', val: category, col: 'CBF_tags' });
-  }
+  advancedFilters.push(...buildFacetedTagFilters({ tagPaths, category }));
   return {
     ...(projectId && { project_id: projectId }),
     filters: {

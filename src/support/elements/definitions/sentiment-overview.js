@@ -12,6 +12,7 @@
 
 import { buildAdvancedFilters, buildModelFilter } from '../constants.js';
 import { dateToIsoWeek } from '../week-utils.js';
+import { buildFacetedTagFilters } from './prompts.js';
 
 // Legacy default window is a rolling 28 days (see defaultDateRange in
 // llmo-brand-presence.js). Kept inline here so this definition stays pure and does
@@ -82,7 +83,7 @@ function defaultDateRange() {
  *   (`CBF_project`); takes precedence over `projectId` when both are given.
  */
 export function buildSentimentOverviewPayload({
-  model, platform, startDate, endDate, category, projectId, projectIds,
+  model, platform, startDate, endDate, category, tagPaths, projectId, projectIds,
 } = {}) {
   // "All platforms" (param absent or 'all') → omit CBF_model so Semrush aggregates across
   // every model that produced data; otherwise scope to the single resolved model (LLMO-7093).
@@ -106,9 +107,7 @@ export function buildSentimentOverviewPayload({
       filters: ids.map((id) => ({ op: 'eq', val: id, col: 'CBF_project' })),
     });
   }
-  if (category) {
-    advancedFilters.push({ op: 'eq', val: category, col: 'CBF_tags' });
-  }
+  advancedFilters.push(...buildFacetedTagFilters({ tagPaths, category }));
 
   return {
     auto_bucketing: 'week',

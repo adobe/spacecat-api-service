@@ -69,6 +69,20 @@ export class NeedsReauthError extends Error {
   }
 }
 
+export function retryableJobError(message, cause) {
+  const error = new Error(message, { cause });
+  error.name = 'RetryableJobError';
+  /** @type {any} */ (error).code = 'RETRY_JOB';
+  /** @type {any} */ (error).retryJob = true;
+  return error;
+}
+
+export function isRetryableJobError(error) {
+  return error instanceof Error
+    && /** @type {any} */ (error).code === 'RETRY_JOB'
+    && /** @type {any} */ (error).retryJob === true;
+}
+
 const REAUTH_STATUS_PATTERN = /status: (401|403)\b/;
 
 /**
@@ -93,13 +107,15 @@ const REAUTH_STATUS_PATTERN = /status: (401|403)\b/;
  *   path (the worker has no request headers); from a request it defaults to the
  *   `x-promise-audience` header. Persisted so the worker exchanges/invalidates on the
  *   same pair.
+ * @param {string} [params.jobId] - Optional deterministic UUID used by callers
+ *   that require durable idempotency across Lambda containers.
  * @returns {Promise<object>} The created job (an AsyncJob instance).
  * @throws On SQS send failure, after rolling back the created job record.
  */
 export async function createAndEnqueueJob(
   context,
   {
-    jobType, metadata = {}, promiseToken, promisePair,
+    jobType, metadata = {}, promiseToken, promisePair, jobId,
   },
 ) {
   const {
@@ -113,6 +129,7 @@ export async function createAndEnqueueJob(
   const promiseTokenResponse = promiseToken ?? await getIMSPromiseToken(context, pair);
 
   const job = await dataAccess.AsyncJob.create({
+    ...(jobId ? { id: jobId } : {}),
     status: 'IN_PROGRESS',
     metadata: {
       ...metadata,
