@@ -126,7 +126,7 @@ describe('drs-generation-client', () => {
     expect(isRetryableJobError(err)).to.equal(true);
   });
 
-  it('emits DRSInvokeDurationMs + DRSInvokeFailure in the infra namespace on a non-ship verdict', async () => {
+  it('emits DRSInvokeDurationMs {Environment} + DRSInvokeFailure {Environment,Reason} in the infra namespace', async () => {
     const heldInvoke = sinon.stub().resolves({ prompts: [], ship_summary: { verdict: 'held' } });
     const logs = [];
     const orig = console.log;
@@ -136,10 +136,25 @@ describe('drs-generation-client', () => {
     } finally {
       console.log = orig;
     }
-    const joined = logs.join('\n');
-    expect(joined).to.contain('DRSInvokeDurationMs');
-    expect(joined).to.contain('DRSInvokeFailure');
-    expect(joined).to.contain('SpacecatSerenityMarketWorker');
+    const parse = (line) => {
+      try {
+        return JSON.parse(line);
+      } catch {
+        return null;
+      }
+    };
+    // eslint-disable-next-line no-underscore-dangle
+    const meta = (e) => (e && e._aws ? e._aws.CloudWatchMetrics[0] : null);
+    const envelopes = logs.map(parse).filter((e) => meta(e));
+    const byMetric = (name) => envelopes.find((e) => meta(e).Metrics[0].Name === name);
+
+    const duration = byMetric('DRSInvokeDurationMs');
+    expect(meta(duration).Namespace).to.equal('SpacecatSerenityMarketWorker');
+    expect(meta(duration).Dimensions[0]).to.deep.equal(['Environment']);
+
+    const failure = byMetric('DRSInvokeFailure');
+    expect(meta(failure).Dimensions[0]).to.deep.equal(['Environment', 'Reason']);
+    expect(failure.Reason).to.equal('verdict:held');
   });
 });
 

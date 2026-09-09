@@ -204,17 +204,19 @@ export async function invokeDrsGeneration(context, request, { invoke } = {}) {
     );
   }
 
-  // Best-effort EMF metrics (spacecat-infrastructure#780 alarms read these). BOTH
-  // `DRSInvokeFailure` and `DRSInvokeDurationMs` carry EXACTLY the `Environment`
-  // dimension the EMF helper always adds — no `Reason`/jobType/region dimension —
-  // so the two metrics share one dimension set the infra alarms match on
-  // (`Environment=<env>`); the failure reason is logged, not dimensioned, to avoid
-  // fragmenting the count and leaving the alarm at INSUFFICIENT_DATA.
+  // Best-effort EMF metrics (spacecat-infrastructure#780 alarms read these). The
+  // EMF helper always adds an `Environment` dimension, so both metrics carry it:
+  //   - DRSInvokeDurationMs → dims { Environment } (p90 latency alarm).
+  //   - DRSInvokeFailure     → dims { Environment, Reason } where Reason ∈
+  //     { invoke, verdict:held, verdict:gate_error, verdict:unknown } — the infra
+  //     alarm SUMs a SEARCH across all Reason values, so the breakdown is available
+  //     without fragmenting the total. NEITHER metric is dimensionless: the infra
+  //     alarms match on Environment=<env> (per-env, shared namespace).
   const metricsOpts = { environment: resolveEnvironment(env), namespace: METRICS_NAMESPACE };
   const emitFailure = (reason) => {
     log?.warn?.('[drs-generation] invoke failure', { reason, market: request.market, siteId: request.siteId });
     try {
-      emitMetric({ name: 'DRSInvokeFailure', value: 1 }, metricsOpts);
+      emitMetric({ name: 'DRSInvokeFailure', value: 1, dimensions: { Reason: reason } }, metricsOpts);
     } catch { /* metrics are best-effort, never mask the real error */ }
   };
 
