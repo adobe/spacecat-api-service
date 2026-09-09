@@ -1387,7 +1387,7 @@ v2-serenity-org-languages:
     description: |
       Returns the languages Semrush AIO supports (`GET /v1/languages`), so the
       UI only offers languages the gateway accepts (an unsupported language is
-      rejected at create time). Each item carries the catalog `id` (nullable),
+      rejected at create time). Each item carries the catalog `id`,
       the BCP-47 `code` — the resolution key a client persists and later sends
       back as `languageCode` (LLMO-7420) — and the English `name` as
       metadata/fallback text only. Tolerates a 404/405 from the upstream by

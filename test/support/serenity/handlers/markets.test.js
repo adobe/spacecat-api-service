@@ -2346,9 +2346,9 @@ describe('handlers/markets.js — defensive branch coverage', () => {
     expect(log.warn).to.have.been.calledOnce;
   });
 
-  // Line 799: `id: hasText(l.id)?String(l.id):null` — the null branch fires
-  // when a language item has a blank or missing `id` field. listLanguageCatalog
-  // keeps such rows (they have a valid name) and maps id to null.
+  // listLanguageCatalog drops any entry with a blank or missing `id` entirely —
+  // it never maps id to null and keeps the row, since such an entry could never
+  // resolve at createProject time (see the `resolvable` filter in the handler).
   it('listLanguageCatalog drops entries with a missing or blank id — they can never resolve', async () => {
     const transport = {
       listLanguages: sinon.stub().resolves({
