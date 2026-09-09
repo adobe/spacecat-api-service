@@ -172,6 +172,10 @@ paths:
     $ref: './serenity-api.yaml#/v2-serenity-prompts-job-by-id'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/markets:
     $ref: './serenity-api.yaml#/v2-serenity-markets'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/markets/generation/jobs/{jobId}:
+    $ref: './serenity-api.yaml#/v2-serenity-market-generation-job-by-id'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/markets/generation/jobs/{jobId}/reauth:
+    $ref: './serenity-api.yaml#/v2-serenity-market-generation-job-reauth'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/markets/{geoTargetId}/{languageCode}:
     $ref: './serenity-api.yaml#/v2-serenity-market-by-slice'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/tags:

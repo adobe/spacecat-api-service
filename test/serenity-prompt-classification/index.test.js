@@ -21,14 +21,15 @@ import { SerenityTransportError } from '../../src/support/serenity/rest-transpor
 use(chaiAsPromised);
 use(sinonChai);
 
-function makeJob(initialStatus = 'IN_PROGRESS') {
+function makeJob(initialStatus = 'IN_PROGRESS', jobType = 'serenity-classify-prompts') {
   let status = initialStatus;
   let error;
   let result;
+  let metadata = { jobType, promiseToken: { promise_token: 'ptok' } };
   return {
     getId: () => 'job-123',
-    getMetadata: () => ({ promiseToken: { promise_token: 'ptok' } }),
-    setMetadata: sinon.stub(),
+    getMetadata: () => metadata,
+    setMetadata: (m) => { metadata = m; },
     setStatus: (s) => { status = s; },
     getStatus: () => status,
     setError: (e) => { error = e; },
@@ -50,6 +51,9 @@ describe('serenity-prompt-classification worker entry', () => {
 
   let classifyPromptsHandlerStub;
   let bulkTagsHandlerStub;
+  let semrushMarketGenerationHandlerStub;
+  let claimJobLeaseStub;
+  let clearJobLeaseStub;
 
   beforeEach(async () => {
     sandbox = sinon.createSandbox();
@@ -57,6 +61,10 @@ describe('serenity-prompt-classification worker entry', () => {
     invalidateStub = sandbox.stub().resolves();
     classifyPromptsHandlerStub = sandbox.stub().resolves({ created: [] });
     bulkTagsHandlerStub = sandbox.stub().resolves({ outcome: 'SUCCEEDED' });
+    semrushMarketGenerationHandlerStub = sandbox.stub()
+      .resolves({ promptCount: 3, published: true });
+    claimJobLeaseStub = sandbox.stub().resolves(true);
+    clearJobLeaseStub = sandbox.stub();
 
     ({
       NeedsReauthError,
@@ -71,6 +79,11 @@ describe('serenity-prompt-classification worker entry', () => {
         isRetryableJobError,
         NeedsReauthError,
       },
+      '../../src/support/serenity/job-lease.js': {
+        claimJobLease: claimJobLeaseStub,
+        clearJobLease: clearJobLeaseStub,
+        newLeaseToken: () => 'lease-token-abc',
+      },
       '../../src/support/serenity/handlers/classify-prompts-job.js': {
         classifyPromptsHandler: classifyPromptsHandlerStub,
         CLASSIFY_PROMPTS_JOB_TYPE: 'serenity-classify-prompts',
@@ -78,6 +91,10 @@ describe('serenity-prompt-classification worker entry', () => {
       '../../src/support/serenity/handlers/bulk-tags-job.js': {
         bulkTagsHandler: bulkTagsHandlerStub,
         BULK_TAGS_JOB_TYPE: 'serenity-bulk-tags',
+      },
+      '../../src/support/serenity/handlers/semrush-market-generation-job.js': {
+        semrushMarketGenerationHandler: semrushMarketGenerationHandlerStub,
+        SEMRUSH_MARKET_GENERATION_JOB_TYPE: 'serenity-generate-semrush-market',
       },
     }));
   });
@@ -124,7 +141,8 @@ describe('serenity-prompt-classification worker entry', () => {
   });
 
   it('marks the job FAILED with UNKNOWN_JOB_TYPE and invalidates the token for an unregistered type', async () => {
-    const job = makeJob();
+    // The STORED jobType (not the message type) drives dispatch.
+    const job = makeJob('IN_PROGRESS', 'not-a-real-type');
     const context = makeContext(job);
     exchangeAndPersistStub.resolves('access-token');
 
@@ -134,6 +152,21 @@ describe('serenity-prompt-classification worker entry', () => {
     expect(job.getError().code).to.equal('UNKNOWN_JOB_TYPE');
     expect(invalidateStub).to.have.been.called;
     expect(job.save).to.have.been.called;
+  });
+
+  it('dispatches on the STORED jobType and drops a message whose type contradicts it', async () => {
+    // Stored jobType is classify; a spoofed/poisoned message claims bulk-tags.
+    const job = makeJob('IN_PROGRESS', 'serenity-classify-prompts');
+    const context = makeContext(job);
+    exchangeAndPersistStub.resolves('access-token');
+
+    await run({ jobId: 'job-123', type: 'serenity-bulk-tags' }, context);
+
+    // The mismatched message is dropped; neither handler runs, the job is untouched.
+    expect(classifyPromptsHandlerStub).to.not.have.been.called;
+    expect(bulkTagsHandlerStub).to.not.have.been.called;
+    expect(exchangeAndPersistStub).to.not.have.been.called;
+    expect(job.getStatus()).to.equal('IN_PROGRESS');
   });
 
   it('dispatches serenity-classify-prompts to classifyPromptsHandler (serenity-docs#33)', async () => {
@@ -163,7 +196,7 @@ describe('serenity-prompt-classification worker entry', () => {
   });
 
   it('leaves a bulk job IN_PROGRESS and rethrows when the handler requests SQS retry', async () => {
-    const job = makeJob();
+    const job = makeJob('IN_PROGRESS', 'serenity-bulk-tags');
     const context = makeContext(job);
     exchangeAndPersistStub.resolves('access-token');
     bulkTagsHandlerStub.rejects(retryableJobError('retry publish'));
@@ -275,6 +308,68 @@ describe('serenity-prompt-classification worker entry', () => {
     expect(exchangeAndPersistStub).to.not.have.been.called;
     expect(classifyPromptsHandlerStub).to.not.have.been.called;
     expect(job.getStatus()).to.equal('COMPLETED');
+  });
+
+  describe('Semrush-market generation (lease-required, deferred-exchange)', () => {
+    it('claims the lease and dispatches WITHOUT exchanging the token up front (handler exchanges after DRS)', async () => {
+      const job = makeJob('IN_PROGRESS', 'serenity-generate-semrush-market');
+      const context = makeContext(job);
+
+      await run({ jobId: 'job-123', type: 'serenity-generate-semrush-market' }, context);
+
+      expect(claimJobLeaseStub).to.have.been.calledOnce;
+      // Deferred exchange: the runner does NOT exchange; the handler gets a null token.
+      expect(exchangeAndPersistStub).to.not.have.been.called;
+      expect(semrushMarketGenerationHandlerStub).to.have.been.calledOnceWith(context, job, null);
+      expect(job.getStatus()).to.equal('COMPLETED');
+      expect(invalidateStub).to.have.been.called;
+      expect(clearJobLeaseStub).to.have.been.called;
+    });
+
+    it('drops the duplicate delivery when the lease is held by another delivery (one set of writes)', async () => {
+      claimJobLeaseStub.resolves(false);
+      const job = makeJob('IN_PROGRESS', 'serenity-generate-semrush-market');
+      const context = makeContext(job);
+
+      await run({ jobId: 'job-123', type: 'serenity-generate-semrush-market' }, context);
+
+      expect(semrushMarketGenerationHandlerStub).to.not.have.been.called;
+      expect(exchangeAndPersistStub).to.not.have.been.called;
+      expect(job.getStatus()).to.equal('IN_PROGRESS');
+    });
+
+    it('fails closed (rethrows for redelivery) when the lease claim query errors', async () => {
+      claimJobLeaseStub.rejects(new Error('postgrest down'));
+      const job = makeJob('IN_PROGRESS', 'serenity-generate-semrush-market');
+      const context = makeContext(job);
+
+      await expect(run({ jobId: 'job-123', type: 'serenity-generate-semrush-market' }, context))
+        .to.be.rejectedWith('postgrest down');
+      expect(semrushMarketGenerationHandlerStub).to.not.have.been.called;
+    });
+
+    it('releases the lease and rethrows on a retryable handler failure (redelivery re-claims)', async () => {
+      semrushMarketGenerationHandlerStub.rejects(retryableJobError('DRS throttled'));
+      const job = makeJob('IN_PROGRESS', 'serenity-generate-semrush-market');
+      const context = makeContext(job);
+
+      await expect(run({ jobId: 'job-123', type: 'serenity-generate-semrush-market' }, context))
+        .to.be.rejectedWith('DRS throttled');
+      expect(clearJobLeaseStub).to.have.been.called;
+      expect(job.getStatus()).to.equal('IN_PROGRESS');
+      expect(invalidateStub).to.not.have.been.called;
+    });
+
+    it('does not claim a lease for the classify job type (unchanged path)', async () => {
+      const job = makeJob('IN_PROGRESS', 'serenity-classify-prompts');
+      const context = makeContext(job);
+      exchangeAndPersistStub.resolves('access-token');
+
+      await run({ jobId: 'job-123', type: 'serenity-classify-prompts' }, context);
+
+      expect(claimJobLeaseStub).to.not.have.been.called;
+      expect(exchangeAndPersistStub).to.have.been.called;
+    });
   });
 });
 

@@ -46,6 +46,8 @@ describe('async-job-runner', () => {
   let createAndEnqueueJob;
   let exchangeAndPersistPromiseToken;
   let invalidateJobPromiseToken;
+  let assertTypedPromiseToken;
+  let PROMISE_PAIR_SEMRUSH;
   let NeedsReauthError;
 
   beforeEach(async () => {
@@ -63,6 +65,8 @@ describe('async-job-runner', () => {
       createAndEnqueueJob,
       exchangeAndPersistPromiseToken,
       invalidateJobPromiseToken,
+      assertTypedPromiseToken,
+      PROMISE_PAIR_SEMRUSH,
       NeedsReauthError,
     } = await esmock('../../../src/support/serenity/async-job-runner.js', {
       '@adobe/spacecat-shared-ims-client': {
@@ -343,6 +347,90 @@ describe('async-job-runner', () => {
       const [, type, opts] = createFromStub.firstCall.args;
       expect(type).to.equal('consumer');
       expect(opts).to.deep.equal({ pair: 'SEMRUSH' });
+    });
+  });
+
+  describe('assertTypedPromiseToken (Gap 2)', () => {
+    it('accepts a typed { promise_token, ... } object', () => {
+      expect(() => assertTypedPromiseToken({ promise_token: 'ptok', expires_in: 1 })).to.not.throw();
+    });
+
+    it('rejects a bare string, null, array, and empty token', () => {
+      const bads = ['a-raw-string', null, undefined, {}, { promise_token: '' }, [{ promise_token: 'x' }]];
+      bads.forEach((bad) => expect(() => assertTypedPromiseToken(bad)).to.throw());
+    });
+
+    it('the thrown error carries code INVALID_PROMISE_TOKEN', () => {
+      try {
+        assertTypedPromiseToken('bare');
+        expect.fail('should have thrown');
+      } catch (e) {
+        expect(e.code).to.equal('INVALID_PROMISE_TOKEN');
+      }
+    });
+  });
+
+  describe('createAndEnqueueJob — Semrush-write pair fail-closed (Gap 1)', () => {
+    it('exports the Semrush pair selector', () => {
+      expect(PROMISE_PAIR_SEMRUSH).to.equal('SEMRUSH');
+    });
+
+    it('FAILS the enqueue (before minting a token) when requirePair cannot resolve', async () => {
+      resolvePromisePairStub.returns(undefined); // header absent → default pair
+      const createStub = sandbox.stub().resolves(makeJob());
+      const context = {
+        dataAccess: { AsyncJob: { create: createStub } },
+        sqs: { sendMessage: sandbox.stub().resolves() },
+        env: { SERENITY_JOB_RUNNER_QUEUE_URL: 'queue-url' },
+        log: { error: sandbox.stub(), warn: sandbox.stub() },
+      };
+
+      await expect(createAndEnqueueJob(context, {
+        jobType: 'serenity-generate-semrush-market',
+        requirePair: PROMISE_PAIR_SEMRUSH,
+      })).to.be.rejectedWith(/requires promise pair 'SEMRUSH'/);
+
+      // Never minted a token, never created a job.
+      expect(getPromiseTokenStub).to.not.have.been.called;
+      expect(createStub).to.not.have.been.called;
+    });
+
+    it('enqueues when an explicit Semrush promisePair satisfies requirePair', async () => {
+      getPromiseTokenStub.resolves({ promise_token: 'ptok', expires_in: 14399 });
+      const job = makeJob();
+      const createStub = sandbox.stub().resolves(job);
+      const context = {
+        dataAccess: { AsyncJob: { create: createStub } },
+        sqs: { sendMessage: sandbox.stub().resolves() },
+        env: { SERENITY_JOB_RUNNER_QUEUE_URL: 'queue-url' },
+        log: { error: sandbox.stub(), warn: sandbox.stub() },
+      };
+
+      await createAndEnqueueJob(context, {
+        jobType: 'serenity-generate-semrush-market',
+        promisePair: PROMISE_PAIR_SEMRUSH,
+        requirePair: PROMISE_PAIR_SEMRUSH,
+      });
+
+      expect(getPromiseTokenStub).to.have.been.calledWith(context, 'SEMRUSH');
+      const created = createStub.firstCall.args[0];
+      expect(created.metadata.promisePair).to.equal('SEMRUSH');
+    });
+
+    it('rejects a non-typed minted token before persisting it', async () => {
+      getPromiseTokenStub.resolves('a-bare-string-token');
+      const createStub = sandbox.stub().resolves(makeJob());
+      const context = {
+        dataAccess: { AsyncJob: { create: createStub } },
+        sqs: { sendMessage: sandbox.stub().resolves() },
+        env: { SERENITY_JOB_RUNNER_QUEUE_URL: 'queue-url' },
+        log: { error: sandbox.stub(), warn: sandbox.stub() },
+      };
+
+      await expect(createAndEnqueueJob(context, {
+        jobType: 'serenity-classify-prompts',
+      })).to.be.rejectedWith(/typed \{ promise_token/);
+      expect(createStub).to.not.have.been.called;
     });
   });
 });
