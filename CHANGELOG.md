@@ -1,3 +1,163 @@
+## [1.798.1](https://github.com/adobe/spacecat-api-service/compare/v1.798.0...v1.798.1) (2026-09-08)
+
+
+### Bug Fixes
+
+* **dto:** back-fill legacy top-level documentPath from v2 changeDetails.target (SITES-49140) ([#3186](https://github.com/adobe/spacecat-api-service/issues/3186)) ([4a78188](https://github.com/adobe/spacecat-api-service/commit/4a78188263fbe60524bf35e553c84b87e10872cb))
+
+# [1.798.0](https://github.com/adobe/spacecat-api-service/compare/v1.797.1...v1.798.0) (2026-09-08)
+
+
+### Bug Fixes
+
+* **security:** scope AsyncJob readers to the caller (SEC-5 IDOR) ([#3203](https://github.com/adobe/spacecat-api-service/issues/3203)) ([#3222](https://github.com/adobe/spacecat-api-service/issues/3222)) ([54f2c34](https://github.com/adobe/spacecat-api-service/commit/54f2c3473ba264ef2822bc60acab878af3941ca5)), closes [Hi#level](https://github.com/Hi/issues/level)
+* **security:** verify Slack request signatures on /slack/events ([#3229](https://github.com/adobe/spacecat-api-service/issues/3229)) ([933d0e8](https://github.com/adobe/spacecat-api-service/commit/933d0e807bc574c826aedbd08c30c2d5ade766d5)), closes [adobe/spacecat-shared#1920](https://github.com/adobe/spacecat-shared/issues/1920)
+* **serenity:** brand-scope topic prompts and topics with CBF_brand | LLMO-7443 ([#3230](https://github.com/adobe/spacecat-api-service/issues/3230)) ([00f64ae](https://github.com/adobe/spacecat-api-service/commit/00f64aeb66282d3442272b8ea64bf5ec59bb59a8))
+* **serenity:** CSV re-import updates prompt tags instead of stacking them | LLMO-7422 ([#3219](https://github.com/adobe/spacecat-api-service/issues/3219)) ([e5b9cd9](https://github.com/adobe/spacecat-api-service/commit/e5b9cd96611f52552f7e723f6ff7ccf5afa6a023)), closes [#3210](https://github.com/adobe/spacecat-api-service/issues/3210)
+* set CloudFront connector presign TTL to 12h | LLMO-7074 ([#3211](https://github.com/adobe/spacecat-api-service/issues/3211)) ([1592259](https://github.com/adobe/spacecat-api-service/commit/15922595c027ff5f6361689c596a2e3f41885d3f))
+
+
+### Features
+
+* **llmo-akamai:** single-marker failover cleanup for multi-hop OAE routing ([#3209](https://github.com/adobe/spacecat-api-service/issues/3209)) ([e195346](https://github.com/adobe/spacecat-api-service/commit/e19534603561dd73cee8b989335a1f3341ce7599))
+
+## [1.797.1](https://github.com/adobe/spacecat-api-service/compare/v1.797.0...v1.797.1) (2026-09-07)
+
+
+### Bug Fixes
+
+* **plg-onboard:** only treat a 401 as auth when WWW-Authenticate is present ([#3227](https://github.com/adobe/spacecat-api-service/issues/3227)) ([fd9e323](https://github.com/adobe/spacecat-api-service/commit/fd9e3239173a962f6a27501cbfa513c08443d128))
+
+# [1.797.0](https://github.com/adobe/spacecat-api-service/compare/v1.796.1...v1.797.0) (2026-09-07)
+
+
+### Bug Fixes
+
+* add diagnostic logging to edge-live-preview fetch (LLMO-7416) ([#3216](https://github.com/adobe/spacecat-api-service/issues/3216)) ([4279a84](https://github.com/adobe/spacecat-api-service/commit/4279a84f62501c0ee5736fd498efd1bf2532c498))
+
+
+### Features
+
+* **brand-claims:** name the requester in the on-demand claims Slack alert (LLMO-7263) ([#3215](https://github.com/adobe/spacecat-api-service/issues/3215)) ([143d1c4](https://github.com/adobe/spacecat-api-service/commit/143d1c495824e190748b07bcdfff056edb3b2d45)), closes [adobe/spacecat-api-service#3208](https://github.com/adobe/spacecat-api-service/issues/3208)
+* **plg-onboard:** waitlist authenticated (login/SSO) sites during onboarding ([#3142](https://github.com/adobe/spacecat-api-service/issues/3142)) ([be909a9](https://github.com/adobe/spacecat-api-service/commit/be909a98a9d267f7458293391bed214eb76d4148)), closes [Hi#level](https://github.com/Hi/issues/level) [hi#precision](https://github.com/hi/issues/precision) [hi#precision](https://github.com/hi/issues/precision)
+
+## [1.796.1](https://github.com/adobe/spacecat-api-service/compare/v1.796.0...v1.796.1) (2026-09-07)
+
+
+### Bug Fixes
+
+* **serenity:** restore prompt origin tagging ([663cf6c](https://github.com/adobe/spacecat-api-service/commit/663cf6c7bea5cb1a9c4eef4a27f7b474d4b6cadf)), closes [Hi#level](https://github.com/Hi/issues/level)
+
+# [1.796.0](https://github.com/adobe/spacecat-api-service/compare/v1.795.0...v1.796.0) (2026-09-07)
+
+
+### Features
+
+* **elements:** Brand Claims response-feed join (141adc88 x 404fb017) ([#3200](https://github.com/adobe/spacecat-api-service/issues/3200)) ([58fba15](https://github.com/adobe/spacecat-api-service/commit/58fba15c7c58eb096e7798b7392877c1589c0d4c))
+
+# [1.795.0](https://github.com/adobe/spacecat-api-service/compare/v1.794.1...v1.795.0) (2026-09-07)
+
+
+### Features
+
+* **serenity:** surface per-prompt executions on the topic-prompts element ([#3207](https://github.com/adobe/spacecat-api-service/issues/3207)) ([0e058e7](https://github.com/adobe/spacecat-api-service/commit/0e058e7fcad85568498954c3c360adb2856c98a5))
+
+## [1.794.1](https://github.com/adobe/spacecat-api-service/compare/v1.794.0...v1.794.1) (2026-09-07)
+
+
+### Bug Fixes
+
+* honor admin organizationId override on FACS access-mapping reads ([#3195](https://github.com/adobe/spacecat-api-service/issues/3195)) ([5b0e66f](https://github.com/adobe/spacecat-api-service/commit/5b0e66f581829261b20297957286289c2ce433a9))
+
+# [1.794.0](https://github.com/adobe/spacecat-api-service/compare/v1.793.4...v1.794.0) (2026-09-07)
+
+
+### Bug Fixes
+
+* restrict PLG skip Slack alert to cwv, alt-text, broken-backlinks ([#3212](https://github.com/adobe/spacecat-api-service/issues/3212)) ([551f4ef](https://github.com/adobe/spacecat-api-service/commit/551f4ef35613262061231c3fa0c1ae74071ecd11))
+
+
+### Features
+
+* include review state in webhook jobs ([#3162](https://github.com/adobe/spacecat-api-service/issues/3162)) ([eda2f84](https://github.com/adobe/spacecat-api-service/commit/eda2f84980485b7cd0cf7489854ddde29e4be37b)), closes [Hi#level](https://github.com/Hi/issues/level)
+
+## [1.793.4](https://github.com/adobe/spacecat-api-service/compare/v1.793.3...v1.793.4) (2026-09-04)
+
+
+### Bug Fixes
+
+* **brands:** resolve real LLMO entitlement tier for activate-brand's schedule (LLMO-7366) ([#3206](https://github.com/adobe/spacecat-api-service/issues/3206)) ([9e2cd03](https://github.com/adobe/spacecat-api-service/commit/9e2cd033453399737a6ce5e55b6e3164950457a4)), closes [#2952](https://github.com/adobe/spacecat-api-service/issues/2952) [#1915](https://github.com/adobe/spacecat-api-service/issues/1915) [#1915](https://github.com/adobe/spacecat-api-service/issues/1915) [#2942](https://github.com/adobe/spacecat-api-service/issues/2942) [#3178](https://github.com/adobe/spacecat-api-service/issues/3178)
+
+## [1.793.3](https://github.com/adobe/spacecat-api-service/compare/v1.793.2...v1.793.3) (2026-09-04)
+
+
+### Bug Fixes
+
+* make `move llmo org` resilient to slack message update failures ([#3205](https://github.com/adobe/spacecat-api-service/issues/3205)) ([5d8ef48](https://github.com/adobe/spacecat-api-service/commit/5d8ef48fbc4a354e5e755b92f0fbdb01bd6bbc2b))
+
+## [1.793.2](https://github.com/adobe/spacecat-api-service/compare/v1.793.1...v1.793.2) (2026-09-04)
+
+
+### Bug Fixes
+
+* **plg:** fix fast-path handler enrollment + enable aso_plg imports ([#3202](https://github.com/adobe/spacecat-api-service/issues/3202)) ([12ad7ff](https://github.com/adobe/spacecat-api-service/commit/12ad7fff16d67b7e81242aa43fc662d84ab6b255))
+
+## [1.793.1](https://github.com/adobe/spacecat-api-service/compare/v1.793.0...v1.793.1) (2026-09-04)
+
+
+### Bug Fixes
+
+* **ci:** give type-check a push fallback so it can't lose its required verdict ([#3201](https://github.com/adobe/spacecat-api-service/issues/3201)) ([2a8d34c](https://github.com/adobe/spacecat-api-service/commit/2a8d34ced505f1bd82fdc03090aa2d898f57e2e5)), closes [Hi#level](https://github.com/Hi/issues/level) [#3199](https://github.com/adobe/spacecat-api-service/issues/3199)
+
+# [1.793.0](https://github.com/adobe/spacecat-api-service/compare/v1.792.1...v1.793.0) (2026-09-04)
+
+
+### Features
+
+* add `move llmo org` slack command to relocate a site's full brand graph ([#3181](https://github.com/adobe/spacecat-api-service/issues/3181)) ([17b9f90](https://github.com/adobe/spacecat-api-service/commit/17b9f909fe3556775b5832ed146f9bcd301b5847))
+
+## [1.792.1](https://github.com/adobe/spacecat-api-service/compare/v1.792.0...v1.792.1) (2026-09-04)
+
+
+### Bug Fixes
+
+* **serenity:** exclude org parent workspace from sub-workspace adoption candidates ([#3198](https://github.com/adobe/spacecat-api-service/issues/3198)) ([4b3e261](https://github.com/adobe/spacecat-api-service/commit/4b3e2613fa8ca3cd66e3e6de87a1f0367fd51a34)), closes [Hi#level](https://github.com/Hi/issues/level)
+
+# [1.792.0](https://github.com/adobe/spacecat-api-service/compare/v1.791.1...v1.792.0) (2026-09-03)
+
+
+### Features
+
+* **referral-traffic:** thread urlPathPrefix through referral endpoints (LLMO-7315) ([#3190](https://github.com/adobe/spacecat-api-service/issues/3190)) ([c63bcee](https://github.com/adobe/spacecat-api-service/commit/c63bcee29b5f2891117c0d5abbd9062711de8b34)), closes [Hi#level](https://github.com/Hi/issues/level)
+
+## [1.791.1](https://github.com/adobe/spacecat-api-service/compare/v1.791.0...v1.791.1) (2026-09-03)
+
+
+### Bug Fixes
+
+* bump spacecat-shared-data-access to 4.28.0 for AsyncJob expiresAt (SITES-47947) ([#3196](https://github.com/adobe/spacecat-api-service/issues/3196)) ([bee354d](https://github.com/adobe/spacecat-api-service/commit/bee354d7e468bce5f1913518da032605b4789d1e))
+
+# [1.791.0](https://github.com/adobe/spacecat-api-service/compare/v1.790.0...v1.791.0) (2026-09-03)
+
+
+### Features
+
+* **ai-visibility:** scope remaining v1 brand endpoints to subdomains ([#3187](https://github.com/adobe/spacecat-api-service/issues/3187)) ([2e2d9b2](https://github.com/adobe/spacecat-api-service/commit/2e2d9b2a10ade426ad29a0bd4bee86eb1205320e)), closes [Hi#level](https://github.com/Hi/issues/level)
+
+# [1.790.0](https://github.com/adobe/spacecat-api-service/compare/v1.789.0...v1.790.0) (2026-09-03)
+
+
+### Features
+
+* **organizations:** add GET /organizations/by-access-map-sheet/:productCode ([#3176](https://github.com/adobe/spacecat-api-service/issues/3176)) ([b48b792](https://github.com/adobe/spacecat-api-service/commit/b48b792e20140b5b94720eeb862e52ba3c22756f))
+
+# [1.789.0](https://github.com/adobe/spacecat-api-service/compare/v1.788.0...v1.789.0) (2026-09-03)
+
+
+### Features
+
+* add CloudFront connector template download endpoint | LLMO-7074 ([#3154](https://github.com/adobe/spacecat-api-service/issues/3154)) ([5a0ba25](https://github.com/adobe/spacecat-api-service/commit/5a0ba256eedc1996c58270cabe9ee2b05823701c))
+
 # [1.788.0](https://github.com/adobe/spacecat-api-service/compare/v1.787.0...v1.788.0) (2026-09-03)
 
 

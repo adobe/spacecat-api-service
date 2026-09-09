@@ -139,6 +139,14 @@ const FIXTURES = {
         languageCode: 'en',
         text: 'sample',
       }],
+      // A live response always carries `updated` — the prompts whose text already
+      // existed and had their tags replaced rather than being created again.
+      updated: [{
+        semrushPromptId: 'sem-2',
+        geoTargetId: 2840,
+        languageCode: 'en',
+        text: 'already here',
+      }],
       skipped: [],
       failed: [],
       published: true,
@@ -492,6 +500,38 @@ const FIXTURES = {
       }],
     },
   },
+  listSerenityBrandPresenceResponses: {
+    expectedStatus: 200,
+    usesElementsController: true,
+    controllerMethod: 'listResponseFeed',
+    serviceMethod: 'getResponseFeed',
+    // from/to are optional (they default to the last 7 days ending yesterday), but are
+    // supplied here so the fixture is deterministic rather than clock-dependent.
+    query: { from: '2026-08-23', to: '2026-08-24' },
+    // getResponseFeed returns the joined shape; the controller maps it through
+    // ResponseFeedDto.toEnvelopeJSON before ok().
+    handlerResult: {
+      records: [{
+        projectId: 'cb4f6443-e01f-4075-a586-85511f136e31',
+        prompt: 'best running shoes for flat feet',
+        model: 'chatgpt-paid',
+        date: '2026-08-24',
+        response: 'For flat feet, look for stability shoes with firm midsoles.',
+        sources: [{
+          url: 'https://www.runnersworld.com/gear/best-running-shoes',
+          source: 'runnersworld.com',
+          position: 1,
+          domainType: 'Earned',
+        }],
+        sourceRowCount: 1,
+      }],
+      days: ['2026-08-23', '2026-08-24'],
+      projectIds: ['cb4f6443-e01f-4075-a586-85511f136e31'],
+      pageSize: 5000,
+      truncated: false,
+      unmatchedSourceKeyCount: 0,
+    },
+  },
   listSerenityBrandPresenceSubreddits: {
     expectedStatus: 200,
     usesElementsController: true,
@@ -590,6 +630,7 @@ const FIXTURES = {
         position: 1,
         sentiment: 0.72,
         volume: 5658,
+        executions: 42,
       }],
     }, {
       topic: 'Recliners with USB Charging Ports',
@@ -622,6 +663,7 @@ const FIXTURES = {
       position: 1,
       sentiment: 0.72,
       volume: 5658,
+      executions: 42,
     }],
   },
   // Also served by ElementsController — see the note on

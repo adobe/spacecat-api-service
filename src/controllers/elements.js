@@ -17,7 +17,6 @@ import { hasText, isNonEmptyObject, isValidUUID } from '@adobe/spacecat-shared-u
 import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
 
 import { getBrandIdentity, getBrandBySite } from '../support/brands-storage.js';
-import { resolveBrandUuid } from '../support/prompts-storage.js';
 import { createElementsTransport } from '../support/elements/elements-transport.js';
 import { ElementsTransportError } from '../support/elements/errors.js';
 import { createElementsService } from '../support/elements/elements-service.js';
@@ -30,6 +29,7 @@ import { createSerenityTransport } from '../support/serenity/rest-transport.js';
 import { SerenityTransportError } from '../support/serenity/serenity-transport-error.js';
 import { logUpstreamError } from '../support/serenity/upstream-log.js';
 import { cachedOk } from '../support/cached-response.js';
+import { ResponseFeedDto } from '../dto/response-feed.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { ErrorWithStatusCode, resolveSemrushImsToken } from '../support/utils.js';
 import { X_PROMISE_TOKEN_HEADER, PROMISE_TOKEN_REQUIRED_ERROR_CODE } from '../utils/constants.js';
@@ -39,6 +39,19 @@ const BEARER_PREFIX = 'Bearer ';
 // Caps concurrent DB queries / upstream POSTs when fanning out across brands or projects.
 // mapWithConcurrency itself lives in support/elements/concurrency.js (shared with the service).
 const FANOUT_CONCURRENCY = 8;
+
+/** Milliseconds in a day, for span arithmetic on `YYYY-MM-DD` bounds. */
+const MS_PER_DAY = 86400000;
+
+/**
+ * Maximum span the response feed will serve, in days.
+ *
+ * The upstream window is ROLLING and about 74 days wide (measured 2026-09-04). Beyond it a
+ * day is UNRECOVERABLE rather than expensive, and the failure is silent: the upstream
+ * returns nothing for an out-of-window day, which is indistinguishable from "no model ran".
+ * Rejecting at the edge keeps that ambiguity out of the response.
+ */
+const RESPONSE_FEED_MAX_SPAN_DAYS = 74;
 
 /**
  * Maps a BrandSemrushProject model instance to the plain object shape the
@@ -420,11 +433,14 @@ async function authorizeOrg(ctx) {
  *
  * @param {object} ctx - Request context.
  * @param {object} log - Logger (for the misconfiguration alert).
- * @returns {Promise<{workspaceId: string, brandUuid: string} | {error: Response}>}
- *   the brand's sub-workspace id and resolved Postgres brand UUID on success, or a
+ * @returns {Promise<{workspaceId: string, brandUuid: string, brand: object} | {error: Response}>}
+ *   the brand's sub-workspace id, resolved Postgres brand UUID and brand identity
+ *   (`{ id, name }`) on success, or a
  *   Response on failure (400 non-UUID brandId, 403 no access, 404 org/brand not found
  *   or brand has no sub-workspace, 409 sub-workspace misconfigured as the parent).
- *   `brandUuid` lets callers run the project-ownership guard (see listUrlPrompts).
+ *   `brandUuid` lets callers run the project-ownership guard (see listUrlPrompts);
+ *   `brand.name` is the `CBF_brand` value used to brand-scope elements that are not
+ *   scoped by the sub-workspace alone (see topic-prompts.js).
  */
 async function authorizeBrandSubWorkspace(ctx, log) {
   const spaceCatId = ctx?.params?.spaceCatId;
@@ -440,7 +456,12 @@ async function authorizeBrandSubWorkspace(ctx, log) {
   if (!postgrestClient?.from) {
     return { error: createResponse({ error: 'configurationError', message: 'PostgREST client not available' }, 503) };
   }
-  const brandUuid = await resolveBrandUuid(spaceCatId, brandId, postgrestClient);
+  // getBrandIdentity (rather than resolveBrandUuid) so callers also get the brand's
+  // display NAME for `CBF_brand` scoping. Equivalent lookup here: the non-UUID brandId
+  // path is already rejected above, so resolveBrandUuid's name-ilike fallback is
+  // unreachable and both resolve `brands` by organization_id + id.
+  const brand = await getBrandIdentity(spaceCatId, brandId, postgrestClient);
+  const brandUuid = brand?.id;
   if (!brandUuid) {
     return { error: notFound(`Brand not found for organization: ${brandId}`) };
   }
@@ -485,7 +506,36 @@ async function authorizeBrandSubWorkspace(ctx, log) {
       ),
     };
   }
-  return { workspaceId, brandUuid };
+  return { workspaceId, brandUuid, brand };
+}
+
+/**
+ * Resolves the `CBF_brand` value for a brand-scoped element call.
+ *
+ * Returns the brand's trimmed display name, or `undefined` when it has none — in which
+ * case the element falls back to brand-agnostic counts (any tracked brand in the
+ * response), which is the pre-LLMO-7443 behavior and inflates the numbers. That fallback
+ * is deliberate (a data-quality gap degrades a metric rather than 500-ing a dashboard),
+ * so it is logged rather than raised.
+ *
+ * The trim is what keeps the warning honest: `hasText` is `!!str && isString(str)` and
+ * does NOT trim, so a whitespace-only name is "text" by that test while being useless as
+ * a filter value. Deriving both the log decision and the emitted value from the same
+ * trimmed string means the log can never claim a brand-agnostic fallback while the
+ * payload actually carries a garbage `CBF_brand` (and vice versa).
+ *
+ * @param {object} [brand] - Brand identity (`{ id, name }`) from authorizeBrandSubWorkspace.
+ * @param {object} log - Logger.
+ * @param {string} route - Handler name, for the warning.
+ * @returns {string|undefined} Trimmed brand name, or undefined when unusable.
+ */
+function resolveBrandFilterName(brand, log, route) {
+  const name = typeof brand?.name === 'string' ? brand.name.trim() : '';
+  if (!name) {
+    log.warn(`elements: brand has no display name - ${route} falls back to brand-agnostic counts`, { brandId: brand?.id });
+    return undefined;
+  }
+  return name;
 }
 
 export default function ElementsController(context, log, env) {
@@ -1112,7 +1162,9 @@ export default function ElementsController(context, log, env) {
    * (78864493) fetched across ALL topics, grouped by topic and aggregated
    * server-side (promptCount, brandMentions/citations, avg visibility/position/sentiment).
    *
-   * Brand-scoped via the brand's Semrush **sub-workspace** (like {@link listTopicPrompts}).
+   * Brand-scoped by the brand's Semrush **sub-workspace** AND a `CBF_brand` filter on the
+   * brand's display name (like {@link listTopicPrompts}) — the sub-workspace alone leaves
+   * competitor mentions in the counts, see topic-prompts.js.
    * Caller-supplied projectId(s) (optional) scope to `CBF_project`; absent → all of the
    * brand's markets.
    * Returns the full topic list (`{ topics, totalCount }`); the table paginates client-side.
@@ -1128,7 +1180,7 @@ export default function ElementsController(context, log, env) {
         return auth.error;
       }
       const { brandId } = ctx?.params ?? {};
-      const { workspaceId } = auth;
+      const { workspaceId, brand } = auth;
       const query = extractQuery(ctx);
 
       // Date range is optional; when present it must be a valid, ordered YYYY-MM-DD pair.
@@ -1159,11 +1211,14 @@ export default function ElementsController(context, log, env) {
         return ownershipError;
       }
 
+      // Brand-scope the element to this brand's mentions (CBF_brand); without it the
+      // per-topic aggregates count any tracked brand in the topic's responses.
       const topics = await service.getTopics(workspaceId, {
         model: query.model || query.platform,
         startDate: hasText(startDate) ? startDate : undefined,
         endDate: hasText(endDate) ? endDate : undefined,
         projectIds,
+        brandName: resolveBrandFilterName(brand, log, 'listTopics'),
       });
 
       return cachedOk({ topics, totalCount: topics.length });
@@ -1179,8 +1234,11 @@ export default function ElementsController(context, log, env) {
    * PROMPTS_BY_TOPIC element (78864493), scoped by `CBF_topic` = the topic NAME
    * (`:topicId` is the URL-encoded topic name, not a UUID — Semrush topics have no id).
    *
-   * Brand-scoped via the brand's Semrush **sub-workspace** (like {@link listPrompts} —
-   * projects/prompts live only there). Caller-supplied projectId(s) (optional) scope
+   * Brand-scoped by the brand's Semrush **sub-workspace** (like {@link listPrompts} —
+   * projects/prompts live only there) AND by a `CBF_brand` filter on the brand's display
+   * name: without the latter the element counts ANY tracked brand mentioned in the topic's
+   * responses, so competitors inflate mentions/visibility/citations (see topic-prompts.js).
+   * Caller-supplied projectId(s) (optional) scope
    * to `CBF_project`; absent → all of the brand's markets. Pagination is
    * client-side (Semrush has no server-side paging); `totalCount` is the full count.
    *
@@ -1196,7 +1254,7 @@ export default function ElementsController(context, log, env) {
         return auth.error;
       }
       const { brandId, topicId } = ctx?.params ?? {};
-      const { workspaceId } = auth;
+      const { workspaceId, brand } = auth;
 
       // :topicId is the URL-encoded topic NAME. enrichPathInfo already decodes path
       // params, but decode defensively in case a caller double-encodes.
@@ -1239,12 +1297,15 @@ export default function ElementsController(context, log, env) {
         return ownershipError;
       }
 
+      // Brand-scope the element to this brand's mentions (CBF_brand); see the payload
+      // builder's header for why the sub-workspace alone is not sufficient.
       const allPrompts = await service.getTopicPrompts(workspaceId, {
         topic,
         model: query.model || query.platform,
         startDate: hasText(startDate) ? startDate : undefined,
         endDate: hasText(endDate) ? endDate : undefined,
         projectIds,
+        brandName: resolveBrandFilterName(brand, log, 'listTopicPrompts'),
       });
 
       // Client-side pagination (mirrors listOwnedUrls); totalCount is the full count.
@@ -1270,7 +1331,8 @@ export default function ElementsController(context, log, env) {
    *
    * Brand-scoped via the brand's Semrush **sub-workspace** (like {@link listTopicPrompts});
    * the brand is NOT sent as a filter (`CBF_brand` is redundant with sub-workspace scoping —
-   * see url-prompts.js). Pagination is client-side; `totalCount` is the full count.
+   * see url-prompts.js; note that premise proved FALSE for the topics elements above).
+   * Pagination is client-side; `totalCount` is the full count.
    *
    * Query params: `url` (required, the cited URL), `startDate`/`endDate` (required,
    * YYYY-MM-DD), `model`/`platform` (optional, default search-gpt), `projectId`
@@ -2173,12 +2235,98 @@ export default function ElementsController(context, log, env) {
   };
   /* c8 ignore stop */
 
+  /**
+   * GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/responses
+   *
+   * The Brand Claims RESPONSE FEED: each AI answer for the requested days, paired with the
+   * sources cited in that same execution. Brand Claims sits under Brand Presence within the
+   * ABV product, hence the path segment.
+   *
+   * Assembled from two elements that each hold half the record — 141adc88 has the answer but
+   * no date, 404fb017 has the date and citations but no answer — joined on
+   * `(project_id, prompt, model, date)`. See `elements-service.js#getResponseFeed`.
+   *
+   * RANGE-BASED BY DESIGN. Consecutive days share a window boundary, so N days cost N+1
+   * upstream pulls rather than 2N. A per-day endpoint would forfeit that and pay double.
+   */
+  const listResponseFeed = async (ctx) => {
+    try {
+      const auth = await authorizeOrg(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      // authorizeOrg validated `:brandId`, confirmed the brand belongs to the org, and
+      // resolved the brand's Semrush sub-workspace. The caller never supplies a workspace
+      // id and never holds a Semrush credential (design of record §10).
+      const { workspaceId, brand } = auth;
+      const query = extractQuery(ctx);
+
+      // Default to the last 7 days ending yesterday. Yesterday, not today: the upstream
+      // window is bounded by `CBF_date__end` and today's executions are still landing, so
+      // ending on today would report a partial day as though it were complete. Seven days
+      // is a working week of context at 8 boundary pulls per market — small enough to stay
+      // responsive, wide enough to be useful without a caller computing dates.
+      const defaultEnd = addDaysToDate(new Date().toISOString().slice(0, 10), -1);
+      const startDate = query.from || query.startDate || addDaysToDate(defaultEnd, -6);
+      const endDate = query.to || query.endDate || defaultEnd;
+
+      if (!isYmdDate(startDate) || !isYmdDate(endDate)) {
+        return badRequest('from and to must be valid YYYY-MM-DD dates');
+      }
+      if (startDate > endDate) {
+        return badRequest('from must not be after to');
+      }
+
+      // The upstream window is ROLLING and about 74 days wide (measured 2026-09-04). A day
+      // older than that is UNRECOVERABLE, not merely expensive — the data is gone upstream.
+      // Rejecting is essential: serving such a request would return an empty result that is
+      // indistinguishable from "nothing ran", i.e. silent data loss presented as fact.
+      const spanDays = (Date.parse(`${endDate}T00:00:00Z`)
+        - Date.parse(`${startDate}T00:00:00Z`)) / MS_PER_DAY;
+      if (spanDays >= RESPONSE_FEED_MAX_SPAN_DAYS) {
+        return badRequest(
+          `Date range must not exceed ${RESPONSE_FEED_MAX_SPAN_DAYS} days: the upstream window `
+          + 'is rolling and older executions are unrecoverable',
+        );
+      }
+
+      const service = await buildService(ctx);
+
+      // Project scoping: caller-supplied projectId(s) (CSV) scope to those Semrush projects;
+      // absent → all of the brand's markets. LOAD-BEARING: the technical account is broadly
+      // entitled, so a caller who guessed another brand's project UUID could otherwise read
+      // that tenant's answers. Ownership is checked against this brand's own rows.
+      const projectIds = extractProjectIds(query);
+      // `dataAccess` is guaranteed present here — `authorizeOrg` above already read
+      // `Organization` from it — so this is a plain destructure rather than the optional
+      // form the sibling handlers use, whose fallback branch is unreachable in practice.
+      const { BrandSemrushProject } = ctx.dataAccess;
+      const brandSemrushProjects = await fetchBrandSemrushProjects(BrandSemrushProject, [brand]);
+      const ownershipError = checkProjectIdsOwnership(projectIds, brandSemrushProjects);
+      if (ownershipError) {
+        return ownershipError;
+      }
+
+      const result = await service.getResponseFeed(workspaceId, {
+        projectIds,
+        startDate,
+        endDate,
+        model: query.model || query.platform,
+        limit: query.limit,
+      });
+      return ok(ResponseFeedDto.toEnvelopeJSON(result));
+    } catch (e) {
+      return mapError(e, log, reqCtxOf(ctx));
+    }
+  };
+
   return {
     listUrlInspectorFilterDimensions,
     listWeeks,
     checkAccess,
     listPrompts,
     listCitedDomains,
+    listResponseFeed,
     listSubreddits,
     listRedditThreads,
     listYoutubeVideos,

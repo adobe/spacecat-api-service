@@ -218,6 +218,7 @@ export default function getRouteHandlers(
     'GET /organizations/by-ims-org-id/:imsOrgId': organizationsController.getByImsOrgID,
     'GET /organizations/by-ims-org-id/:imsOrgId/slack-config': organizationsController.getSlackConfigByImsOrgID,
     'GET /organizations/by-product-code/:productCode': organizationsController.getByProductCode,
+    'GET /organizations/by-access-map-sheet/:productCode': organizationsController.getByAccessMapSheet,
     'PATCH /organizations/:organizationId': organizationsController.updateOrganization,
     'DELETE /organizations/:organizationId': organizationsController.removeOrganization,
     'GET /organizations/:organizationId/sites': organizationsController.getSitesForOrganization,
@@ -268,6 +269,7 @@ export default function getRouteHandlers(
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/prompts': elementsController.listPrompts,
     // eslint-disable-next-line max-len
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/cited-domains': elementsController.listCitedDomains,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/responses': elementsController.listResponseFeed,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/sentiment-overview': elementsController.listSentimentOverview,
     // Per-subreddit Reddit stats (Subreddits element faf56e29).
     // eslint-disable-next-line max-len
@@ -501,7 +503,9 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/top-pages/:source/:geo': sitesController.getTopPages,
     'POST /sites/:siteId/graph': sitesController.getGraph,
 
-    'GET /slack/events': slackController.handleEvent,
+    // NOTE: there is deliberately no `GET /slack/events`. Slack only ever POSTs events and
+    // interactive payloads, and a GET carries no body to sign, so it could never satisfy the
+    // signature check in slackSignatureWrapper (VULN-39365).
     'POST /slack/events': slackController.handleEvent,
     'POST /slack/channels/invite-by-user-id': slackController.inviteUserToChannel,
     'GET /trigger': triggerHandler,
@@ -624,6 +628,7 @@ export default function getRouteHandlers(
     'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/deploy': llmoCloudFrontController.deploy,
     'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/plan': llmoCloudFrontController.plan,
     'GET /sites/:siteId/llmo/cdn-onboard/cloudfront/permissions': llmoCloudFrontController.getPermissions,
+    'GET /sites/:siteId/llmo/cdn-onboard/cloudfront/template': llmoCloudFrontController.getTemplate,
     'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/log-delivery': llmoCloudFrontController.enableCdnLogDelivery,
     'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/log-rescan': llmoCloudFrontController.rescanCdnLogDelivery,
     'GET /sites/:siteId/llmo/strategy': llmoController.getStrategy,

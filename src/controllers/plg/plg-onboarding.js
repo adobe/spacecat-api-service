@@ -44,6 +44,7 @@ import {
   resolveWwwUrl,
   updateCodeConfig,
 } from '../../support/utils.js';
+import { detectAuthWall } from '../../support/detect-auth-wall.js';
 import { loadProfileConfig, postSlackMessage } from '../../utils/slack/base.js';
 import { triggerBrandProfileAgent } from '../../support/brand-profile-trigger.js';
 import { ASO_PRODUCT_CODE, STATUSES, REVIEW_DECISIONS } from './plg-onboarding/constants.js';
@@ -79,6 +80,7 @@ function injectFlowDeps(context) {
     LaunchDarklyClient,
     composeBaseURL,
     detectBotBlocker,
+    detectAuthWall,
     detectLocale,
     resolveCanonicalUrl,
     createOrFindOrganization,

@@ -327,7 +327,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
 
       expect(res.status).to.equal(200);
       expect(mockOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
-      expect(mockLog.warn).to.have.been.calledWithMatch(/Failed to enroll site in config handlers/);
+      expect(mockLog.warn).to.have.been.calledWithMatch(/Failed to enable handler summit-plg for site/);
     });
   });
 });

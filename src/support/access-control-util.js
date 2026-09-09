@@ -27,7 +27,8 @@ import { listResourceIdsWithCapability } from './state-access-mapping-utils.js';
 import routeFacsCapabilities from '../routes/facs-capabilities.js';
 
 const ANONYMOUS_ENDPOINTS = [
-  /^GET \/slack\/events$/,
+  // NOTE: no `GET /slack/events` — the route was removed (VULN-39365). Slack only ever POSTs,
+  // and a GET carries no body to sign, so it could never be signature-verified.
   /^POST \/slack\/events$/,
   /^POST \/hooks\/site-detection.+/,
 ];

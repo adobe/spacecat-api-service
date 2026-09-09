@@ -64,8 +64,8 @@ export const INTERNAL_ROUTES = [
   'POST /sites/:siteId/geo-experiments/:geoExperimentId/trigger-impact-measurement',
   'POST /sites/:siteId/geo-experiments/:geoExperimentId/validate',
 
-  // Slack - event subscriptions and commands use Slack's signature verification
-  'GET /slack/events',
+  // Slack - event subscriptions and commands are authenticated by the Slack request
+  // signature (slackSignatureWrapper), not by a SpaceCat capability.
   'POST /slack/events',
   'POST /slack/channels/invite-by-user-id',
 
@@ -97,6 +97,7 @@ export const INTERNAL_ROUTES = [
   'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/deploy',
   'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/plan',
   'GET /sites/:siteId/llmo/cdn-onboard/cloudfront/permissions',
+  'GET /sites/:siteId/llmo/cdn-onboard/cloudfront/template',
   'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/log-delivery',
   'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/log-rescan',
   'PUT /sites/:siteId/llmo/opportunities-reviewed',
@@ -275,6 +276,15 @@ const routeRequiredCapabilities = {
   // Organizations
   'GET /organizations': CAP_ORG_READ_ALL,
   'GET /organizations/by-product-code/:productCode': CAP_ORG_READ_ALL,
+  // Mapped (not INTERNAL_ROUTES) so readOnlyAdminWrapper takes its read fast-path instead of
+  // the ownership check (this route has no siteId/organizationId path param to own). Reusing
+  // CAP_ORG_READ_ALL lets an S2S consumer pass this wrapper, but getByAccessMapSheet only
+  // calls hasAdminReadAccess() - no hasS2SCapability check - so S2S still gets 403 there;
+  // this route is intentionally admin-only end-to-end, unlike its by-product-code sibling.
+  // See the INVARIANT comment on getByAccessMapSheet in organizations.js: do not add a
+  // hasS2SCapability(CAP_ORG_READ_ALL) fallback there - this mapping's only purpose is the
+  // readOnlyAdminWrapper read fast-path, not S2S opt-in.
+  'GET /organizations/by-access-map-sheet/:productCode': CAP_ORG_READ_ALL,
   'POST /organizations': 'organization:write',
   'GET /organizations/:organizationId': 'organization:read',
   'GET /organizations/by-ims-org-id/:imsOrgId': 'organization:read',
@@ -332,6 +342,7 @@ const routeRequiredCapabilities = {
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/prompts': 'organization:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/cited-domains': 'brand:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/sentiment-overview': 'brand:read',
+  'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/responses': 'brand:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/subreddits': 'brand:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/reddit-threads': 'brand:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/youtube-videos': 'brand:read',

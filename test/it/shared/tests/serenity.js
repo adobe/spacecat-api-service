@@ -797,19 +797,48 @@ export default function serenityTests(
       expect(created.status).to.equal(200);
       expect(created.body.created).to.have.lengthOf(1);
       expect(created.body.created[0].semrushPromptId).to.be.a('string').that.is.not.empty;
-      // The write path server-stamps THREE dimensions the caller may not set: a
+      // The write path server-stamps FOUR dimensions the caller may not set: a
       // branded/non-branded `type:` tag (classified from the text), the producing
       // `source:` tag (`config` on this proxy-create path — source-dimension.md
       // §1 / WP-S2, LLMO-6282), AND an `intent:<Value>` tag (serenity-docs#31,
       // #32). Azure OpenAI is not configured in this IT environment, so intent
       // deterministically defaults to `intent:Informational` (never null/omitted
-      // — see the fallback ladder). `origin` no longer gets its own tag
-      // (tag-display-names.md §3 — authorship folds into `source` via
-      // `deriveSource`, WP-D2/SITES-50446). So the created prompt carries the
-      // two supplied tags plus the three computed ones.
+      // — see the fallback ladder). The `admin` persona's JWT carries
+      // `isS2SAdmin: true` (see FACS bypass logging: "bypass: internal-identity"),
+      // which `isServicePrincipal` (prompts-storage.js) classifies as a SERVICE
+      // principal regardless of `authType` being `jwt` — so this create carries
+      // `origin:ai`, not `origin:human`. So the created prompt carries the two
+      // supplied tags plus the four computed ones.
+      //
+      // COUPLING (review nit): this test's expected origin value depends on
+      // `test/it/shared/auth.js`'s `admin` persona carrying `is_s2s_admin: true`.
+      // If that fixture ever changes to represent a true end-user admin instead
+      // (isS2SAdmin: false), this assertion needs to flip from `ai` to `human`
+      // — grep `is_s2s_admin` in auth.js if this test starts failing after an
+      // auth-fixture change.
       expect(created.body.created[0].tagIds).to.include.members([category.body.id, child.body.id]);
-      expect(created.body.created[0].tagIds).to.have.lengthOf(5);
+      expect(created.body.created[0].tagIds).to.have.lengthOf(6);
       expect(created.body.failed).to.deep.equal([]);
+
+      // Resolve the origin root's `ai` child BY READING the tree the create just
+      // wrote to (never by a separate resolve-or-create call, which could land a
+      // second, differently-id'd node if it ever raced the create's own tag-tree
+      // provisioning) — then confirm ONE of the created prompt's own tagIds
+      // actually IS that id, not just that the count is right (a double-stamped
+      // intent, or any other tag, would also satisfy a bare lengthOf(6)).
+      const roots = await getHttpClient().admin.get(
+        `${base}/tags?geoTargetId=${US_GEO}&languageCode=en&parentId=`,
+      );
+      expect(roots.status).to.equal(200);
+      const originRoot = roots.body.items.find((t) => t.name === 'origin');
+      expect(originRoot, 'the origin root should list among the roots').to.exist;
+      const originChildren = await getHttpClient().admin.get(
+        `${base}/tags?geoTargetId=${US_GEO}&languageCode=en&parentId=${originRoot.id}`,
+      );
+      expect(originChildren.status).to.equal(200);
+      const originAi = originChildren.body.items.find((t) => t.name === 'ai');
+      expect(originAi, 'origin/ai should exist under the origin root').to.exist;
+      expect(created.body.created[0].tagIds).to.include(originAi.id);
 
       // by_tags correlation: the id-based create embeds the tag ids, so filtering the prompt list
       // by the child's id surfaces the new prompt.
@@ -1005,6 +1034,53 @@ export default function serenityTests(
       );
       expect(list.status).to.equal(200);
       expect(list.body.items.filter((p) => p.text === text)).to.have.lengthOf(1);
+    });
+
+    // The customer-reported CSV round trip, end to end (Sony, Brand-A / CH-de). Re-importing a
+    // prompt with a DIFFERENT category must change that category — and, critically, must be
+    // reversible. Before the upsert the second import attached the new category alongside the old
+    // one and the third attached nothing new at all (the tag was already there), so the prompt was
+    // stuck displaying whichever category upstream happened to return first.
+    it('POST /serenity/prompts re-imports change a prompt\'s category, and can change it back', async () => {
+      await createUsMarket();
+      const original = await createCategory('Features & Pricing');
+      const replacement = await createCategory('Reviews');
+      const text = 'What features does the product offer?';
+      const importRow = (tagId) => ({
+        prompts: [{
+          text, tagIds: [tagId], geoTargetId: US_GEO, languageCode: 'en',
+        }],
+      });
+      const categoriesOf = async () => {
+        const list = await getHttpClient().admin.get(
+          `${base}/prompts?geoTargetId=${US_GEO}&languageCode=en`,
+        );
+        expect(list.status).to.equal(200);
+        const rows = list.body.items.filter((p) => p.text === text);
+        // One prompt throughout: an upsert must never mint a duplicate.
+        expect(rows).to.have.lengthOf(1);
+        return rows[0].tags
+          .filter((t) => Array.isArray(t.path) && t.path.length === 1 && t.path[0].name === 'category')
+          .map((t) => t.name);
+      };
+
+      const first = await getHttpClient().admin.post(`${base}/prompts`, importRow(original));
+      expect(first.status).to.equal(200);
+      expect(first.body.created).to.have.lengthOf(1);
+      expect(await categoriesOf()).to.deep.equal(['Features & Pricing']);
+
+      // Import 2 — change it. Exactly ONE category, not two.
+      const second = await getHttpClient().admin.post(`${base}/prompts`, importRow(replacement));
+      expect(second.status).to.equal(200);
+      expect(second.body.created).to.be.an('array').that.is.empty;
+      expect(second.body.updated).to.have.lengthOf(1);
+      expect(await categoriesOf()).to.deep.equal(['Reviews']);
+
+      // Import 3 — change it BACK. This is the step that was impossible before.
+      const third = await getHttpClient().admin.post(`${base}/prompts`, importRow(original));
+      expect(third.status).to.equal(200);
+      expect(third.body.updated).to.have.lengthOf(1);
+      expect(await categoriesOf()).to.deep.equal(['Features & Pricing']);
     });
 
     // In-place edit (serenity-docs#63, gate G1): PATCH edits the prompt via the
@@ -1274,10 +1350,13 @@ export default function serenityTests(
       expect(Date.parse(after.updated_at)).to.be.at.least(Date.parse(before.updated_at));
     });
 
-    // Re-posting an existing text folds into `existing_count` upstream instead of creating a
-    // second row, and the stored stamp is PRESERVED — a dedupe hit must not re-attribute an
-    // existing prompt to whoever re-submitted it.
-    it('POST /serenity/prompts preserves the original stamp when a repeated text dedups', async () => {
+    // Re-posting an existing text no longer creates a second row — it REPLACES that prompt's tags
+    // (the upsert). `created_*` must survive that: a merge-patch writes only the `updated_*` pair,
+    // so the prompt keeps its original author while gaining the identity of whoever re-submitted
+    // it. Before the upsert this was asserted as a full no-op, which was never quite true: the
+    // upstream create silently ATTACHED the re-posted tag ids to the existing prompt without any
+    // stamp at all, so the row changed with nothing in its authorship to show for it.
+    it('POST /serenity/prompts preserves created_* and re-stamps updated_* when a repeated text upserts', async () => {
       await createUsMarket();
       const tagId = await createCategory('Headphones');
       const text = 'Which noise-cancelling headphones are best?';
@@ -1290,8 +1369,15 @@ export default function serenityTests(
         }],
       });
       expect(second.status).to.equal(200);
+      expect(second.body.updated).to.have.lengthOf(1);
+      expect(second.body.created).to.be.an('array').that.is.empty;
 
-      expect(await storedMetadataById(promptId)).to.deep.equal(before);
+      const after = await storedMetadataById(promptId);
+      // Authorship of the ORIGINAL create is never re-attributed.
+      expect(after.created_at).to.equal(before.created_at);
+      expect(after.created_by).to.equal(before.created_by);
+      // The re-submitter is recorded as the editor, because they genuinely edited it.
+      expect(after.updated_by).to.equal('test-user@example.com');
     });
 
     // Gate G2 refusal: a rename onto a sibling's exact text is a 409 and the combined upstream

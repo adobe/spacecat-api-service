@@ -12,20 +12,14 @@
 
 import { deriveProjectName } from '../../../support/utils.js';
 
-// PLG sites get this fixed set of config handlers turned on (summit-plg notifications +
-// per-opportunity auto-suggest/auto-fix). Failure is logged and swallowed — onboarding
-// continues even if the configuration table is briefly unwritable.
+// Config handlers turned on for every PLG site. scrape-top-pages must precede
+// broken-backlinks (its dependency). Failures are logged and swallowed — onboarding
+// continues even if a handler can't be enabled.
 export const PLG_CONFIG_HANDLERS = [
   'summit-plg',
-  'top-pages',
+  'scrape-top-pages',
   'broken-backlinks',
-  'broken-backlinks-auto-suggest',
-  'broken-backlinks-auto-fix',
-  'alt-text-auto-fix',
-  'alt-text-auto-suggest-mystique',
   'alt-text',
-  'cwv-auto-fix',
-  'cwv-auto-suggest',
   'cwv',
 ];
 
@@ -114,14 +108,25 @@ export async function reparentSiteProjectToOrg(site, targetOrgId, context) {
 
 export async function enrollPlgConfigHandlers(site, context) {
   const { dataAccess, log } = context;
+  const siteId = site.getId();
   try {
     const { Configuration } = dataAccess;
     const configuration = await Configuration.findLatest();
+    const enrolled = [];
     PLG_CONFIG_HANDLERS.forEach((handler) => {
-      configuration.enableHandlerForSite(handler, site);
+      try {
+        configuration.enableHandlerForSite(handler, site);
+        enrolled.push(handler);
+      } catch (error) {
+        log.warn(`Failed to enable handler ${handler} for site ${siteId}: ${error.message}`);
+      }
     });
+    if (enrolled.length === 0) {
+      log.warn(`No config handlers could be enabled for site ${siteId}; skipping save`);
+      return;
+    }
     await configuration.save();
-    log.info(`Enrolled site ${site.getId()} in config handlers: ${PLG_CONFIG_HANDLERS.join(', ')}`);
+    log.info(`Enrolled site ${siteId} in config handlers: ${enrolled.join(', ')}`);
   } catch (error) {
     log.warn(`Failed to enroll site in config handlers: ${error.message}`);
   }

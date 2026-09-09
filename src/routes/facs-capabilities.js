@@ -177,6 +177,7 @@ const routeFacsCapabilities = {
     // Admin-only reads
     'GET /organizations', // admin OR S2S readAll
     'GET /organizations/by-product-code/:productCode', // admin OR S2S readAll
+    'GET /organizations/by-access-map-sheet/:productCode', // hasAdminReadAccess only
     'GET /sites', // admin OR S2S readAll
     'GET /sites.csv', // hasAdminReadAccess
     'GET /sites.xlsx', // hasAdminReadAccess
@@ -195,8 +196,7 @@ const routeFacsCapabilities = {
     'POST /hooks/site-detection/cdn/:hookSecret', // hookSecret in path
     'POST /hooks/site-detection/rum/:hookSecret', // hookSecret in path
     'POST /webhooks/github', // HMAC-signed webhook
-    'GET /slack/events', // Slack signature verification
-    'POST /slack/events', // Slack signature verification
+    'POST /slack/events', // Slack signature verification (slackSignatureWrapper)
     'POST /slack/channels/invite-by-user-id', // Slack-internal
     'GET /trigger', // internal scheduler
 
@@ -517,6 +517,7 @@ const routeFacsCapabilities = {
       'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/deploy': 'llmo/can_configure',
       'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/plan': 'llmo/can_configure',
       'GET /sites/:siteId/llmo/cdn-onboard/cloudfront/permissions': 'llmo/can_configure',
+      'GET /sites/:siteId/llmo/cdn-onboard/cloudfront/template': 'llmo/can_configure',
       'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/log-delivery': 'llmo/can_configure',
       'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/log-rescan': 'llmo/can_configure',
       'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/config': 'llmo/can_configure',
@@ -893,6 +894,9 @@ const routeFacsCapabilities = {
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/access': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/prompts': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/cited-domains': 'llmo/can_view',
+      // Brand Claims response feed. Sits under Brand Presence within the ABV product, and
+      // is a read of the brand's own answer corpus — same `can_view` gate as its siblings.
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/responses': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/sentiment-overview': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/subreddits': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/reddit-threads': 'llmo/can_view',

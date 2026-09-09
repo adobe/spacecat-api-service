@@ -375,6 +375,7 @@ describe('getRouteHandlers', () => {
     deploy: () => null,
     plan: () => null,
     getPermissions: () => null,
+    getTemplate: () => null,
   };
 
   const mockLlmoAkamaiController = {
@@ -763,7 +764,6 @@ describe('getRouteHandlers', () => {
       'POST /sites',
       'GET /sites.csv',
       'GET /sites.xlsx',
-      'GET /slack/events',
       'POST /slack/events',
       'GET /trigger',
       'POST /event/fulfillment',
@@ -976,6 +976,7 @@ describe('getRouteHandlers', () => {
       'GET /organizations/by-ims-org-id/:imsOrgId',
       'GET /organizations/by-ims-org-id/:imsOrgId/slack-config',
       'GET /organizations/by-product-code/:productCode',
+      'GET /organizations/by-access-map-sheet/:productCode',
       'PATCH /organizations/:organizationId',
       'DELETE /organizations/:organizationId',
       'GET /organizations/:organizationId/sites',
@@ -1026,6 +1027,7 @@ describe('getRouteHandlers', () => {
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/access',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/prompts',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/cited-domains',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/responses',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/sentiment-overview',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/subreddits',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/reddit-threads',
@@ -1327,6 +1329,7 @@ describe('getRouteHandlers', () => {
       'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/deploy',
       'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/plan',
       'GET /sites/:siteId/llmo/cdn-onboard/cloudfront/permissions',
+      'GET /sites/:siteId/llmo/cdn-onboard/cloudfront/template',
       'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/log-delivery',
       'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/log-rescan',
       'GET /sites/:siteId/llmo/edge-optimize-status',

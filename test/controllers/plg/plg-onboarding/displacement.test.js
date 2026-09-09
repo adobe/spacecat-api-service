@@ -106,6 +106,11 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
 
       expect(response.status).to.equal(200);
       expect(mockDataAccess.SiteEnrollment.create).to.have.been.called;
+      // Fast path enables the aso_plg profile imports (incl. top-pages) and persists them.
+      expect(stubs.enableImportsStub).to.have.been.called;
+      const importTypes = stubs.enableImportsStub.firstCall.args[1].map((d) => d.type);
+      expect(importTypes).to.include('top-pages');
+      expect(mockSite.setConfig).to.have.been.called;
       expect(stubs.triggerAuditsStub).to.not.have.been.called;
       expect(preonboardedOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
       expect(preonboardedOnboarding.setCompletedAt).to.have.been.called;
@@ -134,6 +139,25 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       expect(preonboardedOnboarding.setOrganizationId).to.have.been.calledWith(TEST_ORG_ID);
       // Should NOT run other full onboarding steps
       expect(stubs.detectBotBlockerStub).to.not.have.been.called;
+    });
+
+    it('fast-track still completes onboarding when enableImports fails', async () => {
+      const preonboardedOnboarding = createMockOnboarding({
+        status: 'PRE_ONBOARDING',
+        siteId: TEST_SITE_ID,
+        organizationId: TEST_ORG_ID,
+      });
+      mockDataAccess.PlgOnboarding.findByImsOrgIdAndDomain.resolves(preonboardedOnboarding);
+      const mockSiteInOrg = createMockSite({ id: TEST_SITE_ID, orgId: TEST_ORG_ID });
+      mockDataAccess.Site.findById.resolves(mockSiteInOrg);
+      // Supplementary import-enable step throws — must not abort onboarding.
+      stubs.enableImportsStub.rejects(new Error('dynamo throttle'));
+
+      const response = await controller.onboard(buildContext({ domain: TEST_DOMAIN }));
+
+      expect(response.status).to.equal(200);
+      expect(preonboardedOnboarding.setStatus).to.have.been.calledWith('ONBOARDED');
+      expect(mockLog.warn).to.have.been.calledWithMatch(/Failed to enable imports for site/);
     });
 
     it('fast-tracks preonboarded site with null steps', async () => {

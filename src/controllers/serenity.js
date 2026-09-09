@@ -37,6 +37,7 @@ import {
 } from '../support/serenity/handlers/prompts.js';
 import { createAndEnqueueJob } from '../support/serenity/async-job-runner.js';
 import { CLASSIFY_PROMPTS_JOB_TYPE } from '../support/serenity/handlers/classify-prompts-job.js';
+import { ORIGIN_VALUE } from '../support/serenity/prompt-tags.js';
 import {
   handleListMarkets,
   handleGetMarket,
@@ -79,7 +80,7 @@ import { marketForGeoTargetId } from '../support/serenity/locations.js';
 import { brandNeedles, classifyBrandedTag } from '../support/serenity/branded-classifier.js';
 import { computeWriteDeadline } from '../support/serenity/intent-classification.js';
 import AccessControlUtil from '../support/access-control-util.js';
-import { resolveBrandUuid } from '../support/prompts-storage.js';
+import { isServicePrincipal, resolveBrandUuid } from '../support/prompts-storage.js';
 import {
   getBrandAliases, getBrandUrlSources, getBrandCompetitors, updateBrand, getBrandBaseSiteId,
 } from '../support/brands-storage.js';
@@ -581,6 +582,20 @@ function SerenityController(context, log, env) {
       // `workspaceId`/`parentWorkspaceId` give it the sub-workspace and org parent
       // it needs.
       const body = ctx.data || {};
+      // Deliberately diverges from the v2/Postgres path's `deriveV2PromptOrigin`
+      // (prompts-storage.js), which reuses this SAME `isServicePrincipal`
+      // classifier but then honours a service principal's declared body
+      // `origin` (defaulting to `human` when absent/invalid). This proxy route
+      // has no such body-origin write surface — `origin` is a closed,
+      // server-owned dimension here (see makePromptTagInjector) — so a service
+      // principal is unconditionally `ai`, matching origin-dimension.md §3's
+      // "Serenity AI generation, service, ai" row. That is safe only because no
+      // non-AI service principal is expected to front this route; if one ever
+      // does (e.g. an S2S integration proxying human-authored prompts), it
+      // would be silently mislabeled `ai` with no way to declare `human`.
+      const originValue = isServicePrincipal(ctx?.attributes?.authInfo)
+        ? ORIGIN_VALUE.AI
+        : ORIGIN_VALUE.HUMAN;
       if (validateAsync(body)) {
         const prompts = Array.isArray(body.prompts) ? body.prompts : [];
         if (prompts.length === 0) {
@@ -613,6 +628,7 @@ function SerenityController(context, log, env) {
             workspaceId: auth.workspaceId,
             parentWorkspaceId: auth.parentWorkspaceId,
             prompts,
+            originValue,
             // Authorship (LLMO-6289): capture the caller id at enqueue time — from
             // the auth profile, never the forwarded upstream bearer — so the async
             // classify-on-create job stamps the submitter, not the job runner.
@@ -645,6 +661,7 @@ function SerenityController(context, log, env) {
             // SERENITY_QUOTA_ALERTS_ENABLED) — never required, a no-op when unset.
             orgId: ctx?.params?.spaceCatId,
             brandId: auth.brandUuid,
+            originValue,
           },
         )
         : await handleCreatePrompts(
@@ -658,7 +675,7 @@ function SerenityController(context, log, env) {
           ctx.env,
           writeDeadline,
           callerId,
-          { orgId: ctx?.params?.spaceCatId },
+          { orgId: ctx?.params?.spaceCatId, originValue },
         );
       return createResponse(result, 200);
     } catch (e) {

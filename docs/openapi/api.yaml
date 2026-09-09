@@ -128,6 +128,8 @@ paths:
     $ref: './organizations-api.yaml#/organizations'
   /organizations/by-product-code/{productCode}:
     $ref: './organizations-api.yaml#/organizations-by-product-code'
+  /organizations/by-access-map-sheet/{productCode}:
+    $ref: './organizations-api.yaml#/organizations-by-access-map-sheet'
   /organizations/{organizationId}:
     $ref: './organization-api.yaml#/organization'
   /organizations/{organizationId}/brands:
@@ -198,6 +200,8 @@ paths:
     $ref: './serenity-api.yaml#/v2-serenity-brand-presence-access'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/sentiment-overview:
     $ref: './serenity-api.yaml#/v2-serenity-brand-presence-sentiment-overview'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/responses:
+    $ref: './serenity-api.yaml#/v2-serenity-brand-presence-responses'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/subreddits:
     $ref: './serenity-api.yaml#/v2-serenity-brand-presence-subreddits'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/reddit-threads:
@@ -768,6 +772,8 @@ paths:
     $ref: './llmo-api.yaml#/site-llmo-cloudfront-plan'
   /sites/{siteId}/llmo/cdn-onboard/cloudfront/permissions:
     $ref: './llmo-api.yaml#/site-llmo-cloudfront-permissions'
+  /sites/{siteId}/llmo/cdn-onboard/cloudfront/template:
+    $ref: './llmo-api.yaml#/site-llmo-cloudfront-template'
   /sites/{siteId}/llmo/cdn-onboard/cloudfront/log-delivery:
     $ref: './llmo-api.yaml#/site-llmo-cloudfront-log-delivery'
   /sites/{siteId}/llmo/cdn-onboard/cloudfront/log-rescan:

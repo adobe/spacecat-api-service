@@ -69,6 +69,28 @@ describe('topic-prompts definitions', () => {
       expect(findFilterVal(buildTopicPromptsPayload(), 'CBF_topic')).to.be.undefined;
     });
 
+    it('scopes to the brand via a CBF_brand or-block when brandName is provided', () => {
+      expect(findFilterVal(buildTopicPromptsPayload({ brandName: 'Lovesac' }), 'CBF_brand'))
+        .to.equal('Lovesac');
+    });
+
+    it('omits CBF_brand when brandName is not provided (brand-agnostic, unchanged)', () => {
+      expect(findFilterVal(buildTopicPromptsPayload(), 'CBF_brand')).to.be.undefined;
+    });
+
+    // `hasText` is `!!str && isString(str)` and does NOT trim, so a whitespace-only name
+    // would pass a hasText guard while matching no brand upstream — silently zeroing the
+    // counts. The builder trims, so it is treated as absent (brand-agnostic) instead.
+    it('treats a whitespace-only brandName as absent (no garbage CBF_brand)', () => {
+      expect(findFilterVal(buildTopicPromptsPayload({ brandName: '   ' }), 'CBF_brand'))
+        .to.be.undefined;
+    });
+
+    it('trims surrounding whitespace off brandName', () => {
+      expect(findFilterVal(buildTopicPromptsPayload({ brandName: '  Lovesac  ' }), 'CBF_brand'))
+        .to.equal('Lovesac');
+    });
+
     it('includes CBF_project (in an or-block) when projectId is provided', () => {
       expect(findFilterVal(buildTopicPromptsPayload({ projectId: 'proj-42' }), 'CBF_project'))
         .to.equal('proj-42');
@@ -136,7 +158,7 @@ describe('topic-prompts definitions', () => {
             position: 1,
             sentiment: 0.72,
             volume: 5658,
-            days: 30,
+            days: 42,
             model: 'Chat GPT',
           }],
         },
@@ -152,6 +174,8 @@ describe('topic-prompts definitions', () => {
         position: 1,
         sentiment: 0.72,
         volume: 5658,
+        // Distinct from mentions (30) so a mentions->executions mis-map is caught.
+        executions: 42,
       }]);
     });
 
@@ -178,6 +202,7 @@ describe('topic-prompts definitions', () => {
       expect(row.citations).to.equal(0);
       expect(row.visibility).to.equal(0);
       expect(row.volume).to.equal(0);
+      expect(row.executions).to.equal(0);
     });
 
     it('defaults missing string fields to empty strings', () => {
