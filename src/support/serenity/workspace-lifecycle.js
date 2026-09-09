@@ -112,7 +112,7 @@ export async function pollUntilCreated(
       return;
     }
     if (TERMINAL_WORKSPACE_STATUSES.has(observedStatus)) {
-      log.error('pollUntilCreated: SUBWORKSPACE_CREATION_FAILED — terminal status observed', {
+      log.error('pollUntilCreated: SUBWORKSPACE_CREATION_FAILED: terminal status observed', {
         workspaceId,
         status: observedStatus,
       });

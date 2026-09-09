@@ -17,14 +17,16 @@ import sinonChai from 'sinon-chai';
 import esmock from 'esmock';
 import { ProjectEngineApiError } from '@adobe/spacecat-shared-project-engine-client';
 import { ErrorWithStatusCode } from '../../src/support/utils.js';
-import { ERROR_CODES } from '../../src/support/serenity/errors.js';
+import {
+  ERROR_CODES,
+  MainBrandBenchmarkInvariantError,
+} from '../../src/support/serenity/errors.js';
 import { brandPointerReloader } from '../../src/controllers/serenity.js';
 // The REAL transport error type: since LLMO-6386 the controller's mapError classifies via
 // errors.js (isSemrushTransportError), which recognises the real SerenityTransportError /
 // ProjectEngineApiError by `instanceof`. The mapError tests below must feed those real types
 // (a bare mock class would not be recognised → would wrongly fall through to the generic 500).
 import { SerenityTransportError as RealSerenityTransportError } from '../../src/support/serenity/serenity-transport-error.js';
-import { MainBrandBenchmarkInvariantError } from '../../src/support/serenity/errors.js';
 import { assertCreatePromptTagLimits } from '../../src/support/serenity/handlers/prompts.js';
 
 use(chaiAsPromised);

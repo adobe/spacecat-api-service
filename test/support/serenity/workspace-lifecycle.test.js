@@ -153,9 +153,11 @@ describe('workspace-lifecycle', () => {
       expect(transport.getWorkspaceStatus).to.have.been.calledOnceWithExactly(SUB_WS);
       expect(sleep).to.not.have.been.called;
       expect(localLog.error).to.have.been.calledOnceWithExactly(
-        'pollUntilCreated: SUBWORKSPACE_CREATION_FAILED — terminal status observed',
+        'pollUntilCreated: SUBWORKSPACE_CREATION_FAILED: terminal status observed',
         { workspaceId: SUB_WS, status: 'creation failed' },
       );
+      expect(brand.setSemrushSubWorkspaceId).to.not.have.been.called;
+      expect(brand.save).to.not.have.been.called;
     });
 
     it('fails immediately when a fresh workspace reports invalid subscription', async () => {
@@ -180,7 +182,7 @@ describe('workspace-lifecycle', () => {
       expect(transport.getWorkspaceStatus).to.have.been.calledOnceWithExactly(SUB_WS);
       expect(sleep).to.not.have.been.called;
       expect(localLog.error).to.have.been.calledOnceWithExactly(
-        'pollUntilCreated: SUBWORKSPACE_CREATION_FAILED — terminal status observed',
+        'pollUntilCreated: SUBWORKSPACE_CREATION_FAILED: terminal status observed',
         { workspaceId: SUB_WS, status: 'invalid subscription' },
       );
       expect(brand.setSemrushSubWorkspaceId).to.not.have.been.called;
