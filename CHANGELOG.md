@@ -1,3 +1,10 @@
+# [1.801.0](https://github.com/adobe/spacecat-api-service/compare/v1.800.2...v1.801.0) (2026-09-09)
+
+
+### Features
+
+* **llmo:** tag on-demand Brand Claims Slack alert as re-run ([#3253](https://github.com/adobe/spacecat-api-service/issues/3253)) ([df32e5f](https://github.com/adobe/spacecat-api-service/commit/df32e5f16835fc149f67ae5cc48d0cd3c55d5cfe))
+
 ## [1.800.2](https://github.com/adobe/spacecat-api-service/compare/v1.800.1...v1.800.2) (2026-09-09)
 
 
