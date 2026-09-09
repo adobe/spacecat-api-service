@@ -236,15 +236,45 @@ export default function AuditPolicyController() {
     return [v, decoded].some((s) => s.includes('../') || s.includes('..\\'));
   }
 
+  // Mirrors the write-time glob-rewrite CASE in wrpc_upsert_audit_policy
+  // (SITES-49858, mysticat-data-service db/migrations/20260814154830_audit_policy_
+  // exclusion_glob_rewrite.sql:102-119) so the controller's own dedup compares
+  // against the same representation the RPC will persist. Defense-in-depth only
+  // (SITES-51200 item 2) — the RPC's own post-rewrite dedup (SITES-51200 item 1)
+  // remains the canonical guarantee against a stored duplicate.
+  function normalizeExclusionGlob(baseURL, value) {
+    if (typeof value !== 'string') {
+      return value;
+    }
+    if (value === '' || value.startsWith('http://') || value.startsWith('https://') || value.startsWith('*')) {
+      return value;
+    }
+    const root = baseURL.replace(/\/+$/, '');
+    return value.startsWith('/') ? `${root}${value}` : `${root}/${value}`;
+  }
+
   // add = set-union (preserves existing order, appends new values in call order);
   // remove = set-difference. Both are no-ops for elements already in the target state,
   // which is what makes retrying this operation safe (§3.2 of the design doc).
-  function computeNewArray(currentArray, values, mode) {
+  // `normalize` mirrors the RPC's own write-time rewrite (see normalizeExclusionGlob)
+  // so membership/no-op checks compare against the value the RPC will actually
+  // persist rather than the raw caller input (SITES-51200 item 2, defense in depth).
+  // Identity for manualUrls, which the RPC never rewrites.
+  function computeNewArray(currentArray, values, mode, normalize) {
     if (mode === 'add') {
-      return [...new Set([...currentArray, ...values])];
+      const seen = new Set();
+      const result = [];
+      [...currentArray, ...values].forEach((v) => {
+        const key = normalize(v);
+        if (!seen.has(key)) {
+          seen.add(key);
+          result.push(v);
+        }
+      });
+      return result;
     }
-    const removeSet = new Set(values);
-    return currentArray.filter((v) => !removeSet.has(v));
+    const removeSet = new Set(values.map(normalize));
+    return currentArray.filter((v) => !removeSet.has(normalize(v)));
   }
 
   async function mutateArray(context, resourceKey, mode) {
@@ -284,7 +314,10 @@ export default function AuditPolicyController() {
         return internalServerError('Failed to read audit policy');
       }
       const current = row ? AuditPolicyDto.toJSON(row) : AuditPolicyDto.defaultDocument(siteId);
-      const newArray = computeNewArray(current[config.field], body.values, mode);
+      const normalize = resourceKey === 'exclusions'
+        ? (v) => normalizeExclusionGlob(site.getBaseURL(), v)
+        : (v) => v;
+      const newArray = computeNewArray(current[config.field], body.values, mode, normalize);
       if (newArray.length > config.max) {
         return badRequest(`${config.field} would exceed the maximum of ${config.max}`);
       }
