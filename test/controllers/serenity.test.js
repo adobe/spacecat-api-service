@@ -2262,6 +2262,21 @@ describe('SerenityController', () => {
       expect(body.message).to.equal('Subworkspace creation failed');
     });
 
+    it('activate maps a workspace readiness timeout without exposing its workspace id', async () => {
+      ensureSubworkspaceStub.rejects(
+        new ErrorWithStatusCode('Subworkspace creation timed out', 504),
+      );
+      getBrandBaseSiteIdStub.resolves('primary-site');
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+
+      const response = await controller.activate(fakeContext());
+      const body = await readBody(response);
+
+      expect(response.status).to.equal(504);
+      expect(body.message).to.equal('Subworkspace creation timed out');
+      expect(JSON.stringify(body)).to.not.include(SUBWS);
+    });
+
     it('activate ensures the subworkspace ONCE for the batch and creates each market against it', async () => {
       handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: {} });
       // Body-driven market provisioning runs ONLY for an already-active brand

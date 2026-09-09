@@ -96,7 +96,7 @@ function subworkspaceCreationFailedError() {
  * @param {SerenityTransport} transport
  * @param {string} workspaceId
  * @param {{ attempts: number, intervalMs: number, sleep: function }} timing
- * @param {object} [log]
+ * @param {object} log
  */
 export async function pollUntilCreated(
   transport,
@@ -112,7 +112,7 @@ export async function pollUntilCreated(
       return;
     }
     if (TERMINAL_WORKSPACE_STATUSES.has(observedStatus)) {
-      log?.error?.('pollUntilCreated: SUBWORKSPACE_CREATION_FAILED — terminal status observed', {
+      log.error('pollUntilCreated: SUBWORKSPACE_CREATION_FAILED — terminal status observed', {
         workspaceId,
         status: observedStatus,
       });
@@ -121,10 +121,11 @@ export async function pollUntilCreated(
     // eslint-disable-next-line no-await-in-loop
     await sleep(intervalMs);
   }
-  throw new ErrorWithStatusCode(
-    `Subworkspace ${workspaceId} did not settle to 'created' in time`,
-    504,
+  log.error(
+    'pollUntilCreated: SUBWORKSPACE_CREATION_TIMEOUT — readiness attempts exhausted',
+    { workspaceId },
   );
+  throw new ErrorWithStatusCode('Subworkspace creation timed out', 504);
 }
 
 // The user-manager family endpoint (GET /v1/workspaces/{id}/family) returns a

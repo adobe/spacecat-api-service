@@ -790,6 +790,7 @@ describe('workspace-lifecycle', () => {
 
     it('504s when the workspace never settles to created', async () => {
       const sleep = sinon.stub().resolves();
+      const localLog = { info: sinon.stub(), error: sinon.stub(), warn: sinon.stub() };
       const transport = makeTransport({
         getWorkspaceStatus: sinon.stub().resolves({ status: 'not ready' }),
       });
@@ -799,14 +800,18 @@ describe('workspace-lifecycle', () => {
         transport,
         brand,
         PARENT_WS,
-        log,
+        localLog,
         { attempts: 2, intervalMs: 0, sleep },
       ).catch((e) => e);
 
       expect(error.status).to.equal(504);
-      expect(error.message).to.match(/did not settle to 'created'/);
+      expect(error.message).to.equal('Subworkspace creation timed out');
       expect(transport.getWorkspaceStatus).to.have.been.calledTwice;
       expect(sleep).to.have.been.calledTwice;
+      expect(localLog.error).to.have.been.calledOnceWithExactly(
+        'pollUntilCreated: SUBWORKSPACE_CREATION_TIMEOUT — readiness attempts exhausted',
+        { workspaceId: SUB_WS },
+      );
     });
 
     it('uses the real timer when no sleep is injected (bounded poll)', async () => {
@@ -819,7 +824,7 @@ describe('workspace-lifecycle', () => {
       // setTimeout-based sleep once before the bounded poll gives up.
       const timing = { attempts: 1, intervalMs: 0 };
       await expect(ensureSubworkspace(transport, brand, PARENT_WS, log, timing))
-        .to.be.rejectedWith(/did not settle to 'created'/);
+        .to.be.rejectedWith('Subworkspace creation timed out');
     });
 
     it('refuses to re-grant onto a workspace that IS the org parent', async () => {
