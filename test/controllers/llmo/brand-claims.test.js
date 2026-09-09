@@ -353,6 +353,43 @@ describe('handleBrandClaims', () => {
     expect(mockLog.info).to.have.been.calledWithMatch(/falling back to English/);
   });
 
+  it('falls back to English when the localized HEAD 404s via $metadata (no error name)', async () => {
+    // Some S3 clients surface a missing object as an httpStatusCode, not a `NotFound`
+    // name — that branch must fall back to English just the same.
+    const statusError = new Error('Not Found');
+    statusError.$metadata = { httpStatusCode: 404 };
+    headBehavior = (command) => (command.input.Key.endsWith('data.ja_jp.json.gz')
+      ? Promise.reject(statusError)
+      : Promise.resolve({}));
+    const context = { ...baseContext, data: { locale: 'ja_jp' } };
+
+    const result = await handleBrandClaims(context);
+
+    expect(result.status).to.equal(200);
+    const body = await result.json();
+    expect(body.servedLocale).to.equal('default'); // fell back to English
+    expect(signedKey()).to.equal(FLAT_KEY);
+    expect(mockLog.info).to.have.been.calledWithMatch(/falling back to English/);
+  });
+
+  it('rethrows a non-404 error from the localized HEAD (no silent English fallback)', async () => {
+    // A NoSuchBucket/transient fault on the localized HEAD must NOT be swallowed as a
+    // "missing localized file" — it rethrows into the shared handler so the real
+    // failure surfaces instead of masquerading as an English fallback.
+    const bucketError = new Error('bucket gone');
+    bucketError.name = 'NoSuchBucket';
+    headBehavior = (command) => (command.input.Key.endsWith('data.ja_jp.json.gz')
+      ? Promise.reject(bucketError)
+      : Promise.resolve({}));
+    const context = { ...baseContext, data: { locale: 'ja_jp' } };
+
+    const result = await handleBrandClaims(context);
+
+    expect(result.status).to.equal(400);
+    expect((await result.json()).message).to.match(/Storage bucket not found/);
+    expect(mockGetSignedUrl).not.to.have.been.called;
+  });
+
   it('returns 404 when both the localized and English objects are missing', async () => {
     const notFoundError = new Error('Not Found');
     notFoundError.name = 'NotFound';
