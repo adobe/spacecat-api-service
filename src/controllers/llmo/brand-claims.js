@@ -317,8 +317,12 @@ export async function handleRequestBrandClaims(context, site) {
   // audit row both pass this check and both enqueue. The per-brand redelivery dedup
   // (blackboard fact freshness in mystique) makes the duplicate a cheap no-op, so a
   // best-effort check here is deliberate rather than a hard once-only lock.
+  // A prior audit that clears the cooldown means this request is a re-run rather than
+  // a first-ever run; the Slack alert below tags it so operators can tell them apart.
+  let isRerun = false;
   try {
     const latestAudit = await site.getLatestAuditByAuditType(BRAND_CLAIMS_AUDIT_TYPE);
+    isRerun = Boolean(latestAudit);
     const ranAtMs = typeof latestAudit?.getAuditedAt === 'function'
       ? Date.parse(latestAudit.getAuditedAt())
       : NaN;
@@ -366,9 +370,10 @@ export async function handleRequestBrandClaims(context, site) {
     try {
       const requester = getRequesterLabel(context);
       const requestedBy = requester ? ` by ${requester}` : '';
+      const rerunTag = isRerun ? ' (re-run)' : '';
       await postSlackMessage(
         slackChannel,
-        `:rocket: On-demand Brand Claims requested for *${site.getBaseURL()}* (${site.getId()})${requestedBy}.`,
+        `:rocket: On-demand Brand Claims requested${rerunTag} for *${site.getBaseURL()}* (${site.getId()})${requestedBy}.`,
         slackToken,
       );
     } catch (slackError) {

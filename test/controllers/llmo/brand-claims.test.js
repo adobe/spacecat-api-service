@@ -705,6 +705,19 @@ describe('handleRequestBrandClaims (on-demand, LLMO-7263)', () => {
     expect(sqsSend).to.have.been.calledOnce;
   });
 
+  it('does not tag the Slack alert "(re-run)" on a first-ever run (no prior audit)', async () => {
+    await handleRequestBrandClaims(context, site);
+    expect(postSlackMessage.getCall(0).args[1]).to.not.include('(re-run)');
+  });
+
+  it('tags the Slack alert "(re-run)" when a prior (cooldown-cleared) audit exists', async () => {
+    const ranAt = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString(); // 8 days ago
+    getLatestAudit.resolves({ getAuditedAt: () => ranAt });
+    await handleRequestBrandClaims(context, site);
+    expect(postSlackMessage.getCall(0).args[1])
+      .to.include('On-demand Brand Claims requested (re-run) for');
+  });
+
   it('proceeds (202) at the 7-day boundary (cooldown uses strict <)', async () => {
     // Exactly 7 days ago: elapsed is >= COOLDOWN_MS (never < it), so strict `<`
     // lets the request through rather than blocking on the boundary.
