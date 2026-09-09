@@ -386,7 +386,7 @@ describe('handleBrandClaims', () => {
     const result = await handleBrandClaims(context);
 
     expect(result.status).to.equal(400);
-    expect((await result.json()).message).to.match(/Storage bucket not found/);
+    expect((await result.json()).message).to.equal('S3 storage is not properly configured for this environment');
     expect(mockGetSignedUrl).not.to.have.been.called;
   });
 
@@ -439,6 +439,29 @@ describe('handleBrandClaims', () => {
 
   it('returns 400 when locale has uppercase letters (strict lowercase only)', async () => {
     const context = { ...baseContext, data: { locale: 'JA_JP' } };
+
+    const result = await handleBrandClaims(context);
+
+    expect(result.status).to.equal(400);
+    expect(mockS3Send).not.to.have.been.called;
+  });
+
+  it('treats an empty locale as absent and serves English (no extra HEAD)', async () => {
+    // `?locale=` -> hasText false -> useLocale false -> unchanged English behavior.
+    const context = { ...baseContext, data: { locale: '' } };
+
+    const result = await handleBrandClaims(context);
+
+    expect(result.status).to.equal(200);
+    const body = await result.json();
+    expect(body.requestedLocale).to.equal(null);
+    expect(body.servedLocale).to.equal('default');
+    expect(headCalls()).to.have.length(1); // only the English existence HEAD
+  });
+
+  it('returns 400 for a whitespace-only locale (present but invalid)', async () => {
+    // `?locale=%20%20` -> hasText true (not trimmed) -> validated -> rejected.
+    const context = { ...baseContext, data: { locale: '  ' } };
 
     const result = await handleBrandClaims(context);
 
@@ -500,19 +523,21 @@ describe('handleBrandClaims', () => {
     const result = await handleBrandClaims(baseContext);
 
     expect(result.status).to.equal(400);
-    expect((await result.json()).message).to.equal('Storage bucket not found: test-bucket');
+    // Generic client message — the bucket name stays in the log, not the response.
+    expect((await result.json()).message).to.equal('S3 storage is not properly configured for this environment');
     expect(mockLog.error).to.have.been.calledWith('S3 bucket test-bucket not found');
   });
 
-  it('returns 400 for generic S3 errors', async () => {
+  it('returns 500 with a generic message for other S3 errors (no raw detail leaked)', async () => {
     const accessDeniedError = new Error('Access denied');
     accessDeniedError.name = 'AccessDenied';
     headBehavior = () => Promise.reject(accessDeniedError);
 
     const result = await handleBrandClaims(baseContext);
 
-    expect(result.status).to.equal(400);
-    expect((await result.json()).message).to.equal('Error retrieving brand claims: Access denied');
+    expect(result.status).to.equal(500);
+    // The raw AWS message (recon primitive) is logged, never returned to the caller.
+    expect((await result.json()).message).to.equal('Unable to retrieve brand claims');
     expect(mockLog.error).to.have.been.calledWith(
       `S3 error retrieving brand claims for site ${TEST_SITE_ID}: Access denied`,
     );

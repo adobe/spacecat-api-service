@@ -17,6 +17,7 @@ import { hasText } from '@adobe/spacecat-shared-utils';
 import { HeadObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
 import { cachedOk } from '../../support/cached-response.js';
 import { dateToIsoWeek } from '../../support/elements/week-utils.js';
+import { isValidLocale } from '../../utils/validations.js';
 import { postSlackMessage } from '../../utils/slack/base.js';
 
 const CLAIMS_PREFIX = 'brand_claims/llmo';
@@ -70,11 +71,10 @@ const BRAND_CLAIMS_REQUEST_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
 // dots, hyphens, underscores — no `/` — to prevent using HeadObject as an
 // object-existence probe across arbitrary key paths.
 const MODEL_RE = /^[\w.-]+$/;
-// `locale` is interpolated into the S3 key too, so accept only the strict
-// `xx_yy` shape (two lowercase letters, `_`, two lowercase letters — e.g.
-// `ja_jp`). This blocks `..`, slashes, and arbitrary path segments (S3 key
-// injection) just like MODEL_RE.
-const LOCALE_RE = /^[a-z]{2}_[a-z]{2}$/;
+// `locale` is interpolated into the S3 key too, so it is validated with the shared
+// `isValidLocale` (strict `xx_yy` shape) before it can reach a key — one definition of
+// "valid locale" across the service, and it blocks `..`, slashes, and arbitrary path
+// segments (S3 key injection) just like MODEL_RE.
 
 /**
  * Latest run key for a site: the lexically-greatest `YYYY-Www` folder under the
@@ -134,7 +134,7 @@ export async function handleBrandClaims(context) {
   // wins, keeping the two selectors from interacting. Validate strictly here,
   // before it can reach an S3 key (trust boundary).
   const useLocale = !model && hasText(locale);
-  if (useLocale && !LOCALE_RE.test(locale)) {
+  if (useLocale && !isValidLocale(locale)) {
     return badRequest('Invalid locale parameter: expected e.g. ja_jp');
   }
 
@@ -192,8 +192,13 @@ export async function handleBrandClaims(context) {
     // the caller actually got so the UI can tell whether it fell back.
     let servedLocale = 'default';
     let verified = false;
-    if (useLocale) {
-      const localizedKey = s3Key.replace(/data\.json\.gz$/, `data.${locale}.json.gz`);
+    const localizedKey = useLocale ? s3Key.replace(/data\.json\.gz$/, `data.${locale}.json.gz`) : s3Key;
+    // The regex-replace only produces a distinct key when the resolved English key ends
+    // in `data.json.gz` (true for every default-family branch today). Guard on
+    // `localizedKey !== s3Key` so that if a future key shape ever breaks that invariant,
+    // the replace no-op can't make us HEAD the English object and then report
+    // `servedLocale = locale` for an English file — a silent misreport.
+    if (useLocale && localizedKey !== s3Key) {
       try {
         await s3.s3Client.send(new HeadObjectCommand({ Bucket: bucketName, Key: localizedKey }));
         s3Key = localizedKey;
@@ -242,11 +247,15 @@ export async function handleBrandClaims(context) {
     }
     if (s3Error.name === 'NoSuchBucket') {
       log.error(`S3 bucket ${bucketName} not found`);
-      return badRequest(`Storage bucket not found: ${bucketName}`);
+      return badRequest('S3 storage is not properly configured for this environment');
     }
 
+    // Keep the raw AWS error (message, bucket, key layout) in the log only — echoing it
+    // to the client leaks recon primitives (e.g. an AccessDenied surfaces account/role/
+    // bucket), and trial users can reach this endpoint. Return generic text + a 5xx, so a
+    // real S3 fault isn't mislabelled a 400 (mirrors handleBrandClaimsWeeks).
     log.error(`S3 error retrieving brand claims for site ${siteId}: ${s3Error.message}`);
-    return badRequest(`Error retrieving brand claims: ${s3Error.message}`);
+    return internalServerError('Unable to retrieve brand claims');
   }
 }
 
