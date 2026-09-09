@@ -1216,27 +1216,35 @@ export async function assertNoDuplicateActiveBrandName({
   if (error) {
     throw new Error(`Failed to check for a duplicate active brand named "${name}": ${error.message}`);
   }
-  if ((data || []).length >= ACTIVE_BRAND_SCAN_LIMIT) {
+  const rows = data ?? [];
+  if (rows.length >= ACTIVE_BRAND_SCAN_LIMIT) {
     // Fail CLOSED: a full page means the scan may be truncated, so we cannot prove
     // uniqueness. Rejecting is safer than admitting a possible duplicate silently.
-    throw new Error(
+    const err = new Error(
       `Active-brand duplicate scan for org ${organizationId} returned the full `
       + `${ACTIVE_BRAND_SCAN_LIMIT}-row cap; the result may be truncated and `
       + 'uniqueness cannot be verified. Aborting the write (investigate db-max-rows / '
       + 'the org\'s active-brand count).',
     );
+    err.status = 503;
+    err.code = 'brand_duplicate_scan_truncated';
+    throw err;
   }
 
-  const clash = (data || []).find((b) => normalizeBrandName(b.name) === normalized);
+  // Bound the name embedded in error/log messages: it's user-controlled and would
+  // otherwise be interpolated into a Lambda log line without limit.
+  const loggedName = name.length > 255 ? `${name.slice(0, 255)}…` : name;
+  const clash = rows.find((b) => normalizeBrandName(b.name) === normalized);
   if (clash) {
+    const loggedClashName = clash.name.length > 255 ? `${clash.name.slice(0, 255)}…` : clash.name;
     // Live ops breadcrumb: the after-the-fact reconcile report also catches this,
     // but a warn here surfaces a blocked duplicate at the moment it happens.
     log?.warn?.(
       `[llmo-7284] blocked a duplicate active brand in org ${organizationId}: `
-      + `"${name}" collides with existing "${clash.name}" (normalized-equal).`,
+      + `"${loggedName}" collides with existing "${loggedClashName}" (normalized-equal).`,
     );
     const err = new Error(
-      `An active brand named "${clash.name}" already exists in this organization `
+      `An active brand named "${loggedClashName}" already exists in this organization `
       + '(brand names are compared case- and whitespace-insensitively). '
       + 'Rename the brand or reuse the existing one.',
     );
@@ -1491,6 +1499,7 @@ export async function upsertBrand({
  * @param {object} params.updates - Partial brand data in V2 config shape
  * @param {object} params.postgrestClient - PostgREST client
  * @param {string} [params.updatedBy] - User performing the operation
+ * @param {object} [params.log] - Logger (defaults to console).
  * @returns {Promise<object|null>} Updated brand or null if not found
  */
 export async function updateBrand({
@@ -1499,6 +1508,7 @@ export async function updateBrand({
   updates,
   postgrestClient,
   updatedBy = 'system',
+  log = console,
 }) {
   if (!postgrestClient?.from) {
     throw new Error('PostgREST client is required');
@@ -1674,6 +1684,7 @@ export async function updateBrand({
       organizationId,
       name: resultingName,
       excludeBrandId: brandId,
+      log,
     });
   }
 

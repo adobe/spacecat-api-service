@@ -61,7 +61,9 @@ export async function assertSiteOrgReassignmentSafe({ site, targetOrgId, log = c
 
   // Re-running the admin action against the site's CURRENT org (e.g. to add products)
   // is not a move — never block it, regardless of how many enrollments the site has.
-  if (targetOrgId !== null && targetOrgId === currentOrgId) {
+  // (`targetOrgId === currentOrgId` is already false whenever targetOrgId is null,
+  // since currentOrgId is a resolved org id, never null — no separate null check needed.)
+  if (targetOrgId === currentOrgId) {
     return;
   }
 

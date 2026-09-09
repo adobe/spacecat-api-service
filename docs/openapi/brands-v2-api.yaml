@@ -217,7 +217,8 @@ v2-brand-for-org:
         description: Organization or brand not found
       '409':
         description: |
-          Conflict. One of (disambiguated by the `code` field in the response body):
+          Conflict. One of (disambiguated by the `code` field in the response body,
+          where present):
           - The PATCH would demote an **active** brand to `pending` via the
             generic update path (`code: brand_status_demotion_not_allowed`). Use
             `PATCH /v2/orgs/{spaceCatId}/brands/{brandId}/status` for intentional

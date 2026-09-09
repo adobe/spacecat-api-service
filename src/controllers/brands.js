@@ -2378,6 +2378,7 @@ function BrandsController(ctx, log, env) {
         updates,
         postgrestClient,
         updatedBy,
+        log,
       });
 
       if (!updatedRow) {
@@ -2771,6 +2772,7 @@ function BrandsController(ctx, log, env) {
         updates: { status: 'active', baseSiteId },
         postgrestClient,
         updatedBy,
+        log,
       });
       if (!updated) {
         return notFound(`Brand not found: ${brandId}`);

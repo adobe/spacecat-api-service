@@ -53,6 +53,15 @@ const ALLOWLISTED_ORG_MUTATION_FILES = new Map([
   ['src/controllers/plg/plg-onboarding.js', 'PLG onboarding first-assignment path'],
   ['src/controllers/plg/plg-onboarding/entitlement.js', 'entitlement flow, gated upstream'],
   ['src/controllers/project.js', 'project re-parent, not a site enrollment move'],
+  ['src/controllers/plg/plg-onboarding/site-setup.js', 'project re-parent (project.setOrganizationId), not a site enrollment move'],
+  // The site-level org move for this flow is delegated to the wrpc_move_brandalf_org DB
+  // RPC in llmo-org-move.js (outside this JS-level backstop's reach entirely — see that
+  // file's own header comment). This file's only match is its call into the project-level
+  // reparentSiteProject helper (see set-ims-org-modal.js above), not a site mutation. The
+  // RPC path deliberately does NOT move entitlements/enrollments (LLMO-7294, a reviewed
+  // design decision with an explicit operator warning, ENTITLEMENT_GOTCHA) rather than a
+  // silent AC12 gap.
+  ['src/support/slack/actions/move-llmo-org.js', 'site-org move delegated to the wrpc_move_brandalf_org RPC (LLMO-7294); calls the project-level reparentSiteProject helper only'],
 ]);
 
 function walkJsFiles(dir) {

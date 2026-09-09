@@ -70,4 +70,14 @@ describe('assertSiteOrgReassignmentSafe (LLMO-7284 AC12)', () => {
     expect(err.status).to.equal(502);
     expect(err.code).to.equal('site_org_reassignment_unverified');
   });
+
+  it('propagates a rejection from getSiteEnrollments rather than swallowing it', async () => {
+    const site = makeSite();
+    const readError = new Error('data-service unavailable');
+    site.getSiteEnrollments = sinon.stub().rejects(readError);
+    const err = await assertSiteOrgReassignmentSafe({ site, targetOrgId: TARGET_ORG })
+      .catch((e) => e);
+    expect(err).to.equal(readError);
+    expect(err.code).to.be.undefined;
+  });
 });

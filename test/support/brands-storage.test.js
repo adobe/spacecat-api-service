@@ -3509,6 +3509,10 @@ describe('brands-storage', () => {
       const client = createCapturingClient({
         ...successfulChildWrites([{ id: 'site-new', base_url: 'https://new.example' }]),
         brands: [
+          // Pre-read (LLMO-7284: a rename needs the current name+status). Status
+          // 'pending' keeps this out of the AC13 active-rename duplicate-check path,
+          // which is exercised separately.
+          { data: makeBrandRow({ status: 'pending' }), error: null },
           {
             data: makeBrandRow({
               name: 'Updated Brand',
@@ -3578,7 +3582,9 @@ describe('brands-storage', () => {
         { value: 'https://unresolved.example/path', onboarded: false },
       ]);
       expect(result.siteIds).to.deep.equal(['site-new']);
-      expect(client.from.withArgs('brands').callCount).to.equal(2);
+      // Pre-read (rename) + the UPDATE's own return + the stale-child-collection
+      // follow-up GET.
+      expect(client.from.withArgs('brands').callCount).to.equal(3);
 
       const upserts = Object.fromEntries(
         client.capturedCalls.upsert.map(({ table, row }) => [table, row]),

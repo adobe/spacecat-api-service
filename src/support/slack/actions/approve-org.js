@@ -90,8 +90,15 @@ export default function approveOrg(lambdaContext) {
       // LLMO-7284 (AC12): surface a blocked/unverified reassignment to the operator
       // (parity with set-ims-org-modal.js and onboard-llmo-modal.js) so the actionable
       // "offboard or transfer the enrollments first" reason is not swallowed into logs.
+      // The respond() itself is guarded so a Slack delivery failure (network error,
+      // rate limit, expired response URL) never replaces the domain error being
+      // re-thrown below with a Slack error that lacks its .code/.status.
       if (typeof e?.code === 'string' && e.code.startsWith('site_org_reassignment')) {
-        await respond({ replace_original: false, text: `:x: ${e.message}` });
+        try {
+          await respond({ replace_original: false, text: `:x: ${e.message}` });
+        } catch (slackErr) {
+          log.warn('Failed to deliver reassignment-blocked notice to Slack', slackErr);
+        }
       }
       throw e;
     }
