@@ -183,6 +183,28 @@ export const SENTIMENT_METRICS = Object.freeze({
   MENTIONS: 'mentions',
 });
 
+/**
+ * Normalises one candidate metric value to a {@link SENTIMENT_METRICS} member.
+ *
+ * Trims and lowercases, so `' MENTIONS '` resolves like `'mentions'`. Only that
+ * one opt-in selects mention counts; everything else — absent, blank,
+ * unrecognised, non-string — resolves to `PROMPTS`, this endpoint's original
+ * behaviour. Deliberately permissive rather than throwing: an unrecognised value
+ * should degrade to today's numbers, not fail an otherwise-valid chart request.
+ *
+ * Shared by the controller's query-param parsing and by
+ * {@link transformSentimentOverviewResponse}, so a direct service caller gets the
+ * same answer as an HTTP one rather than silently falling back on casing alone.
+ *
+ * @param {*} value - Raw candidate value.
+ * @returns {'prompts'|'mentions'}
+ */
+export function normalizeSentimentMetric(value) {
+  return (typeof value === 'string' && value.trim().toLowerCase() === SENTIMENT_METRICS.MENTIONS)
+    ? SENTIMENT_METRICS.MENTIONS
+    : SENTIMENT_METRICS.PROMPTS;
+}
+
 // Guard against a non-date `bar` value (e.g. a metadata / "N/A" row from the upstream
 // element): an invalid day slices to junk that dateToIsoWeek turns into a "NaN-WNaN"
 // key, which would surface as a phantom weeklyTrends entry (weekNumber/year 0). Only a
@@ -252,14 +274,16 @@ function isoDayOf(bar) {
  * @param {object} raw - Raw response from the Sentiment element.
  * @param {object} [options]
  * @param {'prompts'|'mentions'} [options.metric] - Which count drives the percentages.
- *   Anything other than `'mentions'` (including absent) means `'prompts'`; the controller
- *   normalises the query value via {@link parseSentimentMetric} before this is reached.
+ *   Normalised via `normalizeSentimentMetric`, so a trimmed/cased value from a direct
+ *   service caller resolves the same way an HTTP query value does. Anything other than
+ *   `'mentions'` (including absent) means `'prompts'`.
  * @returns {{ metric: string, weeklyTrends: Array<object> }}
  */
 export function transformSentimentOverviewResponse(raw, { metric } = {}) {
-  // Only the explicit 'mentions' opt-in switches the source field; every other value
-  // (absent, blank, unrecognised) keeps today's prompt-based behaviour.
-  const useMentions = metric === SENTIMENT_METRICS.MENTIONS;
+  // Shared with the controller's query parsing so both layers agree; only the
+  // explicit 'mentions' opt-in switches the source field.
+  const resolvedMetric = normalizeSentimentMetric(metric);
+  const useMentions = resolvedMetric === SENTIMENT_METRICS.MENTIONS;
   const rows = Array.isArray(raw?.blocks?.data) ? raw.blocks.data : [];
   const lineRows = Array.isArray(raw?.blocks?.line) ? raw.blocks.line : [];
 
@@ -356,7 +380,7 @@ export function transformSentimentOverviewResponse(raw, { metric } = {}) {
     });
 
   return {
-    metric: useMentions ? SENTIMENT_METRICS.MENTIONS : SENTIMENT_METRICS.PROMPTS,
+    metric: resolvedMetric,
     weeklyTrends,
   };
 }

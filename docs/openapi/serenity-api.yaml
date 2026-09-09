@@ -1729,7 +1729,9 @@ v2-serenity-brand-presence-sentiment-overview:
           Unrecognised, blank and absent values all resolve to `prompts` rather
           than returning 400, so an unknown value degrades to today's numbers
           instead of failing the chart request. Aliases: `sentimentMetric`,
-          `sentiment_metric`.
+          `sentiment_metric` — resolution takes the first of the three that is a
+          non-blank string, so a present-but-empty `metric` does not shadow a
+          populated alias.
 
           `mentionCounts` and `promptCounts` are returned regardless of this
           value, so both definitions can be compared from a single call.
@@ -1740,6 +1742,20 @@ v2-serenity-brand-presence-sentiment-overview:
           type: string
           enum: [prompts, mentions]
           default: prompts
+      - name: sentimentMetric
+        in: query
+        required: false
+        description: Alias for `metric`. Used only if `metric` is absent or blank.
+        schema:
+          type: string
+          enum: [prompts, mentions]
+      - name: sentiment_metric
+        in: query
+        required: false
+        description: Snake_case alias for `metric`. Used only if `metric` and `sentimentMetric` are absent or blank.
+        schema:
+          type: string
+          enum: [prompts, mentions]
     responses:
       '200':
         description: Weekly sentiment retrieved.

@@ -23,7 +23,7 @@ import { createElementsService } from '../support/elements/elements-service.js';
 import { fetchOwnedUrlsTraffic, mergeOwnedUrlsTraffic } from '../support/elements/owned-urls-traffic.js';
 import { mapWithConcurrency } from '../support/elements/concurrency.js';
 import { addDaysToDate } from '../support/elements/week-utils.js';
-import { SENTIMENT_METRICS } from '../support/elements/definitions/sentiment-overview.js';
+import { normalizeSentimentMetric, SENTIMENT_METRICS } from '../support/elements/definitions/index.js';
 import { resolveBrandWorkspace } from '../support/serenity/workspace-resolver.js';
 import { isSerenityActiveForBrand } from '../support/serenity/serenity-active.js';
 import { createSerenityTransport } from '../support/serenity/rest-transport.js';
@@ -347,13 +347,19 @@ function extractProjectIds(query) {
 }
 
 /**
- * Normalises the `metric`/`sentiment_metric` query param for the sentiment-overview
- * endpoint (LLMO-7457), mirroring the shape of {@link parseShowTrends}.
+ * Normalises the `metric`/`sentimentMetric`/`sentiment_metric` query param for the
+ * sentiment-overview endpoint (LLMO-7457), mirroring the shape of {@link parseShowTrends}.
  *
- * Only the exact opt-in `'mentions'` (case-insensitive, trimmed) selects mention counts.
- * Anything else — absent, blank, or unrecognised — resolves to `'prompts'`, this
- * endpoint's original behaviour. Deliberately permissive rather than a 400: an
- * unrecognised value degrades to today's numbers instead of failing a chart request.
+ * Resolution walks the three accepted names and takes the first that is a NON-BLANK
+ * string, so a present-but-empty `metric` does not shadow a populated alias. `??` alone
+ * would have: it only skips null/undefined, so `{ metric: '', sentiment_metric: 'mentions' }`
+ * would have resolved to `prompts`.
+ *
+ * The value itself is normalised by `normalizeSentimentMetric`, shared with the
+ * transform, so both layers agree on what counts as the opt-in. Only the exact
+ * `'mentions'` (trimmed, case-insensitive) selects mention counts; anything else
+ * degrades to `'prompts'` rather than 400, so an unrecognised value returns today's
+ * numbers instead of failing an otherwise-valid chart request.
  *
  * Exported for direct unit testing, for the same reason as {@link parseShowTrends}.
  *
@@ -361,11 +367,9 @@ function extractProjectIds(query) {
  * @returns {'prompts'|'mentions'}
  */
 export function parseSentimentMetric(q) {
-  const v = q?.metric ?? q?.sentimentMetric ?? q?.sentiment_metric;
-  if (typeof v === 'string' && v.trim().toLowerCase() === SENTIMENT_METRICS.MENTIONS) {
-    return SENTIMENT_METRICS.MENTIONS;
-  }
-  return SENTIMENT_METRICS.PROMPTS;
+  const candidates = [q?.metric, q?.sentimentMetric, q?.sentiment_metric];
+  const supplied = candidates.find((v) => typeof v === 'string' && v.trim() !== '');
+  return normalizeSentimentMetric(supplied);
 }
 
 /**
@@ -1323,6 +1327,27 @@ export default function ElementsController(context, log, env) {
       };
 
       const result = await service.getSentimentOverview(workspaceId, params);
+      // The metric parse is deliberately permissive and this handler is
+      // coverage-ignored, so a mis-spelled param produces no error and no test
+      // failure. Log the non-default opt-in so the production A/B this parameter
+      // exists for is traceable from the server side, not only from the echoed
+      // field in a response someone happens to inspect (LLMO-7457).
+      if (params.metric !== SENTIMENT_METRICS.PROMPTS) {
+        log.info(`[serenity] sentiment-overview metric=${params.metric} brandId=${brand?.id}`);
+      }
+      // A zero basis while the other count set is non-empty means the upstream
+      // field this metric reads has gone missing, which otherwise surfaces only
+      // as an unexplained empty chart.
+      const suspectWeek = (result?.weeklyTrends ?? []).find((w) => {
+        const isMentions = params.metric === SENTIMENT_METRICS.MENTIONS;
+        const basis = isMentions ? w.mentionCounts : w.promptCounts;
+        const other = isMentions ? w.promptCounts : w.mentionCounts;
+        const sum = (c) => (c ? c.positive + c.neutral + c.negative : 0);
+        return sum(basis) === 0 && sum(other) > 0;
+      });
+      if (suspectWeek) {
+        log.warn(`[serenity] sentiment-overview metric=${params.metric} has a zero basis while the other count set is non-empty - week=${suspectWeek.week} brandId=${brand?.id}`);
+      }
       return cachedOk(result);
     } catch (e) {
       return mapError(e, log, reqCtxOf(ctx));

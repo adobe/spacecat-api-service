@@ -16,6 +16,15 @@ import {
   transformSentimentOverviewResponse,
   SENTIMENT_COLORS,
 } from '../../../../src/support/elements/definitions/sentiment-overview.js';
+import {
+  RAW_SENTIMENT_WEEK,
+  SENTIMENT_MENTIONS_TOTAL,
+  SENTIMENT_PROMPTS_TOTAL,
+  SENTIMENT_MENTIONS_PCT,
+  SENTIMENT_PROMPTS_PCT,
+  SENTIMENT_MENTION_COUNTS,
+  SENTIMENT_PROMPT_COUNTS,
+} from '../fixtures/sentiment-overview.js';
 
 // Locates the CBF_project value inside the advanced filter tree (it sits in its own
 // `or` block, like the CBF_model block), or returns undefined if absent (including when
@@ -355,59 +364,44 @@ describe('sentiment-overview definitions', () => {
     // the live element (brand "au", week starting 2026-08-16), whose numbers the Semrush
     // MFE tooltip rendered as Negative 1% / 7, Neutral 56% / 571, Positive 43% / 443.
     describe('metric switch (prompts vs mentions)', () => {
-      // value = mentions, value__prompts = prompts — deliberately different, so a test
-      // reading the wrong field cannot pass by coincidence.
-      const rawWeek = {
-        type: 'bar',
-        blocks: {
-          data: [
-            {
-              bar: '2026-08-16', legend: 'Negative', value: 7, value__prompts: 7,
-            },
-            {
-              bar: '2026-08-16', legend: 'Neutral', value: 571, value__prompts: 208,
-            },
-            {
-              bar: '2026-08-16', legend: 'Positive', value: 443, value__prompts: 165,
-            },
-          ],
-          line: [{ bar: '2026-08-16', value: 275 }],
-        },
-      };
+      const rawWeek = RAW_SENTIMENT_WEEK;
       const pctOf = (wk) => Object.fromEntries(wk.sentiment.map((s) => [s.name, s.value]));
 
       it('defaults to prompts when no metric is given (unchanged behaviour)', () => {
         const res = transformSentimentOverviewResponse(rawWeek);
         expect(res.metric).to.equal('prompts');
-        expect(pctOf(res.weeklyTrends[0]))
-          .to.deep.equal({ Positive: 43, Neutral: 55, Negative: 2 });
-        expect(res.weeklyTrends[0].sentimentTotal).to.equal(380);
+        expect(pctOf(res.weeklyTrends[0])).to.deep.equal(SENTIMENT_PROMPTS_PCT);
+        expect(res.weeklyTrends[0].sentimentTotal).to.equal(SENTIMENT_PROMPTS_TOTAL);
       });
 
       it('reproduces the live MFE tooltip percentages when metric is mentions', () => {
         const res = transformSentimentOverviewResponse(rawWeek, { metric: 'mentions' });
         expect(res.metric).to.equal('mentions');
         // Exactly what the MFE showed for this bucket.
-        expect(pctOf(res.weeklyTrends[0]))
-          .to.deep.equal({ Positive: 43, Neutral: 56, Negative: 1 });
-        expect(res.weeklyTrends[0].sentimentTotal).to.equal(1021);
+        expect(pctOf(res.weeklyTrends[0])).to.deep.equal(SENTIMENT_MENTIONS_PCT);
+        expect(res.weeklyTrends[0].sentimentTotal).to.equal(SENTIMENT_MENTIONS_TOTAL);
+      });
+
+      it('normalises a padded/upper-case metric (shared with the controller)', () => {
+        const res = transformSentimentOverviewResponse(rawWeek, { metric: '  MENTIONS  ' });
+        expect(res.metric).to.equal('mentions');
+        expect(res.weeklyTrends[0].sentimentTotal).to.equal(SENTIMENT_MENTIONS_TOTAL);
       });
 
       it('falls back to prompts for an unrecognised or blank metric', () => {
         for (const metric of ['bogus', '', null, undefined, 42]) {
           const res = transformSentimentOverviewResponse(rawWeek, { metric });
           expect(res.metric, `metric=${metric}`).to.equal('prompts');
-          expect(res.weeklyTrends[0].sentimentTotal, `metric=${metric}`).to.equal(380);
+          expect(res.weeklyTrends[0].sentimentTotal, `metric=${metric}`)
+            .to.equal(SENTIMENT_PROMPTS_TOTAL);
         }
       });
 
       it('returns BOTH count sets regardless of the selected metric', () => {
         for (const metric of ['prompts', 'mentions']) {
           const [wk] = transformSentimentOverviewResponse(rawWeek, { metric }).weeklyTrends;
-          expect(wk.mentionCounts, `metric=${metric}`)
-            .to.deep.equal({ positive: 443, neutral: 571, negative: 7 });
-          expect(wk.promptCounts, `metric=${metric}`)
-            .to.deep.equal({ positive: 165, neutral: 208, negative: 7 });
+          expect(wk.mentionCounts, `metric=${metric}`).to.deep.equal(SENTIMENT_MENTION_COUNTS);
+          expect(wk.promptCounts, `metric=${metric}`).to.deep.equal(SENTIMENT_PROMPT_COUNTS);
         }
       });
 
@@ -416,7 +410,7 @@ describe('sentiment-overview definitions', () => {
       it('keeps promptsWithSentiment and totalPrompts prompt-based under either metric', () => {
         for (const metric of ['prompts', 'mentions']) {
           const [wk] = transformSentimentOverviewResponse(rawWeek, { metric }).weeklyTrends;
-          expect(wk.promptsWithSentiment, `metric=${metric}`).to.equal(380);
+          expect(wk.promptsWithSentiment, `metric=${metric}`).to.equal(SENTIMENT_PROMPTS_TOTAL);
           expect(wk.totalPrompts, `metric=${metric}`).to.equal(275);
         }
       });
@@ -435,6 +429,77 @@ describe('sentiment-overview definitions', () => {
             .to.deep.equal({ Positive: 0, Neutral: 0, Negative: 0 });
           expect(wk.sentimentTotal, `metric=${metric}`).to.equal(0);
         }
+      });
+
+      // The zero case above has BOTH sets empty. This is the asymmetric shape: the
+      // SELECTED basis is zero while the other is not — what an upstream `value`
+      // regression would look like, and what the controller's warn log keys on.
+      it('zeroes percentages when only the selected basis is empty', () => {
+        const mentionsMissing = {
+          blocks: {
+            data: [
+              {
+                bar: '2026-08-16', legend: 'Positive', value: 0, value__prompts: 165,
+              },
+              {
+                bar: '2026-08-16', legend: 'Neutral', value: 0, value__prompts: 208,
+              },
+            ],
+            line: [{ bar: '2026-08-16', value: 275 }],
+          },
+        };
+        const [asMentions] = transformSentimentOverviewResponse(mentionsMissing, { metric: 'mentions' }).weeklyTrends;
+        expect(pctOf(asMentions)).to.deep.equal({ Positive: 0, Neutral: 0, Negative: 0 });
+        expect(asMentions.sentimentTotal).to.equal(0);
+        // The other set is intact, which is exactly what makes this diagnosable.
+        expect(asMentions.promptCounts).to.deep.equal({ positive: 165, neutral: 208, negative: 0 });
+
+        const [asPrompts] = transformSentimentOverviewResponse(mentionsMissing, { metric: 'prompts' }).weeklyTrends;
+        expect(asPrompts.sentimentTotal).to.equal(373);
+      });
+
+      it('coerces a non-numeric mention value to 0 rather than NaN', () => {
+        const dirty = {
+          blocks: {
+            data: [
+              {
+                bar: '2026-08-16', legend: 'Positive', value: 'N/A', value__prompts: 10,
+              },
+              {
+                bar: '2026-08-16', legend: 'Neutral', value: 30, value__prompts: 10,
+              },
+            ],
+            line: [{ bar: '2026-08-16', value: 20 }],
+          },
+        };
+        const [wk] = transformSentimentOverviewResponse(dirty, { metric: 'mentions' }).weeklyTrends;
+        expect(wk.mentionCounts).to.deep.equal({ positive: 0, neutral: 30, negative: 0 });
+        expect(wk.sentimentTotal).to.equal(30);
+        expect(pctOf(wk)).to.deep.equal({ Positive: 0, Neutral: 100, Negative: 0 });
+      });
+
+      // The absorb branch: independent rounding of positive and negative can sum to
+      // 101, which would make the neutral remainder negative. Exercised on the
+      // mention path, which previously had no case for it.
+      it('clamps neutral to 0 on the mention path when rounding overflows to 101', () => {
+        const split = {
+          blocks: {
+            data: [
+              {
+                bar: '2026-08-16', legend: 'Positive', value: 101, value__prompts: 1,
+              },
+              {
+                bar: '2026-08-16', legend: 'Negative', value: 99, value__prompts: 1,
+              },
+            ],
+            line: [{ bar: '2026-08-16', value: 200 }],
+          },
+        };
+        const [wk] = transformSentimentOverviewResponse(split, { metric: 'mentions' }).weeklyTrends;
+        const pct = pctOf(wk);
+        expect(pct.Neutral).to.equal(0);
+        expect(pct.Positive + pct.Neutral + pct.Negative).to.equal(100);
+        expect(pct.Positive).to.be.at.least(pct.Negative);
       });
     });
   });

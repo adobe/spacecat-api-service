@@ -12939,6 +12939,12 @@ SerenityBrandPresenceSentimentOverview:
       description: |
         The resolved `metric` the `sentiment[]` percentages were computed over —
         echoed back so a caller can confirm which definition it received.
+
+        Temporary (LLMO-7457). The `metric` REQUEST parameter is removed once the
+        UI has migrated to `mentions`, but this response field is not simply
+        dropped: at that point the enum must NARROW to `[mentions]`, so a client
+        that switches on it keeps working. `mentionCounts` and `sentimentTotal`
+        are permanent; `promptCounts` goes with the `prompts` branch.
     weeklyTrends:
       type: array
       description: One entry per ISO week in the requested range, ordered oldest-first.
@@ -12998,6 +13004,9 @@ SerenityBrandPresenceSentimentOverview:
             description: |
               Raw per-sentiment PROMPT counts for the week (the element's
               `value__prompts`). Returned regardless of `metric`.
+
+              Temporary (LLMO-7457): removed alongside the `prompts` branch once
+              the UI has migrated to `mentions`.
             required: [positive, neutral, negative]
             properties:
               positive: { type: integer, example: 165 }
@@ -13025,7 +13034,11 @@ SerenityBrandPresenceSentimentOverview:
               sum-of-three.
           mentions:
             type: integer
-            description: Stubbed 0 (parity with the legacy contract).
+            description: |
+              Stubbed 0 (parity with the legacy contract). This is NOT a mention
+              count — it has always been a hardcoded 0 on this endpoint. For real
+              per-sentiment mention data, read `mentionCounts` above; a 0 here
+              does not mean the brand has no mentions.
           citations:
             type: integer
             description: Stubbed 0 (parity with the legacy contract).

@@ -18,6 +18,14 @@ import { hasText } from '@adobe/spacecat-shared-utils';
 import { createElementsService } from '../../../src/support/elements/elements-service.js';
 import { ELEMENT_IDS } from '../../../src/support/elements/element-ids.js';
 import {
+  RAW_SENTIMENT_WEEK,
+  SENTIMENT_MENTIONS_TOTAL,
+  SENTIMENT_PROMPTS_TOTAL,
+  SENTIMENT_MENTIONS_PCT,
+  SENTIMENT_MENTION_COUNTS,
+  SENTIMENT_PROMPT_COUNTS,
+} from './fixtures/sentiment-overview.js';
+import {
   DIMENSION,
   INTENT_VALUE,
   INTENT_ROOT_NAME,
@@ -1032,29 +1040,6 @@ describe('createElementsService', () => {
   // `metric=mentions` a permanent silent no-op with fully green CI — and the
   // deliberately permissive parse removes the error path that would surface it.
   describe('getSentimentOverview', () => {
-    // A real bucket captured from the live element (brand "au", week starting
-    // 2026-08-16), the same fixture the definition tests use. `value` and
-    // `value__prompts` differ deliberately, so reading the wrong field cannot
-    // pass by coincidence. The Semrush MFE rendered this bucket as
-    // Negative 1% / 7, Neutral 56% / 571, Positive 43% / 443.
-    const RAW_SENTIMENT = {
-      type: 'bar',
-      blocks: {
-        data: [
-          {
-            bar: '2026-08-16', legend: 'Negative', value: 7, value__prompts: 7,
-          },
-          {
-            bar: '2026-08-16', legend: 'Neutral', value: 571, value__prompts: 208,
-          },
-          {
-            bar: '2026-08-16', legend: 'Positive', value: 443, value__prompts: 165,
-          },
-        ],
-        line: [{ bar: '2026-08-16', value: 275 }],
-      },
-    };
-
     const BASE_PARAMS = {
       model: 'chatgpt',
       startDate: '2026-08-11',
@@ -1065,7 +1050,7 @@ describe('createElementsService', () => {
     beforeEach(() => {
       transport.fetchElement
         .withArgs('ws-1', ELEMENT_IDS.SENTIMENT, sinon.match.any)
-        .resolves(RAW_SENTIMENT);
+        .resolves(RAW_SENTIMENT_WEEK);
     });
 
     // Assertion 1: the metric the controller writes actually reaches the transform.
@@ -1073,17 +1058,25 @@ describe('createElementsService', () => {
       const params = { ...BASE_PARAMS, metric: 'mentions' };
       const result = await service.getSentimentOverview('ws-1', params);
       expect(result.metric).to.equal('mentions');
-      expect(result.weeklyTrends[0].sentimentTotal).to.equal(1021);
+      expect(result.weeklyTrends[0].sentimentTotal).to.equal(SENTIMENT_MENTIONS_TOTAL);
       const pct = Object.fromEntries(
         result.weeklyTrends[0].sentiment.map((s) => [s.name, s.value]),
       );
-      expect(pct).to.deep.equal({ Positive: 43, Neutral: 56, Negative: 1 });
+      expect(pct).to.deep.equal(SENTIMENT_MENTIONS_PCT);
     });
 
     it('defaults to prompts when params carries no metric', async () => {
       const result = await service.getSentimentOverview('ws-1', BASE_PARAMS);
       expect(result.metric).to.equal('prompts');
-      expect(result.weeklyTrends[0].sentimentTotal).to.equal(380);
+      expect(result.weeklyTrends[0].sentimentTotal).to.equal(SENTIMENT_PROMPTS_TOTAL);
+    });
+
+    // The transform shares its normaliser with the controller, so a direct service
+    // caller passing an un-normalised value resolves the same way an HTTP one does.
+    it('normalises a padded/upper-case metric from a direct service caller', async () => {
+      const result = await service.getSentimentOverview('ws-1', { ...BASE_PARAMS, metric: '  MENTIONS  ' });
+      expect(result.metric).to.equal('mentions');
+      expect(result.weeklyTrends[0].sentimentTotal).to.equal(SENTIMENT_MENTIONS_TOTAL);
     });
 
     it('returns both count sets regardless of the metric', async () => {
@@ -1091,10 +1084,8 @@ describe('createElementsService', () => {
         // eslint-disable-next-line no-await-in-loop
         const result = await service.getSentimentOverview('ws-1', { ...BASE_PARAMS, metric });
         const [wk] = result.weeklyTrends;
-        expect(wk.mentionCounts, `metric=${metric}`)
-          .to.deep.equal({ positive: 443, neutral: 571, negative: 7 });
-        expect(wk.promptCounts, `metric=${metric}`)
-          .to.deep.equal({ positive: 165, neutral: 208, negative: 7 });
+        expect(wk.mentionCounts, `metric=${metric}`).to.deep.equal(SENTIMENT_MENTION_COUNTS);
+        expect(wk.promptCounts, `metric=${metric}`).to.deep.equal(SENTIMENT_PROMPT_COUNTS);
       }
     });
 
@@ -1108,8 +1099,22 @@ describe('createElementsService', () => {
 
       const [firstCall, secondCall] = transport.fetchElement.getCalls();
       expect(secondCall.args[2]).to.deep.equal(firstCall.args[2]);
-      expect(JSON.stringify(firstCall.args[2])).to.not.contain('metric');
       expect(firstCall.args[1]).to.equal(ELEMENT_IDS.SENTIMENT);
+
+      // Assert on KEYS, recursively — a serialised-string check would false-positive
+      // on any nested VALUE that happened to contain the substring.
+      const collectKeys = (node, acc = []) => {
+        if (Array.isArray(node)) {
+          node.forEach((n) => collectKeys(n, acc));
+        } else if (node && typeof node === 'object') {
+          Object.keys(node).forEach((k) => {
+            acc.push(k);
+            collectKeys(node[k], acc);
+          });
+        }
+        return acc;
+      };
+      expect(collectKeys(firstCall.args[2])).to.not.include.members(['metric', 'sentimentMetric', 'sentiment_metric']);
     });
   });
 });
