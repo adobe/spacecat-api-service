@@ -1047,8 +1047,9 @@ export function createSerenityTransport({ env, imsToken }) {
 
     /**
      * GET /v1/languages — returns Semrush's language catalog. Used to resolve
-     * the language_id UUID from an ISO 639-1 code (e.g. 'en' → UUID). The
-     * caller is expected to cache the result (catalog is stable).
+     * the language_id UUID from a BCP-47 `code` (e.g. 'zh-Hans' → UUID),
+     * exact match, case-insensitive (LLMO-7420 — no English-name matching).
+     * The caller is expected to cache the result (catalog is stable).
      */
     async listLanguages() {
       return projects.listLanguages({});
