@@ -7,10 +7,10 @@ permissions:
   pull-requests: write
 
 on:
-  # `push:` stays unfiltered (all branches): the `type-check` push-fallback and
-  # `semver-check` deliberately run on non-main branch pushes. The redundant copy
-  # of the reusable CI on a feature-branch push is suppressed at the job level
-  # instead (see the `ci` job's `if:` guard), not by filtering the trigger.
+  # `push:` stays unfiltered (all branches): the `type-check` push-fallback,
+  # `semver-check`, and the reusable workflow's `branch-deploy` job (auto-deploy of
+  # feature branches to the `dev-branches` env, which fires on push only) all run
+  # on non-main branch pushes.
   push:
   pull_request:
     # `edited` removed: a PR title/body edit fired the full reusable CI (~23
@@ -27,25 +27,22 @@ on:
         default: dev
 
 jobs:
-  # For an open PR, GitHub fires BOTH a `push` (refs/heads/<branch>) and a
-  # `pull_request` (refs/pull/N/merge) event on every commit. The reusable
-  # service-ci workflow's concurrency group keys on `github.ref`, so the two runs
-  # land in different groups and never cancel each other -- `build` + `it-postgres`
-  # (the only two branch-protection-required checks) run in full TWICE per commit,
-  # ~19 billable job-min and ~3 org-shared runner slots wasted each time.
+  # The reusable CI runs on both `push` and `pull_request`, so for an open PR its
+  # `build` + `it-postgres` run twice per commit (the concurrency group keys on
+  # `github.ref`, which differs between the two events, so they don't cancel each
+  # other). That duplication is deliberate here: the `push` run uniquely carries
+  # the reusable `branch-deploy` job, which auto-deploys feature branches to the
+  # `dev-branches` env and fires on push only. A previous attempt to skip the
+  # non-main `push` run to dedup (this repo's #3235) silently disabled that. A real
+  # dedup that keeps branch-deploy needs a change in the shared service-ci workflow
+  # (tracked in the mysticat-ci CI-queue issue), not a caller-side push skip.
   #
-  # This guard runs the reusable CI on exactly the events that need it and skips
-  # only the duplicate non-main `push` run:
-  #   - pull_request (non-draft)  -> reports the required `ci / build` + `ci / it-postgres`
-  #   - push to main              -> semantic-release + deploy-stage
-  #   - workflow_dispatch         -> manual dev/stage/prod deploy (deploy-worker needs: [ci])
-  # Draft PRs are skipped too (a draft cannot merge; `ready_for_review` re-triggers
-  # and reports the required checks). The type-check push-fallback and semver-check
-  # are separate jobs/workflows and are unaffected.
+  # The one caller-side saving kept: skip the `pull_request` copy on DRAFT PRs. A
+  # draft can't merge, the `push` run still runs branch-deploy and reports the
+  # required `ci / build` + `ci / it-postgres` on the same commit, and
+  # `ready_for_review` re-triggers the full `pull_request` run.
   ci:
-    if: >-
-      (github.event_name != 'push' || github.ref == 'refs/heads/main')
-      && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     uses: adobe/mysticat-ci/.github/workflows/service-ci.yaml@v3
     with:
       service-name: api-service

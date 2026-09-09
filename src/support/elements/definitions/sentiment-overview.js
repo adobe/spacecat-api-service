@@ -12,6 +12,7 @@
 
 import { buildAdvancedFilters, buildModelFilter } from '../constants.js';
 import { dateToIsoWeek } from '../week-utils.js';
+import { buildFacetedTagFilters } from './prompts.js';
 
 // Legacy default window is a rolling 28 days (see defaultDateRange in
 // llmo-brand-presence.js). Kept inline here so this definition stays pure and does
@@ -61,11 +62,24 @@ function defaultDateRange() {
  *    `category__<label>` prefix).
  *  - Cited Domains' `comparison_data_formatting: 'union'` and top-level `project_id` are
  *    intentionally NOT sent — this element ignores both (confirmed via the MFE probe).
- *  - Brand scoping comes from the request targeting the brand's sub-workspace (resolved in
- *    the controller); the MFE also passes `CBF_brand` (name), but the sub-workspace already
- *    scopes to the brand, so we don't duplicate it here.
- *    CAVEAT: that premise was DISPROVEN live for PROMPTS_BY_TOPIC (see topic-prompts.js);
- *    it is UNVERIFIED for this element and deserves its own MFE reconciliation.
+ *  - Brand scoping needs `CBF_brand` (the brand display name) — the sub-workspace ALONE is
+ *    NOT enough. This file previously claimed the opposite ("the sub-workspace already
+ *    scopes to the brand, so we don't duplicate it here"), with a caveat that the premise
+ *    had been disproven for PROMPTS_BY_TOPIC (see topic-prompts.js) but was unverified
+ *    here. It is now DISPROVEN for this element too (LLMO-7456), by replaying this exact
+ *    payload twice against the live element and changing only `CBF_brand` (brand "au",
+ *    2026-08-11..2026-09-09, search-gpt, one project). Week 2026-08-23 returned
+ *    positive/neutral/negative prompt counts of 319/345/16 WITH the filter and 507/585/66
+ *    WITHOUT it; `blocks.line` went 478 → 637. A brand's sub-workspace also holds its
+ *    tracked COMPETITORS (that is what powers Market Comparison), so without this filter
+ *    the element blends them into the brand's own sentiment — here au plus NTT Docomo,
+ *    SoftBank, Rakuten Mobile and povo. Rendered as a 100% split that understated positive
+ *    by 2-6 points and inflated negative roughly 3x (2% → 6%) on EVERY bar.
+ *    Sent as a bare `eq` (not an `or` block) — the shape captured from the live MFE and
+ *    the one replayed above; `brand-presence-stats.js` sends the same bare shape.
+ *    The column is `CBF_brand`, NOT `CBF_ws_brand`.
+ *    Like PROMPTS_BY_TOPIC, this filter changes the per-bucket VALUES, not the bucket set:
+ *    both probes returned the same four weekly buckets.
  *
  * @param {object} [params]
  * @param {string} [params.model] - AI model filter value (Semrush engine name or UI
@@ -80,9 +94,17 @@ function defaultDateRange() {
  * @param {string} [params.projectId] - Single Semrush project id to scope to (`CBF_project`).
  * @param {string[]} [params.projectIds] - Multiple Semrush project ids to OR together
  *   (`CBF_project`); takes precedence over `projectId` when both are given.
+ * @param {string} [params.brandName] - Brand display name to scope the sentiment counts to
+ *   this brand (`CBF_brand`). Omitted, blank or whitespace-only → brand-agnostic, which
+ *   blends the sub-workspace's tracked competitors into the result (see the module header).
+ *   Matching is exact and case-sensitive upstream, and registered aliases are NOT resolved
+ *   (verified on PROMPTS_BY_TOPIC, see topic-prompts.js), so this must be the brand's exact
+ *   Semrush-tracked name: a casing/rename/alias divergence silently zeroes the counts,
+ *   which is indistinguishable from a genuine "no sentiment". That is why a blank name
+ *   falls back to brand-agnostic rather than sending a value that cannot match.
  */
 export function buildSentimentOverviewPayload({
-  model, platform, startDate, endDate, category, projectId, projectIds,
+  model, platform, startDate, endDate, category, tagPaths, projectId, projectIds, brandName,
 } = {}) {
   // "All platforms" (param absent or 'all') → omit CBF_model so Semrush aggregates across
   // every model that produced data; otherwise scope to the single resolved model (LLMO-7093).
@@ -95,6 +117,20 @@ export function buildSentimentOverviewPayload({
   if (modelFilter) {
     advancedFilters.push(modelFilter);
   }
+  // Brand scoping: restrict the sentiment counts to THIS brand via CBF_brand. Without it
+  // the element blends in every competitor tracked in the same sub-workspace (LLMO-7456 —
+  // see the module header for the live A/B). Sent as a bare `eq`, the shape captured from
+  // the MFE and verified live against this element.
+  //
+  // Trimmed here, and treated as absent when the result is empty, so the invariant holds
+  // for EVERY caller: a blank or whitespace-only name must fall back to brand-agnostic
+  // rather than send `CBF_brand: "   "`, which matches no brand and would silently zero
+  // the counts — indistinguishable from a real "no sentiment". Note `hasText` does NOT
+  // trim (`!!str && isString(str)`), so guarding with it here would not catch "   ".
+  const scopedBrand = typeof brandName === 'string' ? brandName.trim() : '';
+  if (scopedBrand) {
+    advancedFilters.push({ op: 'eq', val: scopedBrand, col: 'CBF_brand' });
+  }
   // Project scoping: this element scopes by CBF_project (one or more Semrush project ids),
   // NOT a top-level project_id. Supplied by the caller via the `projectId` query param.
   const ids = Array.isArray(projectIds) && projectIds.length > 0
@@ -106,9 +142,7 @@ export function buildSentimentOverviewPayload({
       filters: ids.map((id) => ({ op: 'eq', val: id, col: 'CBF_project' })),
     });
   }
-  if (category) {
-    advancedFilters.push({ op: 'eq', val: category, col: 'CBF_tags' });
-  }
+  advancedFilters.push(...buildFacetedTagFilters({ tagPaths, category }));
 
   return {
     auto_bucketing: 'week',

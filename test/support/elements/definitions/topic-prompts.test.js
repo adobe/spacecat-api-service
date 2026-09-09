@@ -91,6 +91,16 @@ describe('topic-prompts definitions', () => {
         .to.equal('Lovesac');
     });
 
+    it('combines brand scoping with faceted custom-tag filters', () => {
+      const payload = buildTopicPromptsPayload({
+        brandName: 'Lovesac',
+        tagPaths: ['tag__Campaign__Q1'],
+      });
+
+      expect(findFilterVal(payload, 'CBF_brand')).to.equal('Lovesac');
+      expect(findFilterVal(payload, 'CBF_tags')).to.equal('tag__Campaign__Q1');
+    });
+
     it('includes CBF_project (in an or-block) when projectId is provided', () => {
       expect(findFilterVal(buildTopicPromptsPayload({ projectId: 'proj-42' }), 'CBF_project'))
         .to.equal('proj-42');

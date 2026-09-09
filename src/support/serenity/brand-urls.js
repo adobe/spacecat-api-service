@@ -14,7 +14,9 @@
 
 import { hasText, siteIdentityFromUrlString } from '@adobe/spacecat-shared-utils';
 
-import { isSemrushTransportError, isMeteredQuota, toQuotaExceededError } from './errors.js';
+import {
+  isSemrushTransportError, isMeteredQuota, toQuotaExceededError, MainBrandBenchmarkInvariantError,
+} from './errors.js';
 import { benchmarkAliases } from './aliases.js';
 import { resolveProjects } from './resolve-projects.js';
 import { primaryUrlOf } from './subworkspace-projects.js';
@@ -394,14 +396,41 @@ export function collectBrandUrlEntries(sources, market, primaryDomains, primaryI
  * with zero benchmarks and nowhere to attach URLs. So we resolve the own-brand
  * benchmark, creating it when absent:
  *   1. an existing `main_brand: true` benchmark (the system one) always wins;
- *   2. else an existing benchmark whose domain matches the brand's own domain
- *      (the one a previous run created — keeps the ensure idempotent);
- *   3. else create it from the brand's name + domain + aliases.
+ *   2. else an existing benchmark whose domain matches the brand's own domain —
+ *      reused as-is by default (pre-LLMO-7421 behaviour), or, when
+ *      `opts.repairUnflagged` is set, deleted and recreated flagged instead,
+ *      since the flag cannot be set via PUT (live-verified) — see below;
+ *   3. else create it from the brand's name + domain + aliases, flagged.
  *
- * A benchmark we create is NOT `main_brand` (the create API can't set it), but
- * brand URLs attach to any benchmark, so that does not affect URL sync. Returns
- * `null` only when there is no benchmark to reuse AND no usable domain to create
- * one with — callers then skip the URL attach (never a hard failure).
+ * `main_brand: true` IS accepted by the v2 batch-create endpoint (live-verified;
+ * see mysticat-data-service PR #945/executor.py `_own_brand_body`) — a prior
+ * version of this function assumed otherwise and left every benchmark it created
+ * unflagged, which is the root cause of LLMO-7421 (published projects with no
+ * main-brand baseline). Reads the DRAFT view (not published) so this can run
+ * before a project's first publish, and so it observes a benchmark this same
+ * ensure call just wrote.
+ *
+ * `opts.repairUnflagged` defaults to `false` and is opt-in for a reason: the
+ * repair (delete then recreate flagged) is destructive to whatever the
+ * existing benchmark carries (brand URLs, aliases) and, on an ALREADY
+ * PUBLISHED project, can leave the published view pointing at a deleted
+ * benchmark until the next incidental republish — this codebase has no
+ * general-purpose "always republish after any repair" seam. The two
+ * PROVISIONING call sites (`project-provisioning.js`,
+ * `handlers/markets-subworkspace.js`'s blocking pre-publish step) pass `true`:
+ * a project mid-provisioning has no customer-visible published state yet and
+ * nothing valuable to lose. The brand-URL edit-time re-sync call sites
+ * (`attachBrandUrlsToProject`, `syncBrandUrlsAcrossMarkets`, both below) do
+ * NOT pass it, preserving the pre-LLMO-7421 reuse-as-is behaviour for an
+ * already-live project's unflagged benchmark — repairing those belongs to the
+ * separate resumable data-repair tool this ticket scopes for the
+ * already-affected production projects, not to a side effect of an unrelated
+ * brand-URL edit.
+ *
+ * Returns `null` only when there is no benchmark to reuse AND no usable domain
+ * to create one with — callers then skip the URL attach (never a hard failure).
+ * Callers that must enforce the invariant (provisioning, not URL sync) should
+ * follow this with {@link assertMainBrandBenchmark}.
  *
  * A created benchmark carries the market's TRACKED url, not just its host.
  * External parties read a benchmark's `primary_url` rather than the project's, and
@@ -416,11 +445,19 @@ export function collectBrandUrlEntries(sources, market, primaryDomains, primaryI
  *   own brand; `primaryUrl` is the url the market tracks and falls back to
  *   `domain`.
  * @param {object} [log] - optional logger ({ info?, warn? }).
- * @param {object} [options] - ensure behavior.
- * @param {boolean} [options.repairAliasCase=false] - perform the blocking
- *   withhold/re-add repair used by project creation.
- * @returns {Promise<string|null>} the resolved benchmark id, or null when none
- *   exists and none can be created (no usable brand domain).
+ * @param {object} [opts]
+ * @param {boolean} [opts.repairUnflagged=false] - delete and recreate flagged
+ *   an existing unflagged own-domain benchmark, instead of reusing it as-is.
+ *   Provisioning call sites only — see the doc above.
+ * @param {boolean} [opts.repairAliasCase=false] - perform the blocking
+ *   withhold/re-add repair used by project creation when the resolved
+ *   benchmark (flagged or an as-is-reused domain match) carries mixed-case
+ *   aliases from Semrush's auto-provisioning. Not applied when
+ *   `repairUnflagged` fires a delete+recreate — the fresh create already
+ *   writes the correctly-cased aliases, so there is nothing left to repair.
+ * @returns {Promise<string|null>} the resolved benchmark id (flagged when
+ *   created/repaired by this call; possibly unflagged when reused as-is), or
+ *   null when none exists and none can be created (no usable brand domain).
  */
 export async function ensureOwnBrandBenchmark(
   transport,
@@ -428,27 +465,79 @@ export async function ensureOwnBrandBenchmark(
   projectId,
   brand,
   log,
-  { repairAliasCase = false } = {},
+  { repairUnflagged = false, repairAliasCase = false } = {},
 ) {
-  const resp = await transport.listBenchmarks(workspaceId, projectId);
+  const resp = await transport.listBenchmarks(workspaceId, projectId, { draft: true });
   const benchmarks = Array.isArray(resp?.aio_benchmarks) ? resp.aio_benchmarks : [];
   const ownDomain = normalizeBenchmarkDomain(brand?.domain);
   const matchesOwn = (b) => hasText(b?.id) && ownDomain !== null
     && normalizeBenchmarkDomain(b?.domain) === ownDomain;
 
-  const existing = benchmarks.find((b) => b?.main_brand === true && hasText(b?.id))
-    || benchmarks.find(matchesOwn);
-  if (existing) {
+  const flagged = benchmarks.find((b) => b?.main_brand === true && hasText(b?.id));
+  if (flagged) {
     if (repairAliasCase) {
-      await repairBenchmarkAliasCase(transport, workspaceId, projectId, existing, brand, log);
+      await repairBenchmarkAliasCase(transport, workspaceId, projectId, flagged, brand, log);
     }
-    return String(existing.id);
+    return String(flagged.id);
   }
 
-  // Nothing to reuse — create the own-brand benchmark. Needs a name + domain.
-  if (!hasText(brand?.name) || ownDomain === null) {
-    return null;
+  const domainMatch = benchmarks.find(matchesOwn);
+  if (domainMatch && !repairUnflagged) {
+    // Reuse as-is (pre-LLMO-7421 behaviour) — see the opts.repairUnflagged doc
+    // above for why this is the default.
+    if (repairAliasCase) {
+      await repairBenchmarkAliasCase(transport, workspaceId, projectId, domainMatch, brand, log);
+    }
+    return String(domainMatch.id);
   }
+
+  if (!hasText(brand?.name) || ownDomain === null) {
+    // Nothing to create/flag with — fall back to an unflagged domain match (if
+    // any) so URL attach still has somewhere to write. The invariant check
+    // downstream ({@link assertMainBrandBenchmark}) is what catches this case
+    // for callers that must block on it.
+    if (repairUnflagged && domainMatch) {
+      // repairUnflagged was requested but skipped: without a usable brand
+      // name/domain there is nothing to recreate the benchmark WITH, so the
+      // caller silently gets back the still-unflagged id. Log it — otherwise
+      // this looks identical to a successful repair in production.
+      log?.warn?.('brand-urls: SERENITY_BENCHMARK_REPAIR_SKIPPED_INSUFFICIENT_METADATA — repairUnflagged requested but brand name/domain insufficient to recreate; returning unflagged benchmark as-is', {
+        workspaceId, projectId, benchmarkId: domainMatch.id,
+      });
+    }
+    return domainMatch ? String(domainMatch.id) : null;
+  }
+
+  if (domainMatch) {
+    // repairUnflagged is set: main_brand can only be set at create, so delete
+    // and recreate it flagged. Aliases are rebuilt from `brand.name`/
+    // `brand.aliases` in the create body below (the same source Semrush's own
+    // provisioning read), and brand URLs (not aliases) attached to the deleted
+    // benchmark are re-pushed by the caller after this resolves
+    // (attachBrandUrlsToProject writes verbatim and the upstream skips
+    // duplicates) — nothing here needs to snapshot/restore either.
+    try {
+      await transport.deleteBenchmarks(workspaceId, projectId, [String(domainMatch.id)]);
+    } catch (e) {
+      // Non-fatal and deliberately swallowed: falling through to create still
+      // establishes the flagged benchmark the invariant requires (it only
+      // counts main_brand:true), so provisioning succeeds either way. The
+      // stale unflagged benchmark this leaves behind is data pollution, not a
+      // correctness problem — greppable token so it's alertable rather than
+      // silently accumulating.
+      log?.warn?.('brand-urls: SERENITY_BENCHMARK_DELETE_DIVERGENCE — could not delete unflagged own-domain benchmark before recreate; stale benchmark left behind', {
+        workspaceId,
+        projectId,
+        benchmarkId: domainMatch.id,
+        error: e?.message,
+        status: e?.status,
+        // Distinguishes ProjectEngineApiError from SerenityTransportError (and
+        // any other thrown shape) during incident triage.
+        name: e?.name,
+      });
+    }
+  }
+
   // Create is the one point where we choose an alias's spelling: upstream keeps
   // whatever an alias was created with, so a later PUT cannot re-case it. Use the
   // lowercase form Semrush's own resolution would have stored.
@@ -462,6 +551,7 @@ export async function ensureOwnBrandBenchmark(
   const body = [{
     brand_name: brand.name,
     domain: brand.domain,
+    main_brand: true,
     ...(trackedUrl ? { primary_url: trackedUrl } : {}),
     ...(aliases.length ? { brand_aliases: aliases } : {}),
   }];
@@ -469,7 +559,7 @@ export async function ensureOwnBrandBenchmark(
     const created = await transport.createBenchmarks(workspaceId, projectId, body);
     const id = Array.isArray(created?.ids) && created.ids.length ? created.ids[0] : null;
     if (hasText(id)) {
-      log?.info?.('brand-urls: created own-brand benchmark', {
+      log?.info?.('brand-urls: created flagged own-brand benchmark', {
         workspaceId, projectId, benchmarkId: id,
       });
       return String(id);
@@ -481,11 +571,47 @@ export async function ensureOwnBrandBenchmark(
       throw e;
     }
   }
-  // Create returned no id (existing_count) or 409'd — re-list and match by domain.
-  const after = await transport.listBenchmarks(workspaceId, projectId);
+  // Create returned no id (existing_count) or 409'd — re-list and match flagged,
+  // then by domain.
+  const after = await transport.listBenchmarks(workspaceId, projectId, { draft: true });
   const afterList = Array.isArray(after?.aio_benchmarks) ? after.aio_benchmarks : [];
-  const found = afterList.find(matchesOwn);
-  return found ? String(found.id) : null;
+  const afterFlagged = afterList.find((b) => b?.main_brand === true && hasText(b?.id));
+  if (afterFlagged) {
+    return String(afterFlagged.id);
+  }
+  const afterMatch = afterList.find(matchesOwn);
+  return afterMatch ? String(afterMatch.id) : null;
+}
+
+/**
+ * Blocking pre-publish provisioning gate (LLMO-7421): asserts a project's
+ * DRAFT benchmark state carries exactly one `main_brand: true` benchmark and
+ * returns its id, so a caller can refuse to publish otherwise — see
+ * `project-provisioning.js` and `handlers/markets-subworkspace.js`.
+ *
+ * Reads the DRAFT view only — see {@link MainBrandBenchmarkInvariantError} for
+ * why a published-view confirmation is deferred rather than attempted here.
+ *
+ * A count greater than one (duplicate main-brand benchmarks) is detected and
+ * blocks the same as zero, but is NOT self-healed by this function or by
+ * {@link ensureOwnBrandBenchmark} — deleting down to one flagged benchmark is
+ * deferred to the fleet reconciliation this ticket scopes, since choosing
+ * which duplicate to keep needs more context than this read-only gate has.
+ *
+ * @param {SerenityTransport} transport
+ * @param {string} workspaceId
+ * @param {string} projectId
+ * @returns {Promise<string>} the single flagged benchmark's id.
+ * @throws {MainBrandBenchmarkInvariantError} when the count is not exactly one.
+ */
+export async function assertMainBrandBenchmark(transport, workspaceId, projectId) {
+  const resp = await transport.listBenchmarks(workspaceId, projectId, { draft: true });
+  const benchmarks = Array.isArray(resp?.aio_benchmarks) ? resp.aio_benchmarks : [];
+  const flagged = benchmarks.filter((b) => b?.main_brand === true && hasText(b?.id));
+  if (flagged.length !== 1) {
+    throw new MainBrandBenchmarkInvariantError(workspaceId, projectId, { count: flagged.length });
+  }
+  return String(flagged[0].id);
 }
 
 /**
