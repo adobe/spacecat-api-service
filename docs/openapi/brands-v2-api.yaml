@@ -81,13 +81,14 @@ v2-brands-for-org:
               $ref: './schemas.yaml#/V2Brand'
       '202':
         description: |
-          PR-C (LLMO-7352/LLMO-7418): the request set `async: true` alongside
-          `semrushMarket`. The brand row is persisted immediately (visible,
+          The request set `async: true` (PR-C, LLMO-7352/LLMO-7418, alongside
+          `semrushMarket`; or Phase 4, same epic, on a bare create with no
+          market). The brand row is persisted immediately (visible,
           non-active — "Setting up", no workspace pointer yet); the
-          sub-workspace ready-check and the initial market's project create/
-          publish are enqueued to a background job chain instead of running
-          inline. Poll the returned `jobId` at `GET .../serenity/jobs/{jobId}`
-          for status + result.
+          sub-workspace ready-check — and, when `semrushMarket` was supplied,
+          the initial market's project create/publish — are enqueued to a
+          background job chain instead of running inline. Poll the returned
+          `jobId` at `GET .../serenity/jobs/{jobId}` for status + result.
         content:
           application/json:
             schema:
@@ -121,7 +122,7 @@ v2-brands-for-org:
             active brand with the same normalized name (case- and
             whitespace-insensitive) in this organization
             (`code: brand_duplicate_active_name`).
-          - (PR-C, `async: true` only) a provisioning attempt is already in flight
+          - (`async: true` only) a provisioning attempt is already in flight
             for this brand (`code: semrush_provisioning_in_progress`). The same
             token is returned by `POST .../serenity/markets` and
             `POST .../serenity/activate`, so a client has one string to branch on.

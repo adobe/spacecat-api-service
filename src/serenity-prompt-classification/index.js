@@ -57,6 +57,10 @@ import {
   ACTIVATE_MARKETS_JOB_TYPE,
 } from '../support/serenity/handlers/activate-markets-job.js';
 import {
+  activateBrandWorkspaceJobHandler,
+  ACTIVATE_BRAND_WORKSPACE_JOB_TYPE,
+} from '../support/serenity/handlers/activate-brand-workspace-job.js';
+import {
   isRateLimited,
   isSemrushTransportError,
 } from '../support/serenity/errors.js';
@@ -128,7 +132,9 @@ export const vaultOpts = {
  * sub-workspace provisioning lives in `../support/serenity/handlers/provision-workspace-job.js`;
  * and PR-C's two chained market-creation phases (workspace ready -> create the market/run the
  * activate batch against it) live in `../support/serenity/handlers/create-market-job.js` and
- * `../support/serenity/handlers/activate-markets-job.js`. All five are registered below.
+ * `../support/serenity/handlers/activate-markets-job.js`; Phase 4's brand-status-flip half of
+ * `activate`'s two remaining "skip"-mode branches lives in
+ * `../support/serenity/handlers/activate-brand-workspace-job.js`. All six are registered below.
  *
  * A deferred-exchange handler receives a null token and exchanges it itself.
  * @type {Record<string, (context: object, job: object,
@@ -141,6 +147,7 @@ const HANDLERS = {
   [PROVISION_WORKSPACE_JOB_TYPE]: provisionWorkspaceHandler,
   [CREATE_MARKET_JOB_TYPE]: createMarketJobHandler,
   [ACTIVATE_MARKETS_JOB_TYPE]: activateMarketsJobHandler,
+  [ACTIVATE_BRAND_WORKSPACE_JOB_TYPE]: activateBrandWorkspaceJobHandler,
 };
 
 /**
