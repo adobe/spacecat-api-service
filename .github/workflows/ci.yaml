@@ -28,19 +28,26 @@ on:
 
 jobs:
   # The reusable CI runs on both `push` and `pull_request`, so for an open PR its
-  # `build` + `it-postgres` run twice per commit (the concurrency group keys on
-  # `github.ref`, which differs between the two events, so they don't cancel each
-  # other). That duplication is deliberate here: the `push` run uniquely carries
-  # the reusable `branch-deploy` job, which auto-deploys feature branches to the
-  # `dev-branches` env and fires on push only. A previous attempt to skip the
-  # non-main `push` run to dedup (this repo's #3235) silently disabled that. A real
-  # dedup that keeps branch-deploy needs a change in the shared service-ci workflow
-  # (tracked in the mysticat-ci CI-queue issue), not a caller-side push skip.
+  # `build` + `it-postgres` would run twice per commit (the concurrency group keys
+  # on `github.ref`, which differs between the two events, so they don't cancel
+  # each other). `dedup-pr-runs: true` makes the shared service-ci workflow skip
+  # the redundant `pull_request` copy of that heavy path for a same-repo PR: the
+  # branch's `push` run covers the same head SHA and reports the required
+  # `ci / build` + `ci / it-postgres`, so the `pull_request` copies come back
+  # `skipped` and branch protection is satisfied by the push run.
   #
-  # The one caller-side saving kept: skip the `pull_request` copy on DRAFT PRs. A
-  # draft can't merge, the `push` run still runs branch-deploy and reports the
-  # required `ci / build` + `ci / it-postgres` on the same commit, and
-  # `ready_for_review` re-triggers the full `pull_request` run.
+  # The `push` run is NEVER the one skipped, so `branch-deploy` (push-only,
+  # auto-deploys feature branches to `dev-branches`) is preserved. Skipping the
+  # push run instead is exactly what this repo's #3235 did — silently disabling
+  # branch-deploy — which the shared dedup is designed to avoid. Fork PRs still
+  # run the heavy path on `pull_request` (they have no base-repo push twin). See
+  # mysticat-ci `.github/actions/ci-context/README.md`.
+  #
+  # The caller-side DRAFT-PR skip is kept and composes with the above: a draft PR
+  # skips the whole `pull_request` `ci` job (the `push` run still covers the
+  # required checks and runs branch-deploy), and `ready_for_review` re-triggers
+  # the `pull_request` run — where the shared dedup then skips only build +
+  # it-postgres.
   ci:
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     uses: adobe/mysticat-ci/.github/workflows/service-ci.yaml@v3
@@ -51,6 +58,7 @@ jobs:
       it-postgres: true
       vpc-enabled: true
       bundle-build: true
+      dedup-pr-runs: true
     secrets: inherit
 
   # Opt-in TypeScript type-checking (checkJs + JSDoc, no .ts source) over the
