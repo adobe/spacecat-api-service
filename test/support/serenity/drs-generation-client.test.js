@@ -88,18 +88,20 @@ describe('drs-generation-client', () => {
     expect(invoke).to.not.have.been.called;
   });
 
-  it('throws terminal on a held verdict (never publishes an empty/held market)', async () => {
+  it('throws terminal HELD on a held verdict (never publishes an empty/held market)', async () => {
     const invoke = sinon.stub().resolves({ prompts: [], ship_summary: { verdict: 'held' } });
-    await expect(invokeDrsGeneration(ctx(), baseRequest, { invoke }))
-      .to.be.rejectedWith(DrsGenerationTerminalError);
+    const err = await invokeDrsGeneration(ctx(), baseRequest, { invoke }).catch((e) => e);
+    expect(err).to.be.instanceOf(DrsGenerationTerminalError);
+    expect(err.code).to.equal('PROMPT_GENERATION_HELD');
   });
 
-  it('throws terminal on a gate_error with terminal error_category', async () => {
+  it('throws terminal GATE_ERROR on a gate_error with terminal error_category', async () => {
     const invoke = sinon.stub().resolves({
       prompts: [], ship_summary: { verdict: 'gate_error', error_category: 'terminal' },
     });
-    await expect(invokeDrsGeneration(ctx(), baseRequest, { invoke }))
-      .to.be.rejectedWith(DrsGenerationTerminalError);
+    const err = await invokeDrsGeneration(ctx(), baseRequest, { invoke }).catch((e) => e);
+    expect(err).to.be.instanceOf(DrsGenerationTerminalError);
+    expect(err.code).to.equal('PROMPT_GENERATION_GATE_ERROR');
   });
 
   it('throws RETRYABLE on a gate_error with retryable error_category', async () => {
@@ -126,7 +128,7 @@ describe('drs-generation-client', () => {
     expect(isRetryableJobError(err)).to.equal(true);
   });
 
-  it('emits DRSInvokeDurationMs + DRSInvokeFailure with the Environment-only dimension set (infra convention)', async () => {
+  it('emits DRSInvokeDurationMs {Environment} + DRSInvokeFailure {Environment,Reason} (infra SEARCH-sum)', async () => {
     const heldInvoke = sinon.stub().resolves({ prompts: [], ship_summary: { verdict: 'held' } });
     const logs = [];
     const orig = console.log;
@@ -152,11 +154,11 @@ describe('drs-generation-client', () => {
     expect(meta(duration).Namespace).to.equal('SpacecatSerenityMarketWorker');
     expect(meta(duration).Dimensions[0]).to.deep.equal(['Environment']);
 
-    // Both metrics carry EXACTLY {Environment} — the infra alarms match on it and
-    // no Reason dimension fragments the failure count.
+    // The failure metric carries {Environment, Reason}; the infra alarm SUMs a
+    // SEARCH across Reason values, so the breakdown stays visible.
     const failure = byMetric('DRSInvokeFailure');
-    expect(meta(failure).Dimensions[0]).to.deep.equal(['Environment']);
-    expect(failure.Reason).to.equal(undefined);
+    expect(meta(failure).Dimensions[0]).to.deep.equal(['Environment', 'Reason']);
+    expect(failure.Reason).to.equal('verdict:held');
   });
 });
 

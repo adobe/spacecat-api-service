@@ -22,7 +22,11 @@ import {
   retryableJobError,
   PROMISE_PAIR_SEMRUSH,
 } from '../async-job-runner.js';
-import { invokeDrsGeneration, DrsGenerationTerminalError } from '../drs-generation-client.js';
+import {
+  invokeDrsGeneration,
+  DrsGenerationTerminalError,
+  GENERATION_ERROR_CODE,
+} from '../drs-generation-client.js';
 import { provisionDimensionTree, ensureServerOwnedValue } from '../tag-tree.js';
 import { isMarketConsumerReady } from '../market-worker-readiness.js';
 import { resolveProject } from '../subworkspace-projects.js';
@@ -335,7 +339,10 @@ export async function semrushMarketGenerationHandler(context, job, _accessToken,
   const prompts = Array.isArray(batch.prompts) ? batch.prompts : [];
   if (prompts.length === 0) {
     // A shipped-but-empty batch must never publish an empty market (Gap 7).
-    throw new DrsGenerationTerminalError('DRS shipped zero prompts; nothing to write');
+    throw new DrsGenerationTerminalError(
+      'DRS shipped zero prompts; nothing to write',
+      { code: GENERATION_ERROR_CODE.EMPTY },
+    );
   }
 
   // ---- Phase 2: exchange write token AFTER DRS, then write ----------------

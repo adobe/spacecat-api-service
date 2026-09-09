@@ -87,15 +87,34 @@ export const DRS_INVOKE_TIMEOUT_MS = 300 * 1000;
 export class DrsGenerationTerminalError extends Error {
   /**
    * @param {string} message
-   * @param {object} [details] - `{ verdict, errorCategory }` for observability.
+   * @param {object} [details] - `{ code, verdict, errorCategory }`. `code` is the
+   *   public error code the polling DTO surfaces so the UI can distinguish the
+   *   terminal outcomes (held vs a hard failure); defaults to the generic
+   *   `DRS_GENERATION_TERMINAL`.
    */
   constructor(message, details = {}) {
     super(message);
     this.name = 'DrsGenerationTerminalError';
-    /** @type {any} */ (this).code = 'DRS_GENERATION_TERMINAL';
+    /** @type {any} */ (this).code = details.code ?? 'DRS_GENERATION_TERMINAL';
     /** @type {any} */ (this).details = details;
   }
 }
+
+/**
+ * Public error codes for the terminal generation outcomes, so the polling DTO's
+ * `error.code` lets the UI (project-elmo-ui#3071) render distinct states:
+ *   - `PROMPT_GENERATION_HELD`     — DRS `held` verdict (a soft quality hold) → UI "held".
+ *   - `PROMPT_GENERATION_GATE_ERROR` — DRS terminal `gate_error` → UI "failed".
+ *   - `PROMPT_GENERATION_EMPTY`    — DRS shipped zero prompts → UI "failed".
+ *   - `DRS_GENERATION_TERMINAL`    — a config/contract failure (target unset) → UI "failed".
+ * (`NEEDS_REAUTH` is separate — the runner sets it, and the DTO flags `needsReauth: true`.)
+ */
+export const GENERATION_ERROR_CODE = Object.freeze({
+  HELD: 'PROMPT_GENERATION_HELD',
+  GATE_ERROR: 'PROMPT_GENERATION_GATE_ERROR',
+  EMPTY: 'PROMPT_GENERATION_EMPTY',
+  TERMINAL: 'DRS_GENERATION_TERMINAL',
+});
 
 /**
  * Default AWS-SDK-backed invoker: constructs a `LambdaClient` for the worker's
@@ -204,19 +223,21 @@ export async function invokeDrsGeneration(context, request, { invoke } = {}) {
     );
   }
 
-  // Best-effort EMF metrics (spacecat-infrastructure#780 alarms read these). BOTH
-  // `DRSInvokeFailure` (Count) and `DRSInvokeDurationMs` (Milliseconds) carry EXACTLY
-  // the `Environment` dimension the EMF helper always adds — the infra "Environment-
-  // only" convention (its four custom-metric alarms all match dimensions={Environment=<env>},
-  // matching this helper's lowercase dev|stage|prod values). The per-failure reason is
-  // LOGGED, not dimensioned, so a plain `{Environment}` alarm reads the full failure
-  // count without fragmentation. The same convention covers the future
-  // StuckInProgressJobs/NeedsReauthBacklog probe metrics.
+  // Best-effort EMF metrics (spacecat-infrastructure#780 alarms read these). The
+  // EMF helper always adds an `Environment` dimension, so both metrics carry it:
+  //   - DRSInvokeDurationMs → dims { Environment }.
+  //   - DRSInvokeFailure     → dims { Environment, Reason } (Reason ∈ invoke |
+  //     verdict:held | verdict:gate_error | verdict:unknown). The infra failure alarm
+  //     is SUM(SEARCH('{SpacecatSerenityMarketWorker,Environment,Reason}
+  //     MetricName="DRSInvokeFailure" Environment="<env>"')) — sums across all Reason
+  //     values, so the total is intact and the per-Reason breakdown stays visible.
+  //     Neither metric is dimensionless; both alarms scope by Environment (lowercase
+  //     dev|stage|prod, matching this helper's values).
   const metricsOpts = { environment: resolveEnvironment(env), namespace: METRICS_NAMESPACE };
   const emitFailure = (reason) => {
     log?.warn?.('[drs-generation] invoke failure', { reason, market: request.market, siteId: request.siteId });
     try {
-      emitMetric({ name: 'DRSInvokeFailure', value: 1 }, metricsOpts);
+      emitMetric({ name: 'DRSInvokeFailure', value: 1, dimensions: { Reason: reason } }, metricsOpts);
     } catch { /* metrics are best-effort, never mask the real error */ }
   };
 
@@ -252,9 +273,14 @@ export async function invokeDrsGeneration(context, request, { invoke } = {}) {
     if (verdict === 'gate_error' && errorCategory === 'retryable') {
       throw retryableJobError(`DRS generation gate_error (retryable) for market ${request.market}`);
     }
+    const terminalCodeByVerdict = {
+      held: GENERATION_ERROR_CODE.HELD,
+      gate_error: GENERATION_ERROR_CODE.GATE_ERROR,
+    };
+    const code = terminalCodeByVerdict[verdict] ?? GENERATION_ERROR_CODE.TERMINAL;
     throw new DrsGenerationTerminalError(
       `DRS generation did not ship (verdict=${verdict}, error_category=${errorCategory ?? 'none'})`,
-      { verdict, errorCategory },
+      { verdict, errorCategory, code },
     );
   }
 

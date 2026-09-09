@@ -288,12 +288,13 @@ describe('semrush-market-generation-job — worker handler', () => {
     expect(publishAffectedStub).to.have.been.calledOnceWith(fakeTransport, 'ws-1', ['project-9']);
   });
 
-  it('throws TERMINAL and never publishes when DRS ships zero prompts', async () => {
+  it('throws TERMINAL (EMPTY) and never publishes when DRS ships zero prompts', async () => {
     invokeDrsStub.resolves({ prompts: [], shipSummary: { verdict: 'ship' } });
     const job = makeJob(baseMeta());
 
-    await expect(semrushMarketGenerationHandler(runCtx(), job, null, deps()))
-      .to.be.rejectedWith(/zero prompts/);
+    const err = await semrushMarketGenerationHandler(runCtx(), job, null, deps()).catch((e) => e);
+    expect(err.message).to.match(/zero prompts/);
+    expect(err.code).to.equal('PROMPT_GENERATION_EMPTY');
     expect(publishAffectedStub).to.not.have.been.called;
   });
 
