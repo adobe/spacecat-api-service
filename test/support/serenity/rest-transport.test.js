@@ -1364,13 +1364,17 @@ describe('Semrush REST transport', () => {
       expect(result).to.equal(null);
     });
 
-    it('surfaces an upstream failure as a ProjectEngineApiError', async () => {
+    // Routed through the raw client (see the facade-gap note on
+    // deleteProjectTags), so an upstream failure surfaces via the local
+    // `unwrap` as a SerenityTransportError, not a ProjectEngineApiError — the
+    // shared `isUpstreamError` guard (errors.js) recognizes both.
+    it('surfaces an upstream failure as a SerenityTransportError', async () => {
       fetchStub.resolves(fetchFail(502, { message: 'upstream down' }));
       const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
 
       await expect(transport.deleteProjectTags(WORKSPACE_ID, PROJECT_ID, ['tag-1']))
         .to.be.rejected.then((err) => {
-          expect(err).to.be.instanceOf(ProjectEngineApiError);
+          expect(err).to.be.instanceOf(SerenityTransportError);
           expect(err.status).to.equal(502);
         });
     });

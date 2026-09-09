@@ -505,7 +505,13 @@ describe('routeFacsCapabilities', () => {
 
     it('FACS_NON_RESOURCE_PARAMS does not contain stale entries', () => {
       const nonResource = routeFacsCapabilities.FACS_NON_RESOURCE_PARAMS;
-      const stale = nonResource.filter((p) => !allRouteParams.has(p));
+      // Query parameters are also explicitly classified for facsWrapper. They
+      // never appear in route templates, so retain the known Serenity filters
+      // alongside dynamic path params.
+      const queryParams = new Set([
+        'failureCursor', 'failureLimit', 'tagFilterMode', 'tagPath',
+      ]);
+      const stale = nonResource.filter((p) => !allRouteParams.has(p) && !queryParams.has(p));
       expect(
         stale,
         `FACS_NON_RESOURCE_PARAMS contains params not used in any route: ${stale.join(', ')}`,

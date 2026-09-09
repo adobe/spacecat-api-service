@@ -28,7 +28,7 @@ import {
   publishAffected,
   BULK_CREATE_CONCURRENCY,
 } from './prompts.js';
-import { ORIGIN_VALUE } from '../prompt-tags.js';
+import { ORIGIN_VALUE, PROXY_CREATE_SOURCE_VALUE } from '../prompt-tags.js';
 import { resolveIntentValueInjection } from '../tag-tree.js';
 import { buildSliceProjectMap, sliceKey } from '../subworkspace-projects.js';
 
@@ -153,6 +153,8 @@ async function createAndClassify(context, job, transport, metadata) {
   // stamped with the human/service that submitted them, not the job runner.
   const {
     brandId, semrushWorkspaceId, callerId = 'unknown', authMode,
+    // Jobs enqueued before origin propagation default to human authorship.
+    originValue = ORIGIN_VALUE.HUMAN,
   } = metadata;
   const inputs = Array.isArray(metadata.prompts) ? metadata.prompts : [];
 
@@ -190,7 +192,11 @@ async function createAndClassify(context, job, transport, metadata) {
     semrushWorkspaceId,
     classifyPromptType,
     log,
-    { originValue: ORIGIN_VALUE.HUMAN },
+    {
+      originValue,
+      sourceValue: PROXY_CREATE_SOURCE_VALUE,
+      normalizeCustomerTags: true,
+    },
   );
 
   // No time budget (serenity-docs#33): retries with backoff until resolved or
@@ -314,8 +320,8 @@ async function createAndClassify(context, job, transport, metadata) {
  * @param {SerenityTransport} transport
  * @param {object} metadata - `{ semrushWorkspaceId, items: [{ projectId,
  *   promptId, text, tagIds }] }` — `tagIds` is the FULL desired tag set minus
- *   `intent` (caller tags + server type/source; `origin` no longer gets its
- *   own tag, tag-display-names.md §3), matching the edit handlers'
+ *   `intent` (caller tags plus independent server-managed type/origin/source),
+ *   matching the edit handlers'
  *   "recompute the whole set, then replace" contract.
  * @returns {Promise<object>} the job result.
  */

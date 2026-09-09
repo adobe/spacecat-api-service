@@ -45,7 +45,14 @@
  */
 
 import { ErrorWithStatusCode } from '../utils.js';
-import { listProjectTagTree } from './handlers/markets.js';
+import { ERROR_CODES } from './errors.js';
+import {
+  cacheTagTreeSnapshot,
+  deleteCachedTagTreeSnapshotIfSame,
+  getCachedTagTreeSnapshot,
+  invalidateTagCacheForProject,
+  listProjectTagTree,
+} from './handlers/markets.js';
 import {
   DIMENSION,
   DIMENSION_PROVISION_ORDER,
@@ -57,8 +64,22 @@ import {
   displayNameOfValue,
   valueSlugOfDisplayName,
 } from './prompt-tags.js';
+import { classifyTagCompatibility } from './tag-compatibility.js';
 
 /** @typedef {import('./rest-transport.js').SerenityTransport} SerenityTransport */
+/**
+ * @typedef {object} TagTreeSnapshotItem
+ * @property {string} id
+ * @property {string} name
+ * @property {string | null} parentId
+ * @property {number} childrenCount
+ * @property {number} promptsCount
+ * @property {string} rootName
+ * @property {string} rootId
+ * @property {number} depth
+ * @property {Array<{ id: string, name: string }>} fullPath
+ * @property {{ state: 'canonical' | 'readOnly', reason: string | null }} compatibility
+ */
 
 /**
  * Where one tag sits in the dimension tree.
@@ -167,6 +188,8 @@ export async function indexLevelByName(transport, semrushWorkspaceId, projectId,
  *   spellings that, if already present at this level, resolve a wanted name
  *   without creating it. Defaults to "no aliases" — every pre-existing caller
  *   is unaffected.
+ * @param {Map<string, string>} [initialExisting] - a level index already read
+ *   by the caller, reused to avoid a duplicate upstream read.
  * @returns {Promise<{ byName: Map<string, string>, createdNames: string[] }>}
  *   `byName` maps every wanted name (and any literal tree name it did not ask
  *   for) to its tag id.
@@ -179,8 +202,10 @@ export async function ensureChildren(
   wanted,
   log,
   aliasesOf = () => [],
+  initialExisting = undefined,
 ) {
-  const existing = await indexLevelByName(transport, semrushWorkspaceId, projectId, parentId, log);
+  const existing = initialExisting
+    ?? await indexLevelByName(transport, semrushWorkspaceId, projectId, parentId, log);
   const missing = [];
   for (const name of wanted) {
     if (existing.has(name)) {
@@ -209,7 +234,9 @@ export async function ensureChildren(
       missing,
       parentId ? { parentId } : {},
     );
+    invalidateTagCacheForProject(semrushWorkspaceId, projectId);
   } catch (e) {
+    invalidateTagCacheForProject(semrushWorkspaceId, projectId);
     // Upstream answers 500 on a duplicate (parent, name). Between our read and
     // our create, a concurrent writer — possibly another resolution inside this
     // same request — may have minted exactly the names we asked for. Re-read
@@ -227,6 +254,11 @@ export async function ensureChildren(
 
   // createProjectTags resolves to a LIST of the created nodes, in request order.
   const nodes = Array.isArray(echoed) ? echoed : [];
+  if (!Array.isArray(echoed)
+    || nodes.length === 0
+    || nodes.some((node) => !(node && typeof node.id === 'string' && node.id))) {
+    throw new ErrorWithStatusCode('upstream created the tag but echoed no id', 502);
+  }
   for (const node of nodes) {
     if (node && typeof node.id === 'string' && node.id && typeof node.name === 'string') {
       existing.set(node.name, node.id);
@@ -287,7 +319,7 @@ const LEGACY_SOURCE_ROOT_NAME = 'source';
  * The dimensions whose ROOT may carry a display rename (tag-display-names.md
  * §1 item 4) — `category`, `type`, `source`. `intent` is excluded (its root is
  * `$abv_tags$intent` forever, no display rename) and `origin` is excluded
- * (retired by remap, not renamed) — both already have their OWN dedicated
+ * because its root name remains unchanged — both already have their OWN dedicated
  * split-root guardrails above/below, so they are deliberately not folded into
  * this generalized one.
  */
@@ -339,7 +371,7 @@ function valueAliasesOf(dimension) {
 }
 
 /**
- * Resolves the five dimension roots, creating any that a project is missing.
+ * Resolves the registered dimension roots, creating any that a project is missing.
  * Older projects predate this taxonomy entirely, so this is the seam that brings
  * them forward on first touch.
  *
@@ -372,6 +404,20 @@ function valueAliasesOf(dimension) {
  * @returns {Promise<Map<string, string>>} dimension → tag id, in provisioning order.
  */
 export async function ensureDimensionRoots(transport, semrushWorkspaceId, projectId, log) {
+  const rootLevel = await indexLevelByName(transport, semrushWorkspaceId, projectId, '', log);
+  const caseVariantTagRoot = [...rootLevel.keys()]
+    .find((name) => name.toLowerCase() === DIMENSION.TAG && name !== DIMENSION.TAG);
+  if (!rootLevel.has(DIMENSION.TAG) && caseVariantTagRoot) {
+    const error = new ErrorWithStatusCode(
+      `The project has a case-variant "${caseVariantTagRoot}" root; refusing to create "tag"`,
+      409,
+    );
+    error.code = ERROR_CODES.INCOMPATIBLE_TAG_TAXONOMY;
+    /** @type {any} */ (error).details = {
+      reason: 'caseVariantRoot', path: [caseVariantTagRoot],
+    };
+    throw error;
+  }
   const { byName, createdNames } = await ensureChildren(
     transport,
     semrushWorkspaceId,
@@ -380,6 +426,7 @@ export async function ensureDimensionRoots(transport, semrushWorkspaceId, projec
     DIMENSION_PROVISION_ORDER.map(rootNameOfDimension),
     log,
     rootAliasesOf,
+    rootLevel,
   );
 
   // Observability guardrail (no tolerance, no behavior change): freshly minting `origin`
@@ -551,7 +598,9 @@ export async function findTagsInTree(transport, semrushWorkspaceId, projectId, t
         visited.add(node.id);
         reads += 1;
         if (reads > MAX_TREE_READS) {
-          throw new ErrorWithStatusCode('tag tree too large to resolve', 502);
+          const error = new ErrorWithStatusCode('Unable to read the complete tag tree', 503);
+          error.code = ERROR_CODES.TAG_TREE_READ_INCOMPLETE;
+          throw error;
         }
         // Sequential by design: stop as soon as every wanted id is placed rather
         // than fanning out every node's children concurrently.
@@ -576,6 +625,7 @@ export async function findTagsInTree(transport, semrushWorkspaceId, projectId, t
         if (found.size === wanted.size) {
           return found;
         }
+
         next.push(...children.items
           .filter((t) => t.childrenCount > 0)
           .map((child) => ({ node: child, rootName, ancestorIds: [...ancestorIds, child.id] })));
@@ -591,6 +641,142 @@ export async function findTagsInTree(transport, semrushWorkspaceId, projectId, t
     }
   }
   return found;
+}
+
+/**
+ * Reads the complete draft taxonomy once and derives stable path and
+ * compatibility metadata without modifying non-canonical Project Engine data.
+ *
+ * @param {SerenityTransport} transport
+ * @param {string} semrushWorkspaceId
+ * @param {string} projectId
+ * @param {object} [log]
+ * @returns {Promise<{
+ *   items: TagTreeSnapshotItem[],
+ *   byId: Map<string, TagTreeSnapshotItem>,
+ * }>}
+ */
+async function loadTagTreeSnapshot(
+  transport,
+  semrushWorkspaceId,
+  projectId,
+  log,
+) {
+  const roots = await listProjectTagTree(transport, semrushWorkspaceId, projectId, '', log);
+  const nodes = roots.items.map((root) => ({
+    ...root,
+    rootName: root.name,
+    rootId: root.id,
+    depth: 1,
+    fullPath: [{ id: root.id, name: root.name }],
+  }));
+  const visited = new Set();
+  let frontier = nodes.filter((node) => node.childrenCount > 0);
+  let reads = 1;
+  while (frontier.length > 0) {
+    const next = [];
+    for (const parent of frontier) {
+      if (visited.has(parent.id)) {
+        // eslint-disable-next-line no-continue
+        continue;
+      }
+      visited.add(parent.id);
+      reads += 1;
+      if (reads > MAX_TREE_READS) {
+        const error = new ErrorWithStatusCode('Unable to read the complete tag tree', 503);
+        error.code = ERROR_CODES.TAG_TREE_READ_INCOMPLETE;
+        throw error;
+      }
+      // eslint-disable-next-line no-await-in-loop
+      const children = await listProjectTagTree(
+        transport,
+        semrushWorkspaceId,
+        projectId,
+        parent.id,
+        log,
+      );
+      for (const child of children.items) {
+        const fullPath = Array.isArray(child.path) && child.path.length > 0
+          ? [...child.path, { id: child.id, name: child.name }]
+          : [...parent.fullPath, { id: child.id, name: child.name }];
+        const node = {
+          ...child,
+          parentId: child.parentId ?? parent.id,
+          rootName: fullPath[0]?.name ?? parent.rootName,
+          rootId: fullPath[0]?.id ?? parent.rootId,
+          depth: fullPath.length,
+          fullPath,
+        };
+        nodes.push(node);
+        if (node.childrenCount > 0) {
+          next.push(node);
+        }
+      }
+    }
+    frontier = next;
+  }
+
+  const items = classifyTagCompatibility(nodes);
+  return {
+    items,
+    byId: new Map(items.map((item) => [item.id, item])),
+  };
+}
+
+/**
+ * Reads the complete draft taxonomy, reusing a short-lived project-keyed
+ * in-flight/completed snapshot when safe. Mutation handlers invalidate the
+ * project entry. Safety-critical worker drift validation passes
+ * `forceRefresh: true`, which bypasses and replaces any cached snapshot.
+ *
+ * @param {SerenityTransport} transport
+ * @param {string} semrushWorkspaceId
+ * @param {string} projectId
+ * @param {object} [log]
+ * @param {object} [options]
+ * @param {boolean} [options.forceRefresh=false]
+ * @returns {Promise<{
+ *   items: TagTreeSnapshotItem[],
+ *   byId: Map<string, TagTreeSnapshotItem>,
+ * }>}
+ */
+export async function readTagTreeSnapshot(
+  transport,
+  semrushWorkspaceId,
+  projectId,
+  log,
+  { forceRefresh = false } = {},
+) {
+  if (!forceRefresh) {
+    const cached = getCachedTagTreeSnapshot(semrushWorkspaceId, projectId);
+    if (cached) {
+      return /** @type {ReturnType<typeof loadTagTreeSnapshot>} */ (cached);
+    }
+  }
+  const pending = loadTagTreeSnapshot(transport, semrushWorkspaceId, projectId, log);
+  cacheTagTreeSnapshot(semrushWorkspaceId, projectId, pending);
+  try {
+    return await pending;
+  } catch (error) {
+    deleteCachedTagTreeSnapshotIfSame(semrushWorkspaceId, projectId, pending);
+    throw error;
+  }
+}
+
+export function incompatibleTaxonomyError(items) {
+  const error = new ErrorWithStatusCode(
+    'The requested tag belongs to an incompatible read-only taxonomy branch',
+    409,
+  );
+  error.code = ERROR_CODES.INCOMPATIBLE_TAG_TAXONOMY;
+  /** @type {any} */ (error).details = {
+    tags: items.map((item) => ({
+      id: item.id,
+      path: item.fullPath?.map((part) => part.name) ?? [],
+      reason: item.compatibility?.reason ?? 'ambiguousPath',
+    })),
+  };
+  return error;
 }
 
 /**
@@ -649,7 +835,9 @@ export async function collectSubtreeIds(transport, semrushWorkspaceId, projectId
     for (const nodeId of frontier) {
       reads += 1;
       if (reads > MAX_TREE_READS) {
-        throw new ErrorWithStatusCode('tag subtree too large to resolve', 502);
+        const error = new ErrorWithStatusCode('Unable to read the complete tag subtree', 503);
+        error.code = ERROR_CODES.TAG_TREE_READ_INCOMPLETE;
+        throw error;
       }
       // Sequential by design — see findTagsInTree for the same rationale.
       // eslint-disable-next-line no-await-in-loop
@@ -663,7 +851,9 @@ export async function collectSubtreeIds(transport, semrushWorkspaceId, projectId
       for (const child of items) {
         ids.push(child.id);
         if (ids.length > MAX_SUBTREE_DELETE_SIZE) {
-          throw new ErrorWithStatusCode('tag subtree too large to delete', 502);
+          const error = new ErrorWithStatusCode('Unable to read the complete tag subtree', 503);
+          error.code = ERROR_CODES.TAG_TREE_READ_INCOMPLETE;
+          throw error;
         }
         if (child.childrenCount > 0) {
           next.push(child.id);

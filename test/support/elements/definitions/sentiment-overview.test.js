@@ -145,6 +145,89 @@ describe('sentiment-overview definitions', () => {
         .find((f) => f.col === 'CBF_tags');
       expect(tagFilter).to.deep.include({ op: 'eq', val: 'category__travel', col: 'CBF_tags' });
     });
+
+    // Brand scoping (LLMO-7456). The sub-workspace alone does NOT scope to the brand — it
+    // also holds the brand's tracked competitors — so without CBF_brand the element blends
+    // them into the sentiment counts. Verified live: brand "au", week 2026-08-23, 319/345/16
+    // with the filter vs 507/585/66 without it.
+    describe('brand scoping (CBF_brand)', () => {
+      const findBrandFilter = (payload) => (payload.filters.advanced?.filters ?? [])
+        .find((f) => f.col === 'CBF_brand');
+
+      it('sends CBF_brand as a bare eq when brandName is provided', () => {
+        const payload = buildSentimentOverviewPayload({ brandName: 'au' });
+        expect(findBrandFilter(payload)).to.deep.equal({ op: 'eq', val: 'au', col: 'CBF_brand' });
+      });
+
+      it('uses CBF_brand, not CBF_ws_brand', () => {
+        const payload = buildSentimentOverviewPayload({ brandName: 'au' });
+        expect(payload.filters.advanced.filters.some((f) => f.col === 'CBF_ws_brand')).to.equal(false);
+      });
+
+      it('omits CBF_brand when brandName is not provided', () => {
+        expect(findBrandFilter(buildSentimentOverviewPayload({ projectId: 'proj-1' }))).to.be.undefined;
+      });
+
+      // A whitespace-only name must NOT be forwarded: `CBF_brand: "   "` matches no brand
+      // and silently zeroes the counts, which is indistinguishable from a real "no
+      // sentiment". Note `hasText` does not trim, so it would not catch this.
+      it('treats a blank or whitespace-only brandName as absent', () => {
+        expect(findBrandFilter(buildSentimentOverviewPayload({ brandName: '', projectId: 'p' }))).to.be.undefined;
+        expect(findBrandFilter(buildSentimentOverviewPayload({ brandName: '   ', projectId: 'p' }))).to.be.undefined;
+      });
+
+      it('ignores a non-string brandName', () => {
+        expect(findBrandFilter(buildSentimentOverviewPayload({ brandName: 42, projectId: 'p' }))).to.be.undefined;
+      });
+
+      it('trims a padded brandName before sending it', () => {
+        const payload = buildSentimentOverviewPayload({ brandName: '  au  ' });
+        expect(findBrandFilter(payload)).to.deep.equal({ op: 'eq', val: 'au', col: 'CBF_brand' });
+      });
+
+      // Guards the documented empty-AND → HTTP 422 behaviour: a whitespace-only brand must
+      // not be the thing that keeps an otherwise-empty advanced block alive.
+      it('still omits the advanced block when a whitespace brandName is the only input', () => {
+        expect(buildSentimentOverviewPayload({ brandName: '   ' }).filters).to.not.have.property('advanced');
+      });
+
+      it('emits the advanced block when brandName is the only filter', () => {
+        const payload = buildSentimentOverviewPayload({ brandName: 'au' });
+        expect(payload.filters.advanced).to.deep.equal({
+          op: 'and',
+          filters: [{ op: 'eq', val: 'au', col: 'CBF_brand' }],
+        });
+      });
+
+      it('coexists with the model, project and category filters', () => {
+        const payload = buildSentimentOverviewPayload({
+          model: 'openai',
+          brandName: 'au',
+          projectId: 'proj-1',
+          category: 'category__Paint',
+        });
+        expect(payload.filters.advanced.filters).to.deep.equal([
+          { op: 'or', filters: [{ op: 'eq', val: 'chatgpt-paid', col: 'CBF_model' }] },
+          { op: 'eq', val: 'au', col: 'CBF_brand' },
+          { op: 'or', filters: [{ op: 'eq', val: 'proj-1', col: 'CBF_project' }] },
+          { op: 'eq', val: 'category__Paint', col: 'CBF_tags' },
+        ]);
+      });
+
+      // Guards the merge of LLMO-7456 (brandName) with the faceted-tag work, which added
+      // tagPaths to this same signature: both must survive and be emitted together.
+      it('coexists with faceted tagPaths', () => {
+        const payload = buildSentimentOverviewPayload({
+          brandName: 'au',
+          tagPaths: ['category__Paint', 'type__branded'],
+        });
+        expect(findBrandFilter(payload)).to.deep.equal({ op: 'eq', val: 'au', col: 'CBF_brand' });
+        expect(payload.filters.advanced.filters).to.deep.include.members([
+          { op: 'or', filters: [{ op: 'eq', val: 'category__Paint', col: 'CBF_tags' }] },
+          { op: 'or', filters: [{ op: 'eq', val: 'type__branded', col: 'CBF_tags' }] },
+        ]);
+      });
+    });
   });
 
   describe('transformSentimentOverviewResponse', () => {
