@@ -207,6 +207,18 @@ describe('handlers/provision-workspace-job.js (LLMO-7352 / LLMO-7418)', () => {
       expect(transport.getWorkspaceStatus).to.have.been.calledOnceWith(CANDIDATE_WS);
     });
 
+    it('fails fast (never calls Semrush) when metadata.title is missing (LLMO-7418 external-review Finding 4)', async () => {
+      const { provisionWorkspaceHandler } = await loadHandler();
+      const job = makeJob(makeMetadata({ title: undefined }));
+
+      await expect(provisionWorkspaceHandler(context, job, 'token'))
+        .to.be.rejectedWith(/metadata.title is required/);
+
+      expect(createOrAdoptSubworkspaceCandidateStub).to.not.have.been.called;
+      // Best-effort failure recording still runs, same as any other unexpected error.
+      expect(promoteProvisioningFailedStub).to.have.been.calledOnce;
+    });
+
     it('cleans up a freshly-created candidate when the persist CAS is rejected (superseded mid-flight)', async () => {
       persistProvisioningCandidateStub.resolves(false);
       const { provisionWorkspaceHandler } = await loadHandler();
