@@ -17,6 +17,7 @@ import sinonChai from 'sinon-chai';
 import esmock from 'esmock';
 import { ProjectEngineApiError } from '@adobe/spacecat-shared-project-engine-client';
 import { ErrorWithStatusCode } from '../../src/support/utils.js';
+import { ERROR_CODES } from '../../src/support/serenity/errors.js';
 import { brandPointerReloader } from '../../src/controllers/serenity.js';
 // The REAL transport error type: since LLMO-6386 the controller's mapError classifies via
 // errors.js (isSemrushTransportError), which recognises the real SerenityTransportError /
@@ -2083,6 +2084,21 @@ describe('SerenityController', () => {
       expect(ensureSubworkspaceStub).to.have.been.calledOnce;
       expect(ensureSubworkspaceStub.firstCall.args[6].brandCollection)
         .to.equal(ctx.dataAccess.Brand);
+    });
+
+    it('activate maps a terminal subworkspace creation failure to its stable 502 token', async () => {
+      const error = new ErrorWithStatusCode('Subworkspace creation failed', 502);
+      error.code = ERROR_CODES.SUBWORKSPACE_CREATION_FAILED;
+      ensureSubworkspaceStub.rejects(error);
+      getBrandBaseSiteIdStub.resolves('primary-site');
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+
+      const response = await controller.activate(fakeContext());
+      const body = await readBody(response);
+
+      expect(response.status).to.equal(502);
+      expect(body.error).to.equal(ERROR_CODES.SUBWORKSPACE_CREATION_FAILED);
+      expect(body.message).to.equal('Subworkspace creation failed');
     });
 
     it('activate ensures the subworkspace ONCE for the batch and creates each market against it', async () => {

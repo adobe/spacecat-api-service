@@ -889,8 +889,8 @@ v2-serenity-activate:
     tags: [serenity]
     summary: Activate a brand into sub-workspace mode
     description: |
-      Ensures the brand has its own resourced Semrush sub-workspace (creating
-      it on first call and persisting `brands.semrush_workspace_id`, which flips
+      Ensures the brand has its own Semrush sub-workspace (creating it on first
+      call and persisting `brands.semrush_sub_workspace_id`, which flips
       the brand into sub-workspace mode), then per supplied market creates-or-resumes a
       draft and publishes it once. Markets are caller-supplied (reactivation
       re-supplies them — there is no stored market memory). A pending (draft)
@@ -959,10 +959,16 @@ v2-serenity-activate:
           not fully complete (a market failed, or markets are live but could not be
           linked as Sites). The brand STAYS `pending`; the body carries
           `error`/`message` and the per-market outcomes so the caller can retry.
-          Also returned when an upstream call returns a non-2xx response.
+          Also returned when a readiness check observes a terminal sub-workspace
+          creation status, or another upstream call returns a non-2xx response.
+          Fresh sub-workspace-only activation intentionally skips readiness
+          polling, so it does not detect terminal creation status in that request.
         content:
           application/json:
-            schema: { $ref: './schemas.yaml#/SerenityActivateResponse' }
+            schema:
+              anyOf:
+                - { $ref: './schemas.yaml#/SerenityActivateResponse' }
+                - { $ref: './schemas.yaml#/SerenityErrorResponse' }
       '500': { $ref: './responses.yaml#/500' }
 
 v2-serenity-deactivate:
@@ -985,12 +991,12 @@ v2-serenity-deactivate:
     tags: [serenity]
     summary: Deactivate a brand (decommission its sub-workspace)
     description: |
-      Decommissions the brand's sub-workspace: deletes every project and
-      releases the allocation back to the parent pool, then DISCONNECTS the
-      brand by clearing its `semrush_workspace_id` pointer. The sub-workspace
-      itself is never deleted (it is left empty and unowned); a future activate
-      allocates a fresh one. Sets the brand status to `pending`. No-op (200) for
-      a brand with no sub-workspace. Convergent and idempotent.
+      Decommissions the brand's sub-workspace by deleting every project, then
+      DISCONNECTS the brand by clearing its `semrush_sub_workspace_id` pointer.
+      The sub-workspace itself is never deleted or reallocated; it remains as an
+      empty shell, and a future activate creates or adopts a suitable workspace.
+      Sets the brand status to `pending`. No-op (200) for a brand with no
+      sub-workspace. Convergent and idempotent.
     operationId: deactivateSerenityBrand
     security:
       - session_token: []
@@ -1007,8 +1013,8 @@ v2-serenity-deactivate:
         description: >-
           Refused to protect dependents: the brand's sub-workspace equals the
           organization parent workspace, or it still has active linked (child)
-          sub-workspaces. Decommission would empty/release a shared or
-          depended-on pool, so it is blocked.
+          sub-workspaces. Decommission would empty a shared or depended-on
+          workspace, so it is blocked.
         content:
           application/json:
             schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }

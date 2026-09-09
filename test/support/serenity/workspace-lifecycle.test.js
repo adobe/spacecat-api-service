@@ -15,12 +15,14 @@ import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import { hasText } from '@adobe/spacecat-shared-utils';
+import { ProjectEngineApiError } from '@adobe/spacecat-shared-project-engine-client';
 
 import {
   ensureSubworkspace,
   decommissionBrandWorkspace,
   deleteAllProjects,
 } from '../../../src/support/serenity/workspace-lifecycle.js';
+import { ERROR_CODES } from '../../../src/support/serenity/errors.js';
 import { SerenityTransportError } from '../../../src/support/serenity/rest-transport.js';
 import { clearBrandWorkspaceCache } from '../../../src/support/serenity/workspace-resolver.js';
 
@@ -127,6 +129,62 @@ describe('workspace-lifecycle', () => {
       expect(transport.getWorkspaceStatus).to.have.been.calledTwice;
       expect(brand.setSemrushSubWorkspaceId).to.have.been.calledOnceWithExactly(SUB_WS);
       expect(brand.save).to.have.been.calledOnce;
+    });
+
+    it('fails immediately when an existing workspace reports creation failed', async () => {
+      const sleep = sinon.stub().resolves();
+      const localLog = { info: sinon.stub(), error: sinon.stub(), warn: sinon.stub() };
+      const transport = makeTransport({
+        getWorkspaceStatus: sinon.stub().resolves({ status: 'creation failed' }),
+      });
+      const brand = makeBrand({ workspaceId: SUB_WS });
+
+      const error = await ensureSubworkspace(
+        transport,
+        brand,
+        PARENT_WS,
+        localLog,
+        { attempts: 3, intervalMs: 1, sleep },
+      ).catch((e) => e);
+
+      expect(error.status).to.equal(502);
+      expect(error.code).to.equal(ERROR_CODES.SUBWORKSPACE_CREATION_FAILED);
+      expect(error.message).to.equal('Subworkspace creation failed');
+      expect(transport.getWorkspaceStatus).to.have.been.calledOnceWithExactly(SUB_WS);
+      expect(sleep).to.not.have.been.called;
+      expect(localLog.error).to.have.been.calledOnceWithExactly(
+        'pollUntilCreated: SUBWORKSPACE_CREATION_FAILED — terminal status observed',
+        { workspaceId: SUB_WS, status: 'creation failed' },
+      );
+    });
+
+    it('fails immediately when a fresh workspace reports invalid subscription', async () => {
+      const sleep = sinon.stub().resolves();
+      const localLog = { info: sinon.stub(), error: sinon.stub(), warn: sinon.stub() };
+      const transport = makeTransport({
+        getWorkspaceStatus: sinon.stub().resolves({ status: 'invalid subscription' }),
+      });
+      const brand = makeBrand();
+
+      const error = await ensureSubworkspace(
+        transport,
+        brand,
+        PARENT_WS,
+        localLog,
+        { attempts: 3, intervalMs: 1, sleep },
+      ).catch((e) => e);
+
+      expect(error.status).to.equal(502);
+      expect(error.code).to.equal(ERROR_CODES.SUBWORKSPACE_CREATION_FAILED);
+      expect(error.message).to.equal('Subworkspace creation failed');
+      expect(transport.getWorkspaceStatus).to.have.been.calledOnceWithExactly(SUB_WS);
+      expect(sleep).to.not.have.been.called;
+      expect(localLog.error).to.have.been.calledOnceWithExactly(
+        'pollUntilCreated: SUBWORKSPACE_CREATION_FAILED — terminal status observed',
+        { workspaceId: SUB_WS, status: 'invalid subscription' },
+      );
+      expect(brand.setSemrushSubWorkspaceId).to.not.have.been.called;
+      expect(brand.save).to.not.have.been.called;
     });
 
     it('createReadiness "skip": creates and persists WITHOUT the settle poll (LLMO-6569 bare path)', async () => {
@@ -731,12 +789,24 @@ describe('workspace-lifecycle', () => {
     });
 
     it('504s when the workspace never settles to created', async () => {
+      const sleep = sinon.stub().resolves();
       const transport = makeTransport({
         getWorkspaceStatus: sinon.stub().resolves({ status: 'not ready' }),
       });
       const brand = makeBrand();
 
-      await expect(ensureSubworkspace(transport, brand, PARENT_WS, log, { attempts: 2, intervalMs: 0, sleep: () => Promise.resolve() })).to.be.rejectedWith(/did not settle to 'created'/);
+      const error = await ensureSubworkspace(
+        transport,
+        brand,
+        PARENT_WS,
+        log,
+        { attempts: 2, intervalMs: 0, sleep },
+      ).catch((e) => e);
+
+      expect(error.status).to.equal(504);
+      expect(error.message).to.match(/did not settle to 'created'/);
+      expect(transport.getWorkspaceStatus).to.have.been.calledTwice;
+      expect(sleep).to.have.been.calledTwice;
     });
 
     it('uses the real timer when no sleep is injected (bounded poll)', async () => {
@@ -1089,6 +1159,39 @@ describe('workspace-lifecycle', () => {
   });
 
   describe('deleteAllProjects (LLMO-6189)', () => {
+    it('treats a typed upstream 404 from the initial listing as zero projects', async () => {
+      const transport = makeTransport({
+        listProjects: sinon.stub().rejects(
+          new ProjectEngineApiError(404, 'GET', { message: 'not found' }),
+        ),
+      });
+
+      const count = await deleteAllProjects(transport, SUB_WS);
+
+      expect(count).to.equal(0);
+      expect(transport.deleteProject).to.not.have.been.called;
+    });
+
+    it('propagates a typed non-404 failure from the initial listing', async () => {
+      const error = new ProjectEngineApiError(500, 'GET', { message: 'boom' });
+      const transport = makeTransport({
+        listProjects: sinon.stub().rejects(error),
+      });
+
+      await expect(deleteAllProjects(transport, SUB_WS)).to.be.rejectedWith(error);
+      expect(transport.deleteProject).to.not.have.been.called;
+    });
+
+    it('propagates an untyped 404 failure from the initial listing', async () => {
+      const error = Object.assign(new Error('not found'), { status: 404 });
+      const transport = makeTransport({
+        listProjects: sinon.stub().rejects(error),
+      });
+
+      await expect(deleteAllProjects(transport, SUB_WS)).to.be.rejectedWith(error);
+      expect(transport.deleteProject).to.not.have.been.called;
+    });
+
     it('deletes every listed project and returns the count', async () => {
       const transport = makeTransport({
         listProjects: sinon.stub().resolves({ items: [{ id: 'p1' }, { id: 'p2' }] }),
