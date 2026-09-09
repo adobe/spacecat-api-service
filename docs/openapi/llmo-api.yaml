@@ -2023,8 +2023,10 @@ llmo-brand-claims-weeks:
     description: |
       Lists the ISO weeks (`YYYY-Www`) for which a brand claims run exists for
       the site, newest first, so the UI can offer a week picker instead of only
-      showing the latest run. Each returned week can then be fetched via
-      `GET /sites/{siteId}/llmo/brand-claims?date=<any-date-in-that-week>`.
+      showing the latest run. A returned week is fetched directly via
+      `GET /sites/{siteId}/llmo/brand-claims?week=<YYYY-Www>` (passing the
+      listing output straight back), or via the
+      `?date=<any-date-in-that-week>` alternative.
 
       Weeks are derived from the run folders under
       `brand_claims/llmo/{siteId}/{YYYY-Www}/`. Returns an empty list (HTTP 200)

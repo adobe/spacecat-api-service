@@ -394,6 +394,7 @@ describe('handleBrandClaimsWeeks', () => {
     ok: (data) => ({ status: 200, json: async () => data }),
     badRequest: (message) => ({ status: 400, json: async () => ({ message }) }),
     notFound: (message) => ({ status: 404, json: async () => ({ message }) }),
+    internalServerError: (message) => ({ status: 500, json: async () => ({ message }) }),
   };
 
   before(async () => {
@@ -520,24 +521,29 @@ describe('handleBrandClaimsWeeks', () => {
     expect((await result.json()).message).to.equal('S3 bucket is not configured for this environment');
   });
 
-  it('returns 400 when bucket not found (NoSuchBucket)', async () => {
+  it('returns 400 without leaking the bucket name when the bucket is missing', async () => {
     const err = new Error('The specified bucket does not exist');
     err.name = 'NoSuchBucket';
     listBehavior = () => Promise.reject(err);
 
     const result = await handleBrandClaimsWeeks(baseContext);
     expect(result.status).to.equal(400);
-    expect((await result.json()).message).to.equal('Storage bucket not found: test-bucket');
+    const { message } = await result.json();
+    expect(message).to.equal('S3 storage is not properly configured for this environment');
+    expect(message).to.not.contain('test-bucket');
   });
 
-  it('returns 400 for a generic S3 listing error', async () => {
-    const err = new Error('Access denied');
+  it('returns 500 (not 400) without leaking details for a server-side S3 error', async () => {
+    const err = new Error('Access denied for arn:aws:iam::123:role/secret');
     err.name = 'AccessDenied';
     listBehavior = () => Promise.reject(err);
 
     const result = await handleBrandClaimsWeeks(baseContext);
-    expect(result.status).to.equal(400);
-    expect((await result.json()).message).to.equal('Error listing brand claims weeks: Access denied');
+    expect(result.status).to.equal(500);
+    const { message } = await result.json();
+    expect(message).to.equal('Unable to list brand claims weeks');
+    expect(message).to.not.contain('Access denied');
+    // The real error is still logged for operators.
     expect(mockLog.error).to.have.been.calledWithMatch(/S3 error listing brand claims weeks/);
   });
 });

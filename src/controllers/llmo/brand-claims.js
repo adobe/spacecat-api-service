@@ -205,10 +205,11 @@ export async function handleBrandClaims(context) {
 /**
  * Lists the ISO weeks (`YYYY-Www`) for which a brand-claims run exists for a
  * site, newest first, capped at `limit` (default 15, max 52). The UI uses this
- * to offer a week picker instead of only ever showing the latest run; each
- * listed week can then be fetched via `GET .../brand-claims?date=<in-week>`.
- * Returns an empty list (not a 404) when no week-partitioned runs exist, so the
- * caller can distinguish "no history yet" from a hard failure.
+ * to offer a week picker instead of only ever showing the latest run; a listed
+ * week is fetched directly via `GET .../brand-claims?week=<YYYY-Www>` (or the
+ * `?date=<any-date-in-that-week>` alternative). Returns an empty list (not a
+ * 404) when no week-partitioned runs exist, so the caller can distinguish
+ * "no history yet" from a hard failure.
  *
  * @param {object} context - The request context containing log, s3, and params.
  * @returns {Promise<Response>} `{ siteId, weeks, count }`.
@@ -240,12 +241,16 @@ export async function handleBrandClaimsWeeks(context) {
     const limited = weeks.slice(0, limit);
     return cachedOk({ siteId, weeks: limited, count: limited.length });
   } catch (s3Error) {
+    // Keep infra details (bucket name, SDK message) in the log only; never echo
+    // them to external callers. A missing bucket is a misconfiguration (400);
+    // any other S3 fault is server-side, so 5xx it so outages show up as 5xx
+    // spikes rather than masquerading as client errors.
     if (s3Error.name === 'NoSuchBucket') {
       log.error(`S3 bucket ${bucketName} not found`);
-      return badRequest(`Storage bucket not found: ${bucketName}`);
+      return badRequest('S3 storage is not properly configured for this environment');
     }
     log.error(`S3 error listing brand claims weeks for site ${siteId}: ${s3Error.message}`);
-    return badRequest(`Error listing brand claims weeks: ${s3Error.message}`);
+    return internalServerError('Unable to list brand claims weeks');
   }
 }
 
