@@ -529,6 +529,7 @@ const FIXTURES = {
     // service is called (see listSentimentOverview) — supply them via query.
     query: { startDate: '2026-06-01', endDate: '2026-07-16' },
     handlerResult: {
+      metric: 'prompts',
       weeklyTrends: [{
         week: '2026-W24',
         weekNumber: 24,
@@ -538,6 +539,9 @@ const FIXTURES = {
           { name: 'Neutral', value: 39, color: '#4B5563' },
           { name: 'Negative', value: 8, color: '#B91C1C' },
         ],
+        mentionCounts: { positive: 12043, neutral: 8871, negative: 1819 },
+        promptCounts: { positive: 4866, neutral: 3581, negative: 734 },
+        sentimentTotal: 9181,
         totalPrompts: 5261,
         promptsWithSentiment: 9181,
         mentions: 0,

@@ -1023,4 +1023,93 @@ describe('createElementsService', () => {
       expect(transport.fetchElement).to.have.been.calledTwice;
     });
   });
+
+  // Covers the controller -> service -> transform wiring seam for the `metric`
+  // param (LLMO-7457). The controller writes `metric:` into params and this
+  // service reads `params?.metric` back out; both ends are unit-tested in
+  // isolation, but nothing else asserts the key written matches the key read.
+  // Both sides also sit inside `c8 ignore` blocks, so a mismatch would make
+  // `metric=mentions` a permanent silent no-op with fully green CI — and the
+  // deliberately permissive parse removes the error path that would surface it.
+  describe('getSentimentOverview', () => {
+    // A real bucket captured from the live element (brand "au", week starting
+    // 2026-08-16), the same fixture the definition tests use. `value` and
+    // `value__prompts` differ deliberately, so reading the wrong field cannot
+    // pass by coincidence. The Semrush MFE rendered this bucket as
+    // Negative 1% / 7, Neutral 56% / 571, Positive 43% / 443.
+    const RAW_SENTIMENT = {
+      type: 'bar',
+      blocks: {
+        data: [
+          {
+            bar: '2026-08-16', legend: 'Negative', value: 7, value__prompts: 7,
+          },
+          {
+            bar: '2026-08-16', legend: 'Neutral', value: 571, value__prompts: 208,
+          },
+          {
+            bar: '2026-08-16', legend: 'Positive', value: 443, value__prompts: 165,
+          },
+        ],
+        line: [{ bar: '2026-08-16', value: 275 }],
+      },
+    };
+
+    const BASE_PARAMS = {
+      model: 'chatgpt',
+      startDate: '2026-08-11',
+      endDate: '2026-09-09',
+      brandName: 'au',
+    };
+
+    beforeEach(() => {
+      transport.fetchElement
+        .withArgs('ws-1', ELEMENT_IDS.SENTIMENT, sinon.match.any)
+        .resolves(RAW_SENTIMENT);
+    });
+
+    // Assertion 1: the metric the controller writes actually reaches the transform.
+    it('carries params.metric through to the transform (mentions)', async () => {
+      const params = { ...BASE_PARAMS, metric: 'mentions' };
+      const result = await service.getSentimentOverview('ws-1', params);
+      expect(result.metric).to.equal('mentions');
+      expect(result.weeklyTrends[0].sentimentTotal).to.equal(1021);
+      const pct = Object.fromEntries(
+        result.weeklyTrends[0].sentiment.map((s) => [s.name, s.value]),
+      );
+      expect(pct).to.deep.equal({ Positive: 43, Neutral: 56, Negative: 1 });
+    });
+
+    it('defaults to prompts when params carries no metric', async () => {
+      const result = await service.getSentimentOverview('ws-1', BASE_PARAMS);
+      expect(result.metric).to.equal('prompts');
+      expect(result.weeklyTrends[0].sentimentTotal).to.equal(380);
+    });
+
+    it('returns both count sets regardless of the metric', async () => {
+      for (const metric of ['prompts', 'mentions']) {
+        // eslint-disable-next-line no-await-in-loop
+        const result = await service.getSentimentOverview('ws-1', { ...BASE_PARAMS, metric });
+        const [wk] = result.weeklyTrends;
+        expect(wk.mentionCounts, `metric=${metric}`)
+          .to.deep.equal({ positive: 443, neutral: 571, negative: 7 });
+        expect(wk.promptCounts, `metric=${metric}`)
+          .to.deep.equal({ positive: 165, neutral: 208, negative: 7 });
+      }
+    });
+
+    // Assertion 2: `metric` is a presentation-only flag and must never reach
+    // Semrush. This holds today only because buildSentimentOverviewPayload
+    // destructures its params explicitly; nothing else enforces it, so a later
+    // refactor to a spread would start leaking an internal flag upstream.
+    it('sends an identical upstream payload for both metric values', async () => {
+      await service.getSentimentOverview('ws-1', { ...BASE_PARAMS, metric: 'prompts' });
+      await service.getSentimentOverview('ws-1', { ...BASE_PARAMS, metric: 'mentions' });
+
+      const [firstCall, secondCall] = transport.fetchElement.getCalls();
+      expect(secondCall.args[2]).to.deep.equal(firstCall.args[2]);
+      expect(JSON.stringify(firstCall.args[2])).to.not.contain('metric');
+      expect(firstCall.args[1]).to.equal(ELEMENT_IDS.SENTIMENT);
+    });
+  });
 });

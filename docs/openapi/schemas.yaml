@@ -12931,7 +12931,7 @@ SerenityBrandPresenceSentimentOverview:
     verbatim so the existing chart consumes it drop-in — the absolute values
     differ from the Postgres-backed legacy endpoint (Semrush metrics), but the
     shape, `sentiment[]` ordering, and colors are identical.
-  required: [weeklyTrends]
+  required: [metric, weeklyTrends]
   properties:
     metric:
       type: string
@@ -12949,6 +12949,9 @@ SerenityBrandPresenceSentimentOverview:
           - weekNumber
           - year
           - sentiment
+          - mentionCounts
+          - promptCounts
+          - sentimentTotal
           - totalPrompts
           - promptsWithSentiment
         properties:
@@ -12985,6 +12988,7 @@ SerenityBrandPresenceSentimentOverview:
               Raw per-sentiment MENTION counts for the week (the element's
               `value`). Returned regardless of `metric`, so a caller can render
               true counts alongside the percentages as the Semrush MFE does.
+            required: [positive, neutral, negative]
             properties:
               positive: { type: integer, example: 443 }
               neutral: { type: integer, example: 571 }
@@ -12994,6 +12998,7 @@ SerenityBrandPresenceSentimentOverview:
             description: |
               Raw per-sentiment PROMPT counts for the week (the element's
               `value__prompts`). Returned regardless of `metric`.
+            required: [positive, neutral, negative]
             properties:
               positive: { type: integer, example: 165 }
               neutral: { type: integer, example: 208 }
