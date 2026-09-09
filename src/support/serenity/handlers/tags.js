@@ -264,9 +264,9 @@ function parseCreateTagBody(body) {
 /**
  * Picks the created/updated tag's upstream id + parent id out of the transport
  * result. `createProjectTags` resolves to a LIST (model.TreeNodeResponse[]);
- * `updateProjectTag` to a single object. Returns `{ id, parentId }` with
- * `parentId` falling back to the requested `parentId` (so the echo is stable even
- * if the upstream omits it), or null.
+ * `updateProjectTag` to a single object. A validated parent sent to upstream is
+ * authoritative because update responses may intermittently echo the old
+ * `parent_id`; the upstream value is used only when no intended parent is known.
  *
  * @param {any} result - transport result (array for create, object for update).
  * @param {string | null | undefined} requestedParentId
@@ -275,9 +275,12 @@ function parseCreateTagBody(body) {
 function pickTagIds(result, requestedParentId) {
   const node = Array.isArray(result) ? result[0] : result;
   const id = node && typeof node.id === 'string' ? node.id : undefined;
-  const parentId = node && typeof node.parent_id === 'string' && node.parent_id
+  const upstreamParentId = node && typeof node.parent_id === 'string' && node.parent_id
     ? node.parent_id
-    : (requestedParentId ?? null);
+    : null;
+  const parentId = requestedParentId !== undefined
+    ? requestedParentId
+    : upstreamParentId;
   return { id, parentId };
 }
 
