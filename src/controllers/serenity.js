@@ -1680,6 +1680,15 @@ function SerenityController(context, log, env) {
         // `provision-workspace-job` ->
         // `serenity-activate-brand-workspace` job chain instead.
         if (validateAsync(body)) {
+          // LLMO-7418 external-review Finding 9: see createMarket's async branch for the full
+          // rationale — reconcile a stale in-flight attempt (reusing the sync guard's own logic)
+          // before minting a new one, since beginProvisioningAttempt's own CAS has no staleness
+          // awareness on its own.
+          await guardAgainstConcurrentProvisioning(
+            brandUuid,
+            ctx.dataAccess.services.postgrestClient,
+            log,
+          );
           const attemptId = randomUUID();
           const began = await beginProvisioningAttempt({
             brandId: brandUuid,
@@ -1791,6 +1800,13 @@ function SerenityController(context, log, env) {
         // activate-brand-workspace-job.js's save-divergence handling matches this branch's own
         // 207-not-502 contract.
         if (validateAsync(body)) {
+          // LLMO-7418 external-review Finding 9: see createMarket's async branch (and the
+          // wasPending branch above) for the full rationale.
+          await guardAgainstConcurrentProvisioning(
+            brandUuid,
+            ctx.dataAccess.services.postgrestClient,
+            log,
+          );
           const attemptId = randomUUID();
           const began = await beginProvisioningAttempt({
             brandId: brandUuid,

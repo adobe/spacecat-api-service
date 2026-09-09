@@ -2467,7 +2467,8 @@ describe('SerenityController', () => {
 
       expect(response.status).to.equal(202);
       expect(ensureSubworkspaceStub).to.not.have.been.called;
-      expect(guardAgainstConcurrentProvisioningStub).to.not.have.been.called;
+      // LLMO-7418 external-review Finding 9: reconciles a stale in-flight attempt first.
+      expect(guardAgainstConcurrentProvisioningStub).to.have.been.calledOnceWith(BRAND);
       expect(brand.setStatus).to.not.have.been.called;
       expect(beginProvisioningAttemptStub).to.have.been.calledOnce;
       expect(beginProvisioningAttemptStub.firstCall.args[0]).to.include({
@@ -2528,7 +2529,8 @@ describe('SerenityController', () => {
 
       expect(response.status).to.equal(202);
       expect(ensureSubworkspaceStub).to.not.have.been.called;
-      expect(guardAgainstConcurrentProvisioningStub).to.not.have.been.called;
+      // LLMO-7418 external-review Finding 9: reconciles a stale in-flight attempt first.
+      expect(guardAgainstConcurrentProvisioningStub).to.have.been.calledOnceWith(BRAND);
       expect(createAndEnqueueJobStub).to.have.been.calledOnce;
       const [, enqueueArgs] = createAndEnqueueJobStub.firstCall.args;
       expect(enqueueArgs.metadata.chainedJobType).to.equal('serenity-activate-brand-workspace');
