@@ -126,7 +126,7 @@ describe('drs-generation-client', () => {
     expect(isRetryableJobError(err)).to.equal(true);
   });
 
-  it('emits DRSInvokeDurationMs {Environment} + DRSInvokeFailure {Environment,Reason} in the infra namespace', async () => {
+  it('emits DRSInvokeDurationMs + DRSInvokeFailure with the Environment-only dimension set (infra convention)', async () => {
     const heldInvoke = sinon.stub().resolves({ prompts: [], ship_summary: { verdict: 'held' } });
     const logs = [];
     const orig = console.log;
@@ -152,9 +152,11 @@ describe('drs-generation-client', () => {
     expect(meta(duration).Namespace).to.equal('SpacecatSerenityMarketWorker');
     expect(meta(duration).Dimensions[0]).to.deep.equal(['Environment']);
 
+    // Both metrics carry EXACTLY {Environment} — the infra alarms match on it and
+    // no Reason dimension fragments the failure count.
     const failure = byMetric('DRSInvokeFailure');
-    expect(meta(failure).Dimensions[0]).to.deep.equal(['Environment', 'Reason']);
-    expect(failure.Reason).to.equal('verdict:held');
+    expect(meta(failure).Dimensions[0]).to.deep.equal(['Environment']);
+    expect(failure.Reason).to.equal(undefined);
   });
 });
 
