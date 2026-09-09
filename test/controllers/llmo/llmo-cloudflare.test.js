@@ -537,6 +537,36 @@ describe('LlmoCloudflareController', () => {
       expect(mockCfClient.deployWorkerScript).to.not.have.been.called;
     });
 
+    it('rejects a client-supplied targetHost containing control characters, even if it still ends with the site\'s domain', async () => {
+      mockSite.getBaseURL = () => 'https://example.com';
+      mockContext.data = {
+        accountId: ACCOUNT_ID,
+        targetHost: 'fake audit line\nz.example.com',
+      };
+
+      const res = await controller.deployWorker(mockContext);
+      expect(res.status).to.equal(400);
+      expect(mockCfClient.deployWorkerScript).to.not.have.been.called;
+    });
+
+    it('rejects a client-supplied targetHost that is not a syntactically valid hostname', async () => {
+      mockSite.getBaseURL = () => 'https://example.com';
+      mockContext.data = { accountId: ACCOUNT_ID, targetHost: 'https://cdn.example.com/path' };
+
+      const res = await controller.deployWorker(mockContext);
+      expect(res.status).to.equal(400);
+      expect(mockCfClient.deployWorkerScript).to.not.have.been.called;
+    });
+
+    it('rejects a client-supplied targetHost longer than 253 characters', async () => {
+      mockSite.getBaseURL = () => 'https://example.com';
+      mockContext.data = { accountId: ACCOUNT_ID, targetHost: `${'a'.repeat(250)}.example.com` };
+
+      const res = await controller.deployWorker(mockContext);
+      expect(res.status).to.equal(400);
+      expect(mockCfClient.deployWorkerScript).to.not.have.been.called;
+    });
+
     it('honors a valid client-supplied targetHost equal to the site\'s canonical host', async () => {
       const resolveSpy = sandbox.stub().resolves('should-not-be-used.example.com');
       mockResolveCanonicalHost = resolveSpy;

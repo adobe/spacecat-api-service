@@ -55,6 +55,12 @@ const WORKER_SCRIPT_FETCH_TIMEOUT_MS = 10_000;
 // Boundary input validation (defense-in-depth, independent of CloudflareClient behaviour).
 const CF_ID_RE = /^[0-9a-f]{32}$/; // Cloudflare account/zone IDs are 32-char lowercase hex
 
+// A client-supplied targetHost passes hostInSiteDomain on a plain suffix match, which alone
+// doesn't rule out control characters (log-injection into auditLine) or pathological length —
+// enforce actual hostname shape first.
+const HOSTNAME_RE = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$/i;
+const MAX_HOSTNAME_LEN = 253;
+
 /**
  * Identifies the API caller for audit logging and worker tagging. profile.email is an IMS user
  * GUID (GUID@hexOrgId.e), not an RFC-5322 address — see access-control-util.js. Returns 'unknown'
@@ -92,9 +98,10 @@ const auditLine = (context, action, outcome, fields = {}) => {
   };
   // Quote any value containing whitespace so key=value parsers (Splunk, grep) don't misread an
   // embedded space (e.g. in an error message) as a field boundary. Inner double quotes are
-  // downgraded to single quotes to keep the token well-formed.
+  // downgraded to single quotes to keep the token well-formed. CR/LF are collapsed to a space
+  // first so a field value can never forge what looks like a second, separate log line.
   const fmt = (v) => {
-    const s = String(v);
+    const s = String(v).replace(/[\r\n]+/g, ' ');
     return /\s/.test(s) ? `"${s.replace(/"/g, "'")}"` : s;
   };
   const kv = Object.entries(entries)
@@ -342,10 +349,11 @@ function LlmoCloudflareController(ctx) {
 
   /**
    * POST /sites/:siteId/llmo/cdn-onboard/cloudflare/deploy
-   * Body: { accountId }
-   * The target host is NOT client-supplied — it is derived server-side from the site's own base
-   * URL (see resolveCanonicalHost) so the worker always forwards to the canonical host for the
-   * site, consistent with how the other CDN integrations resolve the origin.
+   * Body: { accountId, targetHost? }
+   * targetHost is optional. When supplied it must equal the site's canonical host or be a
+   * subdomain of it (hostInSiteDomain), otherwise the request is rejected with 400. When omitted,
+   * it is derived server-side from the site's own base URL (see resolveCanonicalHost), consistent
+   * with how the other CDN integrations resolve the origin.
    * Fetches the Edge Optimize worker script from GitHub and deploys it under a name derived
    * from the site (see deriveWorkerName), tagging it with CF_WORKER_OWNER_TAG (+ the caller's
    * IMS identity), then sets the LLMO API key as the EDGE_OPTIMIZE_API_KEY secret on the worker.
@@ -391,10 +399,14 @@ function LlmoCloudflareController(ctx) {
     const { targetHost: clientTargetHost } = context.data || {};
     let targetHost;
     if (hasText(clientTargetHost)) {
-      if (!hostInSiteDomain(clientTargetHost.trim(), site.getBaseURL())) {
+      const trimmedTargetHost = clientTargetHost.trim();
+      if (trimmedTargetHost.length > MAX_HOSTNAME_LEN || !HOSTNAME_RE.test(trimmedTargetHost)) {
+        return badRequest('targetHost must be a valid hostname');
+      }
+      if (!hostInSiteDomain(trimmedTargetHost, site.getBaseURL())) {
         return badRequest('targetHost must target the site\'s domain');
       }
-      targetHost = clientTargetHost.trim().toLowerCase();
+      targetHost = trimmedTargetHost.toLowerCase();
     } else {
       // resolveCanonicalHost normalizes a bare apex (example.com) to its www host, matching how
       // audits/crawls resolve the origin and keeping host derivation consistent across CDNs
