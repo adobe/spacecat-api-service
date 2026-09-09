@@ -613,21 +613,54 @@ describe('handleRequestBrandClaims (on-demand, LLMO-7263)', () => {
     expect(msg.onDemand).to.equal(true);
     expect(msg.auditContext).to.deep.equal({ trigger: 'on-demand-brand-claims' });
     expect(postSlackMessage).to.have.been.calledOnce;
-    // The alert names who triggered it (name + human-readable email).
-    expect(postSlackMessage.getCall(0).args[1]).to.include('by Ada Lovelace (ada@example.com)');
+    // The alert carries only the coarse internal/external signal, not the requester's
+    // name or email. Default profile is a non-Adobe trial address, so: external.
+    const text = postSlackMessage.getCall(0).args[1];
+    expect(text).to.include('by an external user');
+    expect(text).to.not.include('Ada');
+    expect(text).to.not.include('ada@example.com');
   });
 
-  it('uses preferred_username (RFC-5322) over the profile.email GUID when there is no name', async () => {
+  it('labels an adobe.com requester as internal', async () => {
+    context.attributes.authInfo.getProfile = () => ({ trial_email: 'ada@adobe.com', first_name: 'Ada', last_name: 'Lovelace' });
+    await handleRequestBrandClaims(context, site);
+    const text = postSlackMessage.getCall(0).args[1];
+    expect(text).to.include('by an internal user');
+    expect(text).to.not.include('Ada');
+  });
+
+  it('labels an adobetest.com requester as internal', async () => {
+    context.attributes.authInfo.getProfile = () => ({ trial_email: 'exc-locuser-en+t2e@adobetest.com' });
+    await handleRequestBrandClaims(context, site);
+    expect(postSlackMessage.getCall(0).args[1]).to.include('by an internal user');
+  });
+
+  it('labels an Adobe subdomain requester as internal', async () => {
+    context.attributes.authInfo.getProfile = () => ({ preferred_username: 'ops@geo.adobe.com' });
+    await handleRequestBrandClaims(context, site);
+    expect(postSlackMessage.getCall(0).args[1]).to.include('by an internal user');
+  });
+
+  it('classifies via preferred_username when trial_email is absent', async () => {
     context.attributes.authInfo.getProfile = () => ({ preferred_username: 'grace@example.com' });
     await handleRequestBrandClaims(context, site);
-    expect(postSlackMessage.getCall(0).args[1]).to.include('by grace@example.com');
+    expect(postSlackMessage.getCall(0).args[1]).to.include('by an external user');
   });
 
-  it('uses the name alone when the profile has no email', async () => {
+  it('omits the "by" clause when the profile has no email (only a name)', async () => {
     context.attributes.authInfo.getProfile = () => ({ first_name: 'Ada', last_name: 'Lovelace' });
     await handleRequestBrandClaims(context, site);
-    // Ends with "by Ada Lovelace." — the name only, no "(email)" appended.
-    expect(postSlackMessage.getCall(0).args[1]).to.include('by Ada Lovelace.');
+    const text = postSlackMessage.getCall(0).args[1];
+    expect(text).to.not.include(' by ');
+    expect(text).to.not.include('Ada');
+  });
+
+  it('omits the "by" clause when the only email-like value has no domain (bare IMS GUID)', async () => {
+    context.attributes.authInfo.getProfile = () => ({ email: '6E3D1F2A0B9C4D5E7F8A9B0C' });
+    await handleRequestBrandClaims(context, site);
+    // A bare GUID has no '@', so there is no domain to classify — the alert stays
+    // unlabelled rather than guessing internal/external.
+    expect(postSlackMessage.getCall(0).args[1]).to.not.include(' by ');
   });
 
   it('omits the "by" clause when no identity is available', async () => {
@@ -644,14 +677,6 @@ describe('handleRequestBrandClaims (on-demand, LLMO-7263)', () => {
     };
     await handleRequestBrandClaims(context, site);
     expect(postSlackMessage.getCall(0).args[1]).to.not.include(' by ');
-  });
-
-  it('strips Slack mrkdwn control characters from the requester label', async () => {
-    context.attributes.authInfo.getProfile = () => ({ first_name: '<@here>', last_name: '`Ada`' });
-    await handleRequestBrandClaims(context, site);
-    const text = postSlackMessage.getCall(0).args[1];
-    expect(text).to.include('by @here Ada');
-    expect(text).to.not.match(/[<>`|]/);
   });
 
   it('returns 500 when AUDIT_JOBS_QUEUE_URL is not configured', async () => {
@@ -703,6 +728,19 @@ describe('handleRequestBrandClaims (on-demand, LLMO-7263)', () => {
     const result = await handleRequestBrandClaims(context, site);
     expect(result.status).to.equal(202);
     expect(sqsSend).to.have.been.calledOnce;
+  });
+
+  it('does not tag the Slack alert "(re-run)" on a first-ever run (no prior audit)', async () => {
+    await handleRequestBrandClaims(context, site);
+    expect(postSlackMessage.getCall(0).args[1]).to.not.include('(re-run)');
+  });
+
+  it('tags the Slack alert "(re-run)" when a prior (cooldown-cleared) audit exists', async () => {
+    const ranAt = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString(); // 8 days ago
+    getLatestAudit.resolves({ getAuditedAt: () => ranAt });
+    await handleRequestBrandClaims(context, site);
+    expect(postSlackMessage.getCall(0).args[1])
+      .to.include('On-demand Brand Claims requested (re-run) for');
   });
 
   it('proceeds (202) at the 7-day boundary (cooldown uses strict <)', async () => {

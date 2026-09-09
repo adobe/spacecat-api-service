@@ -52,6 +52,8 @@ export { aggregateTopicsFromPrompts } from './topics-insights.js';
 export {
   buildSentimentOverviewPayload,
   transformSentimentOverviewResponse,
+  normalizeSentimentMetric,
+  SENTIMENT_METRICS,
 } from './sentiment-overview.js';
 export {
   buildOwnedUrlsStatsPayload,

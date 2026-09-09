@@ -254,32 +254,44 @@ export async function handleBrandClaimsWeeks(context) {
   }
 }
 
+// Adobe corporate and test email domains (plus their subdomains) that mark a
+// requester as internal; every other domain is treated as an external customer.
+const INTERNAL_EMAIL_DOMAINS = ['adobe.com', 'adobetest.com'];
+
 /**
- * Human-readable identity of the caller who triggered the request, for the Slack alert.
- * Mirrors user-details.js: prefer the RFC-5322 address (trial_email, then preferred_username)
- * over profile.email, which is an IMS user GUID; include the name when present. Returns
- * null when no identity is available (the alert then omits the "by ..." clause).
+ * Classifies the caller who triggered the request as an internal (Adobe) user or an
+ * external (customer) user, for the Slack alert, so operators can tell an internal or
+ * test run apart from a real customer request (LLMO-7263).
+ *
+ * The email is resolved the same way as the rest of the codebase (trial_email, then
+ * preferred_username, then profile.email — which may be an IMS GUID rather than an
+ * address) and classified purely by domain: an Adobe corporate/test domain
+ * (see INTERNAL_EMAIL_DOMAINS, incl. subdomains) is internal, any other domain is
+ * external. Returns null when no classifiable email is available (the alert then omits
+ * the "by ..." clause).
  *
  * @param {object} context - Request context (attributes.authInfo).
- * @returns {string|null} e.g. "Ada Lovelace (ada@example.com)" or "ada@example.com"; null
- *   when no identity is available.
+ * @returns {'internal'|'external'|null}
  */
-function getRequesterLabel(context) {
+function getRequesterAudience(context) {
   try {
     const authInfo = context?.attributes?.authInfo;
     const profile = authInfo?.getProfile?.() ?? authInfo?.profile ?? {};
     const email = [profile.trial_email, profile.preferred_username, profile.email]
       .find((v) => hasText(v));
-    const first = profile.first_name || profile.given_name;
-    const last = profile.last_name || profile.family_name;
-    const name = [first, last].filter((v) => hasText(v)).join(' ').trim();
-    const label = (name && email) ? `${name} (${email})` : (name || email);
-    // Trial users control their own display name, so strip the Slack mrkdwn control
-    // characters (<, >, `, |) that could inject a link/mention/code span into the alert.
-    return hasText(label) ? label.replace(/[<>`|]/g, '') : null;
+    // Domain is the part after the last '@'; a value without one (e.g. an IMS GUID)
+    // yields no domain and stays unclassified rather than being mislabelled.
+    const at = hasText(email) ? email.lastIndexOf('@') : -1;
+    const domain = at >= 0 ? email.slice(at + 1).toLowerCase().trim() : '';
+    if (!hasText(domain)) {
+      return null;
+    }
+    const isInternal = INTERNAL_EMAIL_DOMAINS
+      .some((d) => domain === d || domain.endsWith(`.${d}`));
+    return isInternal ? 'internal' : 'external';
   } catch {
-    // Best-effort label only — never let requester lookup throw into the (already
-    // queued) run or the Slack alert.
+    // Best-effort classification only — never let requester lookup throw into the
+    // (already queued) run or the Slack alert.
     return null;
   }
 }
@@ -317,8 +329,12 @@ export async function handleRequestBrandClaims(context, site) {
   // audit row both pass this check and both enqueue. The per-brand redelivery dedup
   // (blackboard fact freshness in mystique) makes the duplicate a cheap no-op, so a
   // best-effort check here is deliberate rather than a hard once-only lock.
+  // A prior audit that clears the cooldown means this request is a re-run rather than
+  // a first-ever run; the Slack alert below tags it so operators can tell them apart.
+  let isRerun = false;
   try {
     const latestAudit = await site.getLatestAuditByAuditType(BRAND_CLAIMS_AUDIT_TYPE);
+    isRerun = Boolean(latestAudit);
     const ranAtMs = typeof latestAudit?.getAuditedAt === 'function'
       ? Date.parse(latestAudit.getAuditedAt())
       : NaN;
@@ -364,11 +380,12 @@ export async function handleRequestBrandClaims(context, site) {
   const slackToken = env?.SLACK_BOT_TOKEN;
   if (slackChannel && slackToken) {
     try {
-      const requester = getRequesterLabel(context);
-      const requestedBy = requester ? ` by ${requester}` : '';
+      const audience = getRequesterAudience(context);
+      const requestedBy = audience ? ` by an ${audience} user` : '';
+      const rerunTag = isRerun ? ' (re-run)' : '';
       await postSlackMessage(
         slackChannel,
-        `:rocket: On-demand Brand Claims requested for *${site.getBaseURL()}* (${site.getId()})${requestedBy}.`,
+        `:rocket: On-demand Brand Claims requested${rerunTag} for *${site.getBaseURL()}* (${site.getId()})${requestedBy}.`,
         slackToken,
       );
     } catch (slackError) {
