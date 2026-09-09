@@ -22,7 +22,7 @@ import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
 
 import { createSerenityTransport } from '../support/serenity/rest-transport.js';
 import {
-  isSemrushTransportError, unwrapTransportCause, ERROR_CODES,
+  ERROR_CODES, isSemrushTransportError, unwrapTransportCause,
 } from '../support/serenity/errors.js';
 import {
   resolveBrandWorkspace,
@@ -36,10 +36,18 @@ import {
   validateAsync,
   BULK_PROMPTS_MAX_ITEMS,
   resolveCallerId,
+  assertCreatePromptTagLimits,
 } from '../support/serenity/handlers/prompts.js';
 import { createAndEnqueueJob } from '../support/serenity/async-job-runner.js';
 import { CLASSIFY_PROMPTS_JOB_TYPE } from '../support/serenity/handlers/classify-prompts-job.js';
 import { ORIGIN_VALUE } from '../support/serenity/prompt-tags.js';
+import {
+  BULK_TAGS_JOB_TYPE,
+  BULK_TAGS_PUBLIC_JOB_TYPE,
+  handleBulkTags,
+  handleBulkTagsSubworkspace,
+  pageBulkFailures,
+} from '../support/serenity/handlers/bulk-tags-job.js';
 import {
   handleListMarkets,
   handleGetMarket,
@@ -73,6 +81,8 @@ import {
   handleUpdateTagSubworkspace,
   handleDeleteTag,
   handleDeleteTagSubworkspace,
+  handleTagImpact,
+  handleTagImpactSubworkspace,
 } from '../support/serenity/handlers/tags.js';
 import { ensureSubworkspace, decommissionBrandWorkspace } from '../support/serenity/workspace-lifecycle.js';
 import { isSerenityActiveForBrand } from '../support/serenity/serenity-active.js';
@@ -115,6 +125,19 @@ const MAX_MARKETS = 50;
  */
 function safeError(msg) {
   return cleanupHeaderValue(String(msg || '')).slice(0, MAX_ERR_MSG_LEN);
+}
+
+function headerValue(headers, name) {
+  if (!headers || typeof headers !== 'object') {
+    return undefined;
+  }
+  if (typeof headers.get === 'function') {
+    return headers.get(name) ?? undefined;
+  }
+  const wanted = name.toLowerCase();
+  const entry = Object.entries(headers)
+    .find(([key]) => key.toLowerCase() === wanted);
+  return entry?.[1];
 }
 
 /**
@@ -161,7 +184,38 @@ function parsedQuery(context) {
     const n = parseInt(raw.limit, 10);
     out.limit = Number.isFinite(n) ? n : null;
   }
+  if (raw.failureLimit !== undefined) {
+    const n = parseInt(raw.failureLimit, 10);
+    out.failureLimit = Number.isFinite(n) ? n : null;
+  }
   return out;
+}
+
+const PUBLIC_JOB_ERROR_CODES = new Set([
+  ERROR_CODES.INVALID_REQUEST,
+  ERROR_CODES.PROMPT_NOT_FOUND,
+  ERROR_CODES.SERENITY_UPSTREAM_ERROR,
+  ERROR_CODES.TAG_LIMIT_EXCEEDED,
+  ERROR_CODES.INCOMPATIBLE_TAG_TAXONOMY,
+  ERROR_CODES.PROMPT_CORPUS_INCOMPLETE,
+]);
+
+function publicJobError(error) {
+  if (!error || typeof error !== 'object') {
+    return null;
+  }
+  const code = PUBLIC_JOB_ERROR_CODES.has(error.code) ? error.code : ERROR_CODES.JOB_FAILED;
+  let message = 'The background job failed';
+  if (code === ERROR_CODES.SERENITY_UPSTREAM_ERROR) {
+    message = 'Upstream request failed';
+  } else if (code !== ERROR_CODES.JOB_FAILED && typeof error.message === 'string') {
+    message = safeError(error.message).slice(0, 256) || message;
+  }
+  return {
+    code,
+    message,
+    retryable: error.retryable === true,
+  };
 }
 
 function errorTokenForStatus(status) {
@@ -175,13 +229,32 @@ function errorTokenForStatus(status) {
   }
 }
 
+/** @param {string} code @param {unknown} details @returns {object | undefined} */
+function publicErrorDetails(code, details) {
+  if (!details || typeof details !== 'object') {
+    return undefined;
+  }
+  const value = /** @type {any} */ (details);
+  if (code === ERROR_CODES.TAG_LIMIT_EXCEEDED
+    && Number.isInteger(value.attemptedCount)
+    && Number.isInteger(value.maxPromptTagIds)) {
+    return {
+      attemptedCount: value.attemptedCount,
+      maxPromptTagIds: value.maxPromptTagIds,
+    };
+  }
+  if (code === ERROR_CODES.TAG_FILTER_TOO_LARGE
+    && Number.isInteger(value.attemptedCount)
+    && Number.isInteger(value.maxTagFilterValues)) {
+    return {
+      attemptedCount: value.attemptedCount,
+      maxTagFilterValues: value.maxTagFilterValues,
+    };
+  }
+  return undefined;
+}
+
 /**
- * Request-context ids for the structured upstream-error log line
- * (SITES-49993): the tenant ids from the route plus the resolved Semrush
- * workspace from `authorize` — the latter is what attributes a
- * ProjectEngineApiError (which carries no ids of its own) to a tenant.
- * `auth` is the hoisted `authorize` result and may still be undefined (or its
- * `{error}` variant) when the throw happened before/inside authorization.
  * @param {object} [ctx]
  * @param {{ brandUuid?: string, workspaceId?: string | null }} [auth]
  * @returns {Record<string, unknown>}
@@ -202,6 +275,7 @@ function mapError(e, log, reqCtx = {}) {
     // error token in the response envelope; falls back to the status-based
     // default for plain throws.
     const errorToken = e.code && hasText(e.code) ? e.code : errorTokenForStatus(status);
+    const details = publicErrorDetails(errorToken, /** @type {any} */ (e).details);
     // `serenityLogged` is set ad hoc by project-provisioning.js's
     // cleanupAndRethrow, not declared on ErrorWithStatusCode itself.
     const alreadyLogged = /** @type {{ serenityLogged?: boolean }} */ (e).serenityLogged;
@@ -218,7 +292,11 @@ function mapError(e, log, reqCtx = {}) {
       log?.error?.('Serenity controller error', { reqCtx, error: e });
     }
     return createResponse(
-      { error: errorToken, message: safeError(e.message) },
+      {
+        error: errorToken,
+        message: safeError(e.message),
+        ...(details ? { details } : {}),
+      },
       status,
     );
   }
@@ -570,9 +648,10 @@ function SerenityController(context, log, env) {
         : await handleListPrompts(
           transport,
           ctx.dataAccess,
-          auth.brandUuid,
-          auth.workspaceId,
+          /** @type {string} */ (auth.brandUuid),
+          /** @type {string} */ (auth.workspaceId),
           parsedQuery(ctx),
+          log,
         );
       return createResponse(result, 200);
     } catch (e) {
@@ -629,6 +708,7 @@ function SerenityController(context, log, env) {
             400,
           );
         }
+        assertCreatePromptTagLimits(prompts);
         const job = await createAndEnqueueJob(ctx, {
           jobType: CLASSIFY_PROMPTS_JOB_TYPE,
           metadata: {
@@ -654,7 +734,9 @@ function SerenityController(context, log, env) {
             callerId: resolveCallerId(ctx),
           },
         });
-        return accepted({ jobId: job.getId(), status: job.getStatus() });
+        return accepted({
+          jobId: job.getId(), jobType: 'classifyPrompts', status: job.getStatus(),
+        });
       }
       const transport = buildTransport(ctx, imsToken);
       const classifyPromptType = await buildPromptTypeClassifier(ctx, auth.brandUuid);
@@ -785,6 +867,47 @@ function SerenityController(context, log, env) {
           { orgId: ctx?.params?.spaceCatId, env: ctx.env || env, callerId },
         );
       return createResponse(result, 200);
+    } catch (e) {
+      return mapError(e, log, reqCtxOf(ctx, auth));
+    }
+  };
+
+  const bulkTagPrompts = async (ctx) => {
+    let auth;
+    try {
+      const imsToken = await resolveSemrushImsToken(ctx);
+      auth = await authorize(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const transport = buildTransport(ctx, imsToken);
+      const callerId = resolveCallerId(ctx);
+      const idempotencyKey = headerValue(ctx?.pathInfo?.headers, 'idempotency-key');
+      const result = auth.mode === 'subworkspace'
+        ? await handleBulkTagsSubworkspace(
+          ctx,
+          transport,
+          /** @type {string} */ (auth.brandUuid),
+          /** @type {string} */ (ctx?.params?.spaceCatId),
+          /** @type {string} */ (auth.workspaceId),
+          ctx.data || {},
+          callerId,
+          idempotencyKey,
+          log,
+        )
+        : await handleBulkTags(
+          ctx,
+          transport,
+          ctx.dataAccess,
+          /** @type {string} */ (auth.brandUuid),
+          /** @type {string} */ (ctx?.params?.spaceCatId),
+          /** @type {string} */ (auth.workspaceId),
+          ctx.data || {},
+          callerId,
+          idempotencyKey,
+          log,
+        );
+      return createResponse(result.body, result.status);
     } catch (e) {
       return mapError(e, log, reqCtxOf(ctx, auth));
     }
@@ -1316,6 +1439,7 @@ function SerenityController(context, log, env) {
         return auth.error;
       }
       const transport = buildTransport(ctx, imsToken);
+      const ifMatch = headerValue(ctx?.pathInfo?.headers, 'if-match');
       if (auth.mode === 'subworkspace') {
         await handleDeleteTagSubworkspace(
           transport,
@@ -1323,6 +1447,7 @@ function SerenityController(context, log, env) {
           tagId,
           parsedQuery(ctx),
           log,
+          ifMatch,
         );
       } else {
         await handleDeleteTag(
@@ -1333,9 +1458,46 @@ function SerenityController(context, log, env) {
           tagId,
           parsedQuery(ctx),
           log,
+          ifMatch,
         );
       }
       return noContent();
+    } catch (e) {
+      return mapError(e, log, reqCtxOf(ctx, auth));
+    }
+  };
+
+  const getTagImpact = async (ctx) => {
+    let auth;
+    try {
+      const imsToken = await resolveSemrushImsToken(ctx);
+      const { tagId } = ctx?.params || {};
+      if (!hasText(tagId)) {
+        throw new ErrorWithStatusCode('Missing tagId', 400);
+      }
+      auth = await authorize(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const transport = buildTransport(ctx, imsToken);
+      const result = auth.mode === 'subworkspace'
+        ? await handleTagImpactSubworkspace(
+          transport,
+          /** @type {string} */ (auth.workspaceId),
+          tagId,
+          parsedQuery(ctx),
+          log,
+        )
+        : await handleTagImpact(
+          transport,
+          ctx.dataAccess,
+          /** @type {string} */ (auth.brandUuid),
+          /** @type {string} */ (auth.workspaceId),
+          tagId,
+          parsedQuery(ctx),
+          log,
+        );
+      return createResponse(result.body, result.status, { ETag: result.body.revision });
     } catch (e) {
       return mapError(e, log, reqCtxOf(ctx, auth));
     }
@@ -2089,12 +2251,35 @@ function SerenityController(context, log, env) {
       if (!job || jobBrandId !== auth.brandUuid) {
         return notFound(`Job not found: ${jobId}`);
       }
+      const metadata = job.getMetadata?.() ?? {};
+      /** @type {'classifyPrompts' | 'bulkTags' | 'tagImpact'} */
+      let publicJobType = 'classifyPrompts';
+      if (metadata.jobType === BULK_TAGS_JOB_TYPE) {
+        publicJobType = BULK_TAGS_PUBLIC_JOB_TYPE;
+      } else if (metadata.jobType === 'serenity-tag-impact') {
+        publicJobType = 'tagImpact';
+      }
+      const query = parsedQuery(ctx);
+      const failureLimit = typeof query.failureLimit === 'number'
+        ? query.failureLimit
+        : undefined;
+      const status = job.getStatus();
+      const rawResult = status === 'COMPLETED' ? job.getResult?.() ?? null : null;
+      const result = publicJobType === BULK_TAGS_PUBLIC_JOB_TYPE && rawResult
+        ? pageBulkFailures(
+          rawResult,
+          typeof query.failureCursor === 'string' ? query.failureCursor : undefined,
+          failureLimit,
+        )
+        : rawResult;
+      const error = status === 'FAILED' ? publicJobError(job.getError?.()) : null;
       return createResponse(
         {
           jobId: job.getId(),
-          status: job.getStatus(),
-          result: job.getResult?.() ?? null,
-          error: job.getError?.() ?? null,
+          jobType: publicJobType,
+          status,
+          result,
+          error,
         },
         200,
       );
@@ -2108,6 +2293,7 @@ function SerenityController(context, log, env) {
     createPrompts,
     getPromptsJobStatus,
     updatePrompt,
+    bulkTagPrompts,
     bulkDeletePrompts,
     listMarkets,
     getMarket,
@@ -2116,6 +2302,7 @@ function SerenityController(context, log, env) {
     listTags,
     createTag,
     updateTag,
+    getTagImpact,
     deleteTag,
     listModels,
     listOrgModels,

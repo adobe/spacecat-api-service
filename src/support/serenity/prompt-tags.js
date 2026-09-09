@@ -19,8 +19,8 @@
  * serenity flow.
  *
  * A tag's DIMENSION is its root ancestor, not a prefix on its name. Every
- * project's tag tree has five roots — `category`, `intent`, `origin`, `type`,
- * and `source` — and every tag value is a bare-named descendant of one of them. No
+ * project's tag tree has registered roots for `category`, `tag`, `intent`,
+ * `origin`, `type`, and `source`, and every tag value is a bare-named descendant. No
  * tag name contains a `:`. A tag's dimension is therefore `path[0]` of the
  * upstream breadcrumb (verified against the live Semrush API: `path[]` is a
  * full root-first ancestry at any depth), never something parsed out of a name.
@@ -39,7 +39,7 @@
  */
 
 /**
- * The five dimension roots. Each is a bare-named ROOT tag on every project.
+ * The registered dimension roots. Each is a bare-named ROOT tag on every project.
  *
  * `source` (source-dimension.md) is the producing-system dimension — the system
  * that produced a prompt (`config`, `gsc`, `drs`, …), read from `prompts.source`
@@ -47,6 +47,7 @@
  */
 export const DIMENSION = Object.freeze({
   CATEGORY: 'category',
+  TAG: 'tag',
   INTENT: 'intent',
   ORIGIN: 'origin',
   TYPE: 'type',
@@ -59,9 +60,10 @@ export const DIMENSION = Object.freeze({
  * {@link canonicalizeSource} refuses a derived value longer than it.
  */
 export const MAX_TAG_NAME_LEN = 100;
-/** The five dimensions, in the order their roots are provisioned on a project. */
+/** The dimensions, in the order their roots are provisioned on a project. */
 export const DIMENSION_PROVISION_ORDER = Object.freeze([
   DIMENSION.CATEGORY,
+  DIMENSION.TAG,
   DIMENSION.INTENT,
   DIMENSION.ORIGIN,
   DIMENSION.TYPE,
@@ -94,8 +96,7 @@ export const INTENT_ROOT_NAME = `${HIDDEN_TAG_MARKER}intent`;
  * The customer-facing DISPLAY root name for a dimension whose root gets renamed
  * (tag-display-names.md §1 item 4) — `category` → `Category`, `type` → `Type`,
  * `source` → `Source`. `intent` is excluded (permanently hidden under
- * {@link INTENT_ROOT_NAME}, no display rename) and `origin` keeps its canonical
- * root name.
+ * {@link INTENT_ROOT_NAME}, no display rename) and `origin` remains unchanged.
  *
  * IDENTITY PLACEHOLDER — serenity-docs#407 (the vocabulary sign-off PR) is not
  * yet merged, so every value here is its own key, verbatim. Do NOT add or remove
@@ -104,6 +105,7 @@ export const INTENT_ROOT_NAME = `${HIDDEN_TAG_MARKER}intent`;
  */
 export const ROOT_DISPLAY_NAME = Object.freeze({
   [DIMENSION.CATEGORY]: DIMENSION.CATEGORY,
+  [DIMENSION.TAG]: DIMENSION.TAG,
   [DIMENSION.TYPE]: DIMENSION.TYPE,
   [DIMENSION.SOURCE]: DIMENSION.SOURCE,
 });
@@ -280,7 +282,11 @@ export const CLOSED_DIMENSIONS = Object.freeze([
  * fixed vocabulary"; it does NOT answer "may a client write it" — that is
  * {@link SERVER_OWNED_DIMENSIONS}.
  */
-export const OPEN_DIMENSIONS = Object.freeze([DIMENSION.CATEGORY, DIMENSION.SOURCE]);
+export const OPEN_DIMENSIONS = Object.freeze([
+  DIMENSION.CATEGORY,
+  DIMENSION.TAG,
+  DIMENSION.SOURCE,
+]);
 
 /**
  * The SERVER-OWNED dimensions — everything except `category`. No client may mint
@@ -361,9 +367,24 @@ export const PROXY_CREATE_SOURCE_VALUE = 'config';
 export const GENERATED_PROMPT_SOURCE_VALUE = 'semrush';
 
 /**
+ * The `source` values that exist ONLY as the output of {@link deriveSource} —
+ * never a legal `prompts.source` input, never accepted by the v2 create
+ * validator or the create-tag closed-value enum (tag-display-names.md §6 item
+ * 3). `ai-onboarding` is the remap target for the retired `origin` dimension
+ * (tag-display-names.md §3): it is a real, structural slug (not a display
+ * placeholder) — it must be disjoint from {@link SOURCE_VALUES} today, exactly
+ * as it will be once the vocabulary freezes. Python twin:
+ * `DERIVED_PROMPT_SOURCES` beside `KNOWN_PROMPT_SOURCES`
+ * (mysticat-data-service `scripts/serenity_migration/tags.py`); keep the two
+ * in sync (slugs, not labels — no drift risk from the identity placeholders).
+ */
+export const DERIVED_SOURCE_VALUES = Object.freeze(['ai-onboarding']);
+
+/**
  * Canonical producing-system slug → customer-facing TAG NAME (the tree-write
  * boundary map, tag-display-names.md §1 item 3 — "the tag-name map"). Covers
- * every {@link SOURCE_VALUES} entry.
+ * every {@link SOURCE_VALUES} entry that can still reach the tree as its own
+ * tag PLUS every {@link DERIVED_SOURCE_VALUES} entry.
  *
  * FROZEN and EXHAUSTIVE over that set, enforced by a unit test that FAILS the
  * moment a canonical value is added without an entry. There is deliberately NO
@@ -383,10 +404,11 @@ export const GENERATED_PROMPT_SOURCE_VALUE = 'semrush';
  * many-to-one; that map is WP-D3, out of scope here.)
  */
 export const SOURCE_LABEL = Object.freeze(
-  SOURCE_VALUES.reduce((acc, slug) => {
-    acc[slug] = slug;
-    return acc;
-  }, /** @type {Record<string, string>} */ ({})),
+  [...SOURCE_VALUES, ...DERIVED_SOURCE_VALUES]
+    .reduce((acc, slug) => {
+      acc[slug] = slug;
+      return acc;
+    }, /** @type {Record<string, string>} */ ({})),
 );
 
 /** Backing map for {@link displayToSlug} — built once from {@link SOURCE_LABEL}. */
@@ -610,6 +632,21 @@ export function canonicalizeSource(value) {
     return null;
   }
   return canonical;
+}
+
+/**
+ * Source canonicalization helper. Authorship and producing system are
+ * independent dimensions.
+ *
+ * `null` propagates from {@link canonicalizeSource}: "do not tag this prompt",
+ * never a substituted default (mirrors `canonicalizeSource`'s own contract).
+ *
+ * @param {unknown} source - a raw or already-canonical `prompts.source` value.
+ * @returns {string | null} the `source`-dimension tag slug to attach, or
+ *   `null` when the prompt must not be tagged at all.
+ */
+export function deriveSource(source) {
+  return canonicalizeSource(source);
 }
 
 /**

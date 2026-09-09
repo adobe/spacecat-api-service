@@ -27,6 +27,7 @@ import {
   defaultMarketName,
   listTagsForProject,
   listProjectTagTree,
+  tagConstraints,
   listSliceModels,
   listUnionModels,
   syncModelsForProject,
@@ -694,7 +695,7 @@ export async function handleCreateMarketSubworkspace(
   // so classification can later apply intent/origin/type values per prompt and the
   // Categories surface has a `category` root to hang customer categories under.
   // Idempotent (resolve-before-create), and unconditional: every project carries
-  // exactly the five dimension roots, whether or not it has prompts yet.
+  // exactly the six dimension roots, whether or not it has prompts yet.
   const provisioned = await provisionDimensionTree(transport, workspaceId, projectId, log);
 
   // Attach the selected AI models (LLMs) to the project before populating /
@@ -1011,7 +1012,7 @@ export async function handleDeleteMarketSubworkspace(
  * @param {string} workspaceId - Semrush (sub-)workspace id.
  * @param {string} projectId - AIO project id.
  * @param {any} [log] - logger, used to surface a ceiling-hit truncation warning.
- * @returns {Promise<{ items: Array<{ id?: string, name?: string }> }>}
+ * @returns {Promise<{ items: Array<{ id?: string, name?: string }>, complete: boolean }>}
  */
 async function listStandaloneProjectTags(transport, workspaceId, projectId, log) {
   const items = [];
@@ -1035,11 +1036,11 @@ async function listStandaloneProjectTags(transport, workspaceId, projectId, log)
       log?.warn?.('listStandaloneProjectTags: page ceiling hit; standalone tag set may be truncated', {
         workspaceId, projectId, pages: PAGE_LIMIT, limit: LIMIT,
       });
-      break;
+      return { items, complete: false };
     }
     page += 1;
   }
-  return { items };
+  return { items, complete: true };
 }
 
 /**
@@ -1066,30 +1067,29 @@ export async function handleListTagsSubworkspace(transport, workspaceId, query, 
   // NESTED-TREE MODE (parity with flat handleListTags): a `parentId` query param
   // drills the standalone AIO tag tree instead of the prompt-derived merge below.
   if (query?.parentId !== undefined) {
-    return listProjectTagTree(
+    const explicitPaging = query.page !== undefined || query.limit !== undefined;
+    const result = await listProjectTagTree(
       transport,
       workspaceId,
       projectId,
       validateParentIdQuery(String(query.parentId)),
       log,
+      undefined,
+      {
+        explicit: explicitPaging,
+        page: query.page,
+        limit: query.limit,
+      },
     );
+    return { ...result, constraints: tagConstraints() };
   }
   // A tag exists in two forms: attached to ≥1 prompt (listTagsForProject scans the
   // prompt vocabulary) OR standalone (registered via createProjectTags but not yet
   // carried by any prompt — e.g. a just-created, still-empty category).
-  // The Categories surface must round-trip BOTH, so merge them by tag name. The
-  // standalone list is best-effort: a hiccup there must not regress the
-  // prompt-derived behavior that already worked.
+  // The Categories surface must round-trip BOTH, so merge them by tag name.
   const [fromPrompts, standalone] = await Promise.all([
     listTagsForProject(transport, workspaceId, projectId, { geoTargetId, languageCode }, log),
-    Promise.resolve()
-      .then(() => listStandaloneProjectTags(transport, workspaceId, projectId, log))
-      .catch((e) => {
-        log?.warn?.('handleListTagsSubworkspace: standalone tag list failed (non-fatal)', {
-          workspaceId, projectId, error: e?.message,
-        });
-        return { items: [] };
-      }),
+    listStandaloneProjectTags(transport, workspaceId, projectId, log),
   ]);
   // Merge by ID, not by name. Names are unique only per (project, parent), so a
   // sub-category `human` and the `origin` value `human` are two distinct tags —
@@ -1132,7 +1132,7 @@ export async function handleListTagsSubworkspace(transport, workspaceId, query, 
       byId.set(entry.id, entry);
     }
   }
-  return { items: [...byId.values()] };
+  return { items: [...byId.values()], complete: fromPrompts.complete && standalone.complete };
 }
 
 /**

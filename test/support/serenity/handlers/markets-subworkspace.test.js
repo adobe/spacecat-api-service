@@ -902,7 +902,7 @@ describe('markets-subworkspace handlers', () => {
       );
       expect(res.status).to.equal(201);
       // The taxonomy is provisioned by resolving the tree; this project already
-      // carries all five roots and every closed value, so nothing is created.
+      // carries all six roots and every closed value, so nothing is created.
       expect(transport.createProjectTags).to.not.have.been.called;
       // models attached
       expect(transport.addAiModel).to.have.been.calledWith(WS, 'new-proj', 'm-1');
@@ -1322,6 +1322,7 @@ describe('markets-subworkspace handlers', () => {
         childrenCount: 0,
         promptsCount: 0,
         path: [{ id: 'root-1', name: 'category:Footwear' }],
+        compatibility: { state: 'readOnly', reason: 'separatorInName' },
       }]);
       expect(transport.listPromptsByTags).to.not.have.been.called;
       expect(transport.listProjectTags).to.have.been.calledOnceWithExactly(WS, 'p-tag', {
@@ -1380,7 +1381,7 @@ describe('markets-subworkspace handlers', () => {
       expect(transport.listProjectTags).to.have.been.calledWith(WS, 'p-tag');
     });
 
-    it('keeps prompt-derived tags when the standalone tag list call fails (best-effort)', async () => {
+    it('fails closed when the standalone tag list cannot be completed', async () => {
       const transport = makeTransport({
         listProjects: sinon.stub().resolves({ items: [proj({ id: 'p-tag' })] }),
         listPromptsByTags: sinon.stub().resolves({
@@ -1388,8 +1389,12 @@ describe('markets-subworkspace handlers', () => {
         }),
         listProjectTags: sinon.stub().rejects(new Error('boom')),
       });
-      const result = await handleListTagsSubworkspace(transport, WS, { geoTargetId: 2840, languageCode: 'en' }, log);
-      expect(result.items).to.deep.equal([{ id: 't-1', name: 'category:Running Shoes' }]);
+      await expect(handleListTagsSubworkspace(
+        transport,
+        WS,
+        { geoTargetId: 2840, languageCode: 'en' },
+        log,
+      )).to.be.rejectedWith('boom');
     });
 
     it('upgrades a synthetic prompt-derived id to the canonical standalone id (no shadowing)', async () => {
@@ -1446,7 +1451,7 @@ describe('markets-subworkspace handlers', () => {
       expect(result.items).to.deep.equal([{ id: 'human', name: 'human' }]);
     });
 
-    it('warns when the standalone tag page ceiling is hit (possible truncation)', async () => {
+    it('returns partial results when the standalone tag page ceiling is hit', async () => {
       const fullPage = Array.from({ length: 100 }, (_, i) => ({ id: `t${i}`, name: `category:C${i}` }));
       const warnLog = { info: () => {}, error: () => {}, warn: sinon.stub() };
       const transport = makeTransport({
@@ -1455,7 +1460,13 @@ describe('markets-subworkspace handlers', () => {
         // Every page is full → the walk never short-circuits and runs to the ceiling.
         listProjectTags: sinon.stub().resolves({ items: fullPage }),
       });
-      await handleListTagsSubworkspace(transport, WS, { geoTargetId: 2840, languageCode: 'en' }, warnLog);
+      const result = await handleListTagsSubworkspace(
+        transport,
+        WS,
+        { geoTargetId: 2840, languageCode: 'en' },
+        warnLog,
+      );
+      expect(result.complete).to.equal(false);
       expect(warnLog.warn).to.have.been.calledWithMatch(/page ceiling hit/);
       expect(transport.listProjectTags.callCount).to.equal(50);
     });
@@ -1982,7 +1993,7 @@ describe('markets-subworkspace — defensive branch coverage', () => {
   // `createPromptsWithMetadata` is ATOMIC on an unresolvable id — it 500s and writes
   // nothing — so the handler must fail before it builds the call, not after.
   it('generateAndAttachPrompts: 502s when the standard prompt tag ids cannot be resolved', async () => {
-    // The five roots exist; no closed value under any of them does, and the
+    // The six roots exist; no closed value under any of them does, and the
     // create echoes nothing back. `provisionDimensionTree` fails closed, so the
     // handler never reaches a prompt write holding an unresolved id.
     const transport = makeTransport({
@@ -2003,7 +2014,7 @@ describe('markets-subworkspace — defensive branch coverage', () => {
     ).then(() => null, (e) => e);
 
     expect(err.status).to.equal(502);
-    expect(err.message).to.match(/did not persist the tag\(s\)/);
+    expect(err.message).to.match(/upstream created the tag but echoed no id/);
     // Nothing was attached — the seam fails before any prompt write is built.
     expect(transport.createPromptsWithMetadata).to.have.not.been.called;
   });
@@ -2032,7 +2043,7 @@ describe('markets-subworkspace — defensive branch coverage', () => {
     ).then(() => null, (e) => e);
 
     expect(err.status).to.equal(502);
-    expect(err.message).to.match(/did not persist the tag\(s\): non-branded/);
+    expect(err.message).to.match(/upstream created the tag but echoed no id/);
     expect(transport.createPromptsWithMetadata).to.have.not.been.called;
   });
 });
