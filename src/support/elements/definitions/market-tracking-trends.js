@@ -13,6 +13,7 @@
 import { hasText } from '@adobe/spacecat-shared-utils';
 import { buildAdvancedFilters, buildModelFilter } from '../constants.js';
 import { dateToIsoWeek } from '../week-utils.js';
+import { buildFacetedTagFilters } from './prompts.js';
 
 /**
  * Payload builders + response transformer backing
@@ -62,7 +63,7 @@ import { dateToIsoWeek } from '../week-utils.js';
  * @returns {object} Elements API request payload.
  */
 function buildMarketTrendPayload({
-  model, platform, startDate, endDate, projectIds = [], projectCol,
+  model, platform, startDate, endDate, projectIds = [], projectCol, tagPaths, category,
 }) {
   // "All platforms" (param absent or 'all') → omit CBF_model so Semrush aggregates across
   // every model that produced data; otherwise scope to the single resolved model (LLMO-7093).
@@ -77,6 +78,7 @@ function buildMarketTrendPayload({
       filters: projectIds.map((val) => ({ op: 'eq', val, col: projectCol })),
     });
   }
+  advancedFilters.push(...buildFacetedTagFilters({ tagPaths, category }));
   return {
     auto_bucketing: 'week',
     filters: {
