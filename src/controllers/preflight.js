@@ -30,6 +30,18 @@ import {
 export const AUDIT_STEP_IDENTIFY = 'identify';
 export const AUDIT_STEP_SUGGEST = 'suggest';
 
+/**
+ * The ONLY `metadata.payload` fields the preflight job-status DTO exposes — exactly
+ * what the ASO preflight MFE reads. The reader projects these explicitly rather than
+ * returning the verbatim `metadata.payload`, so a future/sensitive field on `payload`
+ * can never leak (the SEC-5 defence one level deeper). Adding a field the MFE needs is
+ * a one-line change here, and the unit test imports this same constant so its
+ * allowlist assertion can never drift from the projection.
+ */
+export const PREFLIGHT_PAYLOAD_ALLOWLIST = Object.freeze([
+  'step', 'reason', 'errorCode', 'siteId', 'urls',
+]);
+
 const ACCESSIBILITY_AUDIT_NAME = 'accessibility';
 
 /**
@@ -352,16 +364,19 @@ function PreflightController(ctx, log, env) {
       // Emit the terminal-state observability log (shared with the Mystique path).
       logPreflightOutcome(log, PREFLIGHT_PROCESS_AUDW, job);
 
-      // Preflight-shaped metadata allowlist. Projects an explicit field allowlist —
-      // jobType/tags plus payload.{step,reason,errorCode,siteId,urls} — rather than
-      // returning the verbatim `metadata.payload`. Returning the whole payload would
-      // reintroduce the SEC-5 leak one level deeper if payload ever grew a sensitive
-      // field. The allowlisted payload fields are exactly what the ASO preflight MFE
-      // reads (payload.{step,reason,errorCode}); step/reason/errorCode must survive.
-      // Metadata is guaranteed present: loadJobScopedToCaller admitted this job by its
-      // metadata.jobType. `payload` may be absent on a malformed record — guard it.
+      // Preflight-shaped metadata allowlist. Projects an explicit field allowlist
+      // ({@link PREFLIGHT_PAYLOAD_ALLOWLIST}: jobType/tags plus the allowlisted
+      // payload fields) rather than returning the verbatim `metadata.payload` —
+      // returning the whole payload would reintroduce the SEC-5 leak one level
+      // deeper if payload ever grew a sensitive field. Metadata is guaranteed
+      // present: loadJobScopedToCaller admitted this job by its metadata.jobType.
+      // `payload` may be absent on a malformed record — guard it.
       const metadata = job.getMetadata();
       const payload = metadata.payload ?? {};
+      const projectedPayload = PREFLIGHT_PAYLOAD_ALLOWLIST.reduce((acc, key) => {
+        acc[key] = payload[key];
+        return acc;
+      }, {});
 
       return ok({
         jobId: job.getId(),
@@ -378,13 +393,7 @@ function PreflightController(ctx, log, env) {
         metadata: {
           jobType: metadata.jobType,
           tags: metadata.tags,
-          payload: {
-            step: payload.step,
-            reason: payload.reason,
-            errorCode: payload.errorCode,
-            siteId: payload.siteId,
-            urls: payload.urls,
-          },
+          payload: projectedPayload,
         },
       });
     } catch (error) {

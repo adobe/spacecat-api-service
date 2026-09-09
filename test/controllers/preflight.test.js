@@ -24,6 +24,7 @@ import * as utils from '../../src/support/utils.js';
 import PreflightController, {
   countIssuesForAudit,
   PREFLIGHT_PROCESS_AUDW,
+  PREFLIGHT_PAYLOAD_ALLOWLIST,
 } from '../../src/controllers/preflight.js';
 
 // Make fetch available globally
@@ -1570,9 +1571,10 @@ describe('Preflight Controller', () => {
       expect(body.metadata.payload.errorCode).to.equal('CANCELLED');
       expect(body.metadata.payload.siteId).to.equal('test-site-123');
       expect(body.metadata.payload.urls).to.deep.equal(['https://main--example-site.aem.page/test.html']);
-      // Exactly the allowlist — nothing else.
+      // Exactly the allowlist — nothing else. Assert against the shared constant so
+      // this can never drift from the controller's projection.
       expect(Object.keys(body.metadata.payload).sort())
-        .to.deep.equal(['errorCode', 'reason', 'siteId', 'step', 'urls']);
+        .to.deep.equal([...PREFLIGHT_PAYLOAD_ALLOWLIST].sort());
       // The injected extra field is dropped, from body and any log line.
       expect(body.metadata.payload.secret).to.be.undefined;
       expect(JSON.stringify(body)).to.not.include('SECRET-PAYLOAD-do-not-leak');
@@ -1628,10 +1630,11 @@ describe('Preflight Controller', () => {
       expect(allLogArgs).to.not.include(TOKEN);
     });
 
-    it('returns 200 with an empty payload allowlist for a job whose metadata has no payload', async () => {
+    it('returns 404 (fail-closed) for a job whose metadata has no payload — resolver yields no siteId', async () => {
       // A malformed/partially-written preflight record (metadata present — it passed
-      // the jobType gate — but no payload) must not throw; the DTO returns an
-      // all-undefined payload allowlist.
+      // the jobType gate — but no payload) has no resolvable owner siteId, so the
+      // ownership resolver yields undefined and the primitive fails CLOSED (404),
+      // never returning the job. It must not throw.
       const jobNoPayload = {
         ...mockJob,
         getMetadata: () => ({ jobType: 'preflight', tags: ['preflight'] }),

@@ -49,7 +49,10 @@ import AccessControlUtil from './access-control-util.js';
  * @param {string} params.jobId - The AsyncJob UUID (already format-validated by the caller).
  * @param {string[]} params.allowedJobTypes - Job types this endpoint may return.
  * @param {(job: object) => (string|undefined)} [params.resolveOwnerSiteId] - Resolves the
- *   owning siteId from the job; omit for ownerless job types.
+ *   owning siteId from the job. When SUPPLIED, it is authoritative and fail-closed:
+ *   a resolver that returns `undefined`/empty denies the job (404) rather than
+ *   skipping the ownership check. Omit it ONLY for job types that have no owning
+ *   site at all (scoped by jobType alone).
  * @returns {Promise<{ job?: object, error?: object }>} Exactly one of `job`
  *   (authorized) or `error` (an HTTP response to return as-is).
  */
@@ -75,17 +78,20 @@ export async function loadJobScopedToCaller(context, {
   if (resolveOwnerSiteId) {
     const siteId = resolveOwnerSiteId(job);
     if (!hasText(siteId)) {
-      log?.warn?.(`[async-job-access] job ${jobId} has an owner resolver but no resolvable siteId; denying`);
+      // The jobType is logged so a misconfigured resolver (wrong field path for
+      // this job type) is distinguishable from a data-quality issue (a legitimate
+      // record written without its owner siteId).
+      log?.warn?.(`[async-job-access] job ${jobId} (jobType=${jobType}) has an owner resolver but no resolvable siteId; denying`);
       return { error: notFound(`Job with ID ${jobId} not found`) };
     }
     const site = await dataAccess.Site.findById(siteId);
     if (!site) {
-      log?.warn?.(`[async-job-access] job ${jobId} references missing site ${siteId}; denying`);
+      log?.warn?.(`[async-job-access] job ${jobId} (jobType=${jobType}) references missing site ${siteId}; denying`);
       return { error: notFound(`Job with ID ${jobId} not found`) };
     }
     const accessControlUtil = AccessControlUtil.fromContext(context);
     if (!await accessControlUtil.hasAccess(site)) {
-      log?.warn?.(`[async-job-access] caller lacks access to site ${siteId} owning job ${jobId}; denying`);
+      log?.warn?.(`[async-job-access] caller lacks access to site ${siteId} owning job ${jobId} (jobType=${jobType}); denying`);
       return { error: notFound(`Job with ID ${jobId} not found`) };
     }
   }
