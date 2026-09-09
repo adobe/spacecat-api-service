@@ -1,3 +1,10 @@
+## [1.799.2](https://github.com/adobe/spacecat-api-service/compare/v1.799.1...v1.799.2) (2026-09-09)
+
+
+### Bug Fixes
+
+* scope Serenity sentiment-overview to the brand via CBF_brand | LLMO-7456 ([#3238](https://github.com/adobe/spacecat-api-service/issues/3238)) ([473fc2d](https://github.com/adobe/spacecat-api-service/commit/473fc2d965d375b239217b42c7c3d38919bcd287)), closes [Hi#level](https://github.com/Hi/issues/level)
+
 ## [1.799.1](https://github.com/adobe/spacecat-api-service/compare/v1.799.0...v1.799.1) (2026-09-09)
 
 
