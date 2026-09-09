@@ -2515,25 +2515,35 @@ function SuggestionsController(ctx, sqs, env) {
           ];
         }
 
-        // Best-effort: queue a routing-validation job for the suggestions being deployed and
-        // record its jobId on the experiment so a future consumer can poll it. A failure here
-        // must not block the deploy itself -- validation is an auxiliary check, not a gate.
-        try {
-          const oaeValidationController = OaeValidationController(
-            { dataAccess, sqs },
-            context.log,
-            env,
-          );
-          const { jobId: oaeValidationJobId } = await oaeValidationController.createJob({
-            siteId,
-            type: ROUTING_VALIDATOR_TYPE,
-            suggestionIds: validSuggestionIds,
-          });
-          metadataBase[OAE_VALIDATION_JOBS_METADATA_KEY] = {
-            [ROUTING_VALIDATOR_TYPE]: oaeValidationJobId,
-          };
-        } catch (error) {
-          context.log.warn(`[edge-geo-exp] site: ${apexBaseUrl}, failed to queue OAE routing-validation job: ${error.message}`);
+        // Best-effort: queue a routing-validation job for the high-impact measurement
+        // suggestions and record its jobId on the experiment so a future consumer can poll it.
+        // Only runs when highImpactSuggestionIds is actually present -- a plain (non-pattern)
+        // deploy has no discrete measurement target set to validate, so no job is created.
+        // A failure here must not block the deploy itself -- validation is an auxiliary check,
+        // not a gate.
+        // NOTE: this scoping is expected to change as the ROUTING_VALIDATION polling side
+        // (llmo-experimentation-engine) is finalized -- revisit together.
+        if (hasHighImpactIds) {
+          try {
+            const oaeValidationController = OaeValidationController(
+              { dataAccess, sqs },
+              context.log,
+              env,
+            );
+            const { jobId: oaeValidationJobId } = await oaeValidationController.createJob({
+              siteId,
+              type: ROUTING_VALIDATOR_TYPE,
+              suggestionIds: metadataBase.highImpactSuggestionIds,
+            });
+            // Array (not a single id) so a future retry job (created by
+            // llmo-experimentation-engine's ROUTING_VALIDATION phase) can be appended, keeping a
+            // full history of every job run for this validation type rather than overwriting it.
+            metadataBase[OAE_VALIDATION_JOBS_METADATA_KEY] = {
+              [ROUTING_VALIDATOR_TYPE]: [oaeValidationJobId],
+            };
+          } catch (error) {
+            context.log.warn(`[edge-geo-exp] site: ${apexBaseUrl}, failed to queue OAE routing-validation job: ${error.message}`);
+          }
         }
 
         const experimentName = context.data?.name || getExperimentName(opportunity.getType());
