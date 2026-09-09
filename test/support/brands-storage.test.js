@@ -4125,8 +4125,11 @@ describe('brands-storage', () => {
     it('updateBrand does not false-positive on a routine edit that omits status', async () => {
       const postgrestClient = createTableMockClient({
         brands: [
-          { data: { id: BRAND_ID }, error: null }, // update (no existing fetch — status absent)
-          { data: makeBrandRow({ name: 'Renamed', status: 'active' }), error: null }, // getBrandById
+          // LLMO-7284: a rename now always pre-reads the current row. Status
+          // 'pending' keeps the AC13 promotion/rename guard from firing (this
+          // test's own point — the guard only reacts to `status`, not a bare rename).
+          { data: { id: BRAND_ID, status: 'pending' }, error: null },
+          { data: makeBrandRow({ name: 'Renamed', status: 'active' }), error: null }, // update
         ],
       });
 
@@ -4346,8 +4349,9 @@ describe('brands-storage', () => {
     it('updateBrand does not touch child tables when a collection field is omitted', async () => {
       const postgrestClient = createCapturingClient({
         brands: [
-          { data: { id: BRAND_ID }, error: null }, // update
-          { data: makeBrandRow({ name: 'Renamed' }), error: null }, // getBrandById
+          // LLMO-7284: a rename now always pre-reads the current row first.
+          { data: { id: BRAND_ID, status: 'pending' }, error: null },
+          { data: makeBrandRow({ name: 'Renamed' }), error: null }, // update
         ],
       });
 
@@ -4434,8 +4438,9 @@ describe('brands-storage', () => {
     it('updateBrand succeeds when expectedUpdatedAt is omitted (backward compatible)', async () => {
       const postgrestClient = createTableMockClient({
         brands: [
-          { data: { id: BRAND_ID }, error: null }, // update (no existing fetch needed)
-          { data: makeBrandRow({ name: 'Renamed' }), error: null }, // getBrandById
+          // LLMO-7284: a rename now always pre-reads the current row first.
+          { data: { id: BRAND_ID, status: 'pending' }, error: null },
+          { data: makeBrandRow({ name: 'Renamed' }), error: null }, // update
         ],
       });
 
@@ -4474,7 +4479,10 @@ describe('brands-storage', () => {
     it('updateBrand returns null (404 path) when the brand truly does not exist and no concurrency token was supplied', async () => {
       const postgrestClient = createTableMockClient({
         brands: [
-          { data: null, error: null }, // UPDATE matched nothing, no prior existence check was made
+          // LLMO-7284: a rename now always pre-reads the current row first — the
+          // brand doesn't exist, so this comes back null too (no dup-scan follows).
+          { data: null, error: null }, // pre-read: brand not found
+          { data: null, error: null }, // UPDATE matched nothing (same reason)
         ],
       });
 
@@ -4493,8 +4501,9 @@ describe('brands-storage', () => {
     it('updateBrand does not touch child tables when a collection field is explicitly null', async () => {
       const postgrestClient = createCapturingClient({
         brands: [
-          { data: { id: BRAND_ID }, error: null }, // update
-          { data: makeBrandRow({ name: 'Renamed' }), error: null }, // getBrandById
+          // LLMO-7284: a rename now always pre-reads the current row first.
+          { data: { id: BRAND_ID, status: 'pending' }, error: null },
+          { data: makeBrandRow({ name: 'Renamed' }), error: null }, // update
         ],
       });
 
