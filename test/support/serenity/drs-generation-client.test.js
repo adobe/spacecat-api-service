@@ -128,13 +128,14 @@ describe('drs-generation-client', () => {
     expect(isRetryableJobError(err)).to.equal(true);
   });
 
-  it('emits DRSInvokeDurationMs {Environment} + DRSInvokeFailure {Environment,Reason} (infra SEARCH-sum)', async () => {
-    const heldInvoke = sinon.stub().resolves({ prompts: [], ship_summary: { verdict: 'held' } });
+  // eslint-disable-next-line no-underscore-dangle
+  const metaOf = (e) => (e && e._aws ? e._aws.CloudWatchMetrics[0] : null);
+  async function captureMetrics(run) {
     const logs = [];
     const orig = console.log;
     console.log = (...a) => logs.push(a.join(' '));
     try {
-      await invokeDrsGeneration(ctx(), baseRequest, { invoke: heldInvoke }).catch(() => {});
+      await run();
     } finally {
       console.log = orig;
     }
@@ -145,20 +146,32 @@ describe('drs-generation-client', () => {
         return null;
       }
     };
-    // eslint-disable-next-line no-underscore-dangle
-    const meta = (e) => (e && e._aws ? e._aws.CloudWatchMetrics[0] : null);
-    const envelopes = logs.map(parse).filter((e) => meta(e));
-    const byMetric = (name) => envelopes.find((e) => meta(e).Metrics[0].Name === name);
+    const envelopes = logs.map(parse).filter((e) => metaOf(e));
+    return (name) => envelopes.find((e) => metaOf(e).Metrics[0].Name === name);
+  }
 
+  it('always emits DRSInvokeDurationMs {Environment}, and never a failure on a held verdict (fail-open)', async () => {
+    const heldInvoke = sinon.stub().resolves({ prompts: [], ship_summary: { verdict: 'held' } });
+    const byMetric = await captureMetrics(
+      () => invokeDrsGeneration(ctx(), baseRequest, { invoke: heldInvoke }).catch(() => {}),
+    );
     const duration = byMetric('DRSInvokeDurationMs');
-    expect(meta(duration).Namespace).to.equal('SpacecatSerenityMarketWorker');
-    expect(meta(duration).Dimensions[0]).to.deep.equal(['Environment']);
+    expect(metaOf(duration).Namespace).to.equal('SpacecatSerenityMarketWorker');
+    expect(metaOf(duration).Dimensions[0]).to.deep.equal(['Environment']);
+    // held must NOT increment the paging failure metric.
+    expect(byMetric('DRSInvokeFailure')).to.equal(undefined);
+  });
 
-    // The failure metric carries {Environment, Reason}; the infra alarm SUMs a
-    // SEARCH across Reason values, so the breakdown stays visible.
+  it('emits DRSInvokeFailure {Environment}-only on a genuine terminal failure (gate_error)', async () => {
+    const gateInvoke = sinon.stub().resolves({
+      prompts: [], ship_summary: { verdict: 'gate_error', error_category: 'terminal' },
+    });
+    const byMetric = await captureMetrics(
+      () => invokeDrsGeneration(ctx(), baseRequest, { invoke: gateInvoke }).catch(() => {}),
+    );
     const failure = byMetric('DRSInvokeFailure');
-    expect(meta(failure).Dimensions[0]).to.deep.equal(['Environment', 'Reason']);
-    expect(failure.Reason).to.equal('verdict:held');
+    expect(metaOf(failure).Dimensions[0]).to.deep.equal(['Environment']);
+    expect(failure.Reason).to.equal(undefined);
   });
 });
 

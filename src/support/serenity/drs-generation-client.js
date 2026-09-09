@@ -223,21 +223,22 @@ export async function invokeDrsGeneration(context, request, { invoke } = {}) {
     );
   }
 
-  // Best-effort EMF metrics (spacecat-infrastructure#780 alarms read these). The
-  // EMF helper always adds an `Environment` dimension, so both metrics carry it:
-  //   - DRSInvokeDurationMs → dims { Environment }.
-  //   - DRSInvokeFailure     → dims { Environment, Reason } (Reason ∈ invoke |
-  //     verdict:held | verdict:gate_error | verdict:unknown). The infra failure alarm
-  //     is SUM(SEARCH('{SpacecatSerenityMarketWorker,Environment,Reason}
-  //     MetricName="DRSInvokeFailure" Environment="<env>"')) — sums across all Reason
-  //     values, so the total is intact and the per-Reason breakdown stays visible.
-  //     Neither metric is dimensionless; both alarms scope by Environment (lowercase
-  //     dev|stage|prod, matching this helper's values).
+  // Best-effort EMF metrics (spacecat-infrastructure#780 alarms read these). Both
+  // `DRSInvokeDurationMs` and `DRSInvokeFailure` carry ONLY the EMF `Environment`
+  // dimension (lowercase dev|stage|prod); the infra alarms match on
+  // `dimensions={Environment=<env>}` and read the plain metric — no Reason dimension.
   const metricsOpts = { environment: resolveEnvironment(env), namespace: METRICS_NAMESPACE };
+  // `DRSInvokeFailure` is the PAGING metric — it must fire ONLY on a genuine
+  // failure (a transport/invoke error, or a terminal `gate_error`), NEVER on
+  // `ship` or `held`. `held` is fail-OPEN: a successful invoke whose substance
+  // layer legitimately held the prompts — counting it here would page on-call for
+  // every normal held market (spacecat-infrastructure#780 taxonomy). Both metrics
+  // carry only the EMF `Environment` dimension; the failure reason lives in the
+  // structured log, not a metric dimension.
   const emitFailure = (reason) => {
     log?.warn?.('[drs-generation] invoke failure', { reason, market: request.market, siteId: request.siteId });
     try {
-      emitMetric({ name: 'DRSInvokeFailure', value: 1, dimensions: { Reason: reason } }, metricsOpts);
+      emitMetric({ name: 'DRSInvokeFailure', value: 1 }, metricsOpts);
     } catch { /* metrics are best-effort, never mask the real error */ }
   };
 
@@ -247,6 +248,7 @@ export async function invokeDrsGeneration(context, request, { invoke } = {}) {
   try {
     parsed = await invoker(functionName, request);
   } catch (error) {
+    // A transport/invoke error (including a timeout) is a genuine failure.
     emitFailure('invoke');
     throw error;
   } finally {
@@ -266,18 +268,25 @@ export async function invokeDrsGeneration(context, request, { invoke } = {}) {
     log?.info?.('[drs-generation] non-ship verdict', {
       siteId: request.siteId, market: request.market, verdict, errorCategory,
     });
-    emitFailure(`verdict:${verdict ?? 'unknown'}`);
-    // `gate_error` with a `retryable` category is the ONLY retryable non-ship
-    // outcome; `held` and any `terminal` category fail the job (never publish an
-    // empty/held market).
+    // `held` is a legitimate fail-OPEN business outcome — terminal for the job, but
+    // NOT a failure to page on. No failure metric; the reason is only logged.
+    if (verdict === 'held') {
+      throw new DrsGenerationTerminalError(
+        `DRS generation held prompts for market ${request.market}`,
+        { verdict, errorCategory, code: GENERATION_ERROR_CODE.HELD },
+      );
+    }
+    // A retryable `gate_error` is transient (retried) — not a terminal failure yet,
+    // so it does not increment the paging metric either.
     if (verdict === 'gate_error' && errorCategory === 'retryable') {
       throw retryableJobError(`DRS generation gate_error (retryable) for market ${request.market}`);
     }
-    const terminalCodeByVerdict = {
-      held: GENERATION_ERROR_CODE.HELD,
-      gate_error: GENERATION_ERROR_CODE.GATE_ERROR,
-    };
-    const code = terminalCodeByVerdict[verdict] ?? GENERATION_ERROR_CODE.TERMINAL;
+    // Everything else here is a genuine terminal failure: a terminal `gate_error`
+    // or an unexpected/malformed verdict. This DOES page.
+    emitFailure(`verdict:${verdict ?? 'unknown'}`);
+    const code = verdict === 'gate_error'
+      ? GENERATION_ERROR_CODE.GATE_ERROR
+      : GENERATION_ERROR_CODE.TERMINAL;
     throw new DrsGenerationTerminalError(
       `DRS generation did not ship (verdict=${verdict}, error_category=${errorCategory ?? 'none'})`,
       { verdict, errorCategory, code },
