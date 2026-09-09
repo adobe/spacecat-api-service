@@ -1497,6 +1497,53 @@ describe('brands-storage', () => {
       expect(caught.status).to.equal(400);
     });
 
+    it('strips control/invisible/bidi chars from brand guidance while keeping printable text', async () => {
+      // Good{U+202E bidi override}{U+200B zero-width}{NUL}{U+2028 line sep}text 🚀
+      const dirty = `Good${String.fromCharCode(0x202E)}${String.fromCharCode(0x200B)}`
+        + `${String.fromCharCode(0)}${String.fromCharCode(0x2028)}text 🚀`;
+      const client = createCapturingClient({
+        brands: [
+          { data: null, error: null },
+          { data: { id: BRAND_ID, name: 'Test' }, error: null },
+          {
+            data: makeBrandRow({ name: 'Test', brand_context: 'Goodtext 🚀' }),
+            error: null,
+          },
+        ],
+      });
+
+      await upsertBrand({
+        organizationId: ORG_ID,
+        brand: { name: 'Test', brandContext: dirty },
+        postgrestClient: client,
+      });
+
+      const brandsUpsert = client.capturedCalls.upsert.find((c) => c.table === 'brands');
+      // Bidi/zero-width/control/line-separator removed; letters, space and emoji preserved.
+      expect(brandsUpsert.row.brand_context).to.equal('Goodtext 🚀');
+    });
+
+    it('rejects brand guidance longer than 4000 chars with a 400-tagged error', async () => {
+      const client = createCapturingClient({
+        brands: [{ data: null, error: null }],
+      });
+
+      let caught;
+      try {
+        await upsertBrand({
+          organizationId: ORG_ID,
+          brand: { name: 'Test', mentionSentimentGuidance: 'a'.repeat(4001) },
+          postgrestClient: client,
+        });
+      } catch (error) {
+        caught = error;
+      }
+
+      expect(caught).to.be.an('error');
+      expect(caught.message).to.equal('mentionSentimentGuidance must be at most 4000 characters');
+      expect(caught.status).to.equal(400);
+    });
+
     it('does NOT overwrite an existing brand site_id and warns (LLMO-5556)', async () => {
       const log = { warn: sinon.stub(), info: sinon.stub(), error: sinon.stub() };
       const client = createCapturingClient({

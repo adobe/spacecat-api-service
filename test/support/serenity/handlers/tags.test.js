@@ -1428,6 +1428,36 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
       );
     });
 
+    it('returns the requested parent when an explicit re-parent gets a stale upstream echo', async () => {
+      const transport = makeTransport({
+        updateProjectTag: sinon.stub().resolves({
+          id: TAG_IDS.subCategoryHuman,
+          name: 'human',
+          parent_id: TAG_IDS.categoryRunningShoes,
+        }),
+      });
+      const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
+      const res = await handler.handleUpdateTag(
+        transport,
+        dataAccess,
+        BRAND,
+        WORKSPACE,
+        TAG_IDS.subCategoryHuman,
+        {
+          name: 'human',
+          parentId: TAG_IDS.categoryRoot,
+          geoTargetId: 2840,
+          languageCode: 'en',
+        },
+        fakeLog(),
+      );
+
+      expect(res.body.parentId).to.equal(TAG_IDS.categoryRoot);
+      expect(res.body.path).to.deep.equal([
+        { id: TAG_IDS.categoryRoot, name: 'category' },
+      ]);
+    });
+
     // A server-owned value is a descendant too, so it is renameable through
     // the same path — the dimension root above it is what is protected. The
     // vocabulary is authored by the server. Every resolve-or-create keys on the
@@ -1882,6 +1912,34 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
       expect(res.body).to.not.have.property('brandId');
       expect(transport.updateProjectTag)
         .to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-sub-1', TARGET, { name: 'Footwear', parentId: TAG_IDS.categoryRoot });
+    });
+
+    it('returns the requested parent when an explicit re-parent gets a stale upstream echo', async () => {
+      const handler = await loadHandler(sinon.stub().resolves({ id: 'proj-sub-1' }));
+      const transport = makeTransport({
+        updateProjectTag: sinon.stub().resolves({
+          id: TAG_IDS.subCategoryHuman,
+          name: 'human',
+          parent_id: TAG_IDS.categoryRunningShoes,
+        }),
+      });
+      const res = await handler.handleUpdateTagSubworkspace(
+        transport,
+        WORKSPACE,
+        TAG_IDS.subCategoryHuman,
+        {
+          name: 'human',
+          parentId: TAG_IDS.categoryRoot,
+          geoTargetId: 2840,
+          languageCode: 'en',
+        },
+        fakeLog(),
+      );
+
+      expect(res.body.parentId).to.equal(TAG_IDS.categoryRoot);
+      expect(res.body.path).to.deep.equal([
+        { id: TAG_IDS.categoryRoot, name: 'category' },
+      ]);
     });
 
     // The subworkspace twin shares buildUpdatePayload and the placement guard, so
