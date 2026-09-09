@@ -1891,9 +1891,16 @@ export async function listRegions(postgrestClient) {
 // silently overwriting a newer winner's write — `data` comes back `null` and the caller
 // (the worker) treats that as "stand down", not an error.
 
+// Deliberately excludes semrush_provisioning_candidate_workspace_id (LLMO-7418 external-review
+// Finding 7): the column is still written by persistProvisioningCandidate — its CAS `.is(...,
+// null)` check is a real double-delivery mutex (two concurrent SQS deliveries of the same first
+// hop start with identical, empty job metadata, so only a DB-level compare-and-set can tell them
+// apart) — but nothing anywhere reads the value back. The worker's actual candidate resolution is
+// entirely metadata-based (threaded hop-to-hop through the self-requeue payload). Selecting it
+// here just to store it as `provisioningCandidateWorkspaceId`, which no caller ever consulted, was
+// dead weight presented as a real recovery path.
 const PROVISIONING_SELECT = 'id, semrush_provisioning_status, semrush_provisioning_attempt_id, '
-  + 'semrush_provisioning_job_id, semrush_provisioning_candidate_workspace_id, '
-  + 'semrush_sub_workspace_id, status, site_id';
+  + 'semrush_provisioning_job_id, semrush_sub_workspace_id, status, site_id';
 
 /**
  * Reads a brand's current async-provisioning state. Plain read, no compare-and-set — used by the
@@ -1934,7 +1941,6 @@ export async function getBrandProvisioningState(brandId, postgrestClient) {
     provisioningStatus: data.semrush_provisioning_status,
     provisioningAttemptId: data.semrush_provisioning_attempt_id,
     provisioningJobId: data.semrush_provisioning_job_id,
-    provisioningCandidateWorkspaceId: data.semrush_provisioning_candidate_workspace_id,
   };
 }
 

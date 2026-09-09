@@ -50,7 +50,6 @@ function pendingState(overrides = {}) {
     provisioningStatus: 'pending',
     provisioningAttemptId: ATTEMPT_ID,
     provisioningJobId: 'job-1',
-    provisioningCandidateWorkspaceId: null,
     ...overrides,
   };
 }
@@ -244,7 +243,7 @@ describe('handlers/provision-workspace-job.js (LLMO-7352 / LLMO-7418)', () => {
   describe('resuming a self-requeued hop — candidate already persisted', () => {
     it('polls the SAME candidate (from job metadata, not re-read from the DB) without re-running create-or-adopt', async () => {
       getBrandProvisioningStateStub.resolves(
-        pendingState({ provisioningCandidateWorkspaceId: CANDIDATE_WS }),
+        pendingState(),
       );
       transport.getWorkspaceStatus.resolves({ status: 'not_ready' });
       const { provisionWorkspaceHandler } = await loadHandler();
@@ -261,7 +260,7 @@ describe('handlers/provision-workspace-job.js (LLMO-7352 / LLMO-7418)', () => {
 
     it('carries the candidate id AND its freshlyCreated provenance across another self-requeue hop', async () => {
       getBrandProvisioningStateStub.resolves(
-        pendingState({ provisioningCandidateWorkspaceId: CANDIDATE_WS }),
+        pendingState(),
       );
       transport.getWorkspaceStatus.resolves({ status: 'not_ready' });
       const { provisionWorkspaceHandler } = await loadHandler();
@@ -288,7 +287,6 @@ describe('handlers/provision-workspace-job.js (LLMO-7352 / LLMO-7418)', () => {
       // different attempt entirely. Only our own job metadata still knows we created it.
       getBrandProvisioningStateStub.resolves(pendingState({
         provisioningAttemptId: 'attempt-2',
-        provisioningCandidateWorkspaceId: 'some-other-candidate',
       }));
       const { provisionWorkspaceHandler } = await loadHandler();
       const job = makeJob(makeMetadata({

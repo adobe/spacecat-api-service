@@ -4453,6 +4453,10 @@ describe('brands-storage', () => {
               semrush_provisioning_status: 'pending',
               semrush_provisioning_attempt_id: ATTEMPT_ID,
               semrush_provisioning_job_id: JOB_ID,
+              // Deliberately present in the raw row but absent from PROVISIONING_SELECT/the
+              // mapped result below (LLMO-7418 external-review Finding 7) — asserts the
+              // candidate column is genuinely not read back, not just coincidentally absent from
+              // this fixture.
               semrush_provisioning_candidate_workspace_id: CANDIDATE_WS,
               site_id: 'a-site-id',
             },
@@ -4470,7 +4474,6 @@ describe('brands-storage', () => {
           provisioningStatus: 'pending',
           provisioningAttemptId: ATTEMPT_ID,
           provisioningJobId: JOB_ID,
-          provisioningCandidateWorkspaceId: CANDIDATE_WS,
         });
       });
 
