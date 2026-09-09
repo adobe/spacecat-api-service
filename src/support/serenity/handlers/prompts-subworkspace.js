@@ -17,7 +17,10 @@ import { hasText } from '@adobe/spacecat-shared-utils';
 import { ErrorWithStatusCode } from '../../utils.js';
 import { ERROR_CODES, isMeteredQuota, isUpstreamGone } from '../errors.js';
 import { normalizeGeoTargetId, normalizeLanguageCode } from '../validation.js';
-import { invalidateTagCacheForProject } from './markets.js';
+import {
+  invalidateTagCacheForProject,
+  MAX_TAG_FILTER_VALUES,
+} from './markets.js';
 import {
   buildPromptDto,
   normalizePromptInput,
@@ -26,15 +29,21 @@ import {
   makeIntentInjector,
   validateDeferPublish,
   parseUpdatePromptBody,
-  capUpdateTagIds,
   mapLimit,
   publishAffected,
   reconcilePublishErrors,
   resolveSort,
   buildUpdateMetadata,
+  buildExistingPromptIndex,
+  findStoredPrompt,
+  applyUpsertTagWrites,
   DEFAULT_PAGE_LIMIT,
   MAX_PAGE_LIMIT,
   MAX_TAG_IDS,
+  validateTagIds,
+  listFacetedPrompts,
+  capUpdateTagIds,
+  assertCreatePromptTagLimits,
   BULK_CREATE_CONCURRENCY,
   BULK_PROMPTS_MAX_ITEMS,
   deleteProjectBatches,
@@ -88,9 +97,12 @@ export async function handleListPromptsSubworkspace(transport, workspaceId, quer
     ? query.limit : DEFAULT_PAGE_LIMIT;
   const limit = Math.min(requestedLimit, MAX_PAGE_LIMIT);
   const search = hasText(query?.search) ? String(query.search).trim() : undefined;
-  const tagIds = Array.isArray(query?.tagIds)
-    ? query.tagIds.slice(0, MAX_TAG_IDS).map(String).filter(Boolean)
-    : [];
+  const tagIds = validateTagIds(query?.tagIds, {
+    maximum: query?.tagFilterMode === 'faceted-v1' ? MAX_TAG_FILTER_VALUES : MAX_TAG_IDS,
+    tooLargeCode: query?.tagFilterMode === 'faceted-v1'
+      ? ERROR_CODES.TAG_FILTER_TOO_LARGE
+      : ERROR_CODES.INVALID_TAG_FILTER,
+  });
   // sort/order (LLMO-6289): validated against the metadata allow-list and
   // forwarded upstream — kept in lockstep with the flat-mode twin.
   const { sort, order } = resolveSort(query);
@@ -103,6 +115,24 @@ export async function handleListPromptsSubworkspace(transport, workspaceId, quer
     );
     err.code = ERROR_CODES.MARKET_NOT_FOUND;
     throw err;
+  }
+  if (query?.tagFilterMode === 'faceted-v1') {
+    return listFacetedPrompts(
+      transport,
+      workspaceId,
+      String(project.id),
+      {
+        geoTargetId,
+        languageCode,
+        page,
+        limit,
+        search,
+        sort,
+        order,
+        tagIds,
+      },
+      log,
+    );
   }
 
   // Each prompt's tags already carry their own parentage (see buildTagsOf), so
@@ -124,7 +154,7 @@ export async function handleListPromptsSubworkspace(transport, workspaceId, quer
   }
   return {
     items: items
-      .map((item) => buildPromptDto(geoTargetId, languageCode, item))
+      .map((item) => buildPromptDto(geoTargetId, languageCode, item, undefined))
       .filter(Boolean),
     total,
     page,
@@ -176,17 +206,31 @@ export async function handleCreatePromptsSubworkspace(
       400,
     );
   }
+  assertCreatePromptTagLimits(inputs);
   const deferPublish = validateDeferPublish(body);
 
   const projectsBySlice = await buildSliceProjectMap(transport, workspaceId, log);
-  // CREATE: origin comes from the trusted request-principal classification;
-  // source defaults independently to `config`.
+  // CREATE: user-authenticated write stamps independent `origin=human` and
+  // `source=config` values (see the flat-mode
+  // twin handleCreatePrompts, source-dimension.md §1).
   const injectComputedTags = makePromptTagInjector(
     transport,
     workspaceId,
     classifyPromptType,
     log,
-    { originValue, sourceValue: PROXY_CREATE_SOURCE_VALUE },
+    {
+      originValue,
+      sourceValue: PROXY_CREATE_SOURCE_VALUE,
+      normalizeCustomerTags: true,
+    },
+  );
+  // UPSERT: the EDIT-shaped injector (no originValue/sourceValue). Lockstep with
+  // the flat twin handleCreatePrompts.
+  const injectStoredTags = makePromptTagInjector(
+    transport,
+    workspaceId,
+    classifyPromptType,
+    log,
   );
   // Unified layer (serenity-docs#32): batch-classify every distinct text ONCE
   // under the shared request deadline, then thread the resolved map into each
@@ -208,8 +252,37 @@ export async function handleCreatePromptsSubworkspace(
   );
   const injectComputedIntent = makeIntentInjector(transport, workspaceId, intentByText, log);
 
-  const results = await mapLimit(inputs, BULK_CREATE_CONCURRENCY, async (raw) => {
-    const { value: input, reason } = normalizePromptInput(raw);
+  // UPSERT — lockstep with the flat twin handleCreatePrompts; see its docblock for
+  // why a repeated text must REPLACE tags rather than be posted again.
+  const normalizedInputs = inputs.map((raw) => {
+    const { value, reason } = normalizePromptInput(raw);
+    const project = value
+      ? projectsBySlice.get(sliceKey(value.geoTargetId, value.languageCode))
+      : undefined;
+    return {
+      raw, input: value, reason, projectId: project ? String(project.id) : null,
+    };
+  });
+  /** @type {Map<string, { byText: Map<string, any>, byLower: Map<string, any> }>} */
+  const promptIndexByProject = new Map();
+  await Promise.all(
+    [...new Set(normalizedInputs.map((n) => n.projectId).filter(Boolean))].map(
+      async (projectId) => {
+        promptIndexByProject.set(
+          /** @type {string} */ (projectId),
+          await buildExistingPromptIndex(
+            transport,
+            workspaceId,
+            /** @type {string} */ (projectId),
+            log,
+          ),
+        );
+      },
+    ),
+  );
+
+  const results = await mapLimit(normalizedInputs, BULK_CREATE_CONCURRENCY, async (entry) => {
+    const { raw, input, reason } = entry;
     if (!input) {
       return {
         skipped: {
@@ -218,8 +291,7 @@ export async function handleCreatePromptsSubworkspace(
         },
       };
     }
-    const project = projectsBySlice.get(sliceKey(input.geoTargetId, input.languageCode));
-    if (!project) {
+    if (!entry.projectId) {
       return {
         skipped: {
           text: input.text,
@@ -227,8 +299,30 @@ export async function handleCreatePromptsSubworkspace(
         },
       };
     }
-    const projectId = String(project.id);
+    const { projectId } = entry;
+    const stored = findStoredPrompt(promptIndexByProject.get(projectId), input.text);
     try {
+      if (stored) {
+        // REPLACE the existing prompt's tags; stored authorship rides along.
+        // `source` is dropped for the same reason as the flat twin: a per-item
+        // CREATE override would resolve a second value into a one-value dimension.
+        const { source: _, ...editable } = input;
+        let typed = await injectStoredTags(projectId, {
+          ...editable,
+          tagIds: [...new Set([...input.tagIds, ...stored.carryOverTagIds])],
+        });
+        typed = await injectComputedIntent(projectId, typed);
+        return {
+          updated: {
+            semrushPromptId: stored.semrushPromptId,
+            geoTargetId: typed.geoTargetId,
+            languageCode: input.languageCode,
+            text: typed.text,
+            tagIds: typed.tagIds,
+          },
+          affectedProjectId: projectId,
+        };
+      }
       // Unified layer: strip caller-supplied type/origin/source/intent, then inject
       // the computed type, derived origin, producing source, and classified intent.
       // The injectors act on disjoint dimensions.
@@ -282,21 +376,70 @@ export async function handleCreatePromptsSubworkspace(
   });
 
   const created = [];
+  const updated = [];
   const skipped = [];
   const failed = [];
   const affectedProjectIds = [];
+  /** @type {Map<string, Array<{ semrushPromptId: string, tagIds: string[] }>>} */
+  const updatesByProject = new Map();
+  // Collapsed by upstream prompt id, LAST ROW WINS — see the flat twin
+  // handleCreatePrompts for why (duplicate ids in one atomic replace batch are
+  // undefined upstream, and `updated` must not count one prompt twice).
+  /** @type {Map<string, { projectId: string, entry: any }>} */
+  const updatedById = new Map();
   for (const r of results) {
     if (r.created) {
       // `rollbackProjectId` is internal bookkeeping for reconcilePublishErrors' rollback below;
       // stripped before the response is returned.
       created.push({ ...r.created, rollbackProjectId: r.affectedProjectId });
       affectedProjectIds.push(r.affectedProjectId);
+    } else if (r.updated) {
+      // NO `rollbackProjectId` — the quota rollback DELETEs, and an updated prompt
+      // pre-existed this request.
+      updatedById.set(r.updated.semrushPromptId, {
+        projectId: r.affectedProjectId,
+        entry: r.updated,
+      });
     } else if (r.skipped) {
       skipped.push(r.skipped);
     } else if (r.failed) {
       failed.push(r.failed);
     }
   }
+  for (const { projectId, entry } of updatedById.values()) {
+    updated.push(entry);
+    affectedProjectIds.push(projectId);
+    const pending = updatesByProject.get(projectId) ?? [];
+    pending.push({ semrushPromptId: entry.semrushPromptId, tagIds: entry.tagIds });
+    updatesByProject.set(projectId, pending);
+  }
+
+  // One batched replace-mode tag write per project.
+  await Promise.all([...updatesByProject].map(async ([projectId, pending]) => {
+    try {
+      await applyUpsertTagWrites(transport, workspaceId, projectId, pending, callerId, log);
+    } catch (e) {
+      const quota = isMeteredQuota(e);
+      if (quota) {
+        await alertQuotaRejection({
+          orgId, brandId, workspaceId, caseType: 'brandCarveExhausted', dimension: 'prompts',
+        }, env, log);
+      }
+      for (let i = updated.length - 1; i >= 0; i -= 1) {
+        if (pending.some((p) => p.semrushPromptId === updated[i].semrushPromptId)) {
+          const [item] = updated.splice(i, 1);
+          failed.push({
+            text: item.text,
+            geoTargetId: item.geoTargetId,
+            languageCode: item.languageCode,
+            status: quota ? 409 : (e.status || 500),
+            ...(quota ? { error: ERROR_CODES.QUOTA_EXCEEDED } : {}),
+            message: redactUpstreamMessage(e),
+          });
+        }
+      }
+    }
+  }));
 
   for (const pid of new Set(affectedProjectIds)) {
     invalidateTagCacheForProject(workspaceId, pid);
@@ -304,11 +447,16 @@ export async function handleCreatePromptsSubworkspace(
 
   if (deferPublish) {
     log?.info?.('serenity create-prompts (subworkspace): deferPublish set — prompts written as draft, publish skipped', {
-      workspaceId, created: created.length, skipped: skipped.length, failed: failed.length,
+      workspaceId,
+      created: created.length,
+      updated: updated.length,
+      skipped: skipped.length,
+      failed: failed.length,
     });
     return {
       // eslint-disable-next-line no-unused-vars -- omit the bookkeeping field
       created: created.map(({ rollbackProjectId, ...rest }) => rest),
+      updated,
       skipped,
       failed,
       published: false,
@@ -342,6 +490,7 @@ export async function handleCreatePromptsSubworkspace(
   return {
     // eslint-disable-next-line no-unused-vars -- destructuring-omit to strip the bookkeeping field
     created: created.map(({ rollbackProjectId, ...rest }) => rest),
+    updated,
     skipped,
     failed,
     published: true,
@@ -399,13 +548,7 @@ export async function handleUpdatePromptSubworkspace(
     };
   }
   const projectId = String(project.id);
-
-  // capUpdateTagIds guards against sanitizeTagIds' create-time cap strategy
-  // (see the flat-mode twin handleUpdatePrompt / capUpdateTagIds' docblock): a
-  // client echoing its prompt's full existing tag list at/beyond MAX_TAG_IDS
-  // would otherwise risk a closed-dimension id (origin/source — never
-  // re-derived on UPDATE) being silently dropped by a flat positional slice.
-  const cappedTagIds = await capUpdateTagIds(transport, workspaceId, projectId, nextTagIds, log);
+  const cappedTagIds = await capUpdateTagIds(nextTagIds);
 
   // Recompute the type AND intent tags from the NEW text BEFORE any upstream write
   // (see the flat-mode twin handleUpdatePrompt): the unified layer must run before
@@ -413,7 +556,13 @@ export async function handleUpdatePromptSubworkspace(
   // (serenity-docs#31, #32). No `originValue`: origin is never re-derived on edit
   // (origin-dimension.md §3 item 3); the stored origin the caller echoes rides
   // through the replace-mode tag write untouched.
-  const injectComputedTags = makePromptTagInjector(transport, workspaceId, classifyPromptType, log);
+  const injectComputedTags = makePromptTagInjector(
+    transport,
+    workspaceId,
+    classifyPromptType,
+    log,
+    { normalizeCustomerTags: true },
+  );
   const intentByText = await classifyPromptIntents(
     [nextText],
     {

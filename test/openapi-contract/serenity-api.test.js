@@ -112,7 +112,11 @@ const FIXTURES = {
         languageCode: 'en',
         text: 'sample',
         tags: [{
-          id: 't-1', name: 'topic-a', parentId: null, path: null,
+          id: 't-1',
+          name: 'topic-a',
+          parentId: null,
+          path: null,
+          compatibility: { state: 'unverified', reason: 'taxonomyNotLoaded' },
         }],
         // Authorship metadata fields (LLMO-6289) on a list item.
         createdAt: '2026-07-01T00:00:00Z',
@@ -138,6 +142,14 @@ const FIXTURES = {
         geoTargetId: 2840,
         languageCode: 'en',
         text: 'sample',
+      }],
+      // A live response always carries `updated` — the prompts whose text already
+      // existed and had their tags replaced rather than being created again.
+      updated: [{
+        semrushPromptId: 'sem-2',
+        geoTargetId: 2840,
+        languageCode: 'en',
+        text: 'already here',
       }],
       skipped: [],
       failed: [],
@@ -201,6 +213,27 @@ const FIXTURES = {
     handlerResult: { deleted: 1, failed: [] },
     data: {
       prompts: [{ semrushPromptId: 'sem-1', geoTargetId: 2840, languageCode: 'en' }],
+    },
+  },
+  bulkTagSerenityPrompts: {
+    expectedStatus: 202,
+    controllerMethod: 'bulkTagPrompts',
+    handlerName: 'handleBulkTags',
+    handlerResult: {
+      status: 202,
+      body: {
+        jobId: '00000000-0000-4000-8000-000000000001',
+        jobType: 'bulkTags',
+        status: 'IN_PROGRESS',
+        replayed: false,
+      },
+    },
+    data: {
+      geoTargetId: 2840,
+      languageCode: 'en',
+      operation: 'assign',
+      tagIds: ['tag-1'],
+      filter: { tagIds: [], tagFilterMode: 'faceted-v1' },
     },
   },
   listSerenityMarkets: {
@@ -309,6 +342,28 @@ const FIXTURES = {
     controllerMethod: 'deleteTag',
     handlerName: 'handleDeleteTag',
     handlerResult: undefined,
+    params: { tagId: 'tag-1' },
+    query: { geoTargetId: '2840', languageCode: 'en' },
+  },
+  getSerenityTagImpact: {
+    expectedStatus: 200,
+    controllerMethod: 'getTagImpact',
+    handlerName: 'handleTagImpact',
+    handlerResult: {
+      status: 200,
+      body: {
+        tagId: 'tag-1',
+        name: 'Campaign',
+        path: [
+          { id: 'root-tag', name: 'tag' },
+          { id: 'tag-1', name: 'Campaign' },
+        ],
+        descendantCount: 0,
+        affectedPromptCount: 1,
+        complete: true,
+        revision: '"revision"',
+      },
+    },
     params: { tagId: 'tag-1' },
     query: { geoTargetId: '2840', languageCode: 'en' },
   },
@@ -782,6 +837,25 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
     expect(ids).to.deep.equal(fixtureKeys);
   });
 
+  it('SerenityPromptTag rejects a runtime tag that omits compatibility', () => {
+    const schema = spec?.components?.schemas?.SerenityPromptTag;
+    expect(schema).to.exist;
+    const validate = makeAjv().compile(schema);
+
+    const valid = validate({
+      id: 'tag-1',
+      name: 'Campaign',
+      parentId: 'tag-root',
+      path: [{ id: 'tag-root', name: 'tag' }],
+    });
+
+    expect(valid).to.equal(false);
+    expect(validate.errors.some((error) => (
+      error.keyword === 'required'
+      && error.params?.missingProperty === 'compatibility'
+    ))).to.equal(true);
+  });
+
   /**
    * Each operationId in the spec gets a generated test that:
    * 1. stubs the handler to return the fixture
@@ -876,6 +950,7 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
         handleCreatePrompts: sinon.stub(),
         handleUpdatePrompt: sinon.stub(),
         handleBulkDeletePrompts: sinon.stub(),
+        handleBulkTags: sinon.stub(),
         handleListMarkets: sinon.stub(),
         handleGetMarket: sinon.stub(),
         handleCreateMarket: sinon.stub(),
@@ -884,6 +959,7 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
         handleCreateTag: sinon.stub(),
         handleUpdateTag: sinon.stub(),
         handleDeleteTag: sinon.stub(),
+        handleTagImpact: sinon.stub(),
         handleListModels: sinon.stub(),
         handleUpdateModels: sinon.stub(),
         handleCreateMarketSubworkspace: sinon.stub(),
@@ -930,6 +1006,7 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
             handleCreatePrompts: handlerStubs.handleCreatePrompts,
             handleUpdatePrompt: handlerStubs.handleUpdatePrompt,
             handleBulkDeletePrompts: handlerStubs.handleBulkDeletePrompts,
+            assertCreatePromptTagLimits: () => {},
           },
           '../../src/support/serenity/handlers/markets.js': {
             handleListMarkets: handlerStubs.handleListMarkets,
@@ -949,6 +1026,15 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
             handleUpdateTagSubworkspace: sinon.stub(),
             handleDeleteTag: handlerStubs.handleDeleteTag,
             handleDeleteTagSubworkspace: sinon.stub(),
+            handleTagImpact: handlerStubs.handleTagImpact,
+            handleTagImpactSubworkspace: sinon.stub(),
+          },
+          '../../src/support/serenity/handlers/bulk-tags-job.js': {
+            BULK_TAGS_JOB_TYPE: 'serenity-bulk-tags',
+            BULK_TAGS_PUBLIC_JOB_TYPE: 'bulkTags',
+            handleBulkTags: handlerStubs.handleBulkTags,
+            handleBulkTagsSubworkspace: sinon.stub(),
+            pageBulkFailures: (result) => result,
           },
           '../../src/support/serenity/handlers/markets-subworkspace.js': {
             handleListMarketsSubworkspace: handlerStubs.handleListMarketsSubworkspace,

@@ -23,12 +23,16 @@ import { resolveLocation } from '../locations.js';
 import { resolveSiteIdentity, resolveMarketIdentity, logMarketCreated } from '../site-linkage.js';
 import { createProvisionAndPublishProject, CreateNoProjectIdError } from '../project-provisioning.js';
 import { alertQuotaRejection } from '../quota-alerts.js';
+import { classifyTagCompatibility } from '../tag-compatibility.js';
 
 /** @typedef {import('../rest-transport.js').SerenityTransport} SerenityTransport */
 /** @typedef {import('../rest-transport.js').ProjectCreateBody} ProjectCreateBody */
 
 const LANGUAGE_CACHE_TTL_MS = 60 * 60 * 1000;
 export const MAX_MODEL_IDS = 50;
+export const MAX_PROMPT_TAG_IDS = 50;
+export const MAX_TAG_FILTER_VALUES = 50;
+export const BULK_IDEMPOTENCY_TTL_SECONDS = 24 * 60 * 60;
 const MAX_PARENT_ID_QUERY_LEN = 200;
 
 /**
@@ -624,45 +628,99 @@ export async function handleDeleteMarket(
 
 // 60s TTL bounds cross-Lambda-container staleness (multiple warm containers
 // each hold an independent Map). Same-container freshness comes from the
-// `invalidateTagCacheForProject` call wired into every mutating prompts
-// handler (POST /prompts, PATCH, bulk-delete). Together: writes are visible
-// immediately on the same container, and at most ~60s late on a peer.
+// `invalidateTagCacheForProject` call wired into every mutating prompt/tag
+// handler. Together: writes are visible immediately on the same container,
+// and at most ~60s late on a peer.
 const TAG_CACHE_TTL_MS = 60 * 1000;
+// Taxonomy snapshots drive validation as well as display, so keep their peer-
+// container staleness window much shorter. Worker drift checks explicitly
+// force-refresh instead of trusting even this bounded cache.
+const TAG_TREE_SNAPSHOT_CACHE_TTL_MS = 5 * 1000;
 const TAG_CACHE_MAX_ENTRIES = 512;
 const tagCache = new Map();
+const tagTreeSnapshotCache = new Map();
 
 function tagCacheKey(semrushWorkspaceId, projectId) {
   return `${semrushWorkspaceId}::${projectId}`;
 }
 
 /**
- * Removes the cached tag set for one (workspace, project). Called by any
- * handler that mutates prompts in that project so the next /serenity/tags
- * read sees the new set without waiting for TTL.
+ * Removes every cached tag view for one (workspace, project). Called by any
+ * handler that mutates prompts or taxonomy in that project so flat tag reads
+ * and complete taxonomy snapshots both observe the write without waiting for
+ * their TTL.
  */
 export function invalidateTagCacheForProject(semrushWorkspaceId, projectId) {
-  tagCache.delete(tagCacheKey(semrushWorkspaceId, projectId));
+  const key = tagCacheKey(semrushWorkspaceId, projectId);
+  tagCache.delete(key);
+  tagTreeSnapshotCache.delete(key);
 }
 
 export function clearTagCache() {
   tagCache.clear();
+  tagTreeSnapshotCache.clear();
 }
 
-/* c8 ignore start -- LRU eviction only fires past TAG_CACHE_MAX_ENTRIES (512
+/**
+ * @param {string} semrushWorkspaceId
+ * @param {string} projectId
+ * @returns {unknown}
+ */
+export function getCachedTagTreeSnapshot(semrushWorkspaceId, projectId) {
+  const key = tagCacheKey(semrushWorkspaceId, projectId);
+  const cached = tagTreeSnapshotCache.get(key);
+  if (!cached || cached.expiresAt <= Date.now()) {
+    tagTreeSnapshotCache.delete(key);
+    return undefined;
+  }
+  return cached.value;
+}
+
+/* c8 ignore start -- eviction only fires past TAG_CACHE_MAX_ENTRIES (512
    distinct (workspace, project) tuples held in this container). The guard
-   is defensive against tagCache.delete failing silently; exercising it in a
+   is defensive against Map.delete failing silently; exercising it in a
    unit test would require seeding 512 cache entries which is wasted work for
    a branch the runtime hits only under unusual scale. */
-function evictTagCacheIfNeeded() {
-  while (tagCache.size >= TAG_CACHE_MAX_ENTRIES) {
-    const oldest = tagCache.keys().next().value;
+function evictTagCacheIfNeeded(cache) {
+  while (cache.size >= TAG_CACHE_MAX_ENTRIES) {
+    const oldest = cache.keys().next().value;
     if (oldest === undefined) {
       break;
     }
-    tagCache.delete(oldest);
+    cache.delete(oldest);
   }
 }
 /* c8 ignore stop */
+
+/**
+ * @param {string} semrushWorkspaceId
+ * @param {string} projectId
+ * @param {unknown} value
+ */
+export function cacheTagTreeSnapshot(semrushWorkspaceId, projectId, value) {
+  const key = tagCacheKey(semrushWorkspaceId, projectId);
+  tagTreeSnapshotCache.delete(key);
+  evictTagCacheIfNeeded(tagTreeSnapshotCache);
+  tagTreeSnapshotCache.set(key, {
+    value,
+    expiresAt: Date.now() + TAG_TREE_SNAPSHOT_CACHE_TTL_MS,
+  });
+}
+
+/**
+ * Removes a failed in-flight snapshot without deleting a newer force-refresh
+ * that replaced it under the same project key.
+ *
+ * @param {string} semrushWorkspaceId
+ * @param {string} projectId
+ * @param {unknown} value
+ */
+export function deleteCachedTagTreeSnapshotIfSame(semrushWorkspaceId, projectId, value) {
+  const key = tagCacheKey(semrushWorkspaceId, projectId);
+  if (tagTreeSnapshotCache.get(key)?.value === value) {
+    tagTreeSnapshotCache.delete(key);
+  }
+}
 
 /**
  * Project-keyed tag aggregation core, shared by the flat and subworkspace tag
@@ -732,7 +790,7 @@ export async function listTagsForProject(transport, semrushWorkspaceId, projectI
 
   if (truncated) {
     log?.warn?.(
-      'handleListTags: tag pagination ceiling reached, tag set is truncated',
+      'handleListTags: tag pagination ceiling reached',
       {
         ...(logCtx || {}),
         semrushWorkspaceId,
@@ -743,15 +801,17 @@ export async function listTagsForProject(transport, semrushWorkspaceId, projectI
         tagsFound: seen.size,
       },
     );
+    const items = Array.from(seen.values()).sort((a, b) => a.name.localeCompare(b.name));
+    return { items, complete: false };
   }
 
   const sorted = Array.from(seen.values()).sort((a, b) => a.name.localeCompare(b.name));
   // delete-then-set refreshes Map insertion order so evictTagCacheIfNeeded()
   // (LRU-by-insertion-order) treats this entry as freshest.
   tagCache.delete(cacheKey);
-  evictTagCacheIfNeeded();
+  evictTagCacheIfNeeded(tagCache);
   tagCache.set(cacheKey, { items: sorted, expiresAt: now + TAG_CACHE_TTL_MS });
-  return { items: sorted };
+  return { items: sorted, complete: true };
 }
 
 /**
@@ -763,10 +823,11 @@ export async function listTagsForProject(transport, semrushWorkspaceId, projectI
  * until the project is published (verified live 2026-07-01). Pages through the
  * level bounded by a ceiling, mirroring the standalone-tag walk.
  *
- * Unlike {@link listTagsForProject} (prompt-derived, flat, cached), this reads the
+ * Unlike {@link listTagsForProject} (prompt-derived and flat), this reads the
  * registered standalone tags keyed by their upstream ids — the ids the nested
- * create + re-parent endpoints operate on — so it is NOT cached (a just-created or
- * re-parented tag must show immediately).
+ * create + re-parent endpoints operate on. Individual levels are not cached;
+ * complete derived snapshots are cached briefly by `readTagTreeSnapshot`, with
+ * project-scoped mutation invalidation.
  *
  * @param {SerenityTransport} transport
  * @param {string} semrushWorkspaceId - Semrush (sub-)workspace id.
@@ -779,11 +840,13 @@ export async function listTagsForProject(transport, semrushWorkspaceId, projectI
  *   requested. Callers that only need to test membership (e.g. resolve-or-
  *   create) pass this to avoid paginating the whole tree; omit it to collect
  *   every item, as every pre-existing caller does.
+ * @param {{ page?: number, limit?: number, explicit?: boolean }} [paging] -
+ *   explicit upstream pagination for the nested tree endpoint.
  * @returns {Promise<{ items: Array<{
  *   id: string, name: string, parentId: string | null,
  *   childrenCount: number, promptsCount: number,
  *   path: Array<{ id: string, name: string }> | null,
- * }> }>}
+ * }>, page: number, limit: number, total: number, complete: boolean }>}
  */
 export async function listProjectTagTree(
   transport,
@@ -791,45 +854,105 @@ export async function listProjectTagTree(
   projectId,
   parentId,
   log,
-  stopWhen,
+  stopWhen = undefined,
+  paging = {},
 ) {
+  const requestedPage = typeof paging.page === 'number'
+    && Number.isInteger(paging.page) && paging.page > 0 ? paging.page : 1;
+  const requestedLimit = typeof paging.limit === 'number'
+    && Number.isInteger(paging.limit) && paging.limit > 0
+    ? Math.min(paging.limit, 100)
+    : 100;
+  if (paging?.explicit) {
+    const resp = await transport.listProjectTags(semrushWorkspaceId, projectId, {
+      parentId, page: requestedPage, limit: requestedLimit, draft: true,
+    });
+    const batch = Array.isArray(resp?.items) ? resp.items : [];
+    // eslint-disable-next-line no-use-before-define
+    const items = normalizeTreeItems(batch);
+    const hasTotal = Number.isFinite(resp?.total);
+    const total = hasTotal
+      ? Number(resp.total)
+      : ((requestedPage - 1) * requestedLimit) + items.length;
+    return {
+      // eslint-disable-next-line no-use-before-define
+      items: decorateTagTreeItems(items),
+      page: requestedPage,
+      limit: requestedLimit,
+      total,
+      complete: hasTotal
+        ? requestedPage * requestedLimit >= total
+        : batch.length < requestedLimit,
+    };
+  }
   const items = [];
+  const seenIds = new Set();
   const LIMIT = 100;
   const PAGE_LIMIT = 50;
   let page = 1;
+  let expectedTotal;
+  let stoppedEarly = false;
+  const failIncomplete = (reason) => {
+    log?.warn?.('listProjectTagTree: incomplete tag level', {
+      semrushWorkspaceId,
+      projectId,
+      parentId,
+      page,
+      reason,
+    });
+    const error = new ErrorWithStatusCode('Unable to read the complete tag tree level', 503);
+    error.code = ERROR_CODES.TAG_TREE_READ_INCOMPLETE;
+    throw error;
+  };
   while (page <= PAGE_LIMIT) {
     // eslint-disable-next-line no-await-in-loop
     const resp = await transport.listProjectTags(semrushWorkspaceId, projectId, {
       parentId, page, limit: LIMIT, draft: true,
     });
-    const batch = Array.isArray(resp?.items) ? resp.items : [];
+    if (!resp || !Array.isArray(resp.items)) {
+      failIncomplete('malformedPage');
+    }
+    if (resp.page !== undefined
+      && (!Number.isInteger(resp.page) || resp.page !== page)) {
+      failIncomplete('unexpectedPage');
+    }
+    if (resp.total !== undefined) {
+      if (!Number.isInteger(resp.total) || resp.total < 0
+        || (expectedTotal !== undefined && expectedTotal !== resp.total)) {
+        failIncomplete('inconsistentTotal');
+      }
+      expectedTotal = resp.total;
+    }
+    const batch = resp.items;
+    if (batch.some((item) => !item || typeof item.id !== 'string' || !item.id)) {
+      failIncomplete('malformedItem');
+    }
     let matched = false;
     for (const t of batch) {
-      // AIOTag.id is required upstream; guard defensively and skip a malformed row.
-      if (t && typeof t.id === 'string' && t.id) {
-        const item = {
-          id: t.id,
-          name: typeof t.name === 'string' ? t.name : '',
-          parentId: typeof t.parent_id === 'string' && t.parent_id ? t.parent_id : null,
-          childrenCount: typeof t.children_count === 'number' ? t.children_count : 0,
-          promptsCount: typeof t.prompts_count === 'number' ? t.prompts_count : 0,
-          path: Array.isArray(t.path)
-            ? t.path.map((p) => ({
-              id: typeof p?.id === 'string' ? p.id : '',
-              name: typeof p?.name === 'string' ? p.name : '',
-            }))
-            : null,
-        };
-        items.push(item);
-        if (stopWhen && stopWhen(item)) {
-          matched = true;
-        }
+      if (seenIds.has(t.id)) {
+        failIncomplete('repeatedTagId');
+      }
+      seenIds.add(t.id);
+      // eslint-disable-next-line no-use-before-define
+      const [item] = normalizeTreeItems([t]);
+      items.push(item);
+      if (stopWhen && stopWhen(item)) {
+        matched = true;
       }
     }
     if (matched) {
+      stoppedEarly = true;
       break;
     }
-    if (batch.length < LIMIT) {
+    if (expectedTotal !== undefined) {
+      if (items.length > expectedTotal
+        || (items.length < expectedTotal && batch.length < LIMIT)) {
+        failIncomplete('incompleteTotal');
+      }
+      if (items.length === expectedTotal) {
+        break;
+      }
+    } else if (batch.length < LIMIT) {
       break;
     }
     if (page === PAGE_LIMIT) {
@@ -839,11 +962,50 @@ export async function listProjectTagTree(
       log?.warn?.('listProjectTagTree: page ceiling hit; tag level may be truncated', {
         semrushWorkspaceId, projectId, parentId, pages: PAGE_LIMIT, limit: LIMIT,
       });
-      break;
+      const error = new ErrorWithStatusCode('Unable to read the complete tag tree level', 503);
+      error.code = ERROR_CODES.TAG_TREE_READ_INCOMPLETE;
+      throw error;
     }
     page += 1;
   }
-  return { items };
+  return {
+    // eslint-disable-next-line no-use-before-define
+    items: decorateTagTreeItems(items),
+    page: 1,
+    limit: LIMIT,
+    total: expectedTotal ?? items.length,
+    complete: !stoppedEarly && (expectedTotal === undefined || items.length === expectedTotal),
+  };
+}
+
+function normalizeTreeItems(batch) {
+  return batch
+    .filter((t) => t && typeof t.id === 'string' && t.id)
+    .map((t) => ({
+      id: t.id,
+      name: typeof t.name === 'string' ? t.name : '',
+      parentId: typeof t.parent_id === 'string' && t.parent_id ? t.parent_id : null,
+      childrenCount: typeof t.children_count === 'number' ? t.children_count : 0,
+      promptsCount: typeof t.prompts_count === 'number' ? t.prompts_count : 0,
+      path: Array.isArray(t.path)
+        ? t.path.map((p) => ({
+          id: typeof p?.id === 'string' ? p.id : '',
+          name: typeof p?.name === 'string' ? p.name : '',
+        }))
+        : null,
+    }));
+}
+
+export function decorateTagTreeItems(items) {
+  return classifyTagCompatibility(items);
+}
+
+export function tagConstraints() {
+  return {
+    maxPromptTagIds: MAX_PROMPT_TAG_IDS,
+    maxTagFilterValues: MAX_TAG_FILTER_VALUES,
+    bulkIdempotencyTtlSeconds: BULK_IDEMPOTENCY_TTL_SECONDS,
+  };
 }
 
 /**
@@ -896,13 +1058,21 @@ export async function handleListTags(
   }
   const projectId = row.getSemrushProjectId();
   if (query?.parentId !== undefined) {
-    return listProjectTagTree(
+    const explicitPaging = query.page !== undefined || query.limit !== undefined;
+    const result = await listProjectTagTree(
       transport,
       semrushWorkspaceId,
       projectId,
       validateParentIdQuery(String(query.parentId)),
       log,
+      undefined,
+      {
+        explicit: explicitPaging,
+        page: query.page,
+        limit: query.limit,
+      },
     );
+    return { ...result, constraints: tagConstraints() };
   }
   return listTagsForProject(
     transport,
