@@ -1290,13 +1290,19 @@ export function createSerenityTransport({ env, imsToken }) {
     /**
      * POST /v2/workspaces/{ws}/projects/{pid}/ai_models/benchmarks — batch-create
      * benchmarks. Body is an ARRAY of `{ brand_name, domain, primary_url?,
-     * brand_aliases?, color? }`. `primary_url` is honoured at create
+     * brand_aliases?, color?, main_brand? }`. `primary_url` is honoured at create
      * (live-verified 2026-08-19) and is what a subpath brand must carry, since
-     * `domain` alone scores it against its bare host. The API cannot set
-     * `main_brand` (system-managed); a created
-     * benchmark is a regular tracked brand. Returns `{ ids: [...], existing_count }`.
-     * We use it to create the project's own-brand benchmark when Semrush has not
-     * auto-provisioned one (the `benchmark_id` brand URLs must attach to).
+     * `domain` alone scores it against its bare host. `main_brand: true` IS ALSO
+     * accepted and honoured at create (live-verified; see mysticat-data-service
+     * PR #945/executor.py `_own_brand_body` — a prior version of this doc claimed
+     * the API cannot set it, which was the root cause of LLMO-7421: every
+     * benchmark this codebase created was left unflagged). It can only be set at
+     * create — a PUT never sets it (see `updateBenchmark` below) — so repairing
+     * an unflagged own-domain benchmark means delete-then-recreate-flagged, not
+     * an in-place update. Returns `{ ids: [...], existing_count }`. We use it to
+     * create/repair the project's own-brand benchmark (see
+     * `ensureOwnBrandBenchmark` / `assertMainBrandBenchmark` in `brand-urls.js`)
+     * — the `benchmark_id` brand URLs must attach to.
      *
      * @param {string} workspaceId
      * @param {string} projectId
