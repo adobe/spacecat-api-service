@@ -135,6 +135,7 @@ function reqCtxOf(ctx) {
   return {
     spaceCatId: ctx?.params?.spaceCatId,
     brandId: ctx?.params?.brandId,
+    isS2SConsumer: AccessControlUtil.isS2SConsumer(ctx),
   };
 }
 
@@ -147,10 +148,22 @@ function mapError(e, log, reqCtx = {}) {
   if (e instanceof ElementsTransportError) {
     logUpstreamError(log, 'Elements upstream error', e, reqCtx);
     if (e.status === 401 || e.status === 403) {
-      return createResponse(
-        { error: errorTokenForStatus(e.status), message: 'Upstream authorization failed' },
-        e.status,
-      );
+      // An S2S caller presents no upstream credential of its own - the request is
+      // authenticated with the shared SEMRUSH_ADMIN_ELEMENT_API_KEY, so a 401/403 here
+      // means THAT credential was rotated, expired, or lost workspace access, not that
+      // the caller's own JWT/capability is bad. Mirroring 401/403 back would make a
+      // correctly-authorized consumer retry a doomed request and would surface a
+      // platform-wide credential outage as scattered per-tenant auth errors instead of
+      // one clear signal - mirrors buildS2SHeaders' missing-key case, which is
+      // deliberately 503 rather than 401 for the same reason.
+      if (reqCtx.isS2SConsumer) {
+        log.error(`Elements upstream rejected the SEMRUSH_ADMIN_ELEMENT_API_KEY credential (status=${e.status}) - check whether it was rotated, expired, or lost workspace access`);
+      } else {
+        return createResponse(
+          { error: errorTokenForStatus(e.status), message: 'Upstream authorization failed' },
+          e.status,
+        );
+      }
     }
     return createResponse({ error: 'elementsUpstreamError', message: 'Upstream request failed' }, 502);
   }
@@ -425,7 +438,31 @@ async function authorizeOrgAccess(ctx) {
     return { error: notFound(`Organization not found: ${spaceCatId}`) };
   }
   const accessControl = AccessControlUtil.fromContext(ctx);
-  if (!await accessControl.hasAccess(organization)) {
+  const log = ctx?.log;
+  const requestId = ctx?.invocation?.id || 'unknown';
+  const route = `${ctx?.pathInfo?.method || 'GET'} ${ctx?.pathInfo?.suffix || 'elements-route'}`;
+  const isS2SConsumer = AccessControlUtil.isS2SConsumer(ctx);
+
+  // Unchanged from the existing S2S auth flow: hasAccess() already handles admins
+  // (hasAdminReadAccess()) and org membership via the JWT's own `tenants` claim - the SAME
+  // check used for human session tokens. An S2S consumer issued a per-request,
+  // customer-scoped token (its `tenants` claim naming the org) passes through here exactly
+  // like a regular user; Layer 1 (required-capabilities.js) already gated entry to the route
+  // on brand:read. Nothing new is added to the authorization decision itself here - this
+  // only adds an audit-log observation around the existing, unmodified check.
+  const granted = await accessControl.hasAccess(organization);
+  if (isS2SConsumer) {
+    const clientId = ctx?.s2sConsumer?.getClientId?.() || 'n/a';
+    const consumerId = ctx?.s2sConsumer?.getId?.() || 'n/a';
+    if (granted) {
+      // Audit trail for S2S reads (READALL_CAPABILITY_DESIGN.md): log clientId, consumerId,
+      // the org granted, and requestId on every successful S2S pass.
+      log?.info(`[s2s] ${route} granted clientId=${clientId} consumerId=${consumerId} organizationId=${spaceCatId} requestId=${requestId}`);
+    } else {
+      log?.info(`[acl] Denied ${route} - reason=no-org-access clientId=${clientId} consumerId=${consumerId} requestId=${requestId}`);
+    }
+  }
+  if (!granted) {
     return { error: forbidden('User does not have access to this organization') };
   }
   return { organization };
@@ -622,8 +659,16 @@ export default function ElementsController(context, log, env) {
   }
 
   async function buildService(ctx) {
-    const imsToken = await resolveElementsImsToken(ctx);
-    return createElementsService(createElementsTransport({ env, imsToken }), log);
+    // S2S consumers authenticate to the upstream Semrush gateway with an Apikey
+    // (SEMRUSH_ADMIN_ELEMENT_API_KEY), not a forwarded IMS bearer token, so skip
+    // IMS token resolution entirely for them - requireImsBearer would otherwise
+    // reject the S2S JWT (authInfo.getType() === 'jwt', not 'ims').
+    const isS2SConsumer = AccessControlUtil.isS2SConsumer(ctx);
+    const imsToken = isS2SConsumer ? undefined : await resolveElementsImsToken(ctx);
+    return createElementsService(
+      createElementsTransport({ env, imsToken, isS2SConsumer }),
+      log,
+    );
   }
 
   /**
@@ -806,12 +851,32 @@ export default function ElementsController(context, log, env) {
    *   - a real error status (404 no workspace / org / brand, 403 no SpaceCat org access,
    *     502 upstream 5xx / timeout, 503 misconfig) — INDETERMINATE, not a denial; the UI
    *     treats these as "assume access" so a transient blip no longer flashes the banner.
+   *
+   * S2S EXCEPTION: for an S2S consumer, this always returns `{ hasAccess: true }` once
+   * `authorizeOrg` has granted access to the organization/brand, WITHOUT probing the
+   * upstream User Manager resource-allowance endpoint at all (see the short-circuit below).
+   * An S2S consumer authorized for a brand gets access to all of that brand's Semrush
+   * elements — there is no narrower, per-workspace S2S grant this probe could usefully
+   * check. One consequence: if the Semrush-side `SEMRUSH_ADMIN_ELEMENT_API_KEY` credential
+   * itself lost access to a specific brand's workspace, this endpoint would NOT reflect
+   * that for S2S callers (only actual data-fetching calls would fail); it only ever
+   * reflects the caller's own org/brand authorization, never Semrush-side credential health.
    */
   const checkAccess = async (ctx) => {
     try {
       const auth = await authorizeOrg(ctx);
       if (auth.error) {
         return auth.error;
+      }
+      // This probe forwards the CALLER'S OWN IMS token to check THEIR access to the linked
+      // Semrush workspace - it has no meaning for an S2S consumer, which authenticates with a
+      // JWT (not IMS) and, once past authorizeOrg's hasAccess(organization) check above, is
+      // already confirmed to own this specific organization (and, once authorized, has access
+      // to all of its Semrush elements - see the S2S EXCEPTION note above). Short-circuit here
+      // rather than falling through to resolveElementsImsToken/requireImsBearer, which would
+      // reject the S2S JWT with a 401.
+      if (AccessControlUtil.isS2SConsumer(ctx)) {
+        return ok({ hasAccess: true });
       }
       // Forward the caller's own IMS token (x-promise-token flow, falling back to Authorization) so
       // the upstream auth check is scoped to THIS user, then probe the resource-allowance endpoint.
@@ -857,12 +922,26 @@ export default function ElementsController(context, log, env) {
         return auth.error;
       }
       const query = extractQuery(ctx);
+      // Any caller-supplied id must belong to this brand - otherwise it could scope the
+      // Prompts element to another brand's Semrush project (see listCitedDomains for the
+      // same guard). Reuses extractProjectIds (dedup, UUID validation, MAX_PROJECT_IDS cap)
+      // rather than a raw splitCsv, matching every other project-scoped handler.
+      const projectIds = extractProjectIds(query);
+      const { BrandSemrushProject } = ctx?.dataAccess ?? {};
+      const brandSemrushProjects = await fetchBrandSemrushProjects(
+        BrandSemrushProject,
+        [auth.brand],
+      );
+      const ownershipError = checkProjectIdsOwnership(projectIds, brandSemrushProjects);
+      if (ownershipError) {
+        return ownershipError;
+      }
       const service = await buildService(ctx);
       const result = await service.getPrompts(auth.workspaceId, {
         model: query.model,
         platform: query.platform,
         tags: splitCsv(query.tag),
-        projectIds: splitCsv(query.projectId || query.project_id),
+        projectIds,
         enrichUserIntent: parseUserIntent(query),
         ...tagFilterParams(query),
       });

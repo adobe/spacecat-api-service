@@ -86,6 +86,7 @@ describe('LlmoMysticatController', () => {
       '../../../src/support/access-control-util.js': {
         default: {
           fromContext: () => mockAccessControlUtil,
+          isS2SConsumer: (ctx) => ctx?.attributes?.authInfo?.isS2SConsumer?.() ?? false,
         },
       },
     });
@@ -120,6 +121,62 @@ describe('LlmoMysticatController', () => {
     const result = await controller.getFilterDimensions(mockContext);
 
     expect(result.status).to.equal(403);
+  });
+
+  describe('getOrgAndValidateAccess S2S audit logging', () => {
+    function s2sContext(overrides = {}) {
+      return {
+        ...mockContext,
+        attributes: {
+          authInfo: { isS2SConsumer: () => true },
+        },
+        s2sConsumer: { getClientId: () => 'client-abc', getId: () => 'consumer-123' },
+        invocation: { id: 'req-audit-1' },
+        pathInfo: { method: 'GET', suffix: '/org/spaceCatId/brands/all/brand-presence/filter-dimensions' },
+        ...overrides,
+      };
+    }
+
+    it('logs a [s2s] audit line with clientId/consumerId/organizationId/requestId on a granted S2S read', async () => {
+      const controller = LlmoMysticatController(mockContext);
+      const ctx = s2sContext();
+      const result = await controller.getFilterDimensions(ctx);
+
+      expect(result.status).to.equal(200);
+      expect(mockContext.log.info).to.have.been.calledWithMatch(
+        /^\[s2s\] .*granted clientId=client-abc consumerId=consumer-123 organizationId=/,
+      );
+      expect(mockContext.log.info).to.have.been.calledWithMatch(/requestId=req-audit-1/);
+    });
+
+    it('logs an [acl] denial line with clientId/consumerId when an S2S consumer is denied', async () => {
+      mockAccessControlUtil.hasAccess.resolves(false);
+      const controller = LlmoMysticatController(mockContext);
+      const ctx = s2sContext();
+      const result = await controller.getFilterDimensions(ctx);
+
+      expect(result.status).to.equal(403);
+      expect(mockContext.log.info).to.have.been.calledWithMatch(
+        /^\[acl\] Denied .*reason=no-org-access clientId=client-abc consumerId=consumer-123/,
+      );
+      expect(mockContext.log.info).to.have.been.calledWithMatch(/requestId=req-audit-1/);
+    });
+
+    it('does not log [s2s]/[acl] lines for a regular (non-S2S) user', async () => {
+      const controller = LlmoMysticatController(mockContext);
+      await controller.getFilterDimensions(mockContext);
+
+      expect(mockContext.log.info).to.not.have.been.calledWithMatch(/^\[s2s\]/);
+      expect(mockContext.log.info).to.not.have.been.calledWithMatch(/^\[acl\]/);
+    });
+
+    it('does not log [s2s]/[acl] lines for a regular (non-S2S) user who is denied', async () => {
+      mockAccessControlUtil.hasAccess.resolves(false);
+      const controller = LlmoMysticatController(mockContext);
+      await controller.getFilterDimensions(mockContext);
+
+      expect(mockContext.log.info).to.not.have.been.calledWithMatch(/^\[acl\]/);
+    });
   });
 
   it('getAgenticTrafficGlobal allows UI users with LLMO org access', async () => {
