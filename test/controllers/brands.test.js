@@ -5299,51 +5299,67 @@ describe('Brands Controller', () => {
         urls: [{ value: 'https://acme.com/path' }],
         semrushMarket: { market: 'us', languageCode: 'en' },
         semrushModelIds: ['model-a', 'model-b'],
+        async: true,
       };
 
+      // PR-C (LLMO-7352/LLMO-7418): `async: true` on the initial-market create mints a
+      // provisioning attempt, enqueues the provision-workspace-job -> serenity-create-market
+      // job chain, and returns 202. Absent/false (the default) runs the EXACT bespoke
+      // synchronous `provisionBrandSubworkspace` call this endpoint has always made — see the
+      // dedicated regression test below. Site mirroring and mapping-row writes for the async
+      // path's initial market live in that chain's `orchestrateCreateMarketSubworkspace` —
+      // already covered by create-market-orchestration.test.js.
       async function buildController({
-        provisionBrandSubworkspace, provisionBrandSubworkspaceBare, upsertBrand, ensureMarketSite,
-        upsertMappingRow, linkSiteToLiveRows,
+        provisionBrandSubworkspace, provisionBrandSubworkspaceBare, upsertBrand,
         // Serenity active by default (org-wide LLMO/serenity flag ON) so the
         // Semrush-mode create reaches provisioning. The inactive case overrides this.
         isSerenityActiveForOrg = sinon.stub().resolves(true),
-      }) {
+        resolveWorkspaceId = sinon.stub().resolves('parent-ws-1'),
+        beginProvisioningAttempt = sinon.stub().resolves(true),
+        createAndEnqueueJob = sinon.stub().resolves({ getId: () => 'job-abc' }),
+        promoteProvisioningFailed = sinon.stub().resolves(true),
+      } = {}) {
         const Mocked = await esmock('../../src/controllers/brands.js', {
           '../../src/support/serenity/brand-provisioning.js': {
-            provisionBrandSubworkspace,
+            ...(provisionBrandSubworkspace ? { provisionBrandSubworkspace } : {}),
             // Bare (no-market) sub-workspace provisioner (LLMO-6405). Default-stubbed so a
             // market-less serenity create does not reach the real upstream helper.
             provisionBrandSubworkspaceBare:
               provisionBrandSubworkspaceBare || sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-bare' }),
           },
-          // Stub the site mirror by default so these tests stay isolated from the
-          // Site/brand_sites side effect; a test that cares passes its own stub.
-          '../../src/support/serenity/site-linkage.js': {
-            ensureMarketSite: ensureMarketSite || sinon.stub().resolves('site-x'),
-          },
           '../../src/support/serenity/serenity-active.js': { isSerenityActiveForOrg },
-          ...(upsertBrand ? { '../../src/support/brands-storage.js': { upsertBrand } } : {}),
-          ...((upsertMappingRow || linkSiteToLiveRows) ? {
-            '../../src/support/serenity/mapping-rows.js': {
-              upsertMappingRow: upsertMappingRow || sinon.stub().resolves(),
-              linkSiteToLiveRows: linkSiteToLiveRows || sinon.stub().resolves(),
-            },
-          } : {}),
+          '../../src/support/serenity/workspace-resolver.js': { resolveWorkspaceId },
+          '../../src/support/serenity/async-job-runner.js': { createAndEnqueueJob },
+          '../../src/support/serenity/handlers/provision-workspace-job.js': {
+            PROVISION_WORKSPACE_JOB_TYPE: 'serenity-provision-workspace',
+          },
+          '../../src/support/serenity/handlers/create-market-job.js': {
+            CREATE_MARKET_JOB_TYPE: 'serenity-create-market',
+          },
+          '../../src/support/brands-storage.js': {
+            ...(upsertBrand ? { upsertBrand } : {}),
+            beginProvisioningAttempt,
+            promoteProvisioningFailed,
+          },
         });
         return Mocked.default(context, loggerStub, mockEnv);
       }
 
-      it('provisions the sub-workspace then creates the brand bound to it (201)', async () => {
+      it('runs the SAME synchronous provisionBrandSubworkspace call it always has when async is absent (regression: default behavior unchanged)', async () => {
         const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
         const upsertStub = sinon.stub().resolves({ id: 'forced-id', name: 'New Brand' });
+        const enqueueStub = sinon.stub().resolves({ getId: () => 'job-xyz' });
         const controller = await buildController({
-          provisionBrandSubworkspace: provisionStub, upsertBrand: upsertStub,
+          provisionBrandSubworkspace: provisionStub,
+          upsertBrand: upsertStub,
+          createAndEnqueueJob: enqueueStub,
         });
 
+        const { async: _, ...syncData } = semrushData;
         const response = await controller.createBrandForOrg({
           ...context,
           params: { spaceCatId: ORGANIZATION_ID },
-          data: { ...semrushData },
+          data: { ...syncData },
           dataAccess: mockDataAccess,
           attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
         });
@@ -5354,27 +5370,23 @@ describe('Brands Controller', () => {
         expect(provisionArgs.market).to.equal('us');
         expect(provisionArgs.languageCode).to.equal('en');
         expect(provisionArgs.brandDomain).to.equal('acme.com');
-        expect(provisionArgs.brandName).to.equal('New Brand');
         expect(provisionArgs.modelIds).to.deep.equal(['model-a', 'model-b']);
-        // provisioning happens before the row is written, and its outputs are
-        // persisted onto the row.
         expect(upsertStub.calledOnce).to.equal(true);
         expect(upsertStub.calledAfter(provisionStub)).to.equal(true);
         const upsertArgs = upsertStub.firstCall.args[0];
-        expect(upsertArgs.forceBrandId).to.equal(provisionArgs.brandId);
         expect(upsertArgs.semrushSubWorkspaceId).to.equal('ws-1');
+        // No provisioning attempt/enqueue on the default path.
+        expect(enqueueStub).to.not.have.been.called;
       });
 
-      it('writes the mapping row for the initial market after the brand row is persisted', async () => {
-        const provisionStub = sinon.stub().resolves({
-          semrushSubWorkspaceId: 'ws-1', projectId: 'proj-initial', geoTargetId: 2840, languageCode: 'en',
-        });
+      it('mints a provisioning attempt and enqueues the provision->create-market job chain, answering 202', async () => {
         const upsertStub = sinon.stub().resolves({ id: 'forced-id', name: 'New Brand' });
-        const upsertMappingRowStub = sinon.stub().resolves();
+        const beginStub = sinon.stub().resolves(true);
+        const enqueueStub = sinon.stub().resolves({ getId: () => 'job-xyz' });
         const controller = await buildController({
-          provisionBrandSubworkspace: provisionStub,
           upsertBrand: upsertStub,
-          upsertMappingRow: upsertMappingRowStub,
+          beginProvisioningAttempt: beginStub,
+          createAndEnqueueJob: enqueueStub,
         });
 
         const response = await controller.createBrandForOrg({
@@ -5385,50 +5397,48 @@ describe('Brands Controller', () => {
           attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
         });
 
-        expect(response.status).to.equal(201);
-        expect(upsertMappingRowStub).to.have.been.calledOnce;
-        // Runs AFTER the brand row is persisted — provisionBrandSubworkspace runs
-        // against a throwaway id before the row exists, so it cannot write this
-        // itself (the FK requires a persisted brand).
-        expect(upsertMappingRowStub.calledAfter(upsertStub)).to.equal(true);
-        const [, slice] = upsertMappingRowStub.firstCall.args;
-        expect(slice).to.deep.equal({
-          brandId: provisionStub.firstCall.args[1].brandId,
-          semrushProjectId: 'proj-initial',
-          geoTargetId: 2840,
-          languageCode: 'en',
-        });
-      });
+        expect(response.status).to.equal(202);
+        const body = await response.json();
+        expect(body.status).to.equal('pending');
+        expect(body.jobId).to.equal('job-xyz');
 
-      it('does NOT write a mapping row when provisioning returns no initial project id', async () => {
-        const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
-        const upsertStub = sinon.stub().resolves({ id: 'forced-id', name: 'New Brand' });
-        const upsertMappingRowStub = sinon.stub().resolves();
-        const controller = await buildController({
-          provisionBrandSubworkspace: provisionStub,
-          upsertBrand: upsertStub,
-          upsertMappingRow: upsertMappingRowStub,
-        });
+        // The brand row is persisted BEFORE provisioning starts, with no workspace pointer yet.
+        expect(upsertStub.calledOnce).to.equal(true);
+        const upsertArgs = upsertStub.firstCall.args[0];
+        expect(upsertArgs.semrushSubWorkspaceId).to.equal(null);
+        expect(upsertArgs.forceBrandId).to.be.a('string');
 
-        const response = await controller.createBrandForOrg({
-          ...context,
-          params: { spaceCatId: ORGANIZATION_ID },
-          data: { ...semrushData },
-          dataAccess: mockDataAccess,
-          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
-        });
+        expect(beginStub.calledOnce).to.equal(true);
+        expect(beginStub.calledAfter(upsertStub)).to.equal(true);
+        expect(beginStub.firstCall.args[0].brandId).to.equal(upsertArgs.forceBrandId);
 
-        expect(response.status).to.equal(201);
-        expect(upsertMappingRowStub).to.not.have.been.called;
+        expect(enqueueStub.calledOnce).to.equal(true);
+        expect(enqueueStub.calledAfter(beginStub)).to.equal(true);
+        const [, enqueueArgs] = enqueueStub.firstCall.args;
+        expect(enqueueArgs.jobType).to.equal('serenity-provision-workspace');
+        expect(enqueueArgs.metadata.brandId).to.equal(upsertArgs.forceBrandId);
+        expect(enqueueArgs.metadata.parentWorkspaceId).to.equal('parent-ws-1');
+        expect(enqueueArgs.metadata.title).to.equal('New Brand');
+        expect(enqueueArgs.metadata.chainedJobType).to.equal('serenity-create-market');
+        const { chainedJobMetadata } = enqueueArgs.metadata;
+        expect(chainedJobMetadata.brandId).to.equal(upsertArgs.forceBrandId);
+        expect(chainedJobMetadata.parentWorkspaceId).to.equal('parent-ws-1');
+        expect(chainedJobMetadata.orgId).to.equal(ORGANIZATION_ID);
+        expect(chainedJobMetadata.requestBody).to.include({
+          market: 'us', languageCode: 'en', brandDomain: 'acme.com', primaryUrl: 'acme.com/path',
+        });
+        expect(chainedJobMetadata.requestBody.brandNames).to.deep.equal(['New Brand']);
+        expect(chainedJobMetadata.requestBody.brandDisplayName).to.equal('New Brand');
+        expect(chainedJobMetadata.modelIds).to.deep.equal(['model-a', 'model-b']);
       });
 
       it('rejects a Semrush-mode create with 403 when serenity is inactive for the org (no provisioning, no row write)', async () => {
-        const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
         const upsertStub = sinon.stub().resolves({ id: 'forced-id', name: 'New Brand' });
+        const enqueueStub = sinon.stub().resolves({ getId: () => 'job-xyz' });
         const serenityActiveStub = sinon.stub().resolves(false);
         const controller = await buildController({
-          provisionBrandSubworkspace: provisionStub,
           upsertBrand: upsertStub,
+          createAndEnqueueJob: enqueueStub,
           isSerenityActiveForOrg: serenityActiveStub,
         });
 
@@ -5441,9 +5451,9 @@ describe('Brands Controller', () => {
         });
 
         expect(response.status).to.equal(403);
-        // The org is on the normal backend: no sub-workspace provisioned, no brand row.
-        expect(provisionStub.called).to.equal(false);
+        // The org is on the normal backend: no row write, no provisioning attempt.
         expect(upsertStub.called).to.equal(false);
+        expect(enqueueStub.called).to.equal(false);
         // The gate must be asked about THIS org (2nd positional arg = spaceCatId),
         // so a wiring slip (passing the wrong id) can't silently let a create through.
         expect(serenityActiveStub).to.have.been.calledWith(
@@ -5453,102 +5463,11 @@ describe('Brands Controller', () => {
         );
       });
 
-      it('mirrors the url the market TRACKS as a Site (+ brand_sites link) after the row is written', async () => {
-        const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
-        const upsertStub = sinon.stub().resolves({ id: 'forced-id', name: 'New Brand' });
-        const ensureSiteStub = sinon.stub().resolves('site-x');
-        const controller = await buildController({
-          provisionBrandSubworkspace: provisionStub,
-          upsertBrand: upsertStub,
-          ensureMarketSite: ensureSiteStub,
-        });
-
-        const response = await controller.createBrandForOrg({
-          ...context,
-          params: { spaceCatId: ORGANIZATION_ID },
-          data: { ...semrushData },
-          dataAccess: mockDataAccess,
-          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
-        });
-
-        expect(response.status).to.equal(201);
-        expect(ensureSiteStub).to.have.been.calledOnce;
-        // runs after the brand row is persisted (compensation safety)
-        expect(ensureSiteStub.calledAfter(upsertStub)).to.equal(true);
-        const opts = ensureSiteStub.firstCall.args[1];
-        expect(opts.organizationId).to.equal(ORGANIZATION_ID);
-        // The tracked url, not the host the project is filed under: the resolved
-        // Site becomes brands.site_id, so mirroring the host would record a brand
-        // analysing acme.com/path against the root acme.com Site — and sibling
-        // brands on one apex would then collide on brands_base_site_unique.
-        expect(opts.domain).to.equal('acme.com/path');
-        expect(opts.brandId).to.equal(provisionStub.firstCall.args[1].brandId);
-      });
-
-      it('forwards the payload URL\'s full identity as the project\'s tracked url', async () => {
-        // `brandDomain` must be a bare FQDN (a path there is a hard 400 upstream,
-        // and the upstream folds it to the registrable domain regardless), so
-        // without a separate primaryUrl a brand created on acme.com/path analysed
-        // acme.com until a data-service reconcile repaired it (serenity-docs#348).
-        const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
-        const controller = await buildController({
-          provisionBrandSubworkspace: provisionStub,
-          upsertBrand: sinon.stub().resolves({ id: 'forced-id', name: 'New Brand' }),
-          ensureMarketSite: sinon.stub().resolves('site-x'),
-        });
-
-        const response = await controller.createBrandForOrg({
-          ...context,
-          params: { spaceCatId: ORGANIZATION_ID },
-          data: { ...semrushData },
-          dataAccess: mockDataAccess,
-          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
-        });
-
-        expect(response.status).to.equal(201);
-        const params = provisionStub.firstCall.args[1];
-        expect(params.brandDomain).to.equal('acme.com');
-        expect(params.primaryUrl).to.equal('acme.com/path');
-      });
-
-      it('links the mirrored site onto the mapping row after ensureMarketSite resolves', async () => {
-        const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
-        const upsertStub = sinon.stub().resolves({ id: 'forced-id', name: 'New Brand' });
-        const ensureSiteStub = sinon.stub().resolves('site-x');
-        const linkSiteToLiveRowsStub = sinon.stub().resolves();
-        const controller = await buildController({
-          provisionBrandSubworkspace: provisionStub,
-          upsertBrand: upsertStub,
-          ensureMarketSite: ensureSiteStub,
-          linkSiteToLiveRows: linkSiteToLiveRowsStub,
-        });
-
-        const response = await controller.createBrandForOrg({
-          ...context,
-          params: { spaceCatId: ORGANIZATION_ID },
-          data: { ...semrushData },
-          dataAccess: mockDataAccess,
-          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
-        });
-
-        expect(response.status).to.equal(201);
-        expect(linkSiteToLiveRowsStub).to.have.been.calledOnceWithExactly(
-          mockDataAccess,
-          provisionStub.firstCall.args[1].brandId,
-          'site-x',
-          loggerStub,
-        );
-        expect(linkSiteToLiveRowsStub.calledAfter(ensureSiteStub)).to.equal(true);
-      });
-
-      it('does NOT mirror a Site for a pending (draft) brand — nothing is provisioned yet', async () => {
-        const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
+      it('does NOT start async provisioning for a pending (draft) brand — nothing is provisioned yet', async () => {
         const upsertStub = sinon.stub().resolves({ id: 'draft-id', name: 'New Brand', status: 'pending' });
-        const ensureSiteStub = sinon.stub().resolves('site-x');
+        const enqueueStub = sinon.stub().resolves({ getId: () => 'job-xyz' });
         const controller = await buildController({
-          provisionBrandSubworkspace: provisionStub,
-          upsertBrand: upsertStub,
-          ensureMarketSite: ensureSiteStub,
+          upsertBrand: upsertStub, createAndEnqueueJob: enqueueStub,
         });
 
         const response = await controller.createBrandForOrg({
@@ -5560,62 +5479,35 @@ describe('Brands Controller', () => {
         });
 
         expect(response.status).to.equal(201);
-        expect(provisionStub).to.not.have.been.called;
-        expect(ensureSiteStub).to.not.have.been.called;
+        expect(enqueueStub).to.not.have.been.called;
       });
 
-      it('forwards the brand URL sources (urls + social + earned) to provisioning', async () => {
-        const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
+      it('returns 409 without enqueuing when a provisioning attempt is already in flight', async () => {
         const upsertStub = sinon.stub().resolves({ id: 'forced-id', name: 'New Brand' });
+        const beginStub = sinon.stub().resolves(false);
+        const enqueueStub = sinon.stub().resolves({ getId: () => 'job-xyz' });
         const controller = await buildController({
-          provisionBrandSubworkspace: provisionStub, upsertBrand: upsertStub,
+          upsertBrand: upsertStub,
+          beginProvisioningAttempt: beginStub,
+          createAndEnqueueJob: enqueueStub,
         });
 
-        const social = [{ url: 'https://x.com/acme', regions: ['us'] }];
-        const earned = [{ name: 'News', url: 'https://news/acme', regions: [] }];
         const response = await controller.createBrandForOrg({
           ...context,
           params: { spaceCatId: ORGANIZATION_ID },
-          data: { ...semrushData, socialAccounts: social, earnedContent: earned },
+          data: { ...semrushData },
           dataAccess: mockDataAccess,
           attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
         });
 
-        expect(response.status).to.equal(201);
-        expect(provisionStub.firstCall.args[1].brandUrlSources).to.deep.equal({
-          urls: semrushData.urls,
-          socialAccounts: social,
-          earnedContent: earned,
-        });
+        expect(response.status).to.equal(409);
+        expect(enqueueStub).to.not.have.been.called;
       });
 
-      it('forwards the brand competitors to provisioning', async () => {
-        const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
+      it('returns 400 without persisting a row when the organization has no Semrush parent workspace configured', async () => {
         const upsertStub = sinon.stub().resolves({ id: 'forced-id', name: 'New Brand' });
         const controller = await buildController({
-          provisionBrandSubworkspace: provisionStub, upsertBrand: upsertStub,
-        });
-
-        const competitors = [{ name: 'Rival', url: 'https://rival.com', regions: ['us'] }];
-        const response = await controller.createBrandForOrg({
-          ...context,
-          params: { spaceCatId: ORGANIZATION_ID },
-          data: { ...semrushData, competitors },
-          dataAccess: mockDataAccess,
-          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
-        });
-
-        expect(response.status).to.equal(201);
-        expect(provisionStub.firstCall.args[1].competitors).to.deep.equal(competitors);
-      });
-
-      it('returns the provisioning error and does NOT create the brand on failure', async () => {
-        const err = new Error('Organization has no Semrush workspace configured');
-        err.status = 400;
-        const provisionStub = sinon.stub().rejects(err);
-        const upsertStub = sinon.stub().resolves({ id: 'x' });
-        const controller = await buildController({
-          provisionBrandSubworkspace: provisionStub, upsertBrand: upsertStub,
+          upsertBrand: upsertStub, resolveWorkspaceId: sinon.stub().resolves(null),
         });
 
         const response = await controller.createBrandForOrg({
@@ -5627,22 +5519,19 @@ describe('Brands Controller', () => {
         });
 
         expect(response.status).to.equal(400);
+        // Checked BEFORE any write: a missing org workspace config must never leave a
+        // persisted, permanently-inert brand row behind.
         expect(upsertStub.called).to.equal(false);
       });
 
-      it('redacts the gateway URL from a Semrush upstream error on provisioning', async () => {
-        // A Semrush error's message embeds the internal gateway host plus workspace
-        // and project UUIDs. Provisioning runs unguarded inside createBrandForOrg's
-        // try, so the error reaches createErrorResponse — which must map it to a
-        // generic message and keep the detail in the log, on both the body and the
-        // x-error header.
-        const leakUrl = 'https://gw.internal/enterprise/workspaces/ws-9/projects/proj-abc/aio';
-        const provisionStub = sinon.stub().rejects(
-          new SerenityTransportError(502, `Semrush POST ${leakUrl} failed: 502`, {}),
-        );
-        const upsertStub = sinon.stub().resolves({ id: 'x' });
+      it('records the provisioning-start failure and rethrows when the job enqueue itself fails', async () => {
+        const upsertStub = sinon.stub().resolves({ id: 'forced-id', name: 'New Brand' });
+        const enqueueStub = sinon.stub().rejects(new Error('SQS unavailable'));
+        const promoteFailedStub = sinon.stub().resolves(true);
         const controller = await buildController({
-          provisionBrandSubworkspace: provisionStub, upsertBrand: upsertStub,
+          upsertBrand: upsertStub,
+          createAndEnqueueJob: enqueueStub,
+          promoteProvisioningFailed: promoteFailedStub,
         });
 
         const response = await controller.createBrandForOrg({
@@ -5653,94 +5542,80 @@ describe('Brands Controller', () => {
           attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
         });
 
-        expect(response.status).to.equal(502);
-        const body = await response.json();
-        expect(body.message).to.equal('Upstream request failed');
-        expect(JSON.stringify(body)).to.not.contain('gw.internal');
-        expect(response.headers.get('x-error') || '').to.not.contain('gw.internal');
-        expect(upsertStub.called).to.equal(false);
+        // The row IS already persisted (visible, non-active) — marked failed rather than
+        // left silently inert — but the request itself surfaces the original error.
+        expect(response.status).to.equal(500);
+        expect(promoteFailedStub.calledOnce).to.equal(true);
+        expect(promoteFailedStub.firstCall.args[0].brandId)
+          .to.equal(upsertStub.firstCall.args[0].forceBrandId);
       });
 
-      // SITES-49993: while the client sees only the generic message,
-      // createErrorResponse logs ONE structured line — JSON in the message —
-      // with the upstream status/method/endpoint/body and the tenant ids, so
-      // Logs Insights can group Semrush failures by tenant and upstream reason.
-      it('logs one structured line with upstream status/body and tenant ids (SITES-49993)', async () => {
-        loggerStub.error.resetHistory();
-        const leakUrl = 'https://gw.internal/enterprise/workspaces/ws-9/projects/proj-abc/aio';
-        const provisionStub = sinon.stub().rejects(
-          new SerenityTransportError(502, `Semrush POST ${leakUrl} failed: 502`, { detail: 'pool exhausted' }, {
-            method: 'POST', endpoint: '/enterprise/workspaces/ws-9/projects/proj-abc/aio',
-          }),
-        );
-        const controller = await buildController({
-          provisionBrandSubworkspace: provisionStub,
-          upsertBrand: sinon.stub().resolves({ id: 'x' }),
-        });
+      it('returns 400 when async is present but not a boolean', async () => {
+        const enqueueStub = sinon.stub().resolves({ getId: () => 'job-xyz' });
+        const controller = await buildController({ createAndEnqueueJob: enqueueStub });
 
-        await controller.createBrandForOrg({
+        const response = await controller.createBrandForOrg({
           ...context,
           params: { spaceCatId: ORGANIZATION_ID },
-          data: { ...semrushData },
+          data: { ...semrushData, async: 'yes' },
           dataAccess: mockDataAccess,
           attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
         });
 
-        const call = loggerStub.error.getCalls().find(
-          (c) => typeof c.args[0] === 'string' && c.args[0].startsWith('Brands upstream error {'),
-        );
-        expect(call).to.exist;
-        const payload = JSON.parse(call.args[0].slice('Brands upstream error '.length));
-        expect(payload.status).to.equal(502);
-        expect(payload.method).to.equal('POST');
-        expect(payload.endpoint).to.equal('/enterprise/workspaces/ws-9/projects/proj-abc/aio');
-        expect(payload.spaceCatId).to.equal(ORGANIZATION_ID);
-        expect(payload.body).to.include('pool exhausted');
+        expect(response.status).to.equal(400);
+        const body = await response.json();
+        expect(body.message).to.equal('async must be a boolean');
+        expect(enqueueStub.called).to.equal(false);
       });
 
-      it('maps a 401 Semrush upstream error on provisioning to HTTP 401 + generic auth message', async () => {
-        // The 401/403 side of createErrorResponse's status ternary: the upstream
-        // status is preserved rather than flattened to 502, and the message is the
-        // generic auth one.
-        const leakUrl = 'https://gw.internal/enterprise/workspaces/ws-9/projects';
-        const provisionStub = sinon.stub().rejects(
-          new SerenityTransportError(401, `Semrush GET ${leakUrl} failed: 401`, {}),
-        );
+      it('runs the same synchronous path as an absent flag when async is explicitly false', async () => {
+        const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
+        const upsertStub = sinon.stub().resolves({ id: 'forced-id', name: 'New Brand' });
+        const enqueueStub = sinon.stub().resolves({ getId: () => 'job-xyz' });
         const controller = await buildController({
           provisionBrandSubworkspace: provisionStub,
-          upsertBrand: sinon.stub().resolves({ id: 'x' }),
+          upsertBrand: upsertStub,
+          createAndEnqueueJob: enqueueStub,
         });
 
         const response = await controller.createBrandForOrg({
           ...context,
           params: { spaceCatId: ORGANIZATION_ID },
-          data: { ...semrushData },
+          data: { ...semrushData, async: false },
           dataAccess: mockDataAccess,
           attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
         });
 
-        expect(response.status).to.equal(401);
-        const body = await response.json();
-        expect(body.message).to.equal('Upstream authorization failed');
-        expect(JSON.stringify(body)).to.not.contain('gw.internal');
-        expect(response.headers.get('x-error') || '').to.not.contain('gw.internal');
+        expect(response.status).to.equal(201);
+        expect(provisionStub.calledOnce).to.equal(true);
+        expect(enqueueStub.called).to.equal(false);
       });
 
-      it('releases the orphaned sub-workspace when the brand row write fails after provisioning', async () => {
-        const provisionStub = sinon.stub().resolves({
-          semrushSubWorkspaceId: 'ws-orphan',
-          createdByThisRequest: true,
-        });
-        const releaseStub = sinon.stub().resolves();
-        // A routine post-provision DB failure (e.g. unique-constraint 409).
-        const upsertStub = sinon.stub().rejects(new Error('duplicate key value violates unique constraint'));
+      it('records the provisioning-start failure via the fresh-brand path and rethrows when beginProvisioningAttempt itself fails', async () => {
+        const upsertStub = sinon.stub().resolves({ id: 'forced-id', name: 'New Brand' });
+        const beginStub = sinon.stub().rejects(new Error('DB unavailable'));
+        const enqueueStub = sinon.stub().resolves({ getId: () => 'job-xyz' });
+        const promoteFailedStub = sinon.stub().resolves(true);
+        const recordFreshFailureStub = sinon.stub().resolves(true);
         const Mocked = await esmock('../../src/controllers/brands.js', {
           '../../src/support/serenity/brand-provisioning.js': {
-            provisionBrandSubworkspace: provisionStub,
-            emptyProvisionedWorkspace: releaseStub,
+            provisionBrandSubworkspaceBare: sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-bare' }),
           },
           '../../src/support/serenity/serenity-active.js': { isSerenityActiveForOrg: sinon.stub().resolves(true) },
-          '../../src/support/brands-storage.js': { upsertBrand: upsertStub },
+          '../../src/support/serenity/workspace-resolver.js': { resolveWorkspaceId: sinon.stub().resolves('parent-ws-1') },
+          '../../src/support/serenity/async-job-runner.js': { createAndEnqueueJob: enqueueStub },
+          '../../src/support/serenity/handlers/provision-workspace-job.js': {
+            PROVISION_WORKSPACE_JOB_TYPE: 'serenity-provision-workspace',
+          },
+          '../../src/support/serenity/handlers/create-market-job.js': {
+            CREATE_MARKET_JOB_TYPE: 'serenity-create-market',
+          },
+          '../../src/support/brands-storage.js': {
+            upsertBrand: upsertStub,
+            beginProvisioningAttempt: beginStub,
+            promoteProvisioningFailed: promoteFailedStub,
+            recordFreshBrandProvisioningStartFailure: recordFreshFailureStub,
+          },
         });
         const controller = Mocked.default(context, loggerStub, mockEnv);
 
@@ -5752,57 +5627,20 @@ describe('Brands Controller', () => {
           attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
         });
 
-        // The DB write failed, so the create still errors out...
-        expect(response.status).to.not.equal(201);
-        expect(provisionStub.calledOnce).to.equal(true);
-        // ...but the provisioned-yet-unreferenced sub-workspace is released back
-        // to the parent pool, not leaked.
-        expect(releaseStub.calledOnce).to.equal(true);
-        expect(releaseStub.firstCall.args[1]).to.equal('ws-orphan');
-      });
-
-      it('does NOT release a sub-workspace that provisioning only ADOPTED', async () => {
-        // Sub-workspace titles are bare brand display names, which are not unique within
-        // an org. Two same-named brands onboarding concurrently (observed in prod at 0.17s
-        // apart) can both resolve the SAME workspace: the first persists its claim, the
-        // second's brand-row write then fails on the UNIQUE constraint on
-        // brands.semrush_sub_workspace_id. Releasing here would delete the winner's
-        // projects and strip its allocation — on a live, correctly-owned workspace. The
-        // unique-constraint failure is precisely the signal that someone else owns it.
-        const provisionStub = sinon.stub().resolves({
-          semrushSubWorkspaceId: 'ws-adopted',
-          createdByThisRequest: false,
-        });
-        const releaseStub = sinon.stub().resolves();
-        const upsertStub = sinon.stub().rejects(new Error('duplicate key value violates unique constraint'));
-        const Mocked = await esmock('../../src/controllers/brands.js', {
-          '../../src/support/serenity/brand-provisioning.js': {
-            provisionBrandSubworkspace: provisionStub,
-            emptyProvisionedWorkspace: releaseStub,
-          },
-          '../../src/support/serenity/serenity-active.js': { isSerenityActiveForOrg: sinon.stub().resolves(true) },
-          '../../src/support/brands-storage.js': { upsertBrand: upsertStub },
-        });
-        const controller = Mocked.default(context, loggerStub, mockEnv);
-
-        const response = await controller.createBrandForOrg({
-          ...context,
-          params: { spaceCatId: ORGANIZATION_ID },
-          data: { ...semrushData },
-          dataAccess: mockDataAccess,
-          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
-        });
-
-        // The create still errors out for this brand...
-        expect(response.status).to.not.equal(201);
-        expect(provisionStub.calledOnce).to.equal(true);
-        // ...but the adopted workspace — the other brand's — is left untouched.
-        expect(releaseStub.called).to.equal(false);
+        expect(response.status).to.equal(500);
+        const body = await response.json();
+        expect(body.message).to.equal('DB unavailable');
+        expect(recordFreshFailureStub.calledOnce).to.equal(true);
+        expect(recordFreshFailureStub.firstCall.args[0].brandId)
+          .to.equal(upsertStub.firstCall.args[0].forceBrandId);
+        // The pre-existing established-brand compensation must NOT fire for a fresh brand.
+        expect(promoteFailedStub.called).to.equal(false);
+        expect(enqueueStub.called).to.equal(false);
       });
 
       it('returns 400 when semrushMarket lacks a languageCode', async () => {
-        const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
-        const controller = await buildController({ provisionBrandSubworkspace: provisionStub });
+        const enqueueStub = sinon.stub().resolves({ getId: () => 'job-xyz' });
+        const controller = await buildController({ createAndEnqueueJob: enqueueStub });
 
         const response = await controller.createBrandForOrg({
           ...context,
@@ -5813,12 +5651,12 @@ describe('Brands Controller', () => {
         });
 
         expect(response.status).to.equal(400);
-        expect(provisionStub.called).to.equal(false);
+        expect(enqueueStub.called).to.equal(false);
       });
 
       it('returns 400 when semrushModelIds is missing or empty and generatePrompts is true', async () => {
-        const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
-        const controller = await buildController({ provisionBrandSubworkspace: provisionStub });
+        const enqueueStub = sinon.stub().resolves({ getId: () => 'job-xyz' });
+        const controller = await buildController({ createAndEnqueueJob: enqueueStub });
 
         // generatePrompts:true → a prompt-generating project, which needs a model.
         const response = await controller.createBrandForOrg({
@@ -5835,12 +5673,12 @@ describe('Brands Controller', () => {
         });
 
         expect(response.status).to.equal(400);
-        expect(provisionStub.called).to.equal(false);
+        expect(enqueueStub.called).to.equal(false);
       });
 
       it('returns 400 when generatePrompts is true but no market/language was supplied', async () => {
-        const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
-        const controller = await buildController({ provisionBrandSubworkspace: provisionStub });
+        const enqueueStub = sinon.stub().resolves({ getId: () => 'job-xyz' });
+        const controller = await buildController({ createAndEnqueueJob: enqueueStub });
 
         // generatePrompts true signals Semrush mode even with no semrushMarket, but
         // generating prompts needs a project → market+language are required.
@@ -5857,14 +5695,14 @@ describe('Brands Controller', () => {
         });
 
         expect(response.status).to.equal(400);
-        expect(provisionStub.called).to.equal(false);
+        expect(enqueueStub.called).to.equal(false);
       });
 
-      it('provisions WITHOUT models when generatePrompts is false (model-less project allowed)', async () => {
-        const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
+      it('does not require semrushModelIds when generatePrompts is false, and forwards an empty modelIds override', async () => {
         const upsertStub = sinon.stub().resolves({ id: 'forced-id', name: 'New Brand' });
+        const enqueueStub = sinon.stub().resolves({ getId: () => 'job-xyz' });
         const controller = await buildController({
-          provisionBrandSubworkspace: provisionStub, upsertBrand: upsertStub,
+          upsertBrand: upsertStub, createAndEnqueueJob: enqueueStub,
         });
 
         const response = await controller.createBrandForOrg({
@@ -5875,21 +5713,21 @@ describe('Brands Controller', () => {
             urls: [{ value: 'https://acme.com' }],
             semrushMarket: { market: 'us', languageCode: 'en' },
             generatePrompts: false,
+            async: true,
           },
           dataAccess: mockDataAccess,
           attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
         });
 
-        expect(response.status).to.equal(201);
-        expect(provisionStub.called).to.equal(true);
-        // generateTopics is threaded through as false.
-        expect(provisionStub.firstCall.args[1].generateTopics).to.equal(false);
-        expect(provisionStub.firstCall.args[1].modelIds).to.deep.equal([]);
+        expect(response.status).to.equal(202);
+        const [, enqueueArgs] = enqueueStub.firstCall.args;
+        expect(enqueueArgs.metadata.chainedJobMetadata.modelIds).to.deep.equal([]);
+        expect(enqueueArgs.metadata.chainedJobMetadata.requestBody.generatePrompts).to.equal(false);
       });
 
       it('returns 400 when no primary URL is present to derive a domain', async () => {
-        const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
-        const controller = await buildController({ provisionBrandSubworkspace: provisionStub });
+        const enqueueStub = sinon.stub().resolves({ getId: () => 'job-xyz' });
+        const controller = await buildController({ createAndEnqueueJob: enqueueStub });
 
         const response = await controller.createBrandForOrg({
           ...context,
@@ -5900,23 +5738,20 @@ describe('Brands Controller', () => {
         });
 
         expect(response.status).to.equal(400);
-        expect(provisionStub.called).to.equal(false);
+        expect(enqueueStub.called).to.equal(false);
       });
 
       it('creates a bare sub-workspace (no project) when no market is supplied (serenity-active)', async () => {
         // LLMO-6405: market-scoped inputs moved to market creation, so a serenity-active
-        // create with no market provisions just the sub-workspace (no project) — the
-        // market-based project provisioner is never called, and there is no market
-        // domain to mirror, so ensureMarketSite is skipped.
-        const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
+        // create with no market provisions just the sub-workspace (no project), synchronously
+        // (unconverted, out of PR-C's scope) — the async job chain is never started.
         const bareStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-bare' });
         const upsertStub = sinon.stub().resolves({ id: 'forced-id', name: 'New Brand' });
-        const ensureMarketSiteStub = sinon.stub().resolves('site-x');
+        const enqueueStub = sinon.stub().resolves({ getId: () => 'job-xyz' });
         const controller = await buildController({
-          provisionBrandSubworkspace: provisionStub,
           provisionBrandSubworkspaceBare: bareStub,
           upsertBrand: upsertStub,
-          ensureMarketSite: ensureMarketSiteStub,
+          createAndEnqueueJob: enqueueStub,
         });
 
         const response = await controller.createBrandForOrg({
@@ -5928,10 +5763,8 @@ describe('Brands Controller', () => {
         });
 
         expect(response.status).to.equal(201);
-        expect(provisionStub.called).to.equal(false);
         expect(bareStub.called).to.equal(true);
-        // No market domain on the bare path → the Site mirror is skipped.
-        expect(ensureMarketSiteStub.called).to.equal(false);
+        expect(enqueueStub.called).to.equal(false);
         const upsertArgs = upsertStub.firstCall.args[0];
         // Anchored by BOTH the bare sub-workspace and the primary site.
         expect(upsertArgs.semrushSubWorkspaceId).to.equal('ws-bare');
@@ -5945,7 +5778,6 @@ describe('Brands Controller', () => {
         const bareStub = sinon.stub().rejects(new Error('Semrush provisioning failed'));
         const upsertStub = sinon.stub().resolves({ id: 'x', name: 'New Brand' });
         const controller = await buildController({
-          provisionBrandSubworkspace: sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-1' }),
           provisionBrandSubworkspaceBare: bareStub,
           upsertBrand: upsertStub,
         });
@@ -5964,13 +5796,13 @@ describe('Brands Controller', () => {
       });
 
       it('does a flat create (no Semrush provisioning) when the org is not serenity-active', async () => {
-        const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
         const bareStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-bare' });
         const upsertStub = sinon.stub().resolves({ id: 'flat-id', name: 'Flat Brand' });
+        const enqueueStub = sinon.stub().resolves({ getId: () => 'job-xyz' });
         const controller = await buildController({
-          provisionBrandSubworkspace: provisionStub,
           provisionBrandSubworkspaceBare: bareStub,
           upsertBrand: upsertStub,
+          createAndEnqueueJob: enqueueStub,
           isSerenityActiveForOrg: sinon.stub().resolves(false),
         });
 
@@ -5983,16 +5815,16 @@ describe('Brands Controller', () => {
         });
 
         expect(response.status).to.equal(201);
-        expect(provisionStub.called).to.equal(false);
         expect(bareStub.called).to.equal(false);
+        expect(enqueueStub.called).to.equal(false);
         expect(upsertStub.firstCall.args[0].semrushSubWorkspaceId).to.equal(null);
       });
 
       it('saves a pending draft: defers provisioning, writes no stash, no anchor (201)', async () => {
-        const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
+        const enqueueStub = sinon.stub().resolves({ getId: () => 'job-xyz' });
         const upsertStub = sinon.stub().resolves({ id: 'draft-id', name: 'New Brand', status: 'pending' });
         const controller = await buildController({
-          provisionBrandSubworkspace: provisionStub, upsertBrand: upsertStub,
+          upsertBrand: upsertStub, createAndEnqueueJob: enqueueStub,
         });
 
         const response = await controller.createBrandForOrg({
@@ -6012,7 +5844,7 @@ describe('Brands Controller', () => {
 
         expect(response.status).to.equal(201);
         // Provisioning is deferred for a draft.
-        expect(provisionStub.called).to.equal(false);
+        expect(enqueueStub.called).to.equal(false);
         // SITES-49448: a pending draft no longer stashes a deferred-provisioning blob.
         const upsertArgs = upsertStub.firstCall.args[0];
         expect(upsertArgs.brand.pendingSemrushProvisioning).to.equal(undefined);
@@ -6022,8 +5854,8 @@ describe('Brands Controller', () => {
       });
 
       it('still requires market and languageCode even for a pending draft', async () => {
-        const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
-        const controller = await buildController({ provisionBrandSubworkspace: provisionStub });
+        const enqueueStub = sinon.stub().resolves({ getId: () => 'job-xyz' });
+        const controller = await buildController({ createAndEnqueueJob: enqueueStub });
 
         const response = await controller.createBrandForOrg({
           ...context,
@@ -6034,7 +5866,7 @@ describe('Brands Controller', () => {
         });
 
         expect(response.status).to.equal(400);
-        expect(provisionStub.called).to.equal(false);
+        expect(enqueueStub.called).to.equal(false);
       });
     });
 
@@ -10301,14 +10133,27 @@ describe('Brands Controller — defensive branch coverage', () => {
   }
 
   async function mountController({
-    provisionBrandSubworkspace = stub().resolves({ semrushSubWorkspaceId: 'ws-1' }),
     upsertBrand = stub().resolves({ id: BRAND_UUID, name: 'New Brand' }),
     isSerenityActiveForOrg = stub().resolves(true),
+    createAndEnqueueJob = stub().resolves({ getId: () => 'job-xyz' }),
   } = {}) {
     const Mocked = await esmock('../../src/controllers/brands.js', {
-      '../../src/support/serenity/brand-provisioning.js': { provisionBrandSubworkspace },
-      '../../src/support/brands-storage.js': { upsertBrand },
+      '../../src/support/brands-storage.js': {
+        upsertBrand,
+        beginProvisioningAttempt: stub().resolves(true),
+        promoteProvisioningFailed: stub().resolves(true),
+      },
       '../../src/support/serenity/serenity-active.js': { isSerenityActiveForOrg },
+      '../../src/support/serenity/workspace-resolver.js': {
+        resolveWorkspaceId: stub().resolves('parent-ws-1'),
+      },
+      '../../src/support/serenity/async-job-runner.js': { createAndEnqueueJob },
+      '../../src/support/serenity/handlers/provision-workspace-job.js': {
+        PROVISION_WORKSPACE_JOB_TYPE: 'serenity-provision-workspace',
+      },
+      '../../src/support/serenity/handlers/create-market-job.js': {
+        CREATE_MARKET_JOB_TYPE: 'serenity-create-market',
+      },
     });
     const ctx = buildContext();
     return { controller: Mocked.default(ctx, loggerStub, mockEnv), ctx };
@@ -10340,42 +10185,13 @@ describe('Brands Controller — defensive branch coverage', () => {
     expect(body.message).to.match(/primary URL is required/i);
   });
 
-  // brandAliases normalize: accepts both `{ name, regions }` objects and bare
-  // strings (region-less), keeps `regions`, and filters entries without a name.
-  // The create handler region-clamps them to the initial market downstream.
-  it('brandAliases: normalizes objects + strings to { name, regions } and filters blanks', async () => {
-    const provisionStub = stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
-    const upsertStub = stub().resolves({ id: BRAND_UUID, name: 'New Brand' });
-    const { controller, ctx } = await mountController({
-      provisionBrandSubworkspace: provisionStub,
-      upsertBrand: upsertStub,
-    });
-
-    const response = await controller.createBrandForOrg({
-      ...ctx,
-      params: { spaceCatId: ORG_ID },
-      data: {
-        name: 'Brand X',
-        urls: [{ value: 'https://x.com' }],
-        semrushMarket: { market: 'us', languageCode: 'en' },
-        semrushModelIds: ['model-a'],
-        brandAliases: [
-          { name: 'Brand Alias Co', regions: ['us'] }, // object → keeps regions
-          'plain string alias', // string → region-less
-          { noName: true }, // object with no name → filtered out
-        ],
-      },
-      dataAccess: ctx.dataAccess,
-      attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
-    });
-
-    expect(response.status).to.equal(201);
-    const provisionArgs = provisionStub.firstCall.args[1];
-    expect(provisionArgs.brandAliases).to.deep.equal([
-      { name: 'Brand Alias Co', regions: ['us'] },
-      { name: 'plain string alias', regions: [] },
-    ]);
-  });
+  // brandAliases normalization for the initial market used to be inline HERE
+  // (map string/{name,regions} → {name,regions}, filter blanks) because
+  // provisionBrandSubworkspace ran before the brand row existed and needed the payload
+  // shape directly. PR-C (LLMO-7352/LLMO-7418) removed that inline block: brandAliases now
+  // persist via upsertBrand's own `syncAliases` (which does its own, independent
+  // normalization) and the async chain reads them back from storage. That normalization is
+  // covered by brands-storage.test.js's upsertBrand suite; nothing left to test here.
 
   // Line 91 else: `Array.isArray(brandData?.urls) ? brandData.urls : []` — fires
   // when urls is absent or not an array. brandDomainFromPayload then finds no first
@@ -10406,11 +10222,11 @@ describe('Brands Controller — defensive branch coverage', () => {
   // test above (space URL is an object entry). Adding an explicit test where the
   // object yields a valid hostname to cover the non-throw path of line 93.
   it('brandDomainFromPayload object-url: extracts hostname from {value} entry (line 93 u?.value branch)', async () => {
-    const provisionStub = stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
     const upsertStub = stub().resolves({ id: BRAND_UUID, name: 'New Brand' });
+    const enqueueStub = stub().resolves({ getId: () => 'job-xyz' });
     const { controller, ctx } = await mountController({
-      provisionBrandSubworkspace: provisionStub,
       upsertBrand: upsertStub,
+      createAndEnqueueJob: enqueueStub,
     });
 
     const response = await controller.createBrandForOrg({
@@ -10421,13 +10237,15 @@ describe('Brands Controller — defensive branch coverage', () => {
         urls: [{ value: 'https://brand.example.com' }], // object entry → u?.value branch
         semrushMarket: { market: 'us', languageCode: 'en' },
         semrushModelIds: ['model-a'],
+        async: true,
       },
       dataAccess: ctx.dataAccess,
       attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
     });
 
-    expect(response.status).to.equal(201);
-    expect(provisionStub.firstCall.args[1].brandDomain).to.equal('brand.example.com');
+    expect(response.status).to.equal(202);
+    const [, enqueueArgs] = enqueueStub.firstCall.args;
+    expect(enqueueArgs.metadata.chainedJobMetadata.requestBody.brandDomain).to.equal('brand.example.com');
   });
 
   // Line 100: `url.hostname || null` — the null branch fires when URL parsing

@@ -319,6 +319,8 @@ const routeRequiredCapabilities = {
   'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts/check': 'organization:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts': 'organization:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/jobs/:jobId': 'organization:read',
+  // PR-C (LLMO-7352/LLMO-7418): job-type-agnostic alias of the route above (same handler).
+  'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/jobs/:jobId': 'organization:read',
   'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts': 'organization:write',
   'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/bulk-tags': 'organization:write',
   'PATCH /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/:semrushPromptId': 'organization:write',

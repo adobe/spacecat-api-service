@@ -245,6 +245,13 @@ export default function getRouteHandlers(
     'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/bulk-tags': serenityController.bulkTagPrompts,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/bulk-delete': serenityController.bulkDeletePrompts,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/jobs/:jobId': serenityController.getPromptsJobStatus,
+    // PR-C (LLMO-7352/LLMO-7418): same handler, generic path — the prompts-job route above
+    // predates the `async: true` opt-in on createMarket/createBrandForOrg/activate, and its own
+    // `getPromptsJobStatus` handler was already job-type-agnostic (keys only on
+    // `job.getMetadata().brandId`, never on job type). This alias gives those newer async
+    // callers a correctly-named path to poll rather than one that says "prompts" for a
+    // workspace-provisioning or market-activation job.
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/jobs/:jobId': serenityController.getPromptsJobStatus,
     'PATCH /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/:semrushPromptId': serenityController.updatePrompt,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets': serenityController.listMarkets,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets': serenityController.createMarket,

@@ -79,6 +79,19 @@ v2-brands-for-org:
           application/json:
             schema:
               $ref: './schemas.yaml#/V2Brand'
+      '202':
+        description: |
+          PR-C (LLMO-7352/LLMO-7418): the request set `async: true` alongside
+          `semrushMarket`. The brand row is persisted immediately (visible,
+          non-active — "Setting up", no workspace pointer yet); the
+          sub-workspace ready-check and the initial market's project create/
+          publish are enqueued to a background job chain instead of running
+          inline. Poll the returned `jobId` at `GET .../serenity/jobs/{jobId}`
+          for status + result.
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/SerenityPromptsJobAccepted'
       '400':
         $ref: './responses.yaml#/400'
       '403':
@@ -104,6 +117,8 @@ v2-brands-for-org:
             organization (`code: brand_site_org_mismatch`).
           - The brand's primary URL is already the primary URL (base site) of
             another brand in this organization.
+          - (PR-C, `async: true` only) a provisioning attempt is already in flight
+            for this brand (`error: semrushProvisioningInProgress`).
         headers:
           X-Error:
             $ref: './headers.yaml#/xError'

@@ -1067,7 +1067,10 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
           // activate reads brand-level aliases/URLs/competitors once per batch, and
           // persists the active-flip + primary site (brands.site_id) via updateBrand;
           // stub them so the contract test doesn't hit the fake postgrest client and
-          // exercises the documented 200 (full-success) shape.
+          // exercises the documented 200 (full-success) shape. PR-C (LLMO-7352/LLMO-7418):
+          // the synchronous (async absent/false) branch also runs
+          // guardAgainstConcurrentProvisioning before dispatching — stub it as a no-op (no
+          // concurrent async attempt) for the same reason.
           '../../src/support/brands-storage.js': {
             getBrandAliases: () => Promise.resolve([]),
             getBrandUrlSources: () => Promise.resolve({
@@ -1075,6 +1078,7 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
             }),
             getBrandCompetitors: () => Promise.resolve([]),
             updateBrand: () => Promise.resolve({ getId: () => 'brand-x' }),
+            guardAgainstConcurrentProvisioning: () => Promise.resolve(),
           },
           // activate's all-or-nothing flip REQUIRES the brand_sites mirror to
           // succeed; stub it to a site id so the documented 200 (full success)
@@ -1083,6 +1087,31 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
           // which the response schema types as format: uuid.
           '../../src/support/serenity/site-linkage.js': {
             ensureMarketSite: () => Promise.resolve('00000000-0000-4000-8000-000000000000'),
+          },
+          // PR-C (LLMO-7352/LLMO-7418): activate's whole project-activation batch (the
+          // ensureSubworkspace-once, per-market handleCreateMarketSubworkspace loop, brand
+          // alias/URL/competitor prefetch, and the all-or-nothing site-link + status flip)
+          // moved into this module. It is a DIRECT import of serenity.js (unlike the
+          // brands-storage.js/site-linkage.js functions above, which it now calls internally
+          // one level deeper — a childmock cannot reach those transitively, only a direct
+          // import of the entry module), so stubbing IT is both correct and sufficient: it's
+          // the same "stub the deepest business function" pattern every other fixture in this
+          // file already uses, just at the layer that now actually owns the response shape.
+          '../../src/support/serenity/handlers/activate-markets-orchestration.js': {
+            orchestrateActivateMarkets: () => Promise.resolve({
+              status: 200,
+              body: {
+                brandId: BRAND,
+                status: 'active',
+                baseSiteId: '00000000-0000-4000-8000-000000000000',
+                markets: [{
+                  market: 'US',
+                  languageCode: 'en',
+                  status: 201,
+                  body: { brandId: BRAND, geoTargetId: 2840, languageCode: 'en' },
+                }],
+              },
+            }),
           },
         },
       )).default;

@@ -12,6 +12,7 @@
 
 import { composeBaseURL, hasText } from '@adobe/spacecat-shared-utils';
 
+import { ErrorWithStatusCode } from './utils.js';
 import { SERENITY_BRAND_SITE_TYPE } from './serenity/site-linkage.js';
 import {
   BRAND_GUIDANCE_MAX_LENGTH,
@@ -1900,7 +1901,7 @@ export async function listRegions(postgrestClient) {
 // here just to store it as `provisioningCandidateWorkspaceId`, which no caller ever consulted, was
 // dead weight presented as a real recovery path.
 const PROVISIONING_SELECT = 'id, semrush_provisioning_status, semrush_provisioning_attempt_id, '
-  + 'semrush_provisioning_job_id, semrush_sub_workspace_id, status, site_id';
+  + 'semrush_provisioning_job_id, semrush_sub_workspace_id, status, site_id, updated_at';
 
 /**
  * Reads a brand's current async-provisioning state. Plain read, no compare-and-set — used by the
@@ -1919,7 +1920,8 @@ const PROVISIONING_SELECT = 'id, semrush_provisioning_status, semrush_provisioni
  * @param {string} brandId
  * @param {object} postgrestClient
  * @returns {Promise<object|null>} the provisioning columns (camelCase), or null if the brand
- *   does not exist.
+ *   does not exist. Includes `updatedAt` — used by {@link guardAgainstConcurrentProvisioning}
+ *   to tell a genuinely in-flight attempt from a stale one nothing ever reconciled.
  */
 export async function getBrandProvisioningState(brandId, postgrestClient) {
   if (!postgrestClient?.from) {
@@ -1949,6 +1951,7 @@ export async function getBrandProvisioningState(brandId, postgrestClient) {
     provisioningStatus: data.semrush_provisioning_status,
     provisioningAttemptId: data.semrush_provisioning_attempt_id,
     provisioningJobId: data.semrush_provisioning_job_id,
+    updatedAt: data.updated_at,
   };
 }
 
@@ -2200,4 +2203,165 @@ export async function cancelProvisioningAttempt({ brandId, postgrestClient }) {
     throw new Error(`Failed to cancel provisioning attempt: ${error.message}`);
   }
   return Boolean(data);
+}
+
+/**
+ * Mints a NEW provisioning attempt for a brand and CAS-flips it to `pending`, atomically
+ * clearing any previous attempt's residue (candidate workspace id, job id, error) — the entry
+ * point for every converted-endpoint HTTP caller (PR-C, LLMO-7352/LLMO-7418) that starts an
+ * async provisioning chain, mirroring the same attempt-id + status contract every other write in
+ * this file already enforces.
+ *
+ * Guarded so a genuinely in-flight `pending` attempt can never be silently replaced by a second,
+ * competing one for the same brand: this CAS only succeeds from a terminal or never-started state
+ * (`NULL`, `ready`, or `failed`) — never from `pending`. It does NOT itself reconcile a stale
+ * `pending` row (that is `guardAgainstConcurrentProvisioning`'s job, for the synchronous callers
+ * this function has no equivalent of yet); a genuinely stuck `pending` attempt here simply answers
+ * 409 until something else reconciles it.
+ *
+ * @param {object} params
+ * @param {string} params.brandId
+ * @param {string} params.attemptId - freshly minted by the caller (a UUID), not generated here, so
+ *   the caller can enqueue the worker job with the SAME id it just persisted.
+ * @param {object} params.postgrestClient
+ * @param {string} [params.updatedBy]
+ * @returns {Promise<boolean>} true if the write landed (no attempt was genuinely in-flight), false
+ *   if a `pending` attempt already owns the brand — the caller must answer 409 rather than start a
+ *   second, competing chain.
+ */
+export async function beginProvisioningAttempt({
+  brandId, attemptId, postgrestClient, updatedBy = 'system',
+}) {
+  if (!postgrestClient?.from) {
+    throw new Error('PostgREST client is required');
+  }
+
+  const { data, error } = await postgrestClient
+    .from('brands')
+    .update({
+      semrush_provisioning_status: 'pending',
+      semrush_provisioning_attempt_id: attemptId,
+      semrush_provisioning_job_id: null,
+      // Cleared even though nothing reads it back (LLMO-7418 external-review Finding 7): a stale
+      // non-null value left over from a PRIOR attempt would otherwise permanently block
+      // persistProvisioningCandidate's own `.is(..., null)` double-delivery mutex for every
+      // subsequent attempt on this brand.
+      semrush_provisioning_candidate_workspace_id: null,
+      semrush_provisioning_error: null,
+      updated_by: updatedBy,
+    })
+    .eq('id', brandId)
+    .or('semrush_provisioning_status.is.null,semrush_provisioning_status.eq.ready,semrush_provisioning_status.eq.failed')
+    .select('id')
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Failed to begin provisioning attempt: ${error.message}`);
+  }
+  return Boolean(data);
+}
+
+/**
+ * Best-effort failure marker for the narrow window where `beginProvisioningAttempt` itself
+ * THROWS (a transient DB error, not its normal `false` return for "an attempt is already in
+ * flight") after the brand row was already persisted by an `async: true` create — e.g.
+ * `createBrandForOrg`'s initial-market path. In that window the row never reached
+ * `semrush_provisioning_status: 'pending'` with any attempt id, so `promoteProvisioningFailed`'s
+ * CAS (keyed on `attempt_id` + `status = 'pending'`) can never match it — this is deliberately
+ * an UNCONDITIONAL write instead, safe ONLY because the caller's `brandId` here is a UUID it
+ * freshly minted moments earlier in the SAME request: nothing else can legitimately know or
+ * reference it yet, so there is no concurrent legitimate writer this could clobber. Never call
+ * this for an already-established brand — use the CAS-guarded functions above for those.
+ *
+ * @param {object} params
+ * @param {string} params.brandId - a UUID minted by the caller earlier in the SAME request.
+ * @param {string} params.error - sanitized failure reason (never a raw upstream/DB error).
+ * @param {object} params.postgrestClient
+ * @returns {Promise<void>} never throws — logging a failure here is the caller's job.
+ */
+export async function recordFreshBrandProvisioningStartFailure({
+  brandId, error: failureReason, postgrestClient,
+}) {
+  if (!postgrestClient?.from) {
+    throw new Error('PostgREST client is required');
+  }
+  const { error } = await postgrestClient
+    .from('brands')
+    .update({
+      semrush_provisioning_status: 'failed',
+      semrush_provisioning_error: failureReason,
+    })
+    .eq('id', brandId);
+  if (error) {
+    throw new Error(`Failed to record provisioning-start failure: ${error.message}`);
+  }
+}
+
+// Sync/async provisioning race guard (PR-C, LLMO-7352/LLMO-7418)
+//
+// `ensureSubworkspace` (workspace-lifecycle.js) has NO awareness of `semrush_provisioning_status`
+// — a not-ready async candidate is invisible to `findAdoptableFamilyMatch`, so an unguarded
+// synchronous call while an async attempt is `pending` can independently create a second,
+// duplicate workspace (see `ensureSubworkspace`'s own "KNOWN GAP" doc comment). This is the
+// guard: call it immediately before any synchronous `ensureSubworkspace` call that was NOT
+// itself converted to the async worker.
+
+/**
+ * Threshold past which a `pending` attempt is presumed dead rather than genuinely in-flight.
+ * The worker's own bounded backoff (5 hops, 5/10/20/40/80s) tops out around ~2.5 minutes of
+ * legitimate `pending` time plus per-hop Semrush latency; 10 minutes is comfortably beyond that,
+ * so only a genuinely stuck row (an uncaught exception whose own best-effort failure-recording
+ * ALSO failed, or a worker crash-looped into the DLQ) is ever reconciled here.
+ */
+export const PROVISIONING_STALE_THRESHOLD_MS = 10 * 60 * 1000;
+
+/**
+ * Guards a synchronous `ensureSubworkspace` call against racing a live async provisioning
+ * attempt for the same brand. This IS the "lazy reconciliation" decided for PR-C — there is no
+ * scheduled sweep anywhere in this codebase, so a stuck `pending` row only ever self-heals when
+ * a caller like this one touches it again.
+ *
+ * - No attempt, or attempt already terminal (`ready`/`failed`): no-op, caller proceeds.
+ * - Attempt `pending` and fresh (within {@link PROVISIONING_STALE_THRESHOLD_MS}): throws a 409 —
+ *   a genuinely in-flight async attempt is trusted, not raced.
+ * - Attempt `pending` and stale: reconciled to `failed` here (best-effort compare-and-set; a
+ *   losing CAS just means someone else already reconciled or completed it), then the caller
+ *   proceeds with its own synchronous provisioning as if nothing were in flight.
+ *
+ * @param {string} brandId
+ * @param {object} postgrestClient
+ * @param {object} [log]
+ * @throws when a fresh attempt is genuinely in flight (`err.status = 409`,
+ *   `err.code = 'semrush_provisioning_in_progress'`).
+ */
+export async function guardAgainstConcurrentProvisioning(brandId, postgrestClient, log) {
+  const state = await getBrandProvisioningState(brandId, postgrestClient);
+  if (!state || state.provisioningStatus !== 'pending') {
+    return;
+  }
+
+  const ageMs = Date.now() - new Date(state.updatedAt).getTime();
+  if (ageMs < PROVISIONING_STALE_THRESHOLD_MS) {
+    // ErrorWithStatusCode (not a plain Error+.status, unlike this file's other 409s): this guard
+    // is called from BOTH serenity.js's activate (whose mapError only special-cases `instanceof
+    // ErrorWithStatusCode`) and brands.js's createBrandForOrg (whose createErrorResponse accepts
+    // any `.status`-bearing error) — ErrorWithStatusCode satisfies both consumers at once.
+    const err = new ErrorWithStatusCode(
+      'A Semrush sub-workspace provisioning attempt is already in progress for this brand; please retry shortly.',
+      409,
+    );
+    err.code = 'semrush_provisioning_in_progress';
+    throw err;
+  }
+
+  log?.warn?.('brands-storage: reconciling a stale pending provisioning attempt', {
+    brandId, attemptId: state.provisioningAttemptId, ageMs,
+  });
+  await promoteProvisioningFailed({
+    brandId,
+    attemptId: state.provisioningAttemptId,
+    error: 'Provisioning attempt went stale (no update within the expected window) and was '
+      + 'reconciled by a later request',
+    postgrestClient,
+  });
 }

@@ -884,6 +884,8 @@ const routeFacsCapabilities = {
       // Serenity proxy (Semrush AIO replacement) — reads under brand
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/jobs/:jobId': 'llmo/can_view',
+      // PR-C (LLMO-7352/LLMO-7418): job-type-agnostic alias of the route above (same handler).
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/jobs/:jobId': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags': 'llmo/can_view',

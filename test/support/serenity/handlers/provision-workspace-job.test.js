@@ -256,6 +256,83 @@ describe('handlers/provision-workspace-job.js (LLMO-7352 / LLMO-7418)', () => {
     });
   });
 
+  describe('existing-pointer fast path (PR-C, LLMO-7352/LLMO-7418) — brand already has a canonical workspace', () => {
+    const EXISTING_WS = 'existing-canonical-ws-1';
+
+    it('polls the canonical pointer directly, without create-or-adopting or persisting a candidate', async () => {
+      getBrandProvisioningStateStub.resolves(pendingState({ semrushSubWorkspaceId: EXISTING_WS }));
+      transport.getWorkspaceStatus.resolves({ status: 'created' });
+      const { provisionWorkspaceHandler } = await loadHandler();
+      const job = makeJob(makeMetadata());
+
+      const result = await provisionWorkspaceHandler(context, job, 'token');
+
+      expect(createOrAdoptSubworkspaceCandidateStub).to.not.have.been.called;
+      expect(persistProvisioningCandidateStub).to.not.have.been.called;
+      expect(transport.getWorkspaceStatus).to.have.been.calledOnceWith(EXISTING_WS);
+      expect(promoteProvisioningReadyStub).to.have.been.calledOnceWith({
+        brandId: BRAND_ID,
+        attemptId: ATTEMPT_ID,
+        workspaceId: EXISTING_WS,
+        hasSiteAnchor: false,
+        postgrestClient,
+        updatedBy: 'serenity-provision-worker',
+      });
+      expect(result).to.deep.equal({ provisioningStatus: 'ready' });
+    });
+
+    it('promotes to failed, WITHOUT any cleanup call, when the existing pointer has gone terminally failed', async () => {
+      getBrandProvisioningStateStub.resolves(pendingState({ semrushSubWorkspaceId: EXISTING_WS }));
+      transport.getWorkspaceStatus.resolves({ status: 'creation_failed' });
+      const { provisionWorkspaceHandler } = await loadHandler();
+      const job = makeJob(makeMetadata());
+
+      const result = await provisionWorkspaceHandler(context, job, 'token');
+
+      expect(emptyWorkspaceBestEffortStub).to.not.have.been.called;
+      expect(promoteProvisioningFailedStub).to.have.been.calledOnceWith({
+        brandId: BRAND_ID,
+        attemptId: ATTEMPT_ID,
+        error: TERMINAL_FAILURE_MESSAGE,
+        postgrestClient,
+      });
+      expect(result).to.deep.equal({ provisioningStatus: 'failed' });
+    });
+
+    it('self-requeues on not-ready, carrying the existing pointer forward as the candidate with freshlyCreated: false', async () => {
+      getBrandProvisioningStateStub.resolves(pendingState({ semrushSubWorkspaceId: EXISTING_WS }));
+      transport.getWorkspaceStatus.resolves({ status: 'not_ready' });
+      const { provisionWorkspaceHandler } = await loadHandler();
+      const job = makeJob(makeMetadata());
+
+      await provisionWorkspaceHandler(context, job, 'token');
+
+      expect(createAndEnqueueJobStub).to.have.been.calledOnceWith(context, sinon.match({
+        jobType: 'serenity-provision-workspace',
+        metadata: sinon.match({
+          candidateWorkspaceId: EXISTING_WS,
+          freshlyCreated: false,
+        }),
+      }));
+    });
+
+    it('never tears down the existing pointer as an orphan when superseded mid-flight', async () => {
+      getBrandProvisioningStateStub.onFirstCall().resolves(
+        pendingState({ semrushSubWorkspaceId: EXISTING_WS }),
+      );
+      // The re-check inside promoteProvisioningReady's CAS loses the race (a newer attempt won).
+      promoteProvisioningReadyStub.resolves(false);
+      transport.getWorkspaceStatus.resolves({ status: 'created' });
+      const { provisionWorkspaceHandler } = await loadHandler();
+      const job = makeJob(makeMetadata());
+
+      const result = await provisionWorkspaceHandler(context, job, 'token');
+
+      expect(emptyWorkspaceBestEffortStub).to.not.have.been.called;
+      expect(result).to.deep.equal({ provisioningStatus: 'superseded' });
+    });
+  });
+
   describe('resuming a self-requeued hop — candidate already persisted', () => {
     it('polls the SAME candidate (from job metadata, not re-read from the DB) without re-running create-or-adopt', async () => {
       getBrandProvisioningStateStub.resolves(
@@ -420,6 +497,77 @@ describe('handlers/provision-workspace-job.js (LLMO-7352 / LLMO-7418)', () => {
         'provision-worker-ready-promotion-failed',
       );
       expect(promoteProvisioningFailedStub).to.have.been.calledOnce;
+    });
+
+    describe('chained job (PR-C, LLMO-7352/LLMO-7418)', () => {
+      it('enqueues the chained job with the resolved workspaceId merged into its metadata, and returns chainedJobId', async () => {
+        transport.getWorkspaceStatus.resolves({ status: 'active' });
+        createAndEnqueueJobStub.resolves({ getId: () => 'chained-job-1' });
+        const { provisionWorkspaceHandler } = await loadHandler();
+        const job = makeJob(makeMetadata({
+          chainedJobType: 'serenity-create-market',
+          chainedJobMetadata: { requestBody: { market: 'us' } },
+        }));
+
+        const result = await provisionWorkspaceHandler(context, job, 'token');
+
+        expect(result).to.deep.equal({ provisioningStatus: 'ready', chainedJobId: 'chained-job-1' });
+        expect(createAndEnqueueJobStub).to.have.been.calledOnce;
+        const [, enqueueArgs] = createAndEnqueueJobStub.firstCall.args;
+        expect(enqueueArgs.jobType).to.equal('serenity-create-market');
+        expect(enqueueArgs.promiseToken).to.deep.equal({ promise_token: 'ptok-current' });
+        expect(enqueueArgs.metadata).to.deep.equal({
+          requestBody: { market: 'us' },
+          workspaceId: CANDIDATE_WS,
+        });
+      });
+
+      it('omits chainedJobId entirely when no chainedJobType was configured (bare-workspace-only callers)', async () => {
+        transport.getWorkspaceStatus.resolves({ status: 'active' });
+        const { provisionWorkspaceHandler } = await loadHandler();
+        const job = makeJob(makeMetadata());
+
+        const result = await provisionWorkspaceHandler(context, job, 'token');
+
+        expect(result).to.deep.equal({ provisioningStatus: 'ready' });
+        expect(createAndEnqueueJobStub).to.not.have.been.called;
+      });
+
+      it('does NOT throw and does NOT re-fail the (already ready) brand when the chain enqueue itself fails', async () => {
+        transport.getWorkspaceStatus.resolves({ status: 'active' });
+        createAndEnqueueJobStub.rejects(new Error('sqs down'));
+        const { provisionWorkspaceHandler } = await loadHandler();
+        const job = makeJob(makeMetadata({ chainedJobType: 'serenity-create-market' }));
+
+        const result = await provisionWorkspaceHandler(context, job, 'token');
+
+        expect(result).to.deep.equal({ provisioningStatus: 'ready' });
+        expect(promoteProvisioningFailedStub).to.not.have.been.called;
+      });
+
+      it('threads chainedJobType/chainedJobMetadata forward across a self-requeue hop', async () => {
+        transport.getWorkspaceStatus.resolves({ status: 'not_ready' });
+        const { provisionWorkspaceHandler } = await loadHandler();
+        const job = makeJob(makeMetadata({
+          chainedJobType: 'serenity-create-market',
+          chainedJobMetadata: { requestBody: { market: 'us' } },
+        }));
+
+        await provisionWorkspaceHandler(context, job, 'token');
+
+        const [, enqueueArgs] = createAndEnqueueJobStub.firstCall.args;
+        expect(enqueueArgs.metadata).to.deep.equal({
+          brandId: BRAND_ID,
+          attemptId: ATTEMPT_ID,
+          parentWorkspaceId: PARENT_WS,
+          title: TITLE,
+          requeueDepth: 1,
+          candidateWorkspaceId: CANDIDATE_WS,
+          freshlyCreated: true,
+          chainedJobType: 'serenity-create-market',
+          chainedJobMetadata: { requestBody: { market: 'us' } },
+        });
+      });
     });
 
     it('cleans up a freshly-created candidate when the ready-promotion CAS is lost', async () => {
