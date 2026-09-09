@@ -14,6 +14,29 @@
 
 # ─── Shared path parameters ───────────────────────────────────────────────────
 
+x-tag-path-parameter: &tagPathParameter
+  name: tagPath
+  in: query
+  required: false
+  style: form
+  explode: true
+  schema:
+    type: array
+    maxItems: 50
+    items: { type: string }
+  description: |
+    Repeated URL-encoded root-first tag paths. `tag__Parent` matches that
+    family and descendants; values in one family are ORed and families are ANDed.
+
+x-tag-filter-mode-parameter: &tagFilterModeParameter
+  name: tagFilterMode
+  in: query
+  required: false
+  schema: { type: string, enum: [elements-faceted-v1] }
+  description: |
+    Required when tagPath is supplied. This token selects the Elements path
+    filter engine and is intentionally distinct from native prompt-id faceting.
+
 v2-serenity-prompts:
   parameters:
     - name: spaceCatId
@@ -37,7 +60,13 @@ v2-serenity-prompts:
       Returns the prompts for a single (brandId, geoTargetId, languageCode)
       slice. Both `geoTargetId` and `languageCode` are required — the request
       always resolves to exactly one upstream project. Pagination is real
-      upstream pagination (no fan-out, no merged-and-sliced shimming).
+      upstream pagination (no fan-out, no merged-and-sliced shimming) unless
+      `tagFilterMode=faceted-v1` is selected.
+
+      Plain list reads do not load the complete project taxonomy. Their embedded
+      tags therefore report `compatibility.state=unverified` unless the tag is
+      locally provably read-only. Faceted reads load the complete taxonomy and
+      return authoritative `canonical` / `readOnly` compatibility.
     operationId: listSerenityPrompts
     security:
       - session_token: []
@@ -78,9 +107,16 @@ v2-serenity-prompts:
           Filter prompts to those carrying any of these upstream tag ids.
           Sent as repeated keys (`?tagIds=a&tagIds=b`); ids come from each
           prompt's `tags[].id`. Omitted/empty lists all prompts in the slice.
-          Maximum 50 ids; excess values are silently truncated (same pattern
-          as the `limit` cap). This matches the server-side `MAX_TAG_IDS`
-          constant in `handlers/prompts.js`.
+          Maximum 50 ids. Values are never truncated.
+      - name: tagFilterMode
+        in: query
+        required: false
+        schema: { type: string, enum: [faceted-v1] }
+        description: |
+          Enables parent-descendant expansion plus OR-within-family and
+          AND-across-family matching. Unknown or incompatible ids fail closed.
+          The faceted scan is bounded to 20,000 upstream prompts; reaching the
+          ceiling returns a failure rather than a partial filter result.
       - name: sort
         in: query
         required: false
@@ -113,6 +149,13 @@ v2-serenity-prompts:
         description: Organization, brand, or workspace not found, or serenity is not active for the organization.
       '502':
         description: Upstream returned a non-2xx response.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '503':
+        description: |
+          The complete faceted taxonomy (`tagTreeReadIncomplete`) or prompt
+          cohort (`promptCorpusIncomplete`) could not be established.
         content:
           application/json:
             schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
@@ -152,8 +195,18 @@ v2-serenity-prompts:
       '400': { $ref: './responses.yaml#/400' }
       '404':
         description: Organization, brand, or workspace not found, or serenity is not active for the organization.
+      '409':
+        description: A prompt supplied more than 50 caller-owned tag ids (`tagLimitExceeded`).
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
       '502':
         description: Upstream returned a non-2xx response.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '503':
+        description: The complete taxonomy required to validate prompt tags could not be established.
         content:
           application/json:
             schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
@@ -218,7 +271,10 @@ v2-serenity-prompt-by-id:
       '404':
         description: Organization, brand, slice, or prompt not found, or serenity is not active for the organization.
       '409':
-        description: The new text exactly matches a different prompt's text in this slice; nothing was changed upstream.
+        description: |
+          The new text exactly matches a different prompt's text in this slice,
+          or the complete replacement tag set exceeds the 50-id limit. Nothing
+          was changed upstream.
         content:
           application/json:
             schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
@@ -279,6 +335,80 @@ v2-serenity-prompts-bulk-delete:
             schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
       '500': { $ref: './responses.yaml#/500' }
 
+v2-serenity-prompts-bulk-tags:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    - name: brandId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+  post:
+    tags: [serenity]
+    summary: Assign or remove tags from all prompts matching a project-local filter
+    description: |
+      Validates the mutation ids and freezes the normalized faceted filter before
+      returning 202; it does not synchronously scan the prompt corpus. The worker
+      force-refreshes the taxonomy, performs the bounded 20,000-prompt scan, and
+      applies the frozen OR-within-family / AND-across-family filter semantics to
+      the worker-time cohort. If a resulting prompt would exceed the 50-id limit,
+      that item fails with `tagLimitExceeded` without being written; other
+      matching prompts continue.
+
+      `Idempotency-Key` replay is request deduplication, not a retry command: the
+      same unexpired key and canonical request returns the original job/result.
+      A request with a new key (or no key) creates a new worker-time evaluation.
+      Publish is project-wide and occurs only when at least one prompt update
+      landed. A failed publish leaves the same job `IN_PROGRESS` and triggers a
+      bounded SQS retry in a persisted publish-only phase. Recovery never
+      reapplies the prompt mutation. Zero-match and unchanged-only jobs do not
+      publish.
+    operationId: bulkTagSerenityPrompts
+    security:
+      - session_token: []
+    parameters:
+      - name: Idempotency-Key
+        in: header
+        required: false
+        schema: { type: string, maxLength: 256 }
+        description: |
+          Scoped to organization, brand, project, caller, and this operation.
+          Retained for 86400 seconds. The same key with the same canonical body
+          replays the original job; the same key with a different body returns
+          409 `idempotencyConflict`. Omit the header, use a new key, or wait for
+          expiry to create a new job.
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: './schemas.yaml#/SerenityBulkTagsRequest' }
+    responses:
+      '200':
+        description: Idempotent replay of an unexpired request.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityBulkTagsAccepted' }
+      '202':
+        description: New bulk operation accepted.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityBulkTagsAccepted' }
+      '400': { $ref: './responses.yaml#/400' }
+      '404': { $ref: './responses.yaml#/404' }
+      '409':
+        description: Tag limit, incompatible taxonomy, or idempotency conflict.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '503':
+        description: The complete taxonomy required to validate mutation/filter ids could not be established.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '500': { $ref: './responses.yaml#/500' }
+
 v2-serenity-prompts-job-by-id:
   parameters:
     - name: spaceCatId
@@ -312,10 +442,26 @@ v2-serenity-prompts-job-by-id:
       org/brand access + serenity-active checks as every other serenity endpoint;
       a job that does not belong to the addressed brand 404s exactly like a
       missing job (jobs are never leaked across brands). The response is
-      secret-free — only `{ jobId, status, result, error }`.
+      secret-free — only `{ jobId, jobType, status, result, error }`.
+
+      `COMPLETED` means worker processing is terminal, not that every prompt or
+      the project publish succeeded. For `bulkTags`, inspect
+      `result.outcome`: `PARTIAL_FAILURE` accompanies item failures and/or a
+      failed publish, with item details paged through `failureCursor`.
+      `result.publish.state=SKIPPED` means no update landed. Transient publish
+      failures keep the job `IN_PROGRESS` while bounded publish-only retries run.
     operationId: getSerenityPromptsJobStatus
     security:
       - session_token: []
+    parameters:
+      - name: failureCursor
+        in: query
+        required: false
+        schema: { type: string }
+      - name: failureLimit
+        in: query
+        required: false
+        schema: { type: integer, minimum: 1, maximum: 100, default: 100 }
     responses:
       '200':
         description: Job status (and result when COMPLETED / error when FAILED).
@@ -535,6 +681,16 @@ v2-serenity-tags:
           roots, an upstream tag id lists that tag's children. Absent → the flat,
           prompt-derived tag set.
         schema: { type: string }
+      - name: page
+        in: query
+        required: false
+        schema: { type: integer, minimum: 1, default: 1 }
+        description: Opt-in direct-level paging for tree mode.
+      - name: limit
+        in: query
+        required: false
+        schema: { type: integer, minimum: 1, maximum: 100, default: 100 }
+        description: Opt-in direct-level paging for tree mode.
     responses:
       '200':
         description: Tags retrieved.
@@ -549,6 +705,11 @@ v2-serenity-tags:
         content:
           application/json:
             schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '503':
+        description: The complete requested tag level could not be established.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
       '500': { $ref: './responses.yaml#/500' }
   post:
     tags: [serenity]
@@ -556,18 +717,16 @@ v2-serenity-tags:
     description: |
       Registers a BARE-NAMED prompt tag on the market addressed by the
       `(geoTargetId, languageCode)` slice. Every tag is a descendant of one of
-      the five dimension roots (`category`, `intent`, `origin`, `type`,
+      the six dimension roots (`category`, `tag`, `intent`, `origin`, `type`,
       `source`); a tag's dimension is that root ancestor, never a prefix on its
       name. `type` names the dimension the value belongs to, and `name` must not
       contain `:` nor shadow a dimension root's name.
 
-      `category` is the one CUSTOMER-AUTHORED open dimension: its values are the
-      customer's. A duplicate name under the same parent is a hard upstream error,
-      so resolve-before-create is the CALLER's job. Omit `parentId` to hang the new
-      value directly under the `category` root; pass an upstream tag id (from a
-      prior tags list) to nest it under an existing category as a sub-category.
-      The "Categories" view is the `category` root's subtree across a brand's
-      markets.
+      `category` and `tag` are CUSTOMER-AUTHORED open dimensions: their values are the
+      customer's. The service resolves an exact `(parentId, name)` before create,
+      including a concurrent-create reread. Existing values return 200 with
+      `created: false`; newly minted values return 201 with `created: true`.
+      Omit `parentId` to hang the new value directly under its dimension root.
 
       `intent` / `origin` / `type` / `source` are SERVER-OWNED: `parentId` is not
       accepted (their values are always direct children of the dimension root),
@@ -594,16 +753,16 @@ v2-serenity-tags:
             properties:
               type:
                 type: string
-                enum: [category, intent, origin, type, source]
+                enum: [category, tag, intent, origin, type, source]
                 description: The tag's dimension. `category` is customer-authored (open); `intent`/`origin`/`type`/`source` are server-owned — the first three closed (fixed enum), `source` open (producing system, resolve-or-create).
               name:
                 type: string
                 minLength: 1
                 maxLength: 100
                 description: |
-                  A BARE value — no dimension prefix. Must not contain ':' and
+                  A BARE value — no dimension prefix. Must not contain ':' or '__' and
                   must not be one of the reserved dimension root names
-                  (`category`, `intent`, `origin`, `type`, `source`,
+                  (`category`, `tag`, `intent`, `origin`, `type`, `source`,
                   `$abv_tags$intent`). For a closed dimension it must exactly
                   match one of that dimension's fixed enum values.
               geoTargetId:
@@ -618,14 +777,13 @@ v2-serenity-tags:
                 type: [string, 'null']
                 description: |
                   Optional upstream tag id (from a prior tags list) to nest the
-                  new OPEN-dimension value under as a sub-category. Omit, or
+                  new OPEN-dimension value under its own dimension. Omit, or
                   pass explicit JSON `null`, to hang it directly under the
-                  `category` dimension root — never at the root level, which is
-                  reserved for the five dimension roots. Not allowed for a
+                  dimension root — never at the root level. Not allowed for a
                   closed dimension.
     responses:
       '200':
-        description: Closed-dimension value resolved (already existed or was just created — see `created`).
+        description: Exact existing value resolved without creating a duplicate.
         content:
           application/json:
             schema:
@@ -634,7 +792,7 @@ v2-serenity-tags:
                 brandId: { type: string, format: uuid }
                 geoTargetId: { type: integer }
                 languageCode: { type: string }
-                type: { type: string, enum: [intent, source, type] }
+                type: { type: string, enum: [category, tag, intent, origin, source, type] }
                 name: { type: string, description: The bare value. }
                 id: { type: string, description: The tag's upstream id. }
                 parentId:
@@ -642,7 +800,7 @@ v2-serenity-tags:
                   description: The dimension root's id — a closed value is always a direct child of its root.
                 created:
                   type: boolean
-                  description: 'true if this call created the value; false if it already existed.'
+                  enum: [false]
       '201':
         description: OPEN-dimension value registered on the market's project.
         content:
@@ -653,7 +811,7 @@ v2-serenity-tags:
                 brandId: { type: string, format: uuid }
                 geoTargetId: { type: integer }
                 languageCode: { type: string }
-                type: { type: string, enum: [category] }
+                type: { type: string, enum: [category, tag] }
                 name: { type: string, description: The bare value. }
                 id:
                   type: string
@@ -663,6 +821,11 @@ v2-serenity-tags:
                   description: |
                     The parent tag's id: the `category` dimension root for a
                     category, or the enclosing category for a sub-category.
+                created:
+                  type: boolean
+                  enum: [true]
+                compatibility:
+                  $ref: './schemas.yaml#/SerenityTagCompatibility'
       '400': { $ref: './responses.yaml#/400' }
       '404':
         description: Organization, brand, or the (geoTargetId, languageCode) market not found.
@@ -712,7 +875,7 @@ v2-serenity-tag-by-id:
       and RE-SENDING it upstream — an upstream PATCH that omits `parent_id`
       silently PROMOTES the tag to a root, stranding it outside its dimension
       while every carrying prompt stays attached. Explicit JSON `null` is
-      rejected with a 400: the root level is reserved for the five dimension
+      rejected with a 400: the root level is reserved for the six dimension
       roots, so a tag can never legally become one.
 
       A re-parent stays inside the tag's own dimension, and the new parent may
@@ -721,7 +884,7 @@ v2-serenity-tag-by-id:
       the tag and its subtree reachable from no root — and so unreachable and
       unrepairable through this API.
 
-      The five dimension roots themselves cannot be renamed or re-parented
+      The six dimension roots themselves cannot be renamed or re-parented
       (400) — doing so would leave their whole subtree without a dimension. A
       closed dimension's value cannot be renamed or re-parented either: its
       vocabulary is fixed.
@@ -805,27 +968,27 @@ v2-serenity-tag-by-id:
       '500': { $ref: './responses.yaml#/500' }
   delete:
     tags: [serenity]
-    summary: Delete a category (or sub-category) and its whole subtree
+    summary: Delete a customer-owned category or tag and its whole subtree
     description: |
       Deletes the tag addressed by `tagId` on the market named by the
       `(geoTargetId, languageCode)` query slice, together with its entire
-      subtree — deleting a category deletes every sub-category beneath it in
-      one call. Every carrying prompt is preserved: a delete only detaches the
-      tag from its prompts, it never reads, writes, or deletes a prompt.
-      Prompts that lose their last `category`-dimension tag surface as
-      uncategorized rather than disappearing.
+      subtree — deleting a customer-owned `category` or `tag` value deletes
+      every descendant beneath it in one call. Every carrying prompt is
+      preserved: a delete only detaches the tag from its prompts, it never
+      reads, writes, or deletes a prompt. Prompts that lose their last
+      customer-owned tag surface as uncategorized rather than disappearing.
 
-      Only a descendant of the `category` dimension may be deleted this way. A
-      dimension root can never be deleted (400) — it would take its whole
-      vocabulary with it — and neither can a value of a server-owned dimension
-      (`intent`, `origin`, `type`, `source`; 400), since those vocabularies are
-      authored by the server, never client-mutated. An id absent from the
-      project's draft tag tree answers 404 `tagNotFound`, including a `tagId`
-      that a previous call already deleted — a repeat delete is a clean no-op,
-      not an error.
+      Only descendants of the customer-owned `category` and `tag` dimensions
+      may be deleted this way. A dimension root can never be deleted (400) —
+      it would take its whole vocabulary with it — and neither can a value of a
+      server-owned dimension (`intent`, `origin`, `type`, `source`; 400), since
+      those vocabularies are authored by the server, never client-mutated. An
+      id absent from the project's draft tag tree answers 404 `tagNotFound`,
+      including a `tagId` that a previous call already deleted — a repeat
+      delete is a clean no-op, not an error.
 
-      This is not undoable: recreating a same-named category mints a new tag
-      id, and anything holding the old one (a saved filter, a deep link)
+      This is not undoable: recreating a same-named customer-owned value mints a
+      new tag id, and anything holding the old one (a saved filter, a deep link)
       resolves to the same 404-refresh semantics.
     operationId: deleteSerenityTag
     security:
@@ -845,6 +1008,11 @@ v2-serenity-tag-by-id:
         schema:
           type: string
           pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$'
+      - name: If-Match
+        in: header
+        required: false
+        schema: { type: string }
+        description: Quoted revision returned by the impact endpoint.
     responses:
       '204':
         description: Tag and its whole subtree deleted (every carrying prompt preserved).
@@ -860,12 +1028,63 @@ v2-serenity-tag-by-id:
           Organization, brand, the (geoTargetId, languageCode) market, or the
           `tagId` itself — an id absent from the project's tag tree answers
           `tagNotFound` (a clean, idempotent outcome on a repeat delete).
+      '412':
+        description: The supplied impact revision is stale.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
       '502':
         description: Upstream returned a non-2xx response.
         content:
           application/json:
             schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
       '500': { $ref: './responses.yaml#/500' }
+
+v2-serenity-tag-impact:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    - name: brandId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    - name: tagId
+      in: path
+      required: true
+      schema: { type: string }
+  get:
+    tags: [serenity]
+    summary: Read complete subtree delete impact
+    operationId: getSerenityTagImpact
+    security:
+      - session_token: []
+    parameters:
+      - name: geoTargetId
+        in: query
+        required: true
+        schema: { type: integer, minimum: 1 }
+      - name: languageCode
+        in: query
+        required: true
+        schema: { type: string, pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$' }
+    responses:
+      '200':
+        description: Complete impact snapshot.
+        headers:
+          ETag:
+            schema: { type: string }
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityTagImpact' }
+      '400': { $ref: './responses.yaml#/400' }
+      '404': { $ref: './responses.yaml#/404' }
+      '503':
+        description: Complete impact could not be established.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
 
 # ─── Brand activation (sub-workspace mode) ────────────────────────────
 
@@ -1408,6 +1627,8 @@ v2-serenity-brand-presence-sentiment-overview:
     security:
       - session_token: []
     parameters:
+      - *tagPathParameter
+      - *tagFilterModeParameter
       - name: startDate
         in: query
         required: true
@@ -2034,6 +2255,8 @@ v2-serenity-brand-presence-topics:
     security:
       - session_token: []
     parameters:
+      - *tagPathParameter
+      - *tagFilterModeParameter
       - name: startDate
         in: query
         required: false
@@ -2133,6 +2356,8 @@ v2-serenity-brand-presence-topic-prompts:
     security:
       - session_token: []
     parameters:
+      - *tagPathParameter
+      - *tagFilterModeParameter
       - name: startDate
         in: query
         required: false
@@ -2241,6 +2466,8 @@ v2-serenity-brand-presence-stats:
     security:
       - session_token: []
     parameters:
+      - *tagPathParameter
+      - *tagFilterModeParameter
       - name: startDate
         in: query
         required: false
@@ -2398,6 +2625,8 @@ v2-serenity-url-inspector-stats:
     security:
       - session_token: []
     parameters:
+      - *tagPathParameter
+      - *tagFilterModeParameter
       - name: startDate
         in: query
         required: false
@@ -2535,6 +2764,8 @@ v2-serenity-url-inspector-prompts-count:
     security:
       - session_token: []
     parameters:
+      - *tagPathParameter
+      - *tagFilterModeParameter
       - name: model
         in: query
         required: false
@@ -2664,6 +2895,8 @@ v2-serenity-url-inspector-url-prompts:
     security:
       - session_token: []
     parameters:
+      - *tagPathParameter
+      - *tagFilterModeParameter
       - name: url
         in: query
         required: true
@@ -2808,6 +3041,8 @@ v2-serenity-market-tracking-trends:
     security:
       - session_token: []
     parameters:
+      - *tagPathParameter
+      - *tagFilterModeParameter
       - name: startDate
         in: query
         required: false
@@ -2942,6 +3177,8 @@ v2-serenity-kpi-headlines:
     security:
       - session_token: []
     parameters:
+      - *tagPathParameter
+      - *tagFilterModeParameter
       - name: startDate
         in: query
         required: false
@@ -3086,6 +3323,8 @@ v2-serenity-source-visibility-headline:
     security:
       - session_token: []
     parameters:
+      - *tagPathParameter
+      - *tagFilterModeParameter
       - name: startDate
         in: query
         required: false
@@ -3225,6 +3464,8 @@ v2-serenity-competitor-summary:
     security:
       - session_token: []
     parameters:
+      - *tagPathParameter
+      - *tagFilterModeParameter
       - name: startDate
         in: query
         required: false
