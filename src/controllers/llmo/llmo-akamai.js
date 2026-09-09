@@ -1194,33 +1194,36 @@ function LlmoAkamaiController(ctx) {
     const siteId = site.getId();
 
     try {
-      // Independent reads — run concurrently to halve endpoint latency.
-      const [activations, latestVersion] = await Promise.all([
-        client.listActivations(propertyId, contractId, groupId),
+      // Independent, history-independent reads — run concurrently. Each active-per-network value
+      // comes from PAPI's bounded `/versions/latest?activatedOn=NETWORK` lookup rather than
+      // scanning the property's full activation history, so this endpoint's cost stays flat as the
+      // number of versions/activations grows.
+      const [latestVersion, staging, production] = await Promise.all([
         client.getLatestVersion(propertyId, contractId, groupId),
+        client.getLatestVersionActivatedOn(propertyId, contractId, groupId, 'STAGING'),
+        client.getLatestVersionActivatedOn(propertyId, contractId, groupId, 'PRODUCTION'),
       ]);
-      // Active-per-network from the full activation history: key the ACTIVE entries by network.
-      // (latestActivation is newest-*submitted* — could be a failed/aborted record — so it is
-      // deliberately not used here.)
-      const active = activations.reduce((acc, activation) => {
-        if (String(activation.status || '').toUpperCase() !== 'ACTIVE') {
-          return acc;
-        }
-        const network = String(activation.network || '').toUpperCase();
-        // Akamai keeps at most one ACTIVE activation per network; if PAPI ever returns more, keep
-        // the first seen rather than letting a later one silently overwrite it (deterministic).
-        if (!(network in acc)) {
-          // Project only the fields the UI needs — do NOT pass the raw PAPI record through, so a
-          // future upstream field (e.g. notifyEmails) can't leak into the response.
-          acc[network] = {
-            activationId: activation.activationId,
-            propertyVersion: activation.propertyVersion,
-            network: activation.network,
-            status: activation.status,
-          };
-        }
-        return acc;
-      }, {});
+      // A bounded lookup returns a *version* record (not an activation record), so activationId is
+      // always null here — the version is active on the network by definition. The key is kept for
+      // response-shape stability with the previous (history-scan) implementation. An absent
+      // (undefined) result means the property was never activated on that network.
+      const active = {};
+      if (staging) {
+        active.STAGING = {
+          activationId: null,
+          propertyVersion: staging.propertyVersion,
+          network: 'STAGING',
+          status: 'ACTIVE',
+        };
+      }
+      if (production) {
+        active.PRODUCTION = {
+          activationId: null,
+          propertyVersion: production.propertyVersion,
+          network: 'PRODUCTION',
+          status: 'ACTIVE',
+        };
+      }
       return ok({ propertyId, latestVersion, active });
     } catch (e) {
       return papiErrorResponse(e, 'version listing', context, { siteId, propertyId });
