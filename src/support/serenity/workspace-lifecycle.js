@@ -92,6 +92,12 @@ function subworkspaceCreationFailedError() {
   return error;
 }
 
+function subworkspaceCreationTimeoutError() {
+  const error = new ErrorWithStatusCode('Subworkspace creation timed out', 504);
+  error.code = ERROR_CODES.SUBWORKSPACE_CREATION_TIMEOUT;
+  return error;
+}
+
 /**
  * @param {SerenityTransport} transport
  * @param {string} workspaceId
@@ -125,7 +131,7 @@ export async function pollUntilCreated(
     'pollUntilCreated: SUBWORKSPACE_CREATION_TIMEOUT: readiness attempts exhausted',
     { workspaceId },
   );
-  throw new ErrorWithStatusCode('Subworkspace creation timed out', 504);
+  throw subworkspaceCreationTimeoutError();
 }
 
 // The user-manager family endpoint (GET /v1/workspaces/{id}/family) returns a

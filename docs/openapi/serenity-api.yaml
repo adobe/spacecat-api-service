@@ -1193,7 +1193,8 @@ v2-serenity-activate:
       '504':
         description: >-
           The sub-workspace remained in a transient provisioning state until the
-          readiness polling budget was exhausted.
+          readiness polling budget was exhausted. The response carries
+          `error: subworkspaceCreationTimeout`.
         content:
           application/json:
             schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }

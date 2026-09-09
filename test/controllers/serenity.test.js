@@ -2309,9 +2309,9 @@ describe('SerenityController', () => {
     });
 
     it('activate maps a workspace readiness timeout without exposing its workspace id', async () => {
-      ensureSubworkspaceStub.rejects(
-        new ErrorWithStatusCode('Subworkspace creation timed out', 504),
-      );
+      const error = new ErrorWithStatusCode('Subworkspace creation timed out', 504);
+      error.code = ERROR_CODES.SUBWORKSPACE_CREATION_TIMEOUT;
+      ensureSubworkspaceStub.rejects(error);
       getBrandBaseSiteIdStub.resolves('primary-site');
       const controller = SerenityController({ env: {} }, fakeLog(), {});
 
@@ -2319,6 +2319,7 @@ describe('SerenityController', () => {
       const body = await readBody(response);
 
       expect(response.status).to.equal(504);
+      expect(body.error).to.equal(ERROR_CODES.SUBWORKSPACE_CREATION_TIMEOUT);
       expect(body.message).to.equal('Subworkspace creation timed out');
       expect(JSON.stringify(body)).to.not.include(SUBWS);
     });

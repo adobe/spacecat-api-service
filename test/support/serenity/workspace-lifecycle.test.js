@@ -189,6 +189,33 @@ describe('workspace-lifecycle', () => {
       expect(brand.save).to.not.have.been.called;
     });
 
+    it('stops polling when a transient status becomes terminal', async () => {
+      const sleep = sinon.stub().resolves();
+      const localLog = { info: sinon.stub(), error: sinon.stub(), warn: sinon.stub() };
+      const transport = makeTransport();
+      transport.getWorkspaceStatus
+        .onFirstCall().resolves({ status: 'not ready' })
+        .onSecondCall().resolves({ status: 'creation failed' });
+      const brand = makeBrand({ workspaceId: SUB_WS });
+
+      const error = await ensureSubworkspace(
+        transport,
+        brand,
+        PARENT_WS,
+        localLog,
+        { attempts: 3, intervalMs: 1, sleep },
+      ).catch((e) => e);
+
+      expect(error.status).to.equal(502);
+      expect(error.code).to.equal(ERROR_CODES.SUBWORKSPACE_CREATION_FAILED);
+      expect(transport.getWorkspaceStatus).to.have.been.calledTwice;
+      expect(sleep).to.have.been.calledOnceWithExactly(1);
+      expect(localLog.error).to.have.been.calledOnceWithExactly(
+        'pollUntilCreated: SUBWORKSPACE_CREATION_FAILED: terminal status observed',
+        { workspaceId: SUB_WS, status: 'creation failed' },
+      );
+    });
+
     it('createReadiness "skip": creates and persists WITHOUT the settle poll (LLMO-6569 bare path)', async () => {
       const transport = makeTransport();
       // A not-ready workspace would make the legacy poll spin (and time out); 'skip' must not probe
@@ -214,6 +241,41 @@ describe('workspace-lifecycle', () => {
       // Pointer still persisted immediately, closing the orphan window.
       expect(brand.setSemrushSubWorkspaceId).to.have.been.calledOnceWithExactly(SUB_WS);
       expect(brand.save).to.have.been.calledOnce;
+    });
+
+    it('detects a terminal status when a skip-mode workspace is checked later', async () => {
+      const sleep = sinon.stub().resolves();
+      const localLog = { info: sinon.stub(), error: sinon.stub(), warn: sinon.stub() };
+      const transport = makeTransport({
+        getWorkspaceStatus: sinon.stub().resolves({ status: 'creation failed' }),
+      });
+      const brand = makeBrand();
+
+      await ensureSubworkspace(
+        transport,
+        brand,
+        PARENT_WS,
+        localLog,
+        { attempts: 3, intervalMs: 1, sleep },
+        null,
+        { createReadiness: 'skip', brandCollection: makeBrandCollection() },
+      );
+
+      const error = await ensureSubworkspace(
+        transport,
+        brand,
+        PARENT_WS,
+        localLog,
+        { attempts: 3, intervalMs: 1, sleep },
+      ).catch((e) => e);
+
+      expect(error.status).to.equal(502);
+      expect(error.code).to.equal(ERROR_CODES.SUBWORKSPACE_CREATION_FAILED);
+      expect(brand.getSemrushSubWorkspaceId()).to.equal(SUB_WS);
+      expect(brand.setSemrushSubWorkspaceId).to.have.been.calledOnceWithExactly(SUB_WS);
+      expect(brand.save).to.have.been.calledOnce;
+      expect(transport.getWorkspaceStatus).to.have.been.calledOnceWithExactly(SUB_WS);
+      expect(sleep).to.not.have.been.called;
     });
 
     it('adopts a unique created family match after a create timeout (504 recovery preserved)', async () => {
