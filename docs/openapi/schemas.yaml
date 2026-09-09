@@ -11950,6 +11950,12 @@ SerenityPrompt:
         own name — bearing in mind that `path[0].name` is the root's UPSTREAM
         name, which for the intent dimension is `$abv_tags$intent` and for the
         other four is the dimension key itself.
+
+        On a plain prompt list, the service does not read the complete project
+        taxonomy, so otherwise-valid embedded tags carry
+        `compatibility.state: unverified` with reason `taxonomyNotLoaded`.
+        `tagFilterMode=faceted-v1` reads the complete taxonomy and returns
+        authoritative compatibility.
     tagIds:
       type: array
       items: { type: string }
@@ -12000,7 +12006,7 @@ SerenityPromptTag:
     dimension root and its own `name` names its dimension upstream. Names are
     passed through exactly as upstream holds them, so the intent root reads
     `$abv_tags$intent`. The dimension is `intent`.
-  required: [id, name]
+  required: [id, name, compatibility]
   properties:
     id:
       type: string
@@ -12023,6 +12029,8 @@ SerenityPromptTag:
         properties:
           id: { type: string }
           name: { type: string }
+    compatibility:
+      $ref: '#/SerenityTagCompatibility'
   example:
     id: "uuid-1"
     name: "Trail"
@@ -12037,10 +12045,26 @@ SerenityPromptListResponse:
   properties:
     items:
       type: array
-      items: { $ref: '#/SerenityPrompt' }
+      items: { $ref: '#/SerenityEditablePrompt' }
     total: { type: integer }
     page: { type: integer }
     limit: { type: integer }
+
+SerenityEditablePrompt:
+  allOf:
+    - { $ref: '#/SerenityPrompt' }
+    - type: object
+      required: [tags]
+      properties:
+        tags:
+          type: array
+          items: { $ref: '#/SerenityEditablePromptTag' }
+
+SerenityEditablePromptTag:
+  allOf:
+    - { $ref: '#/SerenityPromptTag' }
+    - type: object
+      required: [parentId, path, compatibility]
 
 SerenityPromptInput:
   type: object
@@ -12056,6 +12080,7 @@ SerenityPromptInput:
       type: array
       items: { type: string }
       minItems: 1
+      maxItems: 50
       description: Upstream tag ids to attach to this prompt.
     geoTargetId:
       type: integer
@@ -12099,10 +12124,29 @@ SerenityCreatePromptsRequest:
 
 SerenityCreatePromptsResponse:
   type: object
+  additionalProperties: false
   required: [created, skipped, failed, published]
   properties:
     created:
       type: array
+      description: Prompts that did not previously exist in the project and were created.
+      items: { $ref: '#/SerenityPrompt' }
+    updated:
+      type: array
+      description: >
+        Prompts whose text ALREADY existed in the project: rather than being
+        created again, their tags were REPLACED with the ones this request
+        supplied (plus the server-computed `type` and `intent`, and the prompt's
+        stored `source`, which is a creation fact and is never re-derived on an
+        edit). This is what makes a repeated CSV import an update rather than an
+        additive write — the upstream create folds a repeated text into
+        `existing_count` but still attaches the tag ids it is given, which would
+        otherwise leave the prompt carrying several categories at once.
+
+        Always present on a live response. NOT in `required` because an async
+        job's stored `result` may have been persisted before this field existed
+        (`GET .../serenity/prompts/jobs/{jobId}` replays that stored payload
+        verbatim); treat an absent value as an empty list.
       items: { $ref: '#/SerenityPrompt' }
     skipped:
       type: array
@@ -12130,6 +12174,12 @@ SerenityCreatePromptsResponse:
         unless the request set `deferPublish: true`, in which case the prompts
         were written as drafts and the caller must publish separately
         (serenity-docs#32).
+    pendingClassificationCount:
+      type: integer
+      minimum: 0
+    requeuedJobId:
+      type: [string, 'null']
+      format: uuid
 
 SerenityPromptsJobAccepted:
   type: object
@@ -12137,11 +12187,14 @@ SerenityPromptsJobAccepted:
     202 body for an async prompt-create (`async: true`). The write runs
     asynchronously on the job runner; poll `jobId` at
     `GET .../serenity/prompts/jobs/{jobId}`.
-  required: [jobId, status]
+  required: [jobId, jobType, status]
   properties:
     jobId:
       type: string
       format: uuid
+    jobType:
+      type: string
+      enum: [classifyPrompts]
     status:
       type: string
       description: The job's initial state (IN_PROGRESS at enqueue time).
@@ -12150,13 +12203,18 @@ SerenityPromptsJobAccepted:
 SerenityPromptsJobStatus:
   type: object
   description: |
-    Poll response for an async `serenity-classify-prompts` job. Secret-free by
-    design — the job's internal metadata (promise token etc.) is never exposed.
-  required: [jobId, status]
+    Poll response for an async Serenity job. Secret-free by design — the job's
+    internal metadata (promise token etc.) is never exposed. `COMPLETED` means
+    processing is terminal, not necessarily full business success: a bulk-tags
+    caller must inspect `result.outcome`, `failureCount`, and `publish.state`.
+  required: [jobId, jobType, status, result, error]
   properties:
     jobId:
       type: string
       format: uuid
+    jobType:
+      type: string
+      enum: [classifyPrompts, bulkTags, tagImpact]
     status:
       type: string
       enum: [IN_PROGRESS, COMPLETED, FAILED]
@@ -12168,14 +12226,24 @@ SerenityPromptsJobStatus:
         FAILED.
       oneOf:
         - { $ref: '#/SerenityCreatePromptsResponse' }
+        - { $ref: '#/SerenityBulkTagsResult' }
+        - { $ref: '#/SerenityTagImpact' }
         - { type: 'null' }
     error:
-      description: The failure envelope once FAILED; null otherwise.
+      description: |
+        The sanitized public failure envelope once FAILED; null otherwise.
+        `promptCorpusIncomplete` is retryable and means the worker reached the
+        observable 20,000-prompt ceiling without proving the cohort complete.
       oneOf:
         - type: object
+          additionalProperties: false
+          required: [code, message, retryable]
           properties:
-            code: { type: string }
+            code:
+              type: string
+              enum: [invalidRequest, promptNotFound, serenityUpstreamError, tagLimitExceeded, incompatibleTagTaxonomy, promptCorpusIncomplete, jobFailed]
             message: { type: string }
+            retryable: { type: boolean }
         - { type: 'null' }
 
 SerenityUpdatePromptRequest:
@@ -12201,6 +12269,7 @@ SerenityUpdatePromptRequest:
       type: array
       items: { type: string }
       minItems: 1
+      maxItems: 50
       description: Upstream tag ids the prompt carries after the edit (full replacement set).
 
 SerenityBulkDeletePromptsRequest:
@@ -12236,6 +12305,104 @@ SerenityBulkDeletePromptsResponse:
           languageCode: { type: string }
           status: { type: integer }
           message: { type: string }
+
+SerenityBulkTagsRequest:
+  type: object
+  additionalProperties: false
+  required: [geoTargetId, languageCode, operation, tagIds, filter]
+  properties:
+    geoTargetId: { type: integer, minimum: 1 }
+    languageCode: { type: string, pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$' }
+    operation: { type: string, enum: [assign, remove] }
+    tagIds:
+      type: array
+      minItems: 1
+      maxItems: 50
+      uniqueItems: true
+      items: { type: string, maxLength: 128 }
+    filter:
+      type: object
+      additionalProperties: false
+      required: [tagFilterMode]
+      properties:
+        search: { type: string, maxLength: 500 }
+        tagIds:
+          type: array
+          maxItems: 50
+          uniqueItems: true
+          items: { type: string, maxLength: 128 }
+        tagFilterMode: { type: string, enum: [faceted-v1] }
+
+SerenityBulkTagsAccepted:
+  type: object
+  description: |
+    Acceptance/replay envelope. Matching is worker-owned, so a newly accepted
+    response does not claim a prompt count. A replay of a terminal completed job
+    may echo its business `outcome`.
+  required: [jobId, jobType, status, replayed]
+  properties:
+    jobId: { type: string, format: uuid }
+    jobType: { type: string, enum: [bulkTags] }
+    status: { type: string, enum: [IN_PROGRESS, COMPLETED, FAILED] }
+    replayed: { type: boolean }
+    outcome: { type: string, enum: [SUCCEEDED, PARTIAL_FAILURE] }
+
+SerenityBulkTagsResult:
+  type: object
+  additionalProperties: false
+  required:
+    [outcome, matchedCount, updatedCount, unchangedCount, failureCount, failuresPage, publish]
+  properties:
+    outcome:
+      type: string
+      enum: [SUCCEEDED, PARTIAL_FAILURE]
+      description: |
+        Explicit business outcome. `PARTIAL_FAILURE` means at least one prompt
+        failed or the final project publish failed even though the AsyncJob
+        status is `COMPLETED`.
+    matchedCount:
+      type: integer
+      minimum: 0
+      description: Prompts matched by the frozen normalized filter during the worker-time corpus scan.
+    updatedCount: { type: integer, minimum: 0 }
+    unchangedCount: { type: integer, minimum: 0 }
+    failureCount: { type: integer, minimum: 0 }
+    failuresPage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          items:
+            type: object
+            required: [semrushPromptId, code, message, retryable]
+            properties:
+              semrushPromptId: { type: string }
+              code: { type: string }
+              message: { type: string }
+              retryable: { type: boolean }
+        nextCursor: { type: [string, 'null'] }
+    publish:
+      type: object
+      required: [state, error]
+      properties:
+        state:
+          type: string
+          enum: [SUCCEEDED, FAILED, SKIPPED]
+          description: |
+            `SKIPPED` means no prompt update landed. A publish-only retry reports
+            `SUCCEEDED` or `FAILED` without reapplying prompt mutations.
+        error:
+          oneOf:
+            - type: object
+              required: [code, message, retryable]
+              properties:
+                code: { type: string }
+                message: { type: string }
+                retryable: { type: boolean }
+                details: { type: object }
+            - { type: 'null' }
 
 SerenityMarketStatus:
   type: string
@@ -12595,6 +12762,31 @@ SerenityTag:
         properties:
           id: { type: string }
           name: { type: string }
+    compatibility:
+      $ref: '#/SerenityTagCompatibility'
+
+SerenityTagCompatibility:
+  type: object
+  required: [state, reason]
+  properties:
+    state:
+      type: string
+      enum: [canonical, readOnly, unverified]
+      description: |
+        `canonical` and `readOnly` are authoritative only when derived from a
+        complete project taxonomy. Plain prompt lists avoid that expensive tree
+        read and return `unverified` for tags not locally provable as read-only.
+    reason:
+      type: [string, 'null']
+      enum: [unsupportedDepth, caseVariantRoot, ambiguousPath, separatorInName, taxonomyNotLoaded, null]
+
+SerenityTagConstraints:
+  type: object
+  required: [maxPromptTagIds, maxTagFilterValues, bulkIdempotencyTtlSeconds]
+  properties:
+    maxPromptTagIds: { type: integer, example: 50 }
+    maxTagFilterValues: { type: integer, example: 50 }
+    bulkIdempotencyTtlSeconds: { type: integer, example: 86400 }
 
 SerenityTagListResponse:
   type: object
@@ -12603,6 +12795,33 @@ SerenityTagListResponse:
     items:
       type: array
       items: { $ref: '#/SerenityTag' }
+    page: { type: integer, minimum: 1 }
+    limit: { type: integer, minimum: 0, maximum: 100 }
+    total: { type: integer, minimum: 0 }
+    complete: { type: boolean }
+    constraints: { $ref: '#/SerenityTagConstraints' }
+
+SerenityTagImpact:
+  type: object
+  additionalProperties: false
+  required: [tagId, name, path, descendantCount, affectedPromptCount, complete, revision]
+  properties:
+    tagId: { type: string }
+    name: { type: string }
+    path:
+      type: array
+      items:
+        type: object
+        required: [id, name]
+        properties:
+          id: { type: string }
+          name: { type: string }
+    descendantCount: { type: integer, minimum: 0 }
+    affectedPromptCount: { type: integer, minimum: 0 }
+    complete: { type: boolean, enum: [true] }
+    revision:
+      type: string
+      description: Quoted HTTP entity tag for this exact impact snapshot.
 
 SerenityModel:
   type: object
@@ -12670,13 +12889,18 @@ SerenityErrorResponse:
   description: |
     Unified error envelope for the /serenity/* surface. `error` is a stable
     machine-readable token (`invalidRequest`, `serenityUpstreamError`,
-    `sliceExists`, etc.); `message` is a sanitized human-readable summary.
+    `promptCorpusIncomplete`, `sliceExists`, etc.); `message` is a sanitized
+    human-readable summary.
     Provider-specific detail (upstream HTTP status, raw body) is deliberately
     NOT exposed — it is logged server-side instead.
   required: [error, message]
   properties:
     error: { type: string }
     message: { type: string }
+    requestId: { type: string }
+    retryable: { type: boolean }
+    fieldErrors: { type: object }
+    details: { type: object }
 
 SerenityWorkspaceAccess:
   type: object

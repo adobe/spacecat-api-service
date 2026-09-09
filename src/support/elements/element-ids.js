@@ -84,7 +84,8 @@ export const ELEMENT_IDS = Object.freeze({
   //     closest_date, url_cbf }.
   // Scoped by `CBF_source` = the full URL string (placed in BOTH simple and
   // advanced — unique to this element) + date (`CBF_date__start`/`__end`) +
-  // `CBF_model`. Brand scoping is via the sub-workspace (no CBF_brand filter).
+  // `CBF_model`. Brand scoping is via the sub-workspace (no CBF_brand filter) —
+  // premise DISPROVEN for PROMPTS_BY_TOPIC (see topic-prompts.js), unverified here.
   // Does NOT return category/topic/region. Verified live 2026-07-29.
   URL_PROMPTS: 'b4f1ead7-4aea-41ea-b1ce-311004715d63',
 
