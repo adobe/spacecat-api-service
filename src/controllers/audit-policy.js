@@ -241,11 +241,10 @@ export default function AuditPolicyController() {
   // exclusion_glob_rewrite.sql:102-119) so the controller's own dedup compares
   // against the same representation the RPC will persist. Defense-in-depth only
   // (SITES-51200 item 2) — the RPC's own post-rewrite dedup (SITES-51200 item 1)
-  // remains the canonical guarantee against a stored duplicate.
+  // remains the canonical guarantee against a stored duplicate. No non-string
+  // guard: validateMutateBody already rejects non-string `values` entries, and
+  // stored exclusionGlobs are always strings coming out of AuditPolicyDto.
   function normalizeExclusionGlob(baseURL, value) {
-    if (typeof value !== 'string') {
-      return value;
-    }
     if (value === '' || value.startsWith('http://') || value.startsWith('https://') || value.startsWith('*')) {
       return value;
     }
