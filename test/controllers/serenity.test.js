@@ -1657,6 +1657,10 @@ describe('SerenityController', () => {
 
       expect(response.status).to.equal(202);
       expect(body).to.include({ jobId: 'job-abc', status: 'IN_PROGRESS' });
+      // LLMO-7418 external-review Finding 9: reconciles a stale in-flight attempt (reusing the
+      // sync guard's own logic) before minting a new one — beginProvisioningAttempt's own CAS
+      // has no staleness awareness on its own.
+      expect(guardAgainstConcurrentProvisioningStub).to.have.been.calledOnceWith(BRAND);
       expect(beginProvisioningAttemptStub).to.have.been.calledOnce;
       expect(beginProvisioningAttemptStub.firstCall.args[0]).to.include({
         brandId: BRAND, updatedBy: 'serenity-create-market',
@@ -2206,7 +2210,9 @@ describe('SerenityController', () => {
 
       expect(response.status).to.equal(202);
       expect(orchestrateActivateMarketsStub).to.not.have.been.called;
-      expect(guardAgainstConcurrentProvisioningStub).to.not.have.been.called;
+      // LLMO-7418 external-review Finding 9: the async begin-site now reconciles a stale
+      // in-flight attempt first, reusing the sync guard's own logic, before minting a new one.
+      expect(guardAgainstConcurrentProvisioningStub).to.have.been.calledOnceWith(BRAND);
       expect(beginProvisioningAttemptStub).to.have.been.calledOnce;
       expect(beginProvisioningAttemptStub.firstCall.args[0]).to.include({
         brandId: BRAND, updatedBy: 'serenity-activate',

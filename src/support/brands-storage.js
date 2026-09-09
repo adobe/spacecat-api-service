@@ -1935,7 +1935,13 @@ export async function getBrandProvisioningState(brandId, postgrestClient) {
     .maybeSingle();
 
   if (error) {
-    throw new Error(`Failed to read brand provisioning state: ${error.message}`);
+    // Preserve the underlying Postgres SQLSTATE (e.g. `42703` undefined_column) on the thrown
+    // error — LLMO-7418 external-review Finding 1: guardAgainstConcurrentProvisioning needs this
+    // to tell "the async-provisioning migrations haven't landed yet" apart from a genuine
+    // transient read failure, and a bare `new Error(message)` here erases it.
+    const err = new Error(`Failed to read brand provisioning state: ${error.message}`);
+    err.code = error.code;
+    throw err;
   }
   if (!data) {
     return null;
@@ -2332,16 +2338,43 @@ export const PROVISIONING_STALE_THRESHOLD_MS = 10 * 60 * 1000;
  * @param {object} postgrestClient
  * @param {object} [log]
  * @throws when a fresh attempt is genuinely in flight (`err.status = 409`,
- *   `err.code = 'semrush_provisioning_in_progress'`).
+ *   `err.code = 'semrush_provisioning_in_progress'`), or when the provisioning-state read itself
+ *   fails for a reason OTHER than the columns not existing yet (see below) — an unreadable state
+ *   must never be silently treated as an empty one.
  */
 export async function guardAgainstConcurrentProvisioning(brandId, postgrestClient, log) {
-  const state = await getBrandProvisioningState(brandId, postgrestClient);
+  // POSTGRES_UNDEFINED_COLUMN (LLMO-7418 external-review Finding 1): this guard defends against
+  // a race between a synchronous caller and a LIVE async provisioning attempt — a race that
+  // cannot exist until the async-provisioning columns (mysticat-data-service migrations
+  // 1037/1040) are actually deployed. If this API ships even briefly ahead of those migrations,
+  // EVERY synchronous createMarket/activate call would otherwise 500 on a column that doesn't
+  // exist yet, on the exact endpoints every current caller already depends on. Degrade to a
+  // no-op instead: no column means no attempt could possibly be in flight, so proceeding is
+  // correct, not just convenient. Any OTHER read failure (a genuine transient DB error) still
+  // fails closed below, unchanged.
+  const POSTGRES_UNDEFINED_COLUMN = '42703';
+  let state;
+  try {
+    state = await getBrandProvisioningState(brandId, postgrestClient);
+  } catch (error) {
+    if (error?.code === POSTGRES_UNDEFINED_COLUMN) {
+      log?.warn?.('brands-storage: async-provisioning columns not present yet; guard is a no-op', {
+        brandId, error: error.message,
+      });
+      return;
+    }
+    throw error;
+  }
   if (!state || state.provisioningStatus !== 'pending') {
     return;
   }
 
   const ageMs = Date.now() - new Date(state.updatedAt).getTime();
-  if (ageMs < PROVISIONING_STALE_THRESHOLD_MS) {
+  // A missing/unparseable updatedAt yields NaN, and NaN is never < the threshold — falling
+  // through to "stale, reconcile" would then kill a genuinely fresh, healthy attempt (LLMO-7418
+  // external-review Finding 11). Treat an unparseable age as "assume fresh" (the safer
+  // direction: at worst a later request is briefly 409'd, never a live attempt torn down).
+  if (Number.isNaN(ageMs) || ageMs < PROVISIONING_STALE_THRESHOLD_MS) {
     // ErrorWithStatusCode (not a plain Error+.status, unlike this file's other 409s): this guard
     // is called from BOTH serenity.js's activate (whose mapError only special-cases `instanceof
     // ErrorWithStatusCode`) and brands.js's createBrandForOrg (whose createErrorResponse accepts

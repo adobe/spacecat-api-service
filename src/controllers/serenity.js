@@ -98,7 +98,7 @@ import { computeWriteDeadline } from '../support/serenity/intent-classification.
 import AccessControlUtil from '../support/access-control-util.js';
 import { isServicePrincipal, resolveBrandUuid } from '../support/prompts-storage.js';
 import {
-  getBrandAliases, getBrandUrlSources, getBrandCompetitors, updateBrand, getBrandBaseSiteId,
+  getBrandAliases, getBrandBaseSiteId,
   cancelProvisioningAttempt,
   guardAgainstConcurrentProvisioning, beginProvisioningAttempt,
 } from '../support/brands-storage.js';
@@ -1048,6 +1048,19 @@ function SerenityController(context, log, env) {
           // brand's already-canonical workspace rather than provisioning a new one — every
           // brand reaching this branch already has one (`auth.mode === 'subworkspace'` IS that
           // invariant; see `authorize`).
+          //
+          // LLMO-7418 external-review Finding 9: beginProvisioningAttempt's own CAS has no
+          // staleness awareness — a stuck `pending` row (a crashed worker, a DLQ'd message) would
+          // 409 here forever, with nothing else to ever reconcile it once every caller has
+          // migrated to async (a scheduled sweep is architecturally impossible — Semrush only
+          // accepts user-token auth). Reuse the sync guard's own reconcile-or-409 logic first: a
+          // stale attempt is reconciled to `failed` here (so the CAS below then succeeds), a
+          // genuinely fresh one still 409s (via the guard's own throw, same shape as `!began`'s).
+          await guardAgainstConcurrentProvisioning(
+            auth.brandUuid,
+            ctx.dataAccess.services.postgrestClient,
+            log,
+          );
           const attemptId = randomUUID();
           const began = await beginProvisioningAttempt({
             brandId: auth.brandUuid,
@@ -1753,6 +1766,14 @@ function SerenityController(context, log, env) {
       // in-request settle-poll + project-create/publish sequence), slated for removal once every
       // known caller has migrated to `async: true`.
       if (validateAsync(body)) {
+        // LLMO-7418 external-review Finding 9: see the createMarket async branch above for the
+        // full rationale — reconcile a stale in-flight attempt before minting a new one, since
+        // beginProvisioningAttempt's own CAS has no staleness awareness.
+        await guardAgainstConcurrentProvisioning(
+          brandUuid,
+          ctx.dataAccess.services.postgrestClient,
+          log,
+        );
         const attemptId = randomUUID();
         const began = await beginProvisioningAttempt({
           brandId: brandUuid,

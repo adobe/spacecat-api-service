@@ -4975,6 +4975,52 @@ describe('brands-storage', () => {
         }]);
       });
 
+      it('degrades to a no-op (does not throw) when the provisioning columns do not exist yet (LLMO-7418 external-review Finding 1)', async () => {
+        const postgrestClient = createTableMockClient({
+          brands: {
+            data: null,
+            error: { message: 'column brands.semrush_provisioning_status does not exist', code: '42703' },
+          },
+        });
+        const warn = sinon.stub();
+
+        const call = guardAgainstConcurrentProvisioning(BRAND_ID, postgrestClient, { warn });
+        await expect(call).to.not.be.rejected;
+        expect(warn).to.have.been.calledOnce;
+      });
+
+      it('still fails closed (rethrows) on any OTHER read error, e.g. a transient DB failure', async () => {
+        const postgrestClient = createTableMockClient({
+          brands: { data: null, error: { message: 'connection reset', code: 'ECONNRESET' } },
+        });
+
+        let caught;
+        try {
+          await guardAgainstConcurrentProvisioning(BRAND_ID, postgrestClient);
+        } catch (e) {
+          caught = e;
+        }
+
+        expect(caught).to.exist;
+        expect(caught.message).to.include('Failed to read brand provisioning state');
+      });
+
+      it('treats an unparseable updated_at (NaN age) as fresh rather than reconciling it away (LLMO-7418 external-review Finding 11)', async () => {
+        const postgrestClient = createTableMockClient({
+          brands: { data: stateWith({ updated_at: 'not-a-real-timestamp' }), error: null },
+        });
+
+        let caught;
+        try {
+          await guardAgainstConcurrentProvisioning(BRAND_ID, postgrestClient);
+        } catch (e) {
+          caught = e;
+        }
+
+        expect(caught).to.exist;
+        expect(caught.status).to.equal(409);
+      });
+
       it('does not throw when the stale-reconciliation CAS is itself rejected (already reconciled)', async () => {
         const staleAgeMs = PROVISIONING_STALE_THRESHOLD_MS + 1000;
         const staleUpdatedAt = new Date(Date.now() - staleAgeMs).toISOString();
