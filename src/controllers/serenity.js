@@ -1978,7 +1978,7 @@ function SerenityController(context, log, env) {
       if (!AsyncJob || typeof AsyncJob.findById !== 'function') {
         return internalServerError('AsyncJob data-access not available');
       }
-      const job = await AsyncJob.findById(jobId);
+      let job = await AsyncJob.findById(jobId);
       // A job that does not exist AND a job that belongs to another brand answer
       // the same 404: whether the id is unknown or simply not yours is not the
       // caller's business (mirrors authorize's brand-not-found contract).
@@ -1987,6 +1987,31 @@ function SerenityController(context, log, env) {
         return notFound(`Job not found: ${jobId}`);
       }
       const metadata = job.getMetadata?.() ?? {};
+      // Follow a chain/requeue to its EFFECTIVE terminal hop (LLMO-7418 external-review
+      // Finding 8): the runner marks the ORIGINAL job COMPLETED on any non-throwing handler
+      // return, including a self-requeue (`{ requeuedJobId }`, workspace not yet settled) or a
+      // chain hand-off (`{ provisioningStatus: 'ready', chainedJobId }`, the chained market-
+      // create/activate work not yet started) — neither means the real work actually finished.
+      // Without this, a caller polling the FIRST hop's id sees a premature COMPLETED the moment
+      // the chain merely starts, not when it actually ends. `jobId`/`jobType` below still report
+      // the ORIGINALLY-requested job's identity — only status/result/error follow the chain, so a
+      // caller polling a fixed URL never needs to learn about intermediate hop ids. Bounded to
+      // guard against a corrupt/cyclic chain; a dangling pointer (an id the chain names but that
+      // no longer resolves) simply stops following and reports the last hop actually found.
+      const MAX_CHAIN_FOLLOW_HOPS = 10;
+      for (let hops = 0; job.getStatus() === 'COMPLETED' && hops < MAX_CHAIN_FOLLOW_HOPS; hops += 1) {
+        const hopResult = job.getResult?.();
+        const nextJobId = hopResult?.chainedJobId || hopResult?.requeuedJobId;
+        if (!nextJobId) {
+          break;
+        }
+        // eslint-disable-next-line no-await-in-loop
+        const nextJob = await AsyncJob.findById(nextJobId);
+        if (!nextJob) {
+          break;
+        }
+        job = nextJob;
+      }
       /** @type {'classifyPrompts' | 'bulkTags' | 'tagImpact'} */
       let publicJobType = 'classifyPrompts';
       if (metadata.jobType === BULK_TAGS_JOB_TYPE) {
@@ -2010,7 +2035,9 @@ function SerenityController(context, log, env) {
       const error = status === 'FAILED' ? publicJobError(job.getError?.()) : null;
       return createResponse(
         {
-          jobId: job.getId(),
+          // The ORIGINALLY-requested id, never a followed hop's — the caller polls a fixed URL
+          // and never needs to learn about intermediate chain/requeue job ids.
+          jobId,
           jobType: publicJobType,
           status,
           result,

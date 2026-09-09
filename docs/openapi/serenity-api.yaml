@@ -597,10 +597,13 @@ v2-serenity-markets:
           sub-workspace-mode brand only). The sub-workspace-ready check and the
           project create/publish are enqueued to a background job chain instead
           of running inline. Poll the returned `jobId` at
-          `GET .../serenity/jobs/{jobId}` for status + result — on COMPLETED,
-          `result` is the same body a synchronous `201` would have returned.
-          Absent/false runs synchronously as today; this is opt-in only and not
-          yet the default.
+          `GET .../serenity/jobs/{jobId}` for status + result — the polling
+          endpoint transparently follows the job chain to its EFFECTIVE
+          terminal hop, so `status` only reports `COMPLETED` once the actual
+          market create/publish has run, not merely once the sub-workspace
+          became ready; on COMPLETED, `result` is the same body a synchronous
+          `201` would have returned. Absent/false runs synchronously as
+          today; this is opt-in only and not yet the default.
         content:
           application/json:
             schema: { $ref: './schemas.yaml#/SerenityPromptsJobAccepted' }
@@ -1228,9 +1231,12 @@ v2-serenity-activate:
           batch (sub-workspace ready-check, every market's project create/
           publish, the site link, and the active flip) is enqueued to a
           background job chain instead of running inline. Poll the returned
-          `jobId` at `GET .../serenity/jobs/{jobId}` for status + result — on
-          COMPLETED, `result` is the same body a synchronous `200`/`207` would
-          have returned.
+          `jobId` at `GET .../serenity/jobs/{jobId}` for status + result — the
+          polling endpoint transparently follows the job chain to its
+          EFFECTIVE terminal hop, so `status` only reports `COMPLETED` once
+          the actual batch has run, not merely once the sub-workspace became
+          ready; on COMPLETED, `result` is the same body a synchronous
+          `200`/`207` would have returned.
         content:
           application/json:
             schema: { $ref: './schemas.yaml#/SerenityPromptsJobAccepted' }
