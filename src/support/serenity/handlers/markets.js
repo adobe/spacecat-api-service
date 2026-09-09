@@ -71,55 +71,63 @@ export { resolveLocation };
  */
 const languageCache = {
   expiresAt: 0,
-  byTag: new Map(),
+  byCode: new Map(),
 };
 
 export function clearLanguageCache() {
   languageCache.expiresAt = 0;
-  languageCache.byTag.clear();
+  languageCache.byCode.clear();
 }
 
-const ENGLISH_LANGUAGE_NAMES = new Intl.DisplayNames(['en'], { type: 'language' });
-
-function isoToEnglishName(languageTag) {
-  // Strip region/script subtag — the catalog is keyed by primary language
-  // only (no `en-US` / `pt-BR` rows). Caller already enforces
-  // LANGUAGE_TAG_REGEX, so `primary` is always a 2–3 letter string here.
-  const primary = String(languageTag).toLowerCase().split('-')[0];
-  const name = ENGLISH_LANGUAGE_NAMES.of(primary);
-  return name && name.toLowerCase() !== primary ? name : null;
-}
-
-/** @param {SerenityTransport} transport */
-export async function resolveLanguageId(transport, languageTag, log) {
+/**
+ * Resolves a BCP-47 `languageCode` to its Semrush catalog UUID by exact
+ * `code` match (LLMO-7420) — no English-name matching, no alias/normalization
+ * fallback. `languageCode` is expected already normalized by the caller via
+ * `normalizeLanguageCode` (lowercased, `LANGUAGE_TAG_REGEX`-validated); the
+ * catalog's `code` is lowercased on the way into the cache so a live-catalog
+ * value like `zh-Hans` still matches the lowercase input `zh-hans`. Matching
+ * is intentionally case-insensitive regardless of caller normalization
+ * (BCP-47 tags are case-insensitive per RFC 5646) — this function does not
+ * rely on the caller having lowercased its input. An unresolved code returns
+ * `null` (400 `unknownLanguage` at the call sites) —
+ * by design, per LLMO-7420: no Adobe-side mapping change should be needed
+ * when Semrush adds or renames a language. The leading `hasText` guard is
+ * defense-in-depth, not redundant with the caller's normalization — this
+ * function is also called directly in tests and does not assume its input
+ * was ever passed through `normalizeLanguageCode`.
+ * @param {SerenityTransport} transport
+ */
+export async function resolveLanguageId(transport, languageCode, log) {
+  if (!hasText(languageCode)) {
+    return null;
+  }
   const now = Date.now();
   if (languageCache.expiresAt <= now) {
     const resp = await transport.listLanguages();
     const items = Array.isArray(resp?.items) ? resp.items : [];
-    languageCache.byTag.clear();
+    languageCache.byCode.clear();
     for (const item of items) {
-      if (hasText(item?.name) && hasText(item?.id)) {
-        languageCache.byTag.set(String(item.name).toLowerCase(), String(item.id));
+      if (hasText(item?.code) && hasText(item?.id)) {
+        // BCP-47 tags are case-insensitive (RFC 5646) — lowercase both the catalog's `code`
+        // here and the input below so `zh-Hans` and `zh-hans` are the same cache key. Do not
+        // "fix" this to preserve casing.
+        languageCache.byCode.set(String(item.code).toLowerCase(), String(item.id));
       }
     }
-    if (languageCache.byTag.size === 0 && items.length > 0) {
+    if (languageCache.byCode.size === 0 && items.length > 0) {
       /* c8 ignore start -- `items[0] || {}` guards against a malformed
          upstream where the first slot is explicitly null; in this branch
          items.length > 0 so items[0] is defined, but the `|| {}` keeps
          Object.keys safe under that adversarial shape. */
       log?.warn?.(
-        'resolveLanguageId: language catalog returned no usable names — upstream field shape may have changed',
+        'resolveLanguageId: language catalog returned no usable codes — upstream field shape may have changed',
         { receivedKeys: Object.keys(items[0] || {}) },
       );
       /* c8 ignore stop */
     }
     languageCache.expiresAt = now + LANGUAGE_CACHE_TTL_MS;
   }
-  const englishName = isoToEnglishName(languageTag);
-  if (!englishName) {
-    return null;
-  }
-  return languageCache.byTag.get(englishName.toLowerCase()) || null;
+  return languageCache.byCode.get(String(languageCode).toLowerCase()) ?? null;
 }
 
 /**
@@ -1178,17 +1186,26 @@ export async function listGlobalModelCatalog(transport) {
  * Brand-independent catalog of the languages Semrush AIO supports — the source
  * of truth for which BCP-47 codes a market may use. Backs the add-brand wizard
  * (and the brand-config Markets tab) so they only offer languages that will
- * resolve (a code whose English name is not in this catalog hard-fails at
- * createProject — e.g. Croatian 'hr', which Semrush does not carry).
+ * resolve (a code not in this catalog hard-fails at createProject — e.g.
+ * Croatian 'hr', which Semrush does not carry).
  *
- * Returns `{ items: [{ id, name }] }` straight from Semrush's `GET /v1/languages`
- * (English language names; the consumer maps them to its own code list, mirroring
- * how `resolveLanguageId` matches by English name). Tolerant of a 404/405 catalog
- * (returns an empty list) so a transient upstream gap degrades to "no filter"
- * rather than an error.
+ * Returns `{ items: [{ id, name, code }] }` straight from Semrush's
+ * `GET /v1/languages` — `code` (BCP-47, LLMO-7420) is the resolution key a
+ * consumer persists and later sends back as `languageCode`; `name` is the
+ * upstream English display name, metadata/fallback text only. Tolerant of a
+ * 404/405 catalog (returns an empty list) so a transient upstream gap
+ * degrades to "no filter" rather than an error.
+ *
+ * Only entries with BOTH a usable `id` and `code` are returned — an entry
+ * missing either can never resolve via {@link resolveLanguageId} (its
+ * `byCode` map admits only entries with both), so surfacing it as a picker
+ * option would let a caller pick a language that then hard-fails
+ * `unknownLanguage` at create time. This keeps the two functions' notion of
+ * "resolvable" in sync.
  * @param {SerenityTransport} transport
+ * @param {any} [log] - logger, used to surface a dropped-entries warning.
  */
-export async function listLanguageCatalog(transport) {
+export async function listLanguageCatalog(transport, log) {
   let rawItems = [];
   try {
     const resp = await transport.listLanguages();
@@ -1200,9 +1217,20 @@ export async function listLanguageCatalog(transport) {
       throw e;
     }
   }
-  const items = rawItems
-    .filter((l) => l && typeof l === 'object' && hasText(l.name))
-    .map((l) => ({ id: hasText(l.id) ? String(l.id) : null, name: String(l.name) }))
+  const usable = rawItems.filter((l) => l && typeof l === 'object' && hasText(l.name));
+  const resolvable = usable.filter((l) => hasText(l.code) && hasText(l.id));
+  if (resolvable.length < usable.length) {
+    log?.warn?.(
+      'listLanguageCatalog: dropped entries missing code or id — upstream field shape may have changed',
+      { droppedCount: usable.length - resolvable.length },
+    );
+  }
+  const items = resolvable
+    .map((l) => ({
+      id: String(l.id),
+      name: String(l.name),
+      code: String(l.code),
+    }))
     .sort((a, b) => a.name.localeCompare(b.name));
   return { items };
 }
