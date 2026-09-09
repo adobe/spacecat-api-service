@@ -3952,8 +3952,8 @@ Brand:
         live for THIS brand: the brand's own LLMO/serenity override if it has
         one, otherwise its organization's value. Independent of
         semrushSubWorkspaceId, which is set when the brand is provisioned — a
-        brand can be bound to a sub-workspace for some time before it is
-        released. An organization migrating in waves has both answers among its
+        brand remains bound to a sub-workspace until deactivation clears the
+        pointer. An organization migrating in waves has both answers among its
         brands, so consumers must read this per brand rather than deriving one
         answer for the organization.
       type: boolean
@@ -12658,9 +12658,9 @@ SerenityDeactivateResponse:
   type: object
   description: |
     Result of decommissioning a brand's sub-workspace: every project is
-    deleted and the allocation released back to the parent pool, but the
-    workspace and its `semrush_workspace_id` pointer are KEPT for reuse
-    (never-delete). The brand status is set to `pending`.
+    deleted with no allocation transfer. The workspace shell remains upstream,
+    the brand's `semrush_sub_workspace_id` pointer is cleared, and the brand
+    status is set to `pending`.
   required: [brandId, status]
   properties:
     brandId:

@@ -385,7 +385,7 @@ For backwards compatibility and integrations, every Semrush market (project) is 
 
 ## Activate / deactivate (sub-workspace dual-mode)
 
-A brand runs in one of two modes, decided entirely by `brands.semrush_workspace_id`:
+A brand runs in one of two modes, decided entirely by `brands.semrush_sub_workspace_id`:
 - **flat** (pointer NULL): markets resolve through the shared org parent workspace via the `BrandSemrushProject` mapping.
 - **subworkspace** (pointer set): the brand has its own Semrush sub-workspace; markets resolve live from it via `listProjects`.
 
@@ -425,14 +425,14 @@ linked Site per distinct market domain.)
 
 - Body: `{ brandDomain?, brandNames?, brandDisplayName?, markets?: [{ market, languageCode, name? }] }`. **All body fields are optional.** A pending brand's approve sends an empty body (→ sub-workspace-only). For an active brand, `markets` is **capped at 50** (400 above that); an empty `markets` with a resolved `brandDomain` provisions one `US`/`en` fallback project; a body that resolves no markets and no `brandDomain` is a no-op re-ensure.
 - **No stash-driven provisioning (LLMO-6405, SITES-49448).** A pending brand activates sub-workspace-only regardless of `brands.pending_semrush_provisioning`; activation no longer reads OR clears the stash — the column is a deprecated, unwritten remnant, slated for removal once existing legacy drafts drain (serenity-docs post-GA cleanup).
-- Response: **200** — a pending brand's sub-workspace-only activation (flips to `active`), or a fully-succeeded active reactivation. **502 `serenityActivationIncomplete`** — a pending brand whose sub-workspace ensured upstream but whose `active` flip did not persist (stays `pending`, idempotent retry). **207 Multi-Status** — an *already-active* brand re-supplying markets where ≥1 fails; never downgraded, stays `active`.
+- Response: **200** — a pending brand's sub-workspace-only activation (flips to `active`), or a fully-succeeded active reactivation. **502 `serenityActivationIncomplete`** — a pending brand whose sub-workspace ensured upstream but whose `active` flip did not persist (stays `pending`, idempotent retry). **502 `subworkspaceCreationFailed`** — a readiness check observed a terminal sub-workspace status; deactivate the brand before retrying activation. **504 `subworkspaceCreationTimeout`** — the sub-workspace remained transient through the bounded readiness poll. **207 Multi-Status** — an *already-active* brand re-supplying markets where ≥1 fails; never downgraded, stays `active`.
 - Idempotent: a market already live upstream returns 409 `sliceExists` and still counts as live, so a full re-activate of an already-live active brand is a 200.
 
 `POST /serenity/deactivate` moves a brand back to flat mode:
 
 ```
 1. decommission the sub-workspace: delete EVERY project
-2. clear brands.semrush_workspace_id (disconnect → flat mode)
+2. clear `brands.semrush_sub_workspace_id` (disconnect -> flat mode)
 3. set brands.status = 'pending'
 ```
 
@@ -454,7 +454,9 @@ linked Site per distinct market domain.)
 | 404 | `{ message: "Organization has no semrush_workspace_id" }` or `{ error: "marketNotFound" | "promptNotFound" }` | Missing workspace, no `BrandSemrushProject` row for the slice, or upstream prompt id not in the slice |
 | 409 | `{ error: "sliceExists", message }` | `findBySlice` returned a row before the upstream call |
 | 502 | `{ error: "serenityUpstreamError", message }` | Upstream returned a non-2xx; provider-specific detail is logged server-side, not echoed to the client |
+| 502 | `{ error: "subworkspaceCreationFailed", message }` | A readiness check observed the exact terminal status `creation failed` or `invalid subscription`; deactivate the brand before retrying activation |
 | 502 | `{ error: "mainBrandBenchmarkInvariant", message }` | LLMO-7421: market create/publish blocked because the project's DRAFT benchmark state does not carry exactly one `main_brand: true` benchmark (see The onboarding flow, step 7). Retryable — a retry re-attempts the ensure/repair. |
+| 504 | `{ error: "subworkspaceCreationTimeout", message }` | A sub-workspace remained in a transient state through the bounded readiness poll |
 | 500 | `{ message }` | Unexpected error; logged with stack via `log.error` |
 
 Upstream failures surface as one of two typed errors, both carrying the upstream `status` and `body` for server-side logging and both classified by `isSemrushTransportError` (`src/support/serenity/errors.js`): **`ProjectEngineApiError`** (from the shared `@adobe/spacecat-shared-project-engine-client` facade) for Project Engine calls, and **`SerenityTransportError`** (`src/support/serenity/rest-transport.js`) for the User Manager and brand-topics calls. On a Project Engine no-HTTP-response failure (timeout / network / missing-token 401) the original throw is carried as `.cause` and unwrapped at the error→HTTP seam so auth stays 401 and timeouts stay 502. The 502 envelope deliberately does not echo provider details.
