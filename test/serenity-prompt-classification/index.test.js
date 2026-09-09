@@ -360,6 +360,21 @@ describe('serenity-prompt-classification worker entry', () => {
       expect(invalidateStub).to.not.have.been.called;
     });
 
+    it('marks the job FAILED with NEEDS_REAUTH when the deferred-exchange handler needs reauth', async () => {
+      // The handler exchanges the token itself (deferred) and can throw
+      // NeedsReauthError; the runner must surface error.code === NEEDS_REAUTH so the
+      // reauth endpoint/UI can recover it (not a generic JOB_FAILED).
+      semrushMarketGenerationHandlerStub.rejects(new NeedsReauthError('promise token dead'));
+      const job = makeJob('IN_PROGRESS', 'serenity-generate-semrush-market');
+      const context = makeContext(job);
+
+      await run({ jobId: 'job-123', type: 'serenity-generate-semrush-market' }, context);
+
+      expect(job.getStatus()).to.equal('FAILED');
+      expect(job.getError().code).to.equal('NEEDS_REAUTH');
+      expect(job.getError().retryable).to.equal(false);
+    });
+
     it('does not claim a lease for the classify job type (unchanged path)', async () => {
       const job = makeJob('IN_PROGRESS', 'serenity-classify-prompts');
       const context = makeContext(job);

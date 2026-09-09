@@ -169,6 +169,39 @@ export async function renewJobLease(context, job, {
 }
 
 /**
+ * Atomically claims a `NEEDS_REAUTH` job for re-authentication — closes the reauth
+ * TOCTOU. The controller's load→check(status=FAILED && error.code=NEEDS_REAUTH)→
+ * mint→save sequence is non-atomic: two tightly-timed reauth requests both pass the
+ * in-memory check, both mint a promise token, and last-writer-wins leaves the first
+ * token banked-but-never-invalidated. This is the SAME PostgREST compare-and-set the
+ * lease uses: a conditional `UPDATE ... SET status='IN_PROGRESS' WHERE id=? AND
+ * status='FAILED' AND error->>'code'='NEEDS_REAUTH'` — exactly ONE caller flips the
+ * row and proceeds to mint; the loser gets 0 rows and must 409. The winner then
+ * persists the fresh token + clears the error via its own `job.save()`.
+ *
+ * @param {object} context - request context (`dataAccess.services.postgrestClient`).
+ * @param {string} jobId
+ * @returns {Promise<boolean>} true iff this caller won the reauth claim.
+ * @throws when the PostgREST client is unavailable or the claim query errors.
+ */
+export async function claimJobForReauth(context, jobId) {
+  const postgrestClient = requirePostgrestClient(context);
+  const { data, error } = await postgrestClient
+    .from(ASYNC_JOBS_TABLE)
+    .update({ status: 'IN_PROGRESS' })
+    .eq('id', jobId)
+    .eq('status', 'FAILED')
+    .eq('error->>code', 'NEEDS_REAUTH')
+    .select('id');
+  if (error) {
+    const claimError = new Error(`[job-lease] reauth claim query failed for job ${jobId}: ${error.message}`);
+    /** @type {any} */ (claimError).cause = error;
+    throw claimError;
+  }
+  return Array.isArray(data) && data.length === 1;
+}
+
+/**
  * Scrubs the lease off a job's in-memory metadata on terminal state, so a dead
  * job record does not retain a stale claim. The caller persists this via its own
  * `job.save()`.

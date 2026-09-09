@@ -69,6 +69,12 @@ export async function isMarketConsumerReady(context, { ssmClient, now = Date.now
   let ready = false;
   try {
     const res = await client.send(new GetParameterCommand({ Name: CONSUMER_READY_PARAM }));
+    // Strict, exact `'true'` (case-sensitive) — deliberately stricter than the
+    // feature flag's case-insensitive `isAsyncPromptGenEnabled`. This value is
+    // written by an operator/automation to a known literal after a post-deploy
+    // synthetic, so any drift ("True"/"1"/whitespace) should read as NOT ready
+    // (fail closed) rather than be leniently coerced; the env flag is a
+    // developer-set convenience where case leniency is harmless.
     ready = res?.Parameter?.Value === 'true';
   } catch (error) {
     // Fail closed: a missing param or a read error means "not ready" — never

@@ -41,16 +41,21 @@ describe('SerenityController — Semrush-market generation endpoints', () => {
   let getIMSPromiseTokenStub;
   let resolvePromisePairStub;
   let hasAccessStub;
+  let claimJobForReauthStub;
 
   async function build() {
     loadJobScopedToCallerStub = sinon.stub();
     getIMSPromiseTokenStub = sinon.stub().resolves({ promise_token: 'fresh-ptok', expires_in: 300 });
     resolvePromisePairStub = sinon.stub().returns('SEMRUSH');
     hasAccessStub = sinon.stub().resolves(true);
+    claimJobForReauthStub = sinon.stub().resolves(true);
 
     SerenityController = (await esmock('../../src/controllers/serenity.js', {
       '../../src/support/async-job-access.js': {
         loadJobScopedToCaller: loadJobScopedToCallerStub,
+      },
+      '../../src/support/serenity/job-lease.js': {
+        claimJobForReauth: claimJobForReauthStub,
       },
       '../../src/support/access-control-util.js': {
         default: { fromContext: () => ({ hasAccess: hasAccessStub }) },
@@ -149,6 +154,18 @@ describe('SerenityController — Semrush-market generation endpoints', () => {
       expect(res.status).to.equal(404);
     });
 
+    it('returns a siteless job to its owning brand (brand-scoping is the sole control when metadata.siteId is absent)', async () => {
+      // A generation job on a brand with no linked site carries no metadata.siteId;
+      // the primitive scopes it by jobType, and the controller's brand-match is the
+      // sole ownership control. Owned by the caller's brand → returned.
+      const siteless = jobStub({ status: 'IN_PROGRESS', metadata: { brandId: BRAND } });
+      expect(siteless.getMetadata().siteId).to.equal(undefined);
+      loadJobScopedToCallerStub.resolves({ job: siteless });
+      const controller = SerenityController(baseCtx(), fakeLog(), {});
+      const res = await controller.getSemrushMarketGenerationJobStatus(baseCtx());
+      expect(res.status).to.equal(200);
+    });
+
     it('400s an invalid jobId', async () => {
       const controller = SerenityController(baseCtx(), fakeLog(), {});
       const ctx = baseCtx({ params: { spaceCatId: ORG, brandId: BRAND, jobId: 'not-a-uuid' } });
@@ -190,9 +207,23 @@ describe('SerenityController — Semrush-market generation endpoints', () => {
       expect(persisted.promiseToken).to.deep.equal({ promise_token: 'fresh-ptok', expires_in: 300 });
       expect(persisted.promisePair).to.equal('SEMRUSH');
       expect(save).to.have.been.calledOnce;
+      expect(claimJobForReauthStub).to.have.been.calledOnceWith(ctx, JOB_ID);
       expect(ctx.sqs.sendMessage).to.have.been.calledOnceWith('market-queue-url', {
         jobId: JOB_ID, type: 'serenity-generate-semrush-market',
       });
+    });
+
+    it('409s and never mints a second token when it loses the atomic reauth claim (TOCTOU)', async () => {
+      // Two racing reauth requests: this one loses the PostgREST compare-and-set.
+      claimJobForReauthStub.resolves(false);
+      loadJobScopedToCallerStub.resolves({ job: reauthJob() });
+      const ctx = baseCtx();
+      const controller = SerenityController(ctx, fakeLog(), {});
+      const res = await controller.reauthSemrushMarketGenerationJob(ctx);
+      expect(res.status).to.equal(409);
+      // The loser must NOT mint a second promise token.
+      expect(getIMSPromiseTokenStub).to.not.have.been.called;
+      expect(ctx.sqs.sendMessage).to.not.have.been.called;
     });
 
     it('403s a different IMS user (fail-closed strict claim)', async () => {

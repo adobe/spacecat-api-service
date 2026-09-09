@@ -135,6 +135,12 @@ describe('semrush-market-generation-job — producer', () => {
     expect(createAndEnqueueJobStub).to.not.have.been.called;
   });
 
+  it('skips enqueue when the brand name is empty (no ungrounded generation)', async () => {
+    const result = await enqueueSemrushMarketGeneration(context(), baseParams({ brand: '  ' }));
+    expect(result).to.deep.equal({ enqueued: false, reason: 'no-brand' });
+    expect(createAndEnqueueJobStub).to.not.have.been.called;
+  });
+
   it('is a clean no-op when the catalogue yields no seeds', async () => {
     const params = baseParams({ transport: { getBrandTopics: sandbox.stub().resolves([]) } });
     const result = await enqueueSemrushMarketGeneration(context(), params);

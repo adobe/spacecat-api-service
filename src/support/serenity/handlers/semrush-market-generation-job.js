@@ -195,6 +195,17 @@ export async function enqueueSemrushMarketGeneration(context, params) {
     return { enqueued: false, reason: 'consumer-not-ready' };
   }
 
+  // DRS grounds every generated prompt in the brand name; an empty (or whitespace-
+  // only) brand yields ungrounded, low-quality prompts. Skip rather than generate
+  // garbage — the market stands without prompts and can be regenerated once the
+  // brand name is set. (`hasText` treats whitespace as text, so trim first.)
+  if (!hasText(brand) || String(brand).trim().length === 0) {
+    log?.warn?.('[semrush-market-gen] empty brand name; skipping enqueue', {
+      brandId, workspaceId, market,
+    });
+    return { enqueued: false, reason: 'no-brand' };
+  }
+
   // Resolve seeds server-side (a bounded read, same single upstream call the old
   // synchronous path made). An empty catalogue is a clean no-op — nothing to
   // generate, so nothing to enqueue.

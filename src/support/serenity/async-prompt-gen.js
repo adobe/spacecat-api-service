@@ -17,6 +17,7 @@ import {
   enqueueSemrushMarketGeneration,
   SEMRUSH_MARKET_GENERATION_PUBLIC_JOB_TYPE,
 } from './handlers/semrush-market-generation-job.js';
+import { getBrandBaseSiteId } from '../brands-storage.js';
 
 /**
  * Controller-side helpers for the async Semrush-market prompt-generation surface
@@ -99,8 +100,27 @@ export async function maybeEnqueueMarketGeneration(context, {
   if (!enabled || !generateRequested) {
     return null;
   }
+  // Populate the owning siteId from the brand's linked base site when the entry
+  // point did not supply one, so the polling/reauth endpoints' SEC-5 site-level
+  // ownership check (loadJobScopedToCaller's resolveOwnerSiteId → metadata.siteId)
+  // is actually exercised. Best-effort: a brand with no linked site yet stores no
+  // siteId, and those genuinely siteless jobs fall back to brand-scoping as the
+  // sole ownership control (documented on both endpoints).
+  let { siteId } = producerParams;
+  if (!siteId) {
+    try {
+      siteId = await getBrandBaseSiteId(
+        context?.params?.spaceCatId,
+        producerParams.brandId,
+        context?.dataAccess?.services?.postgrestClient,
+      ) ?? undefined;
+    } catch {
+      siteId = undefined;
+    }
+  }
   const result = await enqueueSemrushMarketGeneration(context, {
     ...producerParams,
+    siteId,
     imsUserId: resolveStableImsUserId(context),
   });
   if (!result.enqueued && !result.reused) {

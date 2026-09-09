@@ -5422,6 +5422,95 @@ describe('Brands Controller', () => {
         expect(upsertMappingRowStub).to.not.have.been.called;
       });
 
+      describe('async prompt generation (flag-gated)', () => {
+        async function buildAsyncController({
+          provisionBrandSubworkspace, maybeEnqueueMarketGeneration,
+        }) {
+          const Mocked = await esmock('../../src/controllers/brands.js', {
+            '../../src/support/serenity/brand-provisioning.js': {
+              provisionBrandSubworkspace,
+              provisionBrandSubworkspaceBare: sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-bare' }),
+            },
+            '../../src/support/serenity/site-linkage.js': {
+              ensureMarketSite: sinon.stub().resolves('site-x'),
+            },
+            '../../src/support/serenity/serenity-active.js': {
+              isSerenityActiveForOrg: sinon.stub().resolves(true),
+            },
+            '../../src/support/brands-storage.js': {
+              upsertBrand: sinon.stub().resolves({ id: 'forced-id', name: 'New Brand' }),
+            },
+            '../../src/support/serenity/mapping-rows.js': {
+              upsertMappingRow: sinon.stub().resolves(),
+              linkSiteToLiveRows: sinon.stub().resolves(),
+            },
+            '../../src/support/serenity/async-prompt-gen.js': { maybeEnqueueMarketGeneration },
+            '../../src/support/utils.js': { resolveSemrushImsToken: sinon.stub().resolves('semrush-tok') },
+            '../../src/support/serenity/rest-transport.js': { createSerenityTransport: sinon.stub().returns({}) },
+          });
+          return Mocked.default(context, loggerStub, mockEnv);
+        }
+
+        const asyncReq = (env) => ({
+          ...context,
+          env,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: { ...semrushData, generatePrompts: true },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+        });
+
+        it('flag ON: skips synchronous generateTopics and annotates the 201 body with the handle', async () => {
+          const provisionStub = sinon.stub().resolves({
+            semrushSubWorkspaceId: 'ws-1', projectId: 'proj-1', geoTargetId: 2840, languageCode: 'en',
+          });
+          const enqueueStub = sinon.stub().resolves({ jobId: 'gen-b', status: 'provisioning', reused: false });
+          const controller = await buildAsyncController({
+            provisionBrandSubworkspace: provisionStub, maybeEnqueueMarketGeneration: enqueueStub,
+          });
+
+          const response = await controller.createBrandForOrg(asyncReq({ SERENITY_ASYNC_PROMPT_GEN: 'true' }));
+
+          expect(response.status).to.equal(201);
+          expect(provisionStub.firstCall.args[1].generateTopics).to.equal(false);
+          expect(enqueueStub).to.have.been.calledOnce;
+          const body = await response.json();
+          expect(body.promptGeneration).to.deep.equal({ jobId: 'gen-b', status: 'provisioning', reused: false });
+        });
+
+        it('flag ON: an enqueue failure is non-fatal — the brand still returns 201 without a handle', async () => {
+          const provisionStub = sinon.stub().resolves({
+            semrushSubWorkspaceId: 'ws-1', projectId: 'proj-1', geoTargetId: 2840, languageCode: 'en',
+          });
+          const enqueueStub = sinon.stub().rejects(new Error('sqs down'));
+          const controller = await buildAsyncController({
+            provisionBrandSubworkspace: provisionStub, maybeEnqueueMarketGeneration: enqueueStub,
+          });
+
+          const response = await controller.createBrandForOrg(asyncReq({ SERENITY_ASYNC_PROMPT_GEN: 'true' }));
+
+          expect(response.status).to.equal(201);
+          const body = await response.json();
+          expect(body.promptGeneration).to.equal(undefined);
+        });
+
+        it('flag OFF: preserves synchronous generateTopics and never enqueues', async () => {
+          const provisionStub = sinon.stub().resolves({
+            semrushSubWorkspaceId: 'ws-1', projectId: 'proj-1', geoTargetId: 2840, languageCode: 'en',
+          });
+          const enqueueStub = sinon.stub().resolves(null);
+          const controller = await buildAsyncController({
+            provisionBrandSubworkspace: provisionStub, maybeEnqueueMarketGeneration: enqueueStub,
+          });
+
+          const response = await controller.createBrandForOrg(asyncReq({}));
+
+          expect(response.status).to.equal(201);
+          expect(provisionStub.firstCall.args[1].generateTopics).to.equal(true);
+          expect(enqueueStub).to.not.have.been.called;
+        });
+      });
+
       it('rejects a Semrush-mode create with 403 when serenity is inactive for the org (no provisioning, no row write)', async () => {
         const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
         const upsertStub = sinon.stub().resolves({ id: 'forced-id', name: 'New Brand' });

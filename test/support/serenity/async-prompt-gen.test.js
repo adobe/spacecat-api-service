@@ -117,14 +117,55 @@ describe('async-prompt-gen', () => {
     let enqueueStub;
     let maybeEnqueueMarketGeneration;
 
+    let getBrandBaseSiteIdStub;
     beforeEach(async () => {
       enqueueStub = sinon.stub();
+      getBrandBaseSiteIdStub = sinon.stub().resolves(null);
       ({ maybeEnqueueMarketGeneration } = await esmock('../../../src/support/serenity/async-prompt-gen.js', {
         '../../../src/support/serenity/handlers/semrush-market-generation-job.js': {
           enqueueSemrushMarketGeneration: enqueueStub,
           SEMRUSH_MARKET_GENERATION_PUBLIC_JOB_TYPE: 'generateSemrushMarket',
         },
+        '../../../src/support/brands-storage.js': {
+          getBrandBaseSiteId: getBrandBaseSiteIdStub,
+        },
       }));
+    });
+
+    function siteCtx() {
+      return {
+        params: { spaceCatId: 'org-1' },
+        dataAccess: { services: { postgrestClient: { from: () => ({}) } } },
+        attributes: { authInfo: { getProfile: () => ({ user_id: 'U1' }) } },
+      };
+    }
+
+    it('resolves siteId from the brand base site when the entry point supplies none (SEC-5 scoping)', async () => {
+      getBrandBaseSiteIdStub.resolves('site-xyz');
+      enqueueStub.resolves({ enqueued: true, jobId: 'job-1', status: 'IN_PROGRESS' });
+      await maybeEnqueueMarketGeneration(siteCtx(), {
+        enabled: true, generateRequested: true, producerParams: { brandId: 'b' },
+      });
+      expect(getBrandBaseSiteIdStub).to.have.been.calledWith('org-1', 'b');
+      expect(enqueueStub.firstCall.args[1].siteId).to.equal('site-xyz');
+    });
+
+    it('keeps a supplied siteId and does not resolve the brand base site', async () => {
+      enqueueStub.resolves({ enqueued: true, jobId: 'job-1', status: 'IN_PROGRESS' });
+      await maybeEnqueueMarketGeneration(siteCtx(), {
+        enabled: true, generateRequested: true, producerParams: { brandId: 'b', siteId: 'supplied-site' },
+      });
+      expect(getBrandBaseSiteIdStub).to.not.have.been.called;
+      expect(enqueueStub.firstCall.args[1].siteId).to.equal('supplied-site');
+    });
+
+    it('leaves siteId undefined (siteless job) when the brand base-site resolve throws', async () => {
+      getBrandBaseSiteIdStub.rejects(new Error('unresolvable'));
+      enqueueStub.resolves({ enqueued: true, jobId: 'job-1', status: 'IN_PROGRESS' });
+      await maybeEnqueueMarketGeneration(siteCtx(), {
+        enabled: true, generateRequested: true, producerParams: { brandId: 'b' },
+      });
+      expect(enqueueStub.firstCall.args[1].siteId).to.equal(undefined);
     });
 
     it('returns null (no enqueue) when the feature is off or not requested', async () => {

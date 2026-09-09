@@ -16,7 +16,7 @@ import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
 
 import {
-  claimJobLease, renewJobLease, clearJobLease, newLeaseToken,
+  claimJobLease, renewJobLease, clearJobLease, newLeaseToken, claimJobForReauth,
 } from '../../../src/support/serenity/job-lease.js';
 
 use(chaiAsPromised);
@@ -136,6 +136,30 @@ describe('job-lease', () => {
     it('returns false with no client', async () => {
       const job = makeJob();
       expect(await renewJobLease({ dataAccess: {} }, job, { leaseToken: 'lt' })).to.equal(false);
+    });
+  });
+
+  describe('claimJobForReauth', () => {
+    it('wins the CAS on FAILED + error.code=NEEDS_REAUTH → IN_PROGRESS', async () => {
+      const { client, calls } = makeQuery({ data: [{ id: 'job-1' }], error: null });
+      const won = await claimJobForReauth(makeContext(client), 'job-1');
+      expect(won).to.equal(true);
+      expect(calls.table).to.equal('async_jobs');
+      expect(calls.update).to.deep.equal({ status: 'IN_PROGRESS' });
+      expect(calls.filters).to.deep.include(['eq', 'id', 'job-1']);
+      expect(calls.filters).to.deep.include(['eq', 'status', 'FAILED']);
+      expect(calls.filters).to.deep.include(['eq', 'error->>code', 'NEEDS_REAUTH']);
+    });
+
+    it('loses (0 rows) when the job is not in the NEEDS_REAUTH state', async () => {
+      const { client } = makeQuery({ data: [], error: null });
+      expect(await claimJobForReauth(makeContext(client), 'job-1')).to.equal(false);
+    });
+
+    it('throws when the claim query errors', async () => {
+      const { client } = makeQuery({ data: null, error: { message: 'boom' } });
+      await expect(claimJobForReauth(makeContext(client), 'job-1'))
+        .to.be.rejectedWith(/reauth claim query failed/);
     });
   });
 

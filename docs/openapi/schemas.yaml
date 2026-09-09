@@ -12288,6 +12288,14 @@ SerenityMarketGenerationJobStatus:
               type: boolean
               description: True when the job stalled on an expired Semrush token; use the /reauth endpoint.
         - { type: 'null' }
+    createdAt:
+      type: string
+      format: date-time
+      description: When the job was created.
+    updatedAt:
+      type: string
+      format: date-time
+      description: When the job record was last updated.
 
 SerenityMarketGenerationJobAccepted:
   type: object

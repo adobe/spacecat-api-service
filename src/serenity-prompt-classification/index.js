@@ -303,10 +303,14 @@ export async function run(message, context) {
         return ok();
       }
       // Release the lease on a rethrown (retryable) exchange failure so the
-      // redelivery can re-claim; the job stays IN_PROGRESS.
+      // redelivery can re-claim; the job stays IN_PROGRESS. A failed release is
+      // logged (not swallowed silently): the stale lease then blocks redelivery
+      // until its ~930s TTL, which on-call needs to be able to see.
       if (leaseToken) {
         clearJobLease(job);
-        await job.save().catch(() => {});
+        await job.save().catch((saveError) => {
+          log.warn(`[serenity-job-runner] Job ${jobId} failed to release lease after exchange error: ${saveError.message}`);
+        });
       }
       throw error;
     }
@@ -327,10 +331,14 @@ export async function run(message, context) {
     if (isRetryableJobError(error)) {
       log.warn(`[serenity-job-runner] Job ${jobId} remains IN_PROGRESS for SQS retry: ${error.message}`);
       // Release the lease so the redelivery can re-claim and resume from the
-      // handler's own checkpoints; keep the token (retained for retry).
+      // handler's own checkpoints; keep the token (retained for retry). A failed
+      // release is logged, not swallowed — the stale lease blocks redelivery until
+      // its ~930s TTL.
       if (leaseToken) {
         clearJobLease(job);
-        await job.save().catch(() => {});
+        await job.save().catch((saveError) => {
+          log.warn(`[serenity-job-runner] Job ${jobId} failed to release lease after retryable failure: ${saveError.message}`);
+        });
       }
       throw error;
     }
@@ -346,9 +354,10 @@ export async function run(message, context) {
   if (!tokenOwnershipTransferred) {
     await invalidateJobPromiseToken(context, job);
   }
-  if (leaseToken) {
-    clearJobLease(job);
-  }
+  // Scrub the lease on every terminal path (defense-in-depth): unconditional so a
+  // stale lease left on the record by a prior crashed attempt is cleared even if
+  // this delivery did not itself claim one (`clearJobLease` is a no-op when absent).
+  clearJobLease(job);
   await job.save();
 
   return ok();

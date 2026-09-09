@@ -49,6 +49,7 @@ import {
   maybeEnqueueMarketGeneration,
 } from '../support/serenity/async-prompt-gen.js';
 import { loadJobScopedToCaller } from '../support/async-job-access.js';
+import { claimJobForReauth } from '../support/serenity/job-lease.js';
 import { collectAliasNames } from '../support/serenity/brand-aliases.js';
 import { ORIGIN_VALUE } from '../support/serenity/prompt-tags.js';
 import {
@@ -1247,29 +1248,39 @@ function SerenityController(context, log, env) {
           // Async prompt generation: enqueue the DRS-backed producer for this
           // just-created market and annotate the response so the UI can poll.
           if (asyncGenMarket && projectId) {
-            const successBody2 = /** @type {MarketCreateSuccessBody} */ (result.body);
-            const org = await ctx.dataAccess.Organization.findById(ctx?.params?.spaceCatId);
-            const promptGeneration = await maybeEnqueueMarketGeneration(ctx, {
-              enabled: true,
-              generateRequested: true,
-              producerParams: {
-                transport,
-                brandId: auth.brandUuid,
-                siteId: suppliedSiteId ?? undefined,
-                imsOrgId: org?.getImsOrgId?.() ?? ctx?.params?.spaceCatId,
-                workspaceId: successBody2.workspaceId ?? auth.workspaceId,
-                geoTargetId: successBody2.geoTargetId,
-                languageCode: successBody2.languageCode,
-                market: effectiveBody.market,
-                brandDomain: effectiveBody.brandDomain,
-                baseUrl: effectiveBody.primaryUrl ?? effectiveBody.brandDomain,
-                brand: resolveBrandName(effectiveBody),
-                aliases: collectAliasNames(brandAliases, effectiveBody.market),
-                callerId: resolveCallerId(ctx),
-              },
-            });
-            if (promptGeneration) {
-              result.body = /** @type {any} */ ({ ...result.body, promptGeneration });
+            // Best-effort: an async-generation enqueue failure must never 500 (or
+            // otherwise fail) a market that was already created + published — the
+            // same fault isolation activate/createBrandForOrg use. The market simply
+            // stands without a promptGeneration handle; the user can retry.
+            try {
+              const successBody2 = /** @type {MarketCreateSuccessBody} */ (result.body);
+              const org = await ctx.dataAccess.Organization.findById(ctx?.params?.spaceCatId);
+              const promptGeneration = await maybeEnqueueMarketGeneration(ctx, {
+                enabled: true,
+                generateRequested: true,
+                producerParams: {
+                  transport,
+                  brandId: auth.brandUuid,
+                  siteId: suppliedSiteId ?? undefined,
+                  imsOrgId: org?.getImsOrgId?.() ?? ctx?.params?.spaceCatId,
+                  workspaceId: successBody2.workspaceId ?? auth.workspaceId,
+                  geoTargetId: successBody2.geoTargetId,
+                  languageCode: successBody2.languageCode,
+                  market: effectiveBody.market,
+                  brandDomain: effectiveBody.brandDomain,
+                  baseUrl: effectiveBody.primaryUrl ?? effectiveBody.brandDomain,
+                  brand: resolveBrandName(effectiveBody),
+                  aliases: collectAliasNames(brandAliases, effectiveBody.market),
+                  callerId: resolveCallerId(ctx),
+                },
+              });
+              if (promptGeneration) {
+                result.body = /** @type {any} */ ({ ...result.body, promptGeneration });
+              }
+            } catch (e) {
+              log?.warn?.('serenity create-market: async prompt-generation enqueue failed (non-fatal)', {
+                brandId: auth.brandUuid, market: effectiveBody.market, error: e?.message,
+              });
             }
           }
         }
@@ -2429,6 +2440,12 @@ function SerenityController(context, log, env) {
         return accessError;
       }
       // Additional brand scoping on the serenity surface (the route is brand-scoped).
+      // For a job on a brand with a linked site, `loadJobScopedToCaller` already
+      // enforced site-level ownership via `metadata.siteId`; for a genuinely siteless
+      // job (a brand with no site yet, so `metadata.siteId` is absent), that check is
+      // skipped and THIS brand-match is the sole ownership control — which is
+      // sufficient because the route itself is scoped to a brand the caller passed
+      // `authorize` for.
       if (job.getMetadata?.()?.brandId !== auth.brandUuid) {
         return notFound(`Job not found: ${jobId}`);
       }
@@ -2467,6 +2484,9 @@ function SerenityController(context, log, env) {
         return accessError;
       }
       const metadata = job.getMetadata?.() ?? {};
+      // Brand scoping (the route is brand-scoped). Site-level ownership was enforced
+      // by loadJobScopedToCaller when the job carries a siteId; for a siteless job
+      // this brand-match is the sole ownership control (see the poll endpoint note).
       if (metadata.brandId !== auth.brandUuid) {
         return notFound(`Job not found: ${jobId}`);
       }
@@ -2477,7 +2497,8 @@ function SerenityController(context, log, env) {
         return forbidden('Only the original requester may re-authenticate this job');
       }
 
-      // Only a job actually blocked on reauth is reauth-able.
+      // Fast pre-check for a clean 409 + to avoid minting a token when the job
+      // plainly is not awaiting reauth. The atomic guarantee is the CAS below.
       if (job.getStatus() !== 'FAILED' || job.getError?.()?.code !== 'NEEDS_REAUTH') {
         return createResponse(
           { error: 'invalidState', message: 'Job is not awaiting re-authentication' },
@@ -2495,10 +2516,22 @@ function SerenityController(context, log, env) {
           400,
         );
       }
+
+      // Atomic reauth claim (TOCTOU): flip FAILED+NEEDS_REAUTH → IN_PROGRESS with a
+      // conditional PostgREST update. Exactly one of two racing reauth requests wins
+      // and proceeds to mint; the loser gets a 409 and never mints a second token
+      // (which would bank an unexchanged, un-invalidated promise token).
+      const claimed = await claimJobForReauth(ctx, jobId);
+      if (!claimed) {
+        return createResponse(
+          { error: 'invalidState', message: 'Job is not awaiting re-authentication' },
+          409,
+        );
+      }
       const promiseTokenResponse = await getIMSPromiseToken(ctx, PROMISE_PAIR_SEMRUSH);
 
-      // Atomic update: swap in the fresh token, clear the failure, flip back to
-      // IN_PROGRESS on the SAME record, then re-enqueue the SAME job id.
+      // Persist the fresh token + clear the failure on the SAME record (the CAS
+      // already flipped status to IN_PROGRESS), then re-enqueue the SAME job id.
       job.setMetadata({
         ...metadata,
         promiseToken: promiseTokenResponse,
