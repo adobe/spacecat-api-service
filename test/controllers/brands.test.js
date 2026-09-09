@@ -5848,6 +5848,79 @@ describe('Brands Controller', () => {
         expect(upsertStub.called).to.equal(false);
       });
 
+      it('Phase 4: bare create records the provisioning-start failure and rethrows when the job enqueue itself fails', async () => {
+        const upsertStub = sinon.stub().resolves({ id: 'forced-id', name: 'New Brand' });
+        const enqueueStub = sinon.stub().rejects(new Error('SQS unavailable'));
+        const promoteFailedStub = sinon.stub().resolves(true);
+        const controller = await buildController({
+          upsertBrand: upsertStub,
+          createAndEnqueueJob: enqueueStub,
+          promoteProvisioningFailed: promoteFailedStub,
+        });
+
+        const response = await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: { name: 'New Brand', baseSiteId: 'site-123', async: true },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+        });
+
+        // The row IS already persisted (visible, non-active) — marked failed rather than
+        // left silently inert — but the request itself surfaces the original error.
+        expect(response.status).to.equal(500);
+        expect(promoteFailedStub.calledOnce).to.equal(true);
+        expect(promoteFailedStub.firstCall.args[0].brandId)
+          .to.equal(upsertStub.firstCall.args[0].forceBrandId);
+      });
+
+      it('Phase 4: bare create records the provisioning-start failure via the fresh-brand path and rethrows when beginProvisioningAttempt itself fails', async () => {
+        const upsertStub = sinon.stub().resolves({ id: 'forced-id', name: 'New Brand' });
+        const beginStub = sinon.stub().rejects(new Error('DB unavailable'));
+        const enqueueStub = sinon.stub().resolves({ getId: () => 'job-xyz' });
+        const promoteFailedStub = sinon.stub().resolves(true);
+        const recordFreshFailureStub = sinon.stub().resolves(true);
+        const Mocked = await esmock('../../src/controllers/brands.js', {
+          '../../src/support/serenity/brand-provisioning.js': {
+            provisionBrandSubworkspaceBare: sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-bare' }),
+          },
+          '../../src/support/serenity/serenity-active.js': { isSerenityActiveForOrg: sinon.stub().resolves(true) },
+          '../../src/support/serenity/workspace-resolver.js': { resolveWorkspaceId: sinon.stub().resolves('parent-ws-1') },
+          '../../src/support/serenity/async-job-runner.js': { createAndEnqueueJob: enqueueStub },
+          '../../src/support/serenity/handlers/provision-workspace-job.js': {
+            PROVISION_WORKSPACE_JOB_TYPE: 'serenity-provision-workspace',
+          },
+          '../../src/support/serenity/handlers/create-market-job.js': {
+            CREATE_MARKET_JOB_TYPE: 'serenity-create-market',
+          },
+          '../../src/support/brands-storage.js': {
+            upsertBrand: upsertStub,
+            beginProvisioningAttempt: beginStub,
+            promoteProvisioningFailed: promoteFailedStub,
+            recordFreshBrandProvisioningStartFailure: recordFreshFailureStub,
+          },
+        });
+        const controller = Mocked.default(context, loggerStub, mockEnv);
+
+        const response = await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: { name: 'New Brand', baseSiteId: 'site-123', async: true },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(500);
+        const body = await response.json();
+        expect(body.message).to.equal('DB unavailable');
+        expect(recordFreshFailureStub.calledOnce).to.equal(true);
+        expect(recordFreshFailureStub.firstCall.args[0].brandId)
+          .to.equal(upsertStub.firstCall.args[0].forceBrandId);
+        // The pre-existing established-brand compensation must NOT fire for a fresh brand.
+        expect(promoteFailedStub.called).to.equal(false);
+        expect(enqueueStub.called).to.equal(false);
+      });
+
       it('surfaces a bare sub-workspace provisioning failure and does not write the brand', async () => {
         // The bare sub-workspace is provisioned BEFORE the brand row is written; if
         // that upstream call throws, the create surfaces the error and never persists
