@@ -110,10 +110,12 @@ export async function pollUntilCreated(
   { attempts, intervalMs, sleep },
   log,
 ) {
+  let lastObservedStatus;
   for (let i = 0; i < attempts; i += 1) {
     // eslint-disable-next-line no-await-in-loop
     const status = await transport.getWorkspaceStatus(workspaceId);
     const observedStatus = status?.status;
+    lastObservedStatus = observedStatus;
     if (observedStatus === 'created') {
       return;
     }
@@ -129,7 +131,7 @@ export async function pollUntilCreated(
   }
   log.error(
     'pollUntilCreated: SUBWORKSPACE_CREATION_TIMEOUT: readiness attempts exhausted',
-    { workspaceId },
+    { workspaceId, status: lastObservedStatus },
   );
   throw subworkspaceCreationTimeoutError();
 }
