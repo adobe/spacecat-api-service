@@ -1,3 +1,10 @@
+# [1.799.0](https://github.com/adobe/spacecat-api-service/compare/v1.798.1...v1.799.0) (2026-09-09)
+
+
+### Features
+
+* **serenity:** add native nested custom tags ([#3218](https://github.com/adobe/spacecat-api-service/issues/3218)) ([e937178](https://github.com/adobe/spacecat-api-service/commit/e93717802f2d45356bba039c5213cc1bbedd9094)), closes [adobe/serenity-docs#26](https://github.com/adobe/serenity-docs/issues/26) [adobe/spacecat-shared#1916](https://github.com/adobe/spacecat-shared/issues/1916)
+
 ## [1.798.1](https://github.com/adobe/spacecat-api-service/compare/v1.798.0...v1.798.1) (2026-09-08)
 
 
