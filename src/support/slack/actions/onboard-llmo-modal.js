@@ -344,7 +344,11 @@ async function checkOrg(imsOrgId, site, lambdaCtx, slackCtx) {
       log: lambdaCtx.log,
     });
   } catch (guardError) {
-    await say(`:x: ${guardError.message}`);
+    try {
+      await say(`:x: ${guardError.message}`);
+    } catch (slackErr) {
+      lambdaCtx.log.warn('Failed to deliver reassignment-blocked notice to Slack', slackErr);
+    }
     throw guardError;
   }
 

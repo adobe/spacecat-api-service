@@ -176,7 +176,11 @@ export function setImsOrgModal(lambdaContext) {
         });
       } catch (guardError) {
         log.warn(`set imsorg: reassignment blocked for ${baseURL}: ${guardError.message}`);
-        await say(`:x: ${guardError.message}`);
+        try {
+          await say(`:x: ${guardError.message}`);
+        } catch (slackErr) {
+          log.warn('Failed to deliver reassignment-blocked notice to Slack', slackErr);
+        }
         return;
       }
 
