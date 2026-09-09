@@ -332,11 +332,50 @@ describe('handlers/provision-workspace-job.js (LLMO-7352 / LLMO-7418)', () => {
         brandId: BRAND_ID,
         attemptId: ATTEMPT_ID,
         workspaceId: CANDIDATE_WS,
+        hasSiteAnchor: false,
         postgrestClient,
         updatedBy: 'serenity-provision-worker',
       });
       expect(result).to.deep.equal({ provisioningStatus: 'ready' });
       expect(createAndEnqueueJobStub).to.not.have.been.called;
+    });
+
+    it('passes hasSiteAnchor: true through to promoteProvisioningReady when the brand already has a site_id (LLMO-7418 external-review Finding 5)', async () => {
+      transport.getWorkspaceStatus.resolves({ status: 'active' });
+      getBrandProvisioningStateStub.resolves(pendingState({ siteId: 'a-site-id' }));
+      const { provisionWorkspaceHandler } = await loadHandler();
+      const job = makeJob(makeMetadata());
+
+      await provisionWorkspaceHandler(context, job, 'token');
+
+      expect(promoteProvisioningReadyStub).to.have.been.calledOnceWith({
+        brandId: BRAND_ID,
+        attemptId: ATTEMPT_ID,
+        workspaceId: CANDIDATE_WS,
+        hasSiteAnchor: true,
+        postgrestClient,
+        updatedBy: 'serenity-provision-worker',
+      });
+    });
+
+    it('cleans up a freshly-created candidate when the promotion write fails for a reason other than the handled UNIQUE conflict (LLMO-7418 external-review Finding 5)', async () => {
+      transport.getWorkspaceStatus.resolves({ status: 'active' });
+      const checkViolation = new Error('new row for relation "brands" violates check constraint "chk_active_brand_has_site_id"');
+      checkViolation.code = '23514';
+      promoteProvisioningReadyStub.rejects(checkViolation);
+      const { provisionWorkspaceHandler } = await loadHandler();
+      const job = makeJob(makeMetadata());
+
+      await expect(provisionWorkspaceHandler(context, job, 'token')).to.be.rejectedWith(checkViolation.message);
+
+      expect(emptyWorkspaceBestEffortStub).to.have.been.calledOnceWith(
+        transport,
+        CANDIDATE_WS,
+        PARENT_WS,
+        context.log,
+        'provision-worker-ready-promotion-failed',
+      );
+      expect(promoteProvisioningFailedStub).to.have.been.calledOnce;
     });
 
     it('cleans up a freshly-created candidate when the ready-promotion CAS is lost', async () => {

@@ -12,6 +12,7 @@
 
 // @ts-check
 
+import { hasText } from '@adobe/spacecat-shared-utils';
 import { createSerenityTransport } from '../rest-transport.js';
 import { createAndEnqueueJob } from '../async-job-runner.js';
 import {
@@ -170,6 +171,12 @@ export async function provisionWorkspaceHandler(context, job, accessToken) {
     };
   }
 
+  // Hoisted above the try (LLMO-7418 external-review Finding 5): a `const` declared INSIDE the
+  // try block is out of scope in the catch below, which is exactly why that catch could not
+  // previously call cleanupIfOwned for an unexpected error — this needs no request context
+  // beyond what the function already has, so there is no reason to construct it any later.
+  const transport = createSerenityTransport({ env, imsToken: accessToken });
+
   try {
     // Re-check FIRST, before any Semrush call: a newer attempt (a retry) or a terminal write
     // from a raced-ahead hop may have already superseded this one. Stand down as a clean no-op
@@ -187,13 +194,10 @@ export async function provisionWorkspaceHandler(context, job, accessToken) {
       // the race — the DB row now reflects the WINNING attempt, not ours, so `candidate` here
       // (from OUR OWN metadata) is the only place that ownership is still recorded.
       if (candidate) {
-        const transport = createSerenityTransport({ env, imsToken: accessToken });
         await cleanupIfOwned(transport, candidate, parentWorkspaceId, log, 'provision-worker-superseded-stand-down');
       }
       return { provisioningStatus: 'superseded' };
     }
-
-    const transport = createSerenityTransport({ env, imsToken: accessToken });
 
     if (!candidate) {
       const claim = { brandCollection: dataAccess.Brand, selfBrandId: brandId };
@@ -227,6 +231,11 @@ export async function provisionWorkspaceHandler(context, job, accessToken) {
           brandId,
           attemptId,
           workspaceId: candidate.workspaceId,
+          // LLMO-7418 external-review Finding 5: `state` was already read (and re-validated as
+          // current) at the top of this hop — reuse it rather than a second read. See
+          // promoteProvisioningReady's own doc for why this must gate the `status: 'active'`
+          // write.
+          hasSiteAnchor: hasText(state.siteId),
           postgrestClient,
           updatedBy: 'serenity-provision-worker',
         });
@@ -243,6 +252,14 @@ export async function provisionWorkspaceHandler(context, job, accessToken) {
           });
           return { provisioningStatus: 'superseded' };
         }
+        // Any OTHER promotion failure (LLMO-7418 external-review Finding 5 — most notably a
+        // chk_active_brand_has_site_id 23514, though `hasSiteAnchor` above should make that
+        // unreachable now; kept generic for any other unexpected write failure too) means this
+        // candidate was CONFIRMED ready upstream but never became the canonical pointer — clean
+        // it up here (if we own it) before the generic outer catch records the attempt failed,
+        // rather than leaking it. Distinct from the requeue path below, which must NOT clean up
+        // the candidate it is deliberately carrying forward to the next hop.
+        await cleanupIfOwned(transport, candidate, parentWorkspaceId, log, 'provision-worker-ready-promotion-failed');
         throw error;
       }
       if (!promoted) {

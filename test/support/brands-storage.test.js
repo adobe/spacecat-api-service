@@ -4453,6 +4453,7 @@ describe('brands-storage', () => {
               semrush_provisioning_attempt_id: ATTEMPT_ID,
               semrush_provisioning_job_id: JOB_ID,
               semrush_provisioning_candidate_workspace_id: CANDIDATE_WS,
+              site_id: 'a-site-id',
             },
             error: null,
           },
@@ -4463,6 +4464,7 @@ describe('brands-storage', () => {
         expect(result).to.deep.equal({
           id: BRAND_ID,
           status: 'pending',
+          siteId: 'a-site-id',
           semrushSubWorkspaceId: null,
           provisioningStatus: 'pending',
           provisioningAttemptId: ATTEMPT_ID,
@@ -4624,7 +4626,7 @@ describe('brands-storage', () => {
         })).to.be.rejectedWith('PostgREST client is required');
       });
 
-      it('writes the canonical pointer + flips status active on a matched CAS', async () => {
+      it('writes the canonical pointer + flips status active on a matched CAS (hasSiteAnchor: true)', async () => {
         const postgrestClient = createCapturingClient({
           brands: { data: { id: BRAND_ID }, error: null },
         });
@@ -4633,6 +4635,7 @@ describe('brands-storage', () => {
           brandId: BRAND_ID,
           attemptId: ATTEMPT_ID,
           workspaceId: CANONICAL_WS,
+          hasSiteAnchor: true,
           postgrestClient,
           updatedBy: 'serenity-provision-worker',
         });
@@ -4644,6 +4647,31 @@ describe('brands-storage', () => {
             semrush_sub_workspace_id: CANONICAL_WS,
             semrush_provisioning_status: 'ready',
             status: 'active',
+            updated_by: 'serenity-provision-worker',
+          },
+        }]);
+      });
+
+      it('writes the canonical pointer WITHOUT touching status when there is no site anchor (LLMO-7418 external-review Finding 5)', async () => {
+        const postgrestClient = createCapturingClient({
+          brands: { data: { id: BRAND_ID }, error: null },
+        });
+
+        const result = await promoteProvisioningReady({
+          brandId: BRAND_ID,
+          attemptId: ATTEMPT_ID,
+          workspaceId: CANONICAL_WS,
+          hasSiteAnchor: false,
+          postgrestClient,
+          updatedBy: 'serenity-provision-worker',
+        });
+
+        expect(result).to.equal(true);
+        expect(postgrestClient.capturedCalls.update).to.deep.equal([{
+          table: 'brands',
+          row: {
+            semrush_sub_workspace_id: CANONICAL_WS,
+            semrush_provisioning_status: 'ready',
             updated_by: 'serenity-provision-worker',
           },
         }]);

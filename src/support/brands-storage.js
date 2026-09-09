@@ -1893,7 +1893,7 @@ export async function listRegions(postgrestClient) {
 
 const PROVISIONING_SELECT = 'id, semrush_provisioning_status, semrush_provisioning_attempt_id, '
   + 'semrush_provisioning_job_id, semrush_provisioning_candidate_workspace_id, '
-  + 'semrush_sub_workspace_id, status';
+  + 'semrush_sub_workspace_id, status, site_id';
 
 /**
  * Reads a brand's current async-provisioning state. Plain read, no compare-and-set — used by the
@@ -1926,6 +1926,10 @@ export async function getBrandProvisioningState(brandId, postgrestClient) {
   return {
     id: data.id,
     status: data.status,
+    // LLMO-7418 external-review Finding 5: lets promoteProvisioningReady decide whether it is
+    // safe to flip `status` to `active` in the same write (see its own doc for the full
+    // rationale) without a second read.
+    siteId: data.site_id,
     semrushSubWorkspaceId: data.semrush_sub_workspace_id,
     provisioningStatus: data.semrush_provisioning_status,
     provisioningAttemptId: data.semrush_provisioning_attempt_id,
@@ -2023,13 +2027,29 @@ export async function updateProvisioningJobId({
 
 /**
  * Terminal promotion to READY: writes the CANONICAL `semrush_sub_workspace_id` pointer (the
- * only write path that may ever set it for an async attempt) and flips the brand active, in one
- * atomic compare-and-set keyed on the attempt still being the brand's current, pending one.
+ * only write path that may ever set it for an async attempt) and, when safe, flips the brand
+ * active — in one atomic compare-and-set keyed on the attempt still being the brand's current,
+ * pending one.
+ *
+ * `hasSiteAnchor` gates the `status: 'active'` write (LLMO-7418 external-review Finding 5):
+ * `upsertBrand` enforces that an active brand always has a `site_id` (forcing a siteless create
+ * to `pending` instead), but a bare async provisioning attempt can legitimately still be pending
+ * on a `site_id` when its workspace finishes provisioning (the caller never required one up
+ * front). Writing `status: 'active'` unconditionally here would violate the live
+ * `chk_active_brand_has_site_id` CHECK the moment `hasSiteAnchor` is false, and the resulting
+ * 23514 was not a handled shape — the caller's generic catch would then fail the attempt but
+ * (before this fix) had no path back to clean up the Semrush workspace this call just confirmed
+ * ready, leaking it permanently. Omitting `status` entirely when there is no anchor leaves the
+ * brand exactly where `upsertBrand`'s own invariant already put it (`pending`) — never a
+ * CHECK-violating write, never a silently-inconsistent one.
  *
  * @param {object} params
  * @param {string} params.brandId
  * @param {string} params.attemptId
  * @param {string} params.workspaceId - the CONFIRMED-ready workspace id to promote to canonical.
+ * @param {boolean} params.hasSiteAnchor - whether the brand already has (or is otherwise exempt
+ *   from needing) a `site_id`; the caller reads this from the SAME provisioning-state fetch that
+ *   already validated attempt currency.
  * @param {object} params.postgrestClient
  * @param {string} [params.updatedBy]
  * @returns {Promise<boolean>} true if the promotion landed, false if the CAS was rejected (a
@@ -2037,7 +2057,7 @@ export async function updateProvisioningJobId({
  *   workspace as an orphan needing best-effort cleanup, never the winner's).
  */
 export async function promoteProvisioningReady({
-  brandId, attemptId, workspaceId, postgrestClient, updatedBy = 'system',
+  brandId, attemptId, workspaceId, hasSiteAnchor, postgrestClient, updatedBy = 'system',
 }) {
   if (!postgrestClient?.from) {
     throw new Error('PostgREST client is required');
@@ -2048,7 +2068,7 @@ export async function promoteProvisioningReady({
     .update({
       semrush_sub_workspace_id: workspaceId,
       semrush_provisioning_status: 'ready',
-      status: 'active',
+      ...(hasSiteAnchor ? { status: 'active' } : {}),
       updated_by: updatedBy,
     })
     .eq('id', brandId)
