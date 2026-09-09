@@ -490,7 +490,7 @@ A missing `SEMRUSH_ADMIN_ELEMENT_API_KEY` is treated as a server-side config gap
 
 **Other routes depending on the Elements transport.** Two routes outside this controller also call `createElementsTransport`/`createElementsService` — both in `src/controllers/llmo/llmo-url-inspector.js` (`createUrlInspectorPromptsByUrlHandler`), and only conditionally (when the caller passes a `url` query param **and** the brand is Semrush-eligible; otherwise they fall back to Mysticat/Postgres data and never touch this transport):
 
-- `GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/prompts-by-url` — accepts either `organization:read` or `brand:read`. It returns org-wide, cross-brand data, so `organization:read` alone is sufficient, but every other `brands/all/*` route in this brand-presence family still accepts `brand:read`, and capability matching is exact-string with no hierarchy — so a consumer holding only `brand:read` must not silently lose access to this one route.
+- `GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/prompts-by-url` — requires `organization:read` (returns org-wide, cross-brand data)
 - `GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/prompts-by-url` — requires `brand:read` (`:brandId`-scoped, like the elements.js routes above)
 
 Both now have the same `isS2SConsumer` branch as `ElementsController.buildService()`: S2S callers skip IMS token resolution and get the `Apikey`/v4-raw transport instead. Authorization for the `all` variant still goes through `getOrgAndValidateAccess` → `AccessControlUtil.hasAccess(organization, '', 'LLMO')` (same tenant-claim mechanism as the elements.js routes, plus an `x-product: LLMO` header check satisfied by calling via the LLMO host).

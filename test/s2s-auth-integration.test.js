@@ -126,60 +126,6 @@ describe('s2sAuthWrapper integration', () => {
     expect(context.s2sConsumer).to.equal(mockConsumer);
   });
 
-  it('succeeds when a route maps to an array of capabilities and the consumer holds one of them', async () => {
-    const token = await createS2sToken();
-    // GET .../brands/all/.../prompts-by-url maps to ['organization:read', 'brand:read'] -
-    // a consumer only needs one of the two to pass.
-    const suffix = '/org/org-123/brands/all/brand-presence/url-inspector/prompts-by-url';
-    const request = new Request(`https://example.com${suffix}`, {
-      method: 'GET',
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    const context = buildContext(
-      { method: 'GET', suffix },
-      { authorization: `Bearer ${token}` },
-    );
-
-    const mockConsumer = {
-      isRevoked: () => false,
-      getStatus: () => 'ACTIVE',
-      // Holds only the org-scoped alternative, not brand:read - still must pass.
-      getCapabilities: () => ['organization:read'],
-    };
-    context.dataAccess.Consumer.findByClientIdAndImsOrgId.resolves(mockConsumer);
-
-    const response = await wrappedHandler(request, context);
-
-    expect(response.status).to.equal(200);
-    expect(mockInnerHandler).to.have.been.calledOnce;
-    expect(context.s2sConsumer).to.equal(mockConsumer);
-  });
-
-  it('returns 403 when a route maps to an array of capabilities and the consumer holds neither', async () => {
-    const token = await createS2sToken();
-    const suffix = '/org/org-123/brands/all/brand-presence/url-inspector/prompts-by-url';
-    const request = new Request(`https://example.com${suffix}`, {
-      method: 'GET',
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    const context = buildContext(
-      { method: 'GET', suffix },
-      { authorization: `Bearer ${token}` },
-    );
-
-    const mockConsumer = {
-      isRevoked: () => false,
-      getStatus: () => 'ACTIVE',
-      getCapabilities: () => ['site:read'],
-    };
-    context.dataAccess.Consumer.findByClientIdAndImsOrgId.resolves(mockConsumer);
-
-    const response = await wrappedHandler(request, context);
-
-    expect(response.status).to.equal(403);
-    expect(mockInnerHandler).to.not.have.been.called;
-  });
-
   it('returns 403 when valid S2S JWT hits unmapped route', async () => {
     const token = await createS2sToken();
     const request = new Request('https://example.com/slack/events', {
