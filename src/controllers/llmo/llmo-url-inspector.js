@@ -810,14 +810,6 @@ export function createUrlInspectorPromptsByUrlHandler(
       const startDate = params.startDate || defaults.startDate;
       const endDate = params.endDate || defaults.endDate;
 
-      const fetchViaMysticat = () => (urlId
-        ? fetchUrlPromptsViaMysticat(client, ctx.log, {
-          siteId: params.siteId, urlId, startDate, endDate, model,
-        })
-        : fetchUrlPromptsByUrlViaMysticat(client, ctx.log, {
-          siteId: params.siteId, url, startDate, endDate, model,
-        }));
-
       // Falls back to the Mysticat branch (rather than propagating) if
       // eligibility resolution itself throws (e.g. Brand/Organization
       // data-access unavailable, or a DB read error).
@@ -846,18 +838,20 @@ export function createUrlInspectorPromptsByUrlHandler(
           });
           return cachedOk({ prompts });
         } catch (e) {
-          // Semrush unreachable/unauthorized/erroring for this eligible brand
-          // (e.g. an S2S caller with no IMS user token to forward — see
-          // resolveSemrushImsToken) — fall back to the DRS/mysticat RPC below
-          // instead of failing the request. Previously this masked every
-          // failure, including a legitimate 401, as a generic 500; falling
-          // back to real (DRS) data is strictly better than either.
+          // Semrush failed (e.g. an S2S caller has no IMS token to forward) — fall
+          // back to the DRS/mysticat RPC below instead of failing the request.
           const statusPart = e?.status ? ` [status=${e.status}]` : '';
           ctx.log.warn(`URL Inspector prompts-by-url Semrush error, falling back to DRS: ${e?.message || e}${statusPart}`);
         }
       }
 
-      const result = await fetchViaMysticat();
+      const result = urlId
+        ? await fetchUrlPromptsViaMysticat(client, ctx.log, {
+          siteId: params.siteId, urlId, startDate, endDate, model,
+        })
+        : await fetchUrlPromptsByUrlViaMysticat(client, ctx.log, {
+          siteId: params.siteId, url, startDate, endDate, model,
+        });
       if (result.error) {
         return result.error;
       }
