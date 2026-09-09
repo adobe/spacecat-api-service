@@ -17,6 +17,7 @@ import {
 import {
   accepted, badRequest, internalServerError, notFound, ok,
 } from '@adobe/spacecat-shared-http-utils';
+import { ValidatorRegistry } from '@adobe/spacecat-shared-tokowaka-client';
 
 // Dispatch type import-worker's HANDLERS map routes on -- always this constant, regardless of
 // which validator (`validationType`) the job actually runs. Kept as a plain string (not a shared
@@ -51,6 +52,8 @@ function OaeValidationController(ctx, log, env) {
     throw new Error('Environment object required');
   }
 
+  const validatorRegistry = new ValidatorRegistry(log);
+
   /**
    * Validates the request data for job creation.
    * @param {Object} data - The request data object
@@ -66,6 +69,9 @@ function OaeValidationController(ctx, log, env) {
     if (!hasText(data.type)) {
       throw new Error('Invalid request: type is required');
     }
+    if (!validatorRegistry.getSupportedTypes().includes(data.type)) {
+      throw new Error(`Invalid request: type must be one of ${validatorRegistry.getSupportedTypes().join(', ')}`);
+    }
     if (!isNonEmptyArray(data.suggestionIds)) {
       throw new Error('Invalid request: suggestionIds must be a non-empty array');
     }
@@ -75,6 +81,34 @@ function OaeValidationController(ctx, log, env) {
   }
 
   /**
+   * Validates a job request and dispatches it to spacecat-import-worker. Shared core used by
+   * both the HTTP handler below and in-process callers (e.g. the edge-deploy flow in
+   * suggestions.js) that want a job created without going through the HTTP layer.
+   * @param {Object} data - { siteId, type, suggestionIds }
+   * @returns {Promise<{jobId: string}>}
+   * @throws {Error} With an 'Invalid request: ...' message if data fails validation.
+   */
+  const createJob = async (data) => {
+    validateRequestData(data);
+
+    const { siteId, type, suggestionIds } = data;
+    const jobId = crypto.randomUUID();
+
+    const configuration = await dataAccess.Configuration.findLatest();
+    await sqs.sendMessage(configuration.getQueues().imports, {
+      type: OAE_VALIDATION_IMPORT_TYPE,
+      jobId,
+      siteId,
+      validationType: type,
+      suggestionIds,
+    });
+
+    log.info(`[oae-validation] queued job=${jobId} siteId=${siteId} type=${type} suggestions=${suggestionIds.length}`);
+
+    return { jobId };
+  };
+
+  /**
    * Creates a new OAE validation job and dispatches it to spacecat-import-worker.
    * @param {Object} context - The request context
    * @param {Object} context.data - { siteId, type, suggestionIds }
@@ -82,32 +116,17 @@ function OaeValidationController(ctx, log, env) {
    */
   const createValidationJob = async (context) => {
     const { data } = context;
+    let jobId;
     try {
-      validateRequestData(data);
+      ({ jobId } = await createJob(data));
     } catch (error) {
-      log.error(`Invalid request data: ${error.message}`);
-      return badRequest(error.message);
-    }
-
-    const { siteId, type, suggestionIds } = data;
-    const jobId = crypto.randomUUID();
-
-    try {
-      const configuration = await dataAccess.Configuration.findLatest();
-      await sqs.sendMessage(configuration.getQueues().imports, {
-        type: OAE_VALIDATION_IMPORT_TYPE,
-        jobId,
-        siteId,
-        validationType: type,
-        suggestionIds,
-      });
-    } catch (error) {
+      if (error.message.startsWith('Invalid request')) {
+        log.error(`Invalid request data: ${error.message}`);
+        return badRequest(error.message);
+      }
       log.error(`Failed to queue OAE validation job: ${error.message}`);
       return internalServerError(error.message);
     }
-
-    log.info(`[oae-validation] queued job=${jobId} siteId=${siteId} type=${type} suggestions=${suggestionIds.length}`);
-
     return accepted({ jobId });
   };
 
@@ -151,6 +170,7 @@ function OaeValidationController(ctx, log, env) {
   return {
     createValidationJob,
     getValidationJob,
+    createJob,
   };
 }
 

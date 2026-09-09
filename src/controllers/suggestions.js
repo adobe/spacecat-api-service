@@ -47,7 +47,7 @@ import {
   isAllowedSuggestionTransition,
 } from '@adobe/spacecat-shared-data-access';
 import TierClient from '@adobe/spacecat-shared-tier-client';
-import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
+import TokowakaClient, { ROUTING_VALIDATOR_TYPE } from '@adobe/spacecat-shared-tokowaka-client';
 import { SuggestionDto, SUGGESTION_VIEWS, SUGGESTION_SKIP_REASONS } from '../dto/suggestion.js';
 import { isValidLocale } from '../utils/validations.js';
 import { applyFieldProjection } from '../utils/field-projection.js';
@@ -80,9 +80,16 @@ import { getImsTokenFromPromiseToken } from '../support/edge-routing-auth.js';
 import { isImsGroupMember } from '../support/ims-group.js';
 import { postSlackMessage } from '../utils/slack/base.js';
 import { createAtomicStrategy, deleteAtomicStrategy } from '../support/atomic-strategy-helper.js';
+import OaeValidationController from './oae-validation.js';
 import { PLG_OPPORTUNITY_TYPES } from './plg/plg-onboarding/displacement.js';
 
 const VALIDATION_ERROR_NAME = 'ValidationError';
+
+// TODO: switch to GeoExperimentModel.METADATA_KEYS.OAE_VALIDATION_JOBS once the
+// spacecat-shared release containing that key is pulled in (@adobe/spacecat-shared-data-access
+// version bump) -- kept as a literal for now so this doesn't silently write to an `undefined`
+// metadata key against the currently-pinned dependency version.
+const OAE_VALIDATION_JOBS_METADATA_KEY = 'oaeValidationJobs';
 
 // Freemium (PLG / FREE_TRIAL) orgs cannot be assigned per-user product profiles,
 // so EDS auto-fix is gated behind membership of this IMS group instead. Members
@@ -2506,6 +2513,27 @@ function SuggestionsController(ctx, sqs, env) {
           metadataBase.urls = [
             ...new Set(validSuggestions.map((s) => s.getData()?.url).filter(Boolean)),
           ];
+        }
+
+        // Best-effort: queue a routing-validation job for the suggestions being deployed and
+        // record its jobId on the experiment so a future consumer can poll it. A failure here
+        // must not block the deploy itself -- validation is an auxiliary check, not a gate.
+        try {
+          const oaeValidationController = OaeValidationController(
+            { dataAccess, sqs },
+            context.log,
+            env,
+          );
+          const { jobId: oaeValidationJobId } = await oaeValidationController.createJob({
+            siteId,
+            type: ROUTING_VALIDATOR_TYPE,
+            suggestionIds: validSuggestionIds,
+          });
+          metadataBase[OAE_VALIDATION_JOBS_METADATA_KEY] = {
+            [ROUTING_VALIDATOR_TYPE]: oaeValidationJobId,
+          };
+        } catch (error) {
+          context.log.warn(`[edge-geo-exp] site: ${apexBaseUrl}, failed to queue OAE routing-validation job: ${error.message}`);
         }
 
         const experimentName = context.data?.name || getExperimentName(opportunity.getType());
