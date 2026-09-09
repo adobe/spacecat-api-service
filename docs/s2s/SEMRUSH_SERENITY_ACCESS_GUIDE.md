@@ -54,6 +54,8 @@ curl --request GET \
 
 Any of the 21 `brand-presence/*` routes can be called the same way once you have the session token — see the [Semrush Elements API reference](../elements/semrush-elements-api-reference.md) for the full route list and response shapes.
 
+**Note — `prompts-by-url` uses a different capability split.** Two additional routes also proxy to Semrush, but only conditionally (see the [S2S Elements Access](../elements/semrush-elements-api-reference.md#s2s-elements-access) section): `GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/prompts-by-url` still requires `brand:read`, but the `brands/all` variant (`GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/prompts-by-url`, org-wide/cross-brand data) accepts **either** `organization:read` or `brand:read`. If your consumer only holds `brand:read`, it can still call the `all` variant — no extra grant is needed.
+
 ---
 
 ## How authorization works

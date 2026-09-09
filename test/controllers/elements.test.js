@@ -264,6 +264,7 @@ describe('ElementsController', () => {
     const MockAccessControlUtil = {
       default: {
         fromContext: () => ({ hasAccess: accessControlHasAccessStub }),
+        isS2SConsumer: (ctx) => ctx?.attributes?.authInfo?.isS2SConsumer?.() ?? false,
       },
     };
 
@@ -608,6 +609,30 @@ describe('ElementsController', () => {
       expect(res.status).to.equal(403);
     });
 
+    it('maps a 401 ElementsTransportError to 502 (not 401) for an S2S consumer, logging the admin credential', async () => {
+      serviceStub.getUrlInspectorFilterDimensions
+        .rejects(new MockElementsTransportError(401, 'upstream auth failed'));
+      const ctx = fakeContext({ isS2SConsumer: true, authType: 'jwt', bearer: null });
+      const log = fakeLog();
+      const ctrl = ElementsController(ctx, log, ENV);
+      const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
+      expect(res.status).to.equal(502);
+      const body = await readBody(res);
+      expect(body.error).to.equal('elementsUpstreamError');
+      expect(log.error).to.have.been.calledWithMatch(/SEMRUSH_ADMIN_ELEMENT_API_KEY/);
+    });
+
+    it('maps a 403 ElementsTransportError to 502 (not 403) for an S2S consumer', async () => {
+      serviceStub.getUrlInspectorFilterDimensions
+        .rejects(new MockElementsTransportError(403, 'forbidden'));
+      const ctx = fakeContext({ isS2SConsumer: true, authType: 'jwt', bearer: null });
+      const log = fakeLog();
+      const ctrl = ElementsController(ctx, log, ENV);
+      const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
+      expect(res.status).to.equal(502);
+      expect(log.error).to.have.been.calledWithMatch(/SEMRUSH_ADMIN_ELEMENT_API_KEY/);
+    });
+
     it('maps other ElementsTransportError statuses to 502', async () => {
       serviceStub.getUrlInspectorFilterDimensions
         .rejects(new MockElementsTransportError(503, 'bad gateway'));
@@ -931,7 +956,9 @@ describe('ElementsController', () => {
 
     it('calls getPrompts with the brand SUB-workspace ID and parsed filters', async () => {
       const ctx = fakeContext({
-        url: promptsUrl('?model=perplexity&tag=type__branded,category__Brand&projectId=proj-a,proj-b'),
+        url: promptsUrl(`?model=perplexity&tag=type__branded,category__Brand&projectId=${PROJECT_ID_A},${PROJECT_ID_B}`),
+        withBrandSemrushProject: true,
+        brandSemrushProjects: brandSemrushProjectsFor([PROJECT_ID_A, PROJECT_ID_B]),
       });
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       await ctrl.listPrompts(ctx);
@@ -939,9 +966,29 @@ describe('ElementsController', () => {
         model: 'perplexity',
         platform: undefined,
         tags: ['type__branded', 'category__Brand'],
-        projectIds: ['proj-a', 'proj-b'],
+        projectIds: [PROJECT_ID_A, PROJECT_ID_B],
         enrichUserIntent: false,
       });
+    });
+
+    it('returns 403 when a caller-supplied projectId is not owned by this brand', async () => {
+      const ctx = fakeContext({
+        url: promptsUrl(`?projectId=${PROJECT_ID_A}`),
+        withBrandSemrushProject: true,
+        brandSemrushProjects: brandSemrushProjectsFor([PROJECT_ID_B]),
+      });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listPrompts(ctx);
+      expect(res.status).to.equal(403);
+      expect(serviceStub.getPrompts).to.not.have.been.called;
+    });
+
+    it('returns 400 when a projectId is not a valid UUID', async () => {
+      const ctx = fakeContext({ url: promptsUrl('?projectId=not-a-uuid') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listPrompts(ctx);
+      expect(res.status).to.equal(400);
+      expect(serviceStub.getPrompts).to.not.have.been.called;
     });
 
     it('uses the Elements-specific filter mode for repeated tagPath filters', async () => {
@@ -978,7 +1025,7 @@ describe('ElementsController', () => {
     });
 
     it('passes enrichUserIntent: true to getPrompts when ?userIntent=true', async () => {
-      const ctx = fakeContext({ url: promptsUrl('?projectId=proj-a&userIntent=true') });
+      const ctx = fakeContext({ url: promptsUrl('?userIntent=true') });
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       await ctrl.listPrompts(ctx);
       const [, params] = serviceStub.getPrompts.firstCall.args;
@@ -1004,11 +1051,15 @@ describe('ElementsController', () => {
     });
 
     it('accepts the project_id snake_case alias for projectId', async () => {
-      const ctx = fakeContext({ url: promptsUrl('?project_id=proj-x') });
+      const ctx = fakeContext({
+        url: promptsUrl(`?project_id=${PROJECT_ID_A}`),
+        withBrandSemrushProject: true,
+        brandSemrushProjects: brandSemrushProjectsFor([PROJECT_ID_A]),
+      });
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       await ctrl.listPrompts(ctx);
       const [, params] = serviceStub.getPrompts.firstCall.args;
-      expect(params.projectIds).to.deep.equal(['proj-x']);
+      expect(params.projectIds).to.deep.equal([PROJECT_ID_A]);
     });
 
     it('trims blank CSV entries', async () => {

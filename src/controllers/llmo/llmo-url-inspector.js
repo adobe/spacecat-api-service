@@ -31,6 +31,7 @@ import { createElementsTransport } from '../../support/elements/elements-transpo
 import { createElementsService } from '../../support/elements/elements-service.js';
 import { ALL_PLATFORMS } from '../../support/elements/constants.js';
 import { resolveSemrushImsToken } from '../../support/utils.js';
+import AccessControlUtil from '../../support/access-control-util.js';
 
 /**
  * URL Inspector handlers for org-based routes.
@@ -827,7 +828,7 @@ export function createUrlInspectorPromptsByUrlHandler(
           // forwarded IMS bearer token (see elements.js's ElementsController.buildService for
           // the same pattern) - resolveSemrushImsToken's default fallback would otherwise
           // reject the S2S JWT (authInfo.getType() === 'jwt', not 'ims').
-          const isS2SConsumer = ctx?.attributes?.authInfo?.isS2SConsumer?.() ?? false;
+          const isS2SConsumer = AccessControlUtil.isS2SConsumer(ctx);
           const imsToken = isS2SConsumer
             ? undefined
             : await resolveSemrushImsToken(ctx, ctx.log, 'url-inspector-prompts-by-url');

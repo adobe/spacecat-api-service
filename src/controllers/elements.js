@@ -135,6 +135,7 @@ function reqCtxOf(ctx) {
   return {
     spaceCatId: ctx?.params?.spaceCatId,
     brandId: ctx?.params?.brandId,
+    isS2SConsumer: AccessControlUtil.isS2SConsumer(ctx),
   };
 }
 
@@ -147,10 +148,22 @@ function mapError(e, log, reqCtx = {}) {
   if (e instanceof ElementsTransportError) {
     logUpstreamError(log, 'Elements upstream error', e, reqCtx);
     if (e.status === 401 || e.status === 403) {
-      return createResponse(
-        { error: errorTokenForStatus(e.status), message: 'Upstream authorization failed' },
-        e.status,
-      );
+      // An S2S caller presents no upstream credential of its own - the request is
+      // authenticated with the shared SEMRUSH_ADMIN_ELEMENT_API_KEY, so a 401/403 here
+      // means THAT credential was rotated, expired, or lost workspace access, not that
+      // the caller's own JWT/capability is bad. Mirroring 401/403 back would make a
+      // correctly-authorized consumer retry a doomed request and would surface a
+      // platform-wide credential outage as scattered per-tenant auth errors instead of
+      // one clear signal - mirrors buildS2SHeaders' missing-key case, which is
+      // deliberately 503 rather than 401 for the same reason.
+      if (reqCtx.isS2SConsumer) {
+        log.error(`Elements upstream rejected the SEMRUSH_ADMIN_ELEMENT_API_KEY credential (status=${e.status}) - check whether it was rotated, expired, or lost workspace access`);
+      } else {
+        return createResponse(
+          { error: errorTokenForStatus(e.status), message: 'Upstream authorization failed' },
+          e.status,
+        );
+      }
     }
     return createResponse({ error: 'elementsUpstreamError', message: 'Upstream request failed' }, 502);
   }
@@ -428,7 +441,7 @@ async function authorizeOrgAccess(ctx) {
   const log = ctx?.log;
   const requestId = ctx?.invocation?.id || 'unknown';
   const route = `${ctx?.pathInfo?.method || 'GET'} ${ctx?.pathInfo?.suffix || 'elements-route'}`;
-  const isS2SConsumer = ctx?.attributes?.authInfo?.isS2SConsumer?.() ?? false;
+  const isS2SConsumer = AccessControlUtil.isS2SConsumer(ctx);
 
   // Unchanged from the existing S2S auth flow: hasAccess() already handles admins
   // (hasAdminReadAccess()) and org membership via the JWT's own `tenants` claim - the SAME
@@ -650,7 +663,7 @@ export default function ElementsController(context, log, env) {
     // (SEMRUSH_ADMIN_ELEMENT_API_KEY), not a forwarded IMS bearer token, so skip
     // IMS token resolution entirely for them - requireImsBearer would otherwise
     // reject the S2S JWT (authInfo.getType() === 'jwt', not 'ims').
-    const isS2SConsumer = ctx?.attributes?.authInfo?.isS2SConsumer?.() ?? false;
+    const isS2SConsumer = AccessControlUtil.isS2SConsumer(ctx);
     const imsToken = isS2SConsumer ? undefined : await resolveElementsImsToken(ctx);
     return createElementsService(
       createElementsTransport({ env, imsToken, isS2SConsumer }),
@@ -862,7 +875,7 @@ export default function ElementsController(context, log, env) {
       // to all of its Semrush elements - see the S2S EXCEPTION note above). Short-circuit here
       // rather than falling through to resolveElementsImsToken/requireImsBearer, which would
       // reject the S2S JWT with a 401.
-      if (ctx?.attributes?.authInfo?.isS2SConsumer?.()) {
+      if (AccessControlUtil.isS2SConsumer(ctx)) {
         return ok({ hasAccess: true });
       }
       // Forward the caller's own IMS token (x-promise-token flow, falling back to Authorization) so
@@ -909,12 +922,26 @@ export default function ElementsController(context, log, env) {
         return auth.error;
       }
       const query = extractQuery(ctx);
+      // Any caller-supplied id must belong to this brand - otherwise it could scope the
+      // Prompts element to another brand's Semrush project (see listCitedDomains for the
+      // same guard). Reuses extractProjectIds (dedup, UUID validation, MAX_PROJECT_IDS cap)
+      // rather than a raw splitCsv, matching every other project-scoped handler.
+      const projectIds = extractProjectIds(query);
+      const { BrandSemrushProject } = ctx?.dataAccess ?? {};
+      const brandSemrushProjects = await fetchBrandSemrushProjects(
+        BrandSemrushProject,
+        [auth.brand],
+      );
+      const ownershipError = checkProjectIdsOwnership(projectIds, brandSemrushProjects);
+      if (ownershipError) {
+        return ownershipError;
+      }
       const service = await buildService(ctx);
       const result = await service.getPrompts(auth.workspaceId, {
         model: query.model,
         platform: query.platform,
         tags: splitCsv(query.tag),
-        projectIds: splitCsv(query.projectId || query.project_id),
+        projectIds,
         enrichUserIntent: parseUserIntent(query),
         ...tagFilterParams(query),
       });

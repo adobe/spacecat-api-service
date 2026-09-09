@@ -27,6 +27,11 @@ const ALL_CAP_CONSTANTS = Object.entries(Capabilities)
 
 const READ_ALL_CONSTANTS = ALL_CAP_CONSTANTS.filter((cap) => cap.endsWith(':readAll'));
 
+// A route may map to a single capability string or an array of acceptable capabilities
+// (the consumer needs at least one) - see s2sAuthWrapper's routeCapabilities contract.
+// Flatten here so the drift checks below treat both shapes uniformly.
+const FLATTENED_ROUTE_CAPS = Object.values(routeRequiredCapabilities).flat();
+
 /**
  * Drift assertions for the readAll capability surface.
  *
@@ -46,7 +51,7 @@ describe('capability-constants drift coverage', () => {
   });
 
   it('every readAll constant is used by at least one route in routeRequiredCapabilities', () => {
-    const usedCaps = new Set(Object.values(routeRequiredCapabilities));
+    const usedCaps = new Set(FLATTENED_ROUTE_CAPS);
     READ_ALL_CONSTANTS.forEach((cap) => {
       expect(usedCaps.has(cap)).to.equal(
         true,
@@ -56,7 +61,7 @@ describe('capability-constants drift coverage', () => {
   });
 
   it('every readAll capability used in routeRequiredCapabilities is exported as a constant', () => {
-    const routeReadAllCaps = Object.values(routeRequiredCapabilities)
+    const routeReadAllCaps = FLATTENED_ROUTE_CAPS
       .filter((cap) => cap.endsWith(':readAll'));
     routeReadAllCaps.forEach((cap) => {
       expect(READ_ALL_CONSTANTS).to.include(
@@ -69,7 +74,7 @@ describe('capability-constants drift coverage', () => {
   it('every exported CAP_ constant is used by at least one route in routeRequiredCapabilities', () => {
     // Generalizes the readAll coverage to all capability constants (e.g. configuration:read):
     // an exported constant that no route requires is dead and should be removed or wired up.
-    const usedCaps = new Set(Object.values(routeRequiredCapabilities));
+    const usedCaps = new Set(FLATTENED_ROUTE_CAPS);
     ALL_CAP_CONSTANTS.forEach((cap) => {
       expect(usedCaps.has(cap)).to.equal(
         true,

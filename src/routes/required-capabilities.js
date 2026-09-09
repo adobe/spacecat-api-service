@@ -414,9 +414,12 @@ const routeRequiredCapabilities = {
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/domain-urls': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/url-prompts': 'brand:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/url-prompts': 'brand:read',
-  // The 'all' variant returns org-wide (cross-brand) data, so it's gated on organization:read
-  // rather than brand:read, unlike its :brandId-scoped sibling below.
-  'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/prompts-by-url': 'organization:read',
+  // The 'all' variant returns org-wide (cross-brand) data, so organization:read alone is
+  // sufficient for it - but every other 'all' route in this brand-presence family (see
+  // above) still accepts brand:read, and capability matching is exact-string with no
+  // hierarchy (s2sAuthWrapper), so a consumer holding only brand:read must not silently
+  // lose access to this one route. Accept either, rather than tightening this route alone.
+  'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/prompts-by-url': ['organization:read', 'brand:read'],
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/prompts-by-url': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/filter-dimensions': 'brand:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/filter-dimensions': 'brand:read',
