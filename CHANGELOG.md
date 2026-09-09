@@ -1,3 +1,10 @@
+# [1.802.0](https://github.com/adobe/spacecat-api-service/compare/v1.801.0...v1.802.0) (2026-09-09)
+
+
+### Features
+
+* add metric param to Serenity sentiment-overview | LLMO-7457 ([#3251](https://github.com/adobe/spacecat-api-service/issues/3251)) ([372c6b7](https://github.com/adobe/spacecat-api-service/commit/372c6b7c59f5c37d11b7443659f49ca4fbd4baa3)), closes [Hi#level](https://github.com/Hi/issues/level)
+
 # [1.801.0](https://github.com/adobe/spacecat-api-service/compare/v1.800.2...v1.801.0) (2026-09-09)
 
 
