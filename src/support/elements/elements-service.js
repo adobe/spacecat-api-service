@@ -609,9 +609,13 @@ export function createElementsService(transport, log) {
      * filter built from the caller-supplied `projectId`/`projectIds`; absent → the brand's
      * whole sub-workspace.
      *
+     * Brand scoping is a `CBF_brand` filter on `params.brandName`. The sub-workspace alone
+     * does NOT scope to the brand — it also holds the brand's tracked competitors — so
+     * omitting the name blends them into the sentiment counts (LLMO-7456).
+     *
      * @param {string} workspaceId - Semrush workspace UUID.
      * @param {object} params - Query params (model/platform, startDate, endDate, category,
-     *   projectId, projectIds).
+     *   projectId, projectIds, brandName).
      * @returns {Promise<{ weeklyTrends: object[] }>} Legacy contract.
      */
     async getSentimentOverview(workspaceId, params) {

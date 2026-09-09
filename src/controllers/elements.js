@@ -1094,6 +1094,11 @@ export default function ElementsController(context, log, env) {
    * the Semrush Sentiment element, in the legacy `{ weeklyTrends: [...] }` contract so the
    * existing brand-presence sentiment chart consumes it drop-in. Single upstream call
    * (aggregate, no fan-out); projectId(s) → `CBF_project` filter.
+   *
+   * Brand-scoped by the brand's Semrush **sub-workspace** AND by a `CBF_brand` filter on
+   * the brand's display name: without the latter the element blends in every competitor
+   * tracked in the same sub-workspace, since that is also where Market Comparison's rivals
+   * live (LLMO-7456 — see sentiment-overview.js for the live A/B).
    */
   /* c8 ignore start -- LLMO-6300 POC endpoint; unit tests intentionally deferred */
   const listSentimentOverview = async (ctx) => {
@@ -1146,6 +1151,7 @@ export default function ElementsController(context, log, env) {
         startDate,
         endDate,
         category: query.categoryId || query.category,
+        brandName: resolveBrandFilterName(brand, log, 'listSentimentOverview'),
       };
 
       const result = await service.getSentimentOverview(workspaceId, params);
