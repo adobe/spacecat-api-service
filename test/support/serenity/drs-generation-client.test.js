@@ -22,6 +22,7 @@ import {
   toDrsRequestPayload,
   DrsGenerationTerminalError,
   DRS_GENERATION_TARGET_ENV,
+  DRS_MODEL_ENV,
 } from '../../../src/support/serenity/drs-generation-client.js';
 import { isRetryableJobError } from '../../../src/support/serenity/async-job-runner.js';
 
@@ -246,5 +247,48 @@ describe('drs-generation-client — canonical contract fixture (DRS #3194)', () 
     expect(result.shipSummary.verdict).to.equal('ship');
     expect(result.shipSummary.error_category).to.equal(null);
     expect(result.languageEvidence).to.have.length(CONTRACT.response.language_evidence.length);
+  });
+
+  it('omits the optional audience key when the caller has none', () => {
+    const semantic = { ...semanticFromFixture(CONTRACT.request), audience: undefined };
+    expect(toDrsRequestPayload(semantic)).to.not.have.property('audience');
+  });
+
+  it('includes audience only when present', () => {
+    const payload = toDrsRequestPayload({ ...semanticFromFixture(CONTRACT.request), audience: 'shoppers' });
+    expect(payload.audience).to.equal('shoppers');
+  });
+});
+
+describe('drs-generation-client — model allowlist guard (DRS priced set)', () => {
+  const base = { siteId: 's', brand: 'B', imsOrgId: 'o' };
+
+  it('passes through a priced model', () => {
+    expect(toDrsRequestPayload({ ...base, model: 'gpt-5.4' }).model).to.equal('gpt-5.4');
+    expect(toDrsRequestPayload({ ...base, model: 'gpt-5.4-mini' }).model).to.equal('gpt-5.4-mini');
+  });
+
+  it('falls back to gpt-5-nano for an unpriced request model', () => {
+    expect(toDrsRequestPayload({ ...base, model: 'evil-uncapped-model' }).model).to.equal('gpt-5-nano');
+  });
+
+  it('falls back to gpt-5-nano for an unpriced env model', () => {
+    expect(toDrsRequestPayload(base, { [DRS_MODEL_ENV]: 'not-priced' }).model).to.equal('gpt-5-nano');
+  });
+
+  it('uses a priced env model when the request omits one', () => {
+    expect(toDrsRequestPayload(base, { [DRS_MODEL_ENV]: 'gpt-5.4-nano' }).model).to.equal('gpt-5.4-nano');
+  });
+
+  it('warns when the configured model is clamped to the default', async () => {
+    const warn = sinon.stub();
+    const invoke = sinon.stub().resolves({ prompts: [{ prompt: 'p' }], ship_summary: { verdict: 'ship' } });
+    await invokeDrsGeneration(
+      { env: { [DRS_GENERATION_TARGET_ENV]: 'drs-fn', [DRS_MODEL_ENV]: 'bogus' }, log: { info: sinon.stub(), warn } },
+      { ...base, seeds: [], count: 1 },
+      { invoke },
+    );
+    expect(warn).to.have.been.calledWithMatch(/not in the DRS priced set/);
+    expect(invoke.firstCall.args[1].model).to.equal('gpt-5-nano');
   });
 });

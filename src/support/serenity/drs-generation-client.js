@@ -61,29 +61,54 @@ export const DRS_MODEL_ENV = 'DRS_PROMPT_GENERATION_MODEL';
 export const DEFAULT_DRS_MODEL = 'gpt-5-nano';
 
 /**
+ * The DRS-priced model allowlist. `model` is api-service-owned, and DRS returns a
+ * terminal `gate_error` (`invalid_model:<name>`) for anything outside this set, so
+ * we validate at the seam and fall back to the safe default rather than discovering
+ * a config typo as a terminal generation failure (DRS #3194 contract).
+ */
+export const DRS_PRICED_MODELS = Object.freeze([
+  'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.4-nano', 'gpt-5-nano',
+]);
+
+/**
+ * Resolves the generation model, guaranteed to be in {@link DRS_PRICED_MODELS}:
+ * an explicit request model, else the `DRS_PROMPT_GENERATION_MODEL` env, else the
+ * default — and any value outside the priced set falls back to {@link DEFAULT_DRS_MODEL}.
+ * @param {DrsGenerationRequest} request
+ * @param {Record<string, any>} [env]
+ * @returns {string} a priced model id.
+ */
+export function resolveDrsModel(request, env = {}) {
+  const requested = request.model ?? env?.[DRS_MODEL_ENV] ?? DEFAULT_DRS_MODEL;
+  return DRS_PRICED_MODELS.includes(requested) ? requested : DEFAULT_DRS_MODEL;
+}
+
+/**
  * Maps the semantic (camelCase) generation request the worker assembles onto the
  * EXACT snake_case wire payload the DRS Lambda consumes — the canonical contract
  * pinned in `test/fixtures/semrush_market_generation_contract.json` (DRS #3194).
  * Centralised here (not the handler) so the wire contract lives with the client
  * and the fixture test asserts against a single mapping.
  *
- * NOTE: `imsOrgId` deliberately stays camelCase INSIDE `metadata` (per the fixture).
+ * NOTES (per the fixture's contract-semantics): `imsOrgId` stays camelCase INSIDE
+ * `metadata`; `market_country` is the ISO 3166-1 alpha-2 CODE (DRS resolves the
+ * display name internally); `audience` is OPTIONAL and OMITTED when absent (DRS
+ * proceeds without audience guidance); `model` is validated against the priced set.
  *
  * @param {DrsGenerationRequest} request - the server-resolved semantic request.
  * @param {Record<string, any>} [env] - context env (for the model default).
  * @returns {object} the canonical wire payload.
  */
 export function toDrsRequestPayload(request, env = {}) {
-  return {
+  const payload = {
     site_id: request.siteId,
     brand: request.brand,
     brand_aliases: Array.isArray(request.aliases) ? request.aliases : [],
     base_url: request.baseUrl,
     market_country: request.market,
     language_code: request.languageCode,
-    audience: request.audience,
     num_prompts: request.count,
-    model: request.model ?? env?.[DRS_MODEL_ENV] ?? DEFAULT_DRS_MODEL,
+    model: resolveDrsModel(request, env),
     catalogue_seeds: (Array.isArray(request.seeds) ? request.seeds : []).map((s) => ({
       topic: s.topic,
       volume: s.volume,
@@ -92,6 +117,12 @@ export function toDrsRequestPayload(request, env = {}) {
     catalogue_status: request.catalogueStatus ?? 'populated',
     metadata: { imsOrgId: request.imsOrgId },
   };
+  // audience is optional — include it ONLY when the caller actually has one, so the
+  // wire payload matches the fixture (which omits the key at onboarding).
+  if (request.audience !== undefined && request.audience !== null) {
+    payload.audience = request.audience;
+  }
+  return payload;
 }
 
 /**
@@ -283,6 +314,13 @@ export async function invokeDrsGeneration(context, request, { invoke } = {}) {
       emitMetric({ name: 'DRSInvokeFailure', value: 1 }, metricsOpts);
     } catch { /* metrics are best-effort, never mask the real error */ }
   };
+
+  // Warn (once) if a configured model was out of the priced set and got clamped to
+  // the safe default — so a config typo is observable rather than silent.
+  const requestedModel = request.model ?? env?.[DRS_MODEL_ENV] ?? DEFAULT_DRS_MODEL;
+  if (!DRS_PRICED_MODELS.includes(requestedModel)) {
+    log?.warn?.(`[drs-generation] model '${requestedModel}' is not in the DRS priced set; falling back to ${DEFAULT_DRS_MODEL}`);
+  }
 
   const invoker = invoke ?? createLambdaInvoker(context);
   const wirePayload = toDrsRequestPayload(request, env);
