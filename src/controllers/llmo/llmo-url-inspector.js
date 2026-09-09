@@ -838,9 +838,10 @@ export function createUrlInspectorPromptsByUrlHandler(
           });
           return cachedOk({ prompts });
         } catch (e) {
+          // Semrush failed (e.g. an S2S caller has no IMS token to forward) — fall
+          // back to the DRS/mysticat RPC below instead of failing the request.
           const statusPart = e?.status ? ` [status=${e.status}]` : '';
-          ctx.log.error(`URL Inspector prompts-by-url Semrush error: ${e?.message || e}${statusPart}`);
-          return internalServerError('Internal error processing URL Inspector prompts');
+          ctx.log.warn(`URL Inspector prompts-by-url Semrush error, falling back to DRS: ${e?.message || e}${statusPart}`);
         }
       }
 
