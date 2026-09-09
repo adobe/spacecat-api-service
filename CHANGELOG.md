@@ -1,3 +1,17 @@
+# [1.800.0](https://github.com/adobe/spacecat-api-service/compare/v1.799.3...v1.800.0) (2026-09-09)
+
+
+### Bug Fixes
+
+* **audit-policy:** dedup exclusion globs against RPC-normalized values | SITES-51200 ([#3242](https://github.com/adobe/spacecat-api-service/issues/3242)) ([aa63527](https://github.com/adobe/spacecat-api-service/commit/aa63527e0b1776757597e236faaea80470c44fa0)), closes [#1036](https://github.com/adobe/spacecat-api-service/issues/1036) [Hi#level](https://github.com/Hi/issues/level) [#1036](https://github.com/adobe/spacecat-api-service/issues/1036)
+* **llmo:** fall back to DRS on any Semrush prompts-by-url failure ([#3244](https://github.com/adobe/spacecat-api-service/issues/3244)) ([bfa12e9](https://github.com/adobe/spacecat-api-service/commit/bfa12e96272660229cb7da1f1fecd66780d0f67c))
+
+
+### Features
+
+* LLMO-6836 introduce support for sermush serenity api access for S2S consumers ([#3217](https://github.com/adobe/spacecat-api-service/issues/3217)) ([2e2fe9e](https://github.com/adobe/spacecat-api-service/commit/2e2fe9e6de405346d978ababeb16f85d985892f4)), closes [#4](https://github.com/adobe/spacecat-api-service/issues/4)
+* **llmo:** brand-claims available-weeks endpoint + week fetch param ([#3231](https://github.com/adobe/spacecat-api-service/issues/3231)) ([5608885](https://github.com/adobe/spacecat-api-service/commit/560888547fdcfadd395a7ae030b000700511ddb6))
+
 ## [1.799.3](https://github.com/adobe/spacecat-api-service/compare/v1.799.2...v1.799.3) (2026-09-09)
 
 
