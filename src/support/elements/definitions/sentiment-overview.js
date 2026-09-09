@@ -167,6 +167,22 @@ function parseIsoWeekParts(weekStr) {
 
 const SENTIMENT_BUCKETS = ['positive', 'neutral', 'negative'];
 
+/**
+ * Which per-legend count drives the sentiment percentages (LLMO-7457).
+ *
+ * `PROMPTS` is the default and preserves this endpoint's original behaviour.
+ * `MENTIONS` matches the Semrush Brand Presence MFE — see the verification note on
+ * {@link transformSentimentOverviewResponse}.
+ *
+ * Temporary: this exists so both definitions can be compared in production (no dev org is
+ * correctly wired to Semrush). Once the UI has moved to `mentions`, the default flips and
+ * the `prompts` branch is removed along with this map.
+ */
+export const SENTIMENT_METRICS = Object.freeze({
+  PROMPTS: 'prompts',
+  MENTIONS: 'mentions',
+});
+
 // Guard against a non-date `bar` value (e.g. a metadata / "N/A" row from the upstream
 // element): an invalid day slices to junk that dateToIsoWeek turns into a "NaN-WNaN"
 // key, which would surface as a phantom weeklyTrends entry (weekNumber/year 0). Only a
@@ -180,8 +196,9 @@ function isoDayOf(bar) {
 /**
  * Transforms the raw Sentiment element response into the legacy Brand Presence
  * `sentiment-overview` contract so the sentiment chart is drop-in compatible:
- *   { weeklyTrends: [{ week, weekNumber, year,
+ *   { metric, weeklyTrends: [{ week, weekNumber, year,
  *       sentiment: [{ name, value, color } x Positive/Neutral/Negative],
+ *       mentionCounts, promptCounts, sentimentTotal,
  *       totalPrompts, promptsWithSentiment, mentions, citations,
  *       visibilityScore, competitors }] }
  * ordered oldest-first (matches the legacy aggregateSentimentByWeek sort).
@@ -198,9 +215,24 @@ function isoDayOf(bar) {
  * below is granularity-agnostic: one row per week means the per-week sums are identities, and
  * it would still correctly roll up were the element ever queried at daily granularity.)
  * Field mapping:
- *   positive/neutral/negative prompt counts ← `value__prompts` per legend for the week
- *   totalPrompts                            ← `blocks.line[].value` for the week
+ *   mentionCounts (positive/neutral/negative) ← `value` per legend for the week
+ *   promptCounts  (positive/neutral/negative) ← `value__prompts` per legend for the week
+ *   totalPrompts                              ← `blocks.line[].value` for the week
  *   mentions/citations/visibilityScore/competitors — stubbed 0/[] (as in the legacy handler)
+ *
+ * WHICH COUNT DRIVES THE PERCENTAGES — the `metric` param (LLMO-7457):
+ *   - `'prompts'`  (DEFAULT) → `value__prompts`. The behaviour this endpoint has always had.
+ *   - `'mentions'`           → `value`. What the Semrush Brand Presence MFE plots.
+ * VERIFIED against a live MFE tooltip (brand "au", bucket 2026-08-21): it showed
+ * Negative 1% / 7, Neutral 56% / 571, Positive 43% / 443. The raw row's `value` is
+ * 7/571/443 (exact match) while `value__prompts` is 7/208/165 (no match) — so the MFE
+ * plots `value`. Its percentages are each value over the SUM OF THE THREE (1021 → 1/56/43,
+ * an exact match); the `blocks.line` distinct total (275) yields 3/208/161 and is therefore
+ * definitively NOT the MFE's denominator. Our long-standing rounding rule below, applied to
+ * mentions, reproduces the MFE output exactly.
+ * BOTH count sets are returned on every response regardless of `metric`, so a caller can
+ * render true counts alongside the percentages (as the MFE does) and compare the two
+ * definitions from a single call.
  *
  * SEMANTIC NOTE: the three legends are OVERLAPPING sets, not a partition — a prompt with
  * mixed-sentiment mentions is counted in every legend it appears in. So Σ(value__prompts
@@ -210,24 +242,35 @@ function isoDayOf(bar) {
  *     invariant in aggregateSentimentByWeek where the three counts sum to it), so it
  *     can exceed `totalPrompts`. Do NOT compute promptsWithSentiment/totalPrompts as a
  *     coverage ratio in the UI — it can exceed 100%. (Flag for the UI-wiring follow-up.)
+ *   - This overlap is NOT a defect to correct: the MFE normalises over the same
+ *     sum-of-three (see the verification above). Do not "fix" it to the distinct total.
  *   - The sentiment PERCENTAGES are internal ratios of the three legend counts and are
  *     unaffected by this overlap; they are the chart's load-bearing content.
  * Percentages are computed exactly as the legacy handler: round positive & negative,
  * neutral = 100 − positive − negative (so the three always sum to 100).
  *
  * @param {object} raw - Raw response from the Sentiment element.
- * @returns {{ weeklyTrends: Array<object> }}
+ * @param {object} [options]
+ * @param {'prompts'|'mentions'} [options.metric] - Which count drives the percentages.
+ *   Anything other than `'mentions'` (including absent) means `'prompts'`; the controller
+ *   normalises the query value via {@link parseSentimentMetric} before this is reached.
+ * @returns {{ metric: string, weeklyTrends: Array<object> }}
  */
-export function transformSentimentOverviewResponse(raw) {
+export function transformSentimentOverviewResponse(raw, { metric } = {}) {
+  // Only the explicit 'mentions' opt-in switches the source field; every other value
+  // (absent, blank, unrecognised) keeps today's prompt-based behaviour.
+  const useMentions = metric === SENTIMENT_METRICS.MENTIONS;
   const rows = Array.isArray(raw?.blocks?.data) ? raw.blocks.data : [];
   const lineRows = Array.isArray(raw?.blocks?.line) ? raw.blocks.line : [];
 
-  // week -> { positive, neutral, negative, totalPrompts }
+  // week -> per-legend mention + prompt counts, plus the distinct-response line total.
   const weekMap = new Map();
   const ensureWeek = (week) => {
     if (!weekMap.has(week)) {
       weekMap.set(week, {
-        positive: 0, neutral: 0, negative: 0, totalPrompts: 0,
+        mentions: { positive: 0, neutral: 0, negative: 0 },
+        prompts: { positive: 0, neutral: 0, negative: 0 },
+        totalPrompts: 0,
       });
     }
     return weekMap.get(week);
@@ -239,9 +282,12 @@ export function transformSentimentOverviewResponse(raw) {
     if (!day || !SENTIMENT_BUCKETS.includes(bucket)) {
       return;
     }
-    const week = dateToIsoWeek(day);
+    const entry = ensureWeek(dateToIsoWeek(day));
     // `Number(x) || 0` (not `?? 0`) so a non-numeric value coerces to 0, not NaN.
-    ensureWeek(week)[bucket] += Number(row.value__prompts) || 0;
+    // Both counts are accumulated on every row so the response can carry both sets
+    // regardless of which one `metric` selects for the percentages.
+    entry.mentions[bucket] += Number(row.value) || 0;
+    entry.prompts[bucket] += Number(row.value__prompts) || 0;
   });
 
   // The total-prompts line is a separate per-day series; fold it into the same weeks.
@@ -257,13 +303,20 @@ export function transformSentimentOverviewResponse(raw) {
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([week, entry]) => {
       const { weekNumber, year } = parseIsoWeekParts(week);
-      const promptsWithSentiment = entry.positive + entry.neutral + entry.negative;
+      const { mentions: mentionCounts, prompts: promptCounts } = entry;
+      // The selected metric drives the percentages; the other set still ships.
+      const basis = useMentions ? mentionCounts : promptCounts;
+      const basisTotal = basis.positive + basis.neutral + basis.negative;
+      // Unchanged meaning: always the sum of the three PROMPT counts, whatever `metric` is,
+      // so this field does not silently change definition for existing consumers.
+      const promptsWithSentiment = promptCounts.positive
+        + promptCounts.neutral + promptCounts.negative;
       let positivePct = 0;
       let negativePct = 0;
       let neutralPct = 0;
-      if (promptsWithSentiment > 0) {
-        positivePct = Math.round((entry.positive / promptsWithSentiment) * 100);
-        negativePct = Math.round((entry.negative / promptsWithSentiment) * 100);
+      if (basisTotal > 0) {
+        positivePct = Math.round((basis.positive / basisTotal) * 100);
+        negativePct = Math.round((basis.negative / basisTotal) * 100);
         neutralPct = 100 - positivePct - negativePct;
         // Independent rounding of positive & negative can push their sum to 101
         // (e.g. 50.5→51 and 49.5→50), making the neutral remainder negative. Absorb
@@ -288,6 +341,11 @@ export function transformSentimentOverviewResponse(raw) {
           { name: 'Neutral', value: neutralPct, color: SENTIMENT_COLORS.neutral },
           { name: 'Negative', value: negativePct, color: SENTIMENT_COLORS.negative },
         ],
+        // Raw counts for both definitions — additive, so existing consumers are unaffected.
+        mentionCounts,
+        promptCounts,
+        // The denominator the percentages above were computed over.
+        sentimentTotal: basisTotal,
         totalPrompts: entry.totalPrompts,
         promptsWithSentiment,
         mentions: 0,
@@ -297,7 +355,10 @@ export function transformSentimentOverviewResponse(raw) {
       };
     });
 
-  return { weeklyTrends };
+  return {
+    metric: useMentions ? SENTIMENT_METRICS.MENTIONS : SENTIMENT_METRICS.PROMPTS,
+    weeklyTrends,
+  };
 }
 
 export { SENTIMENT_COLORS };

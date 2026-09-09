@@ -1716,6 +1716,30 @@ v2-serenity-brand-presence-sentiment-overview:
           and the bare `category` slug are recognized for the tag prefix
           itself (tag-display-names.md §1 item 6).
         schema: { type: string }
+      - name: metric
+        in: query
+        required: false
+        description: |
+          Which per-legend count drives the `sentiment[]` percentages.
+          `prompts` (default) uses the element's per-prompt counts — this
+          endpoint's original behaviour. `mentions` uses the per-mention counts,
+          which is what the Semrush Brand Presence MFE plots, and reproduces its
+          percentages exactly.
+
+          Unrecognised, blank and absent values all resolve to `prompts` rather
+          than returning 400, so an unknown value degrades to today's numbers
+          instead of failing the chart request. Aliases: `sentimentMetric`,
+          `sentiment_metric`.
+
+          `mentionCounts` and `promptCounts` are returned regardless of this
+          value, so both definitions can be compared from a single call.
+
+          Temporary (LLMO-7457): the default flips to `mentions` and this
+          parameter is removed once the UI has migrated.
+        schema:
+          type: string
+          enum: [prompts, mentions]
+          default: prompts
     responses:
       '200':
         description: Weekly sentiment retrieved.

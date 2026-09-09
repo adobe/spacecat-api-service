@@ -12933,6 +12933,12 @@ SerenityBrandPresenceSentimentOverview:
     shape, `sentiment[]` ordering, and colors are identical.
   required: [weeklyTrends]
   properties:
+    metric:
+      type: string
+      enum: [prompts, mentions]
+      description: |
+        The resolved `metric` the `sentiment[]` percentages were computed over —
+        echoed back so a caller can confirm which definition it received.
     weeklyTrends:
       type: array
       description: One entry per ISO week in the requested range, ordered oldest-first.
@@ -12966,10 +12972,38 @@ SerenityBrandPresenceSentimentOverview:
                   enum: [Positive, Neutral, Negative]
                 value:
                   type: integer
-                  description: Percentage of prompts-with-sentiment in this bucket (0-100).
+                  description: |
+                    Percentage of the selected `metric`'s total in this bucket
+                    (0-100). The denominator is the sum of the three buckets
+                    (`sentimentTotal`), matching how the Semrush MFE normalises.
                 color:
                   type: string
                   description: Legacy sentiment swatch hex.
+          mentionCounts:
+            type: object
+            description: |
+              Raw per-sentiment MENTION counts for the week (the element's
+              `value`). Returned regardless of `metric`, so a caller can render
+              true counts alongside the percentages as the Semrush MFE does.
+            properties:
+              positive: { type: integer, example: 443 }
+              neutral: { type: integer, example: 571 }
+              negative: { type: integer, example: 7 }
+          promptCounts:
+            type: object
+            description: |
+              Raw per-sentiment PROMPT counts for the week (the element's
+              `value__prompts`). Returned regardless of `metric`.
+            properties:
+              positive: { type: integer, example: 165 }
+              neutral: { type: integer, example: 208 }
+              negative: { type: integer, example: 7 }
+          sentimentTotal:
+            type: integer
+            description: |
+              The denominator used for `sentiment[]` — the sum of the three
+              buckets of whichever count set `metric` selected.
+            example: 1021
           totalPrompts:
             type: integer
             description: |
@@ -12977,10 +13011,13 @@ SerenityBrandPresenceSentimentOverview:
           promptsWithSentiment:
             type: integer
             description: |
-              Positive + Neutral + Negative prompt counts. NOTE: the three
-              sentiment buckets are overlapping sets (a prompt with mixed-sentiment
-              mentions counts in each), so this can exceed `totalPrompts`; do not
-              derive a coverage ratio from the two.
+              Positive + Neutral + Negative PROMPT counts. Always prompt-based,
+              whatever `metric` is set to, so this field never changes meaning.
+              NOTE: the three sentiment buckets are overlapping sets (a prompt
+              with mixed-sentiment mentions counts in each), so this can exceed
+              `totalPrompts`; do not derive a coverage ratio from the two. This
+              overlap is not a defect — the Semrush MFE normalises over the same
+              sum-of-three.
           mentions:
             type: integer
             description: Stubbed 0 (parity with the legacy contract).

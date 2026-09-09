@@ -23,6 +23,7 @@ import { createElementsService } from '../support/elements/elements-service.js';
 import { fetchOwnedUrlsTraffic, mergeOwnedUrlsTraffic } from '../support/elements/owned-urls-traffic.js';
 import { mapWithConcurrency } from '../support/elements/concurrency.js';
 import { addDaysToDate } from '../support/elements/week-utils.js';
+import { SENTIMENT_METRICS } from '../support/elements/definitions/sentiment-overview.js';
 import { resolveBrandWorkspace } from '../support/serenity/workspace-resolver.js';
 import { isSerenityActiveForBrand } from '../support/serenity/serenity-active.js';
 import { createSerenityTransport } from '../support/serenity/rest-transport.js';
@@ -343,6 +344,28 @@ function extractProjectIds(query) {
     );
   }
   return ids;
+}
+
+/**
+ * Normalises the `metric`/`sentiment_metric` query param for the sentiment-overview
+ * endpoint (LLMO-7457), mirroring the shape of {@link parseShowTrends}.
+ *
+ * Only the exact opt-in `'mentions'` (case-insensitive, trimmed) selects mention counts.
+ * Anything else — absent, blank, or unrecognised — resolves to `'prompts'`, this
+ * endpoint's original behaviour. Deliberately permissive rather than a 400: an
+ * unrecognised value degrades to today's numbers instead of failing a chart request.
+ *
+ * Exported for direct unit testing, for the same reason as {@link parseShowTrends}.
+ *
+ * @param {object} q - Query object from `extractQuery`.
+ * @returns {'prompts'|'mentions'}
+ */
+export function parseSentimentMetric(q) {
+  const v = q?.metric ?? q?.sentimentMetric ?? q?.sentiment_metric;
+  if (typeof v === 'string' && v.trim().toLowerCase() === SENTIMENT_METRICS.MENTIONS) {
+    return SENTIMENT_METRICS.MENTIONS;
+  }
+  return SENTIMENT_METRICS.PROMPTS;
 }
 
 /**
@@ -1235,6 +1258,13 @@ export default function ElementsController(context, log, env) {
    * the brand's display name: without the latter the element blends in every competitor
    * tracked in the same sub-workspace, since that is also where Market Comparison's rivals
    * live (LLMO-7456 — see sentiment-overview.js for the live A/B).
+   *
+   * `metric` (optional, `prompts` | `mentions`) selects which per-legend count drives the
+   * percentages. Defaults to `prompts`, this endpoint's original behaviour; `mentions`
+   * matches what the Semrush Brand Presence MFE plots (LLMO-7457). Both count sets are
+   * returned regardless, as `mentionCounts` / `promptCounts`, so a caller can render true
+   * counts alongside the percentages and compare both definitions from one call.
+   * Temporary: the default flips to `mentions` and this param is removed once the UI moves.
    */
   /* c8 ignore start -- LLMO-6300 POC endpoint; unit tests intentionally deferred */
   const listSentimentOverview = async (ctx) => {
@@ -1288,6 +1318,7 @@ export default function ElementsController(context, log, env) {
         endDate,
         category: query.categoryId || query.category,
         brandName: resolveBrandFilterName(brand, log, 'listSentimentOverview'),
+        metric: parseSentimentMetric(query),
         ...tagFilterParams(query),
       };
 
