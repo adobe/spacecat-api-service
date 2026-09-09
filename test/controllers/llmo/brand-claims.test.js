@@ -154,6 +154,46 @@ describe('handleBrandClaims', () => {
     expect(signedKey()).to.equal(`brand_claims/llmo/${TEST_SITE_ID}/2026-W17/data.json.gz`);
   });
 
+  it('serves an explicit week without listing', async () => {
+    const context = { ...baseContext, data: { week: '2026-W17' } };
+
+    const result = await handleBrandClaims(context);
+
+    expect(result.status).to.equal(200);
+    // No list call — the week keys its folder directly.
+    expect(mockS3Send.getCall(0).args[0]).to.be.instanceOf(HeadObjectCommand);
+    expect(signedKey()).to.equal(`brand_claims/llmo/${TEST_SITE_ID}/2026-W17/data.json.gz`);
+  });
+
+  it('prefers week over date when both are supplied', async () => {
+    const context = { ...baseContext, data: { week: '2026-W17', date: '2026-01-05' } };
+
+    const result = await handleBrandClaims(context);
+
+    expect(result.status).to.equal(200);
+    expect(signedKey()).to.equal(`brand_claims/llmo/${TEST_SITE_ID}/2026-W17/data.json.gz`);
+  });
+
+  it('returns 400 for a malformed week', async () => {
+    const context = { ...baseContext, data: { week: '2026-17' } };
+
+    const result = await handleBrandClaims(context);
+
+    expect(result.status).to.equal(400);
+    expect((await result.json()).message).to.equal('Invalid week parameter: expected YYYY-Www format');
+    expect(mockS3Send).not.to.have.been.called;
+  });
+
+  it('returns 400 for a week with a path separator (no key probing)', async () => {
+    const context = { ...baseContext, data: { week: '../secrets' } };
+
+    const result = await handleBrandClaims(context);
+
+    expect(result.status).to.equal(400);
+    expect((await result.json()).message).to.equal('Invalid week parameter: expected YYYY-Www format');
+    expect(mockS3Send).not.to.have.been.called;
+  });
+
   it('returns 400 for an invalid date', async () => {
     const context = { ...baseContext, data: { date: 'not-a-date' } };
 
@@ -340,6 +380,171 @@ describe('handleBrandClaims', () => {
     const oneHourMs = 60 * 60 * 1000;
     expect(expiresAt).to.be.at.least(before + oneHourMs);
     expect(expiresAt).to.be.at.most(after + oneHourMs);
+  });
+});
+
+describe('handleBrandClaimsWeeks', () => {
+  let handleBrandClaimsWeeks;
+  let mockLog;
+  let mockS3Send;
+  let baseContext;
+  let listBehavior; // () => Promise, controls the ListObjectsV2 call
+
+  const mockHttpUtils = {
+    ok: (data) => ({ status: 200, json: async () => data }),
+    badRequest: (message) => ({ status: 400, json: async () => ({ message }) }),
+    notFound: (message) => ({ status: 404, json: async () => ({ message }) }),
+    internalServerError: (message) => ({ status: 500, json: async () => ({ message }) }),
+  };
+
+  before(async () => {
+    const mod = await esmock('../../../src/controllers/llmo/brand-claims.js', {
+      '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+    });
+    handleBrandClaimsWeeks = mod.handleBrandClaimsWeeks;
+  });
+
+  beforeEach(() => {
+    mockLog = { info: sinon.stub(), error: sinon.stub(), warn: sinon.stub() };
+    listBehavior = () => Promise.resolve({ CommonPrefixes: [] });
+
+    mockS3Send = sinon.stub().callsFake((command) => {
+      if (command instanceof ListObjectsV2Command) {
+        return listBehavior();
+      }
+      return Promise.resolve({});
+    });
+
+    baseContext = {
+      log: mockLog,
+      params: { siteId: TEST_SITE_ID },
+      data: {},
+      env: { ENV: 'dev' },
+      s3: { s3Client: { send: mockS3Send }, s3Bucket: 'test-bucket' },
+    };
+  });
+
+  it('lists available weeks newest first', async () => {
+    listBehavior = () => Promise.resolve({
+      CommonPrefixes: [weekPrefix('2026-W15'), weekPrefix('2026-W17'), weekPrefix('2026-W16')],
+    });
+
+    const result = await handleBrandClaimsWeeks(baseContext);
+
+    expect(result.status).to.equal(200);
+    const body = await result.json();
+    expect(body.siteId).to.equal(TEST_SITE_ID);
+    expect(body.weeks).to.deep.equal(['2026-W17', '2026-W16', '2026-W15']);
+    expect(body.count).to.equal(3);
+
+    const listCmd = mockS3Send.getCall(0).args[0];
+    expect(listCmd).to.be.instanceOf(ListObjectsV2Command);
+    expect(listCmd.input.Prefix).to.equal(`brand_claims/llmo/${TEST_SITE_ID}/`);
+    expect(listCmd.input.Delimiter).to.equal('/');
+  });
+
+  it('ignores non-week folders', async () => {
+    listBehavior = () => Promise.resolve({
+      CommonPrefixes: [weekPrefix('archive'), weekPrefix('2026-W09'), weekPrefix('latest')],
+    });
+
+    const body = await (await handleBrandClaimsWeeks(baseContext)).json();
+    expect(body.weeks).to.deep.equal(['2026-W09']);
+    expect(body.count).to.equal(1);
+  });
+
+  it('returns an empty list (200) when no week folders exist', async () => {
+    const result = await handleBrandClaimsWeeks(baseContext);
+    expect(result.status).to.equal(200);
+    const body = await result.json();
+    expect(body.weeks).to.deep.equal([]);
+    expect(body.count).to.equal(0);
+  });
+
+  it('defaults to 15 weeks when no limit is supplied', async () => {
+    listBehavior = () => Promise.resolve({
+      CommonPrefixes: Array.from({ length: 30 }, (_, i) => weekPrefix(`2026-W${String(i + 1).padStart(2, '0')}`)),
+    });
+
+    const body = await (await handleBrandClaimsWeeks(baseContext)).json();
+    expect(body.weeks).to.have.length(15);
+    expect(body.weeks[0]).to.equal('2026-W30'); // newest
+    expect(body.count).to.equal(15);
+  });
+
+  it('honors an explicit limit, clamped to the [1, 52] range', async () => {
+    listBehavior = () => Promise.resolve({
+      CommonPrefixes: Array.from({ length: 10 }, (_, i) => weekPrefix(`2026-W${String(i + 1).padStart(2, '0')}`)),
+    });
+
+    const body = await (await handleBrandClaimsWeeks({ ...baseContext, data: { limit: '3' } })).json();
+    expect(body.weeks).to.deep.equal(['2026-W10', '2026-W09', '2026-W08']);
+    expect(body.count).to.equal(3);
+  });
+
+  it('clamps a limit above the max to 52', async () => {
+    listBehavior = () => Promise.resolve({
+      CommonPrefixes: Array.from({ length: 60 }, (_, i) => weekPrefix(`2026-W${String(i + 1).padStart(2, '0')}`)),
+    });
+
+    const body = await (await handleBrandClaimsWeeks({ ...baseContext, data: { limit: '999' } })).json();
+    expect(body.weeks).to.have.length(52);
+  });
+
+  it('falls back to the default limit for a non-numeric limit', async () => {
+    listBehavior = () => Promise.resolve({
+      CommonPrefixes: Array.from({ length: 20 }, (_, i) => weekPrefix(`2026-W${String(i + 1).padStart(2, '0')}`)),
+    });
+
+    const body = await (await handleBrandClaimsWeeks({ ...baseContext, data: { limit: 'abc' } })).json();
+    expect(body.weeks).to.have.length(15);
+  });
+
+  it('warns when the listing is truncated', async () => {
+    listBehavior = () => Promise.resolve({ IsTruncated: true, CommonPrefixes: [weekPrefix('2026-W17')] });
+
+    const result = await handleBrandClaimsWeeks(baseContext);
+    expect(result.status).to.equal(200);
+    expect(mockLog.warn).to.have.been.calledWithMatch(/listing truncated/);
+  });
+
+  it('returns 400 when S3 is not configured', async () => {
+    const result = await handleBrandClaimsWeeks({ ...baseContext, s3: null });
+    expect(result.status).to.equal(400);
+    expect((await result.json()).message).to.equal('S3 storage is not configured for this environment');
+  });
+
+  it('returns 400 when S3 bucket is not configured', async () => {
+    const ctx = { ...baseContext, s3: { ...baseContext.s3, s3Bucket: null } };
+    const result = await handleBrandClaimsWeeks(ctx);
+    expect(result.status).to.equal(400);
+    expect((await result.json()).message).to.equal('S3 bucket is not configured for this environment');
+  });
+
+  it('returns 400 without leaking the bucket name when the bucket is missing', async () => {
+    const err = new Error('The specified bucket does not exist');
+    err.name = 'NoSuchBucket';
+    listBehavior = () => Promise.reject(err);
+
+    const result = await handleBrandClaimsWeeks(baseContext);
+    expect(result.status).to.equal(400);
+    const { message } = await result.json();
+    expect(message).to.equal('S3 storage is not properly configured for this environment');
+    expect(message).to.not.contain('test-bucket');
+  });
+
+  it('returns 500 (not 400) without leaking details for a server-side S3 error', async () => {
+    const err = new Error('Access denied for arn:aws:iam::123:role/secret');
+    err.name = 'AccessDenied';
+    listBehavior = () => Promise.reject(err);
+
+    const result = await handleBrandClaimsWeeks(baseContext);
+    expect(result.status).to.equal(500);
+    const { message } = await result.json();
+    expect(message).to.equal('Unable to list brand claims weeks');
+    expect(message).to.not.contain('Access denied');
+    // The real error is still logged for operators.
+    expect(mockLog.error).to.have.been.calledWithMatch(/S3 error listing brand claims weeks/);
   });
 });
 
