@@ -7920,6 +7920,27 @@ V2Brand:
       description: >-
         Read-only deferred Semrush provisioning data for a pending (draft)
         brand. Null for a non-pending brand. See V2PendingSemrushProvisioning.
+    semrushProvisioningStatus:
+      type:
+        - string
+        - 'null'
+      enum: [pending, ready, failed, null]
+      readOnly: true
+      description: >-
+        Read-only (LLMO-7352/LLMO-7418): the brand's async Semrush
+        provisioning state, so the caller can show a persistent Setting-up/
+        Ready/Setup-failed indicator without relying on an `async: true`
+        create/activate response's one-shot `jobId`. Null for a brand that
+        has never gone through an async provisioning attempt.
+    semrushProvisioningError:
+      type:
+        - string
+        - 'null'
+      readOnly: true
+      description: >-
+        Read-only (LLMO-7352/LLMO-7418): the failure detail recorded on the
+        last failed provisioning attempt. Null unless
+        `semrushProvisioningStatus` is `failed`.
     updatedAt:
       $ref: '#/DateTime'
     updatedBy:
