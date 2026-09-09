@@ -1,3 +1,18 @@
+## [1.799.1](https://github.com/adobe/spacecat-api-service/compare/v1.799.0...v1.799.1) (2026-09-09)
+
+
+### Bug Fixes
+
+* **serenity:** enforce the main-brand benchmark as a blocking provisioning invariant (LLMO-7421) ([#3220](https://github.com/adobe/spacecat-api-service/issues/3220)) ([34a1b4c](https://github.com/adobe/spacecat-api-service/commit/34a1b4c08269443649b25fa1b619515524870907)), closes [Hi#level](https://github.com/Hi/issues/level) [spacecat-shared#1918](https://github.com/spacecat-shared/issues/1918)
+* **slack:** keep help reply within Slack's 50-block limit ([#3239](https://github.com/adobe/spacecat-api-service/issues/3239)) ([49d6e63](https://github.com/adobe/spacecat-api-service/commit/49d6e63c706745eab7e2928d480971010858761f)), closes [Hi#level](https://github.com/Hi/issues/level)
+
+# [1.799.0](https://github.com/adobe/spacecat-api-service/compare/v1.798.1...v1.799.0) (2026-09-09)
+
+
+### Features
+
+* **serenity:** add native nested custom tags ([#3218](https://github.com/adobe/spacecat-api-service/issues/3218)) ([e937178](https://github.com/adobe/spacecat-api-service/commit/e93717802f2d45356bba039c5213cc1bbedd9094)), closes [adobe/serenity-docs#26](https://github.com/adobe/serenity-docs/issues/26) [adobe/spacecat-shared#1916](https://github.com/adobe/spacecat-shared/issues/1916)
+
 ## [1.798.1](https://github.com/adobe/spacecat-api-service/compare/v1.798.0...v1.798.1) (2026-09-08)
 
 

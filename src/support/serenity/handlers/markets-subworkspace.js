@@ -48,6 +48,7 @@ import {
   collectBrandUrlEntries,
   attachBrandUrlsToProject,
   ensureOwnBrandBenchmark,
+  assertMainBrandBenchmark,
   primaryDomainSet,
   primaryIdentitySet,
 } from '../brand-urls.js';
@@ -535,7 +536,14 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
  *   `require` throws on failure (the default markets endpoint, and — since
  *   SITES-49206 — every create, including an empty-units project: Semrush no
  *   longer enforces AI limits, so there is no quota 405 left to tolerate);
- *   `skip` does not publish at all (LLMO-5492 defer-publish).
+ *   `skip` does not publish at all (LLMO-5492 defer-publish). The main-brand
+ *   benchmark invariant (LLMO-7421) still runs regardless of `publishMode` —
+ *   see the `assertMainBrandBenchmark` call below — but only confirms the
+ *   DRAFT state AT THIS CALL. A `skip` caller that later triggers its OWN
+ *   publish (outside this function) must re-run `ensureOwnBrandBenchmark` +
+ *   `assertMainBrandBenchmark` immediately before that publish, since project
+ *   state can drift between the two calls; this function does not, and
+ *   cannot, guarantee the invariant still holds at a publish it never makes.
  * @param {any} [options.dataAccess] - when supplied, upserts the
  *   `brand_to_semrush_projects` mapping row for this project (best-effort,
  *   never fails the create). Omit for a `brand` that is not yet a persisted
@@ -735,28 +743,47 @@ export async function handleCreateMarketSubworkspace(
     );
   }
 
-  // Resolve the own-brand benchmark before best-effort URL enrichment. Semrush
-  // may have auto-created it from customer-cased brand_names, so project creation
-  // is also the blocking point that repairs those stored aliases before publish.
+  // Resolve/repair the own-brand benchmark before best-effort URL enrichment.
+  // Two concerns converge here, both blocking (NOT best-effort like the
+  // URL/competitor syncs below):
+  //   - LLMO-7421: exactly one main_brand:true benchmark must exist in the
+  //     DRAFT before this market is allowed to publish, or Brand Presence has
+  //     no customer baseline. A project that can't establish its own-brand
+  //     benchmark must not publish and must not reach `upsertMappingRow`
+  //     (recorded as complete). A retry re-enters this handler, re-resolves
+  //     the same still-draft project via the leftover-draft adopt branch
+  //     above, and retries idempotently (ensureOwnBrandBenchmark is safe to
+  //     re-run). Checked only pre-publish: publish is asynchronous (a 202
+  //     with the project transitioning to live in the background — see
+  //     `publish-status.js`), so a published-view read taken immediately
+  //     after the publish call below resolves would race that transition
+  //     rather than confirm anything; that confirmation is deferred to the
+  //     fleet reconciliation this ticket also scopes.
+  //   - Semrush may have auto-created the benchmark from customer-cased
+  //     brand_names, so project creation is also the blocking point that
+  //     repairs those stored aliases (mixed-case aliases need a blocking
+  //     withhold/re-add repair) before publish.
   const ownBrand = {
     name: hasText(body.brandDisplayName) ? body.brandDisplayName : body.brandNames[0],
     domain: body.brandDomain,
     primaryUrl,
     aliases: aliasNames,
   };
-  // Benchmark identity is a correctness step, not enrichment. In particular,
-  // mixed-case aliases on Semrush's auto-created benchmark need a blocking
-  // withhold/re-add repair before the project can be published.
-  const ownBrandBenchmarkId = await ensureOwnBrandBenchmark(
+  await ensureOwnBrandBenchmark(
     transport,
     workspaceId,
     projectId,
     ownBrand,
     log,
-    { repairAliasCase: true },
+    { repairUnflagged: true, repairAliasCase: true },
   );
+  // The authoritative id: assertMainBrandBenchmark re-reads and requires
+  // exactly one flagged benchmark, so it (not ensureOwnBrandBenchmark's own
+  // return value) is the single source of truth callers below should use.
+  const ownBrandBenchmarkId = await assertMainBrandBenchmark(transport, workspaceId, projectId);
 
-  // URL attachment remains best-effort.
+  // URL attachment remains best-effort. The benchmark itself is already
+  // guaranteed to exist and be flagged by this point.
   try {
     // Skip EVERY market's primary domain, not just this one's: a market-mirror
     // brand's other-market primary must not surface as a website URL here either
