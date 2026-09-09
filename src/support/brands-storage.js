@@ -313,6 +313,18 @@ function mapDbBrandToV2(row) {
     // sub-workspace minted yet). Consumers use it to scope per-brand Semrush
     // views to the sub-workspace.
     semrushSubWorkspaceId: row.semrush_sub_workspace_id || null,
+    // Read-only (LLMO-7352/LLMO-7418): the brand's async Semrush provisioning state — the
+    // same CAS state the provisioning worker itself reads/writes (see
+    // beginProvisioningAttempt/promoteProvisioningReady/promoteProvisioningFailed below), now
+    // surfaced to a normal GET so the frontend can show a persistent Setting-up/Ready/Setup-
+    // failed indicator instead of relying on the one-shot `jobId` an `async: true` create/
+    // activate response carries. Null for a brand that has never gone through an async
+    // provisioning attempt (every brand created before this column existed, and every
+    // synchronous create/activate).
+    semrushProvisioningStatus: row.semrush_provisioning_status || null,
+    // Read-only (LLMO-7352/LLMO-7418): the failure detail recorded on the LAST failed
+    // provisioning attempt. Null unless semrushProvisioningStatus is 'failed'.
+    semrushProvisioningError: row.semrush_provisioning_error || null,
     // Read-only: deferred Semrush provisioning data for a pending (draft) brand
     // (serenity dual-mode). Object { primaryUrl, markets: [{ market,
     // languageCode }] } the wizard collected before provisioning; null once
