@@ -23,6 +23,7 @@ import { brandPointerReloader } from '../../src/controllers/serenity.js';
 // ProjectEngineApiError by `instanceof`. The mapError tests below must feed those real types
 // (a bare mock class would not be recognised → would wrongly fall through to the generic 500).
 import { SerenityTransportError as RealSerenityTransportError } from '../../src/support/serenity/serenity-transport-error.js';
+import { MainBrandBenchmarkInvariantError } from '../../src/support/serenity/errors.js';
 import { assertCreatePromptTagLimits } from '../../src/support/serenity/handlers/prompts.js';
 
 use(chaiAsPromised);
@@ -951,7 +952,8 @@ describe('SerenityController', () => {
 
     // SITES-49993: when authorize() itself throws (before returning), the
     // hoisted `auth` is still undefined — the fallback log line must still
-    // carry the route ids from params, with no brandUuid/workspaceId keys.
+    // carry the route ids from params, with brandUuid/workspaceId left
+    // undefined rather than populated with stale/wrong values.
     it('logs route ids on the fallback when authorize throws before resolving', async () => {
       const boom = new Error('db down');
       const log = fakeLog();
@@ -961,15 +963,15 @@ describe('SerenityController', () => {
       const response = await controller.listMarkets(ctx);
       expect(response.status).to.equal(500);
       const call = log.error.getCalls().find(
-        (c) => typeof c.args[0] === 'string' && c.args[0].startsWith('Serenity controller error {'),
+        (c) => c.args[0] === 'Serenity controller error',
       );
       expect(call).to.exist;
-      const payload = JSON.parse(call.args[0].slice('Serenity controller error '.length));
-      expect(payload.spaceCatId).to.equal(ORG);
-      expect(payload.brandId).to.equal(BRAND);
-      expect(payload).to.not.have.property('brandUuid');
-      expect(payload).to.not.have.property('workspaceId');
-      expect(call.args[1]).to.equal(boom);
+      const { reqCtx, error } = call.args[1];
+      expect(reqCtx.spaceCatId).to.equal(ORG);
+      expect(reqCtx.brandId).to.equal(BRAND);
+      expect(reqCtx.brandUuid).to.be.undefined;
+      expect(reqCtx.workspaceId).to.be.undefined;
+      expect(error).to.equal(boom);
     });
 
     // LLMO-6386: a Project Engine call now throws ProjectEngineApiError directly (adaptPE gone).
@@ -1250,6 +1252,48 @@ describe('SerenityController', () => {
       expect(response.status).to.equal(201);
       expect(handlers.handleCreateMarket).to.have.been.calledOnce;
       expect(handlers.handleCreateMarketSubworkspace).to.not.have.been.called;
+    });
+
+    it('createMarket maps MainBrandBenchmarkInvariantError to a generic 502 and logs server-side (MysticatBot review)', async () => {
+      // Simulates the sub-workspace path: nothing upstream of mapError sets
+      // `serenityLogged`, so this is the error's only log.
+      const err = new MainBrandBenchmarkInvariantError('ws-1', 'proj-1', { count: 0 });
+      handlers.handleCreateMarket.rejects(err);
+      const log = fakeLog();
+      const controller = SerenityController({ env: {} }, log, {});
+      const response = await controller.createMarket(fakeContext({
+        data: {
+          market: 'us', languageCode: 'en', brandDomain: 'x.com', brandNames: ['X'],
+        },
+      }));
+      expect(response.status).to.equal(502);
+      const body = await readBody(response);
+      expect(body.error).to.equal('mainBrandBenchmarkInvariant');
+      // Client-facing message stays generic — no workspace/project id leak.
+      expect(body.message).to.not.include('ws-1');
+      expect(body.message).to.not.include('proj-1');
+      expect(log.error).to.have.been.calledOnce;
+      expect(log.error).to.have.been.calledWithMatch(
+        'Serenity controller error',
+        sinon.match({ error: sinon.match({ workspaceId: 'ws-1', projectId: 'proj-1', count: 0 }) }),
+      );
+    });
+
+    it('createMarket does not double-log MainBrandBenchmarkInvariantError already logged upstream (flat path cleanup)', async () => {
+      // Simulates the flat path: project-provisioning.js's cleanupAndRethrow
+      // already logged this exact failure (and marked it) before rethrowing.
+      const err = new MainBrandBenchmarkInvariantError('ws-1', 'proj-1', { count: 2 });
+      err.serenityLogged = true;
+      handlers.handleCreateMarket.rejects(err);
+      const log = fakeLog();
+      const controller = SerenityController({ env: {} }, log, {});
+      const response = await controller.createMarket(fakeContext({
+        data: {
+          market: 'us', languageCode: 'en', brandDomain: 'x.com', brandNames: ['X'],
+        },
+      }));
+      expect(response.status).to.equal(502);
+      expect(log.error).to.not.have.been.called;
     });
 
     it('bulkDeletePrompts routes to the flat handler in flat mode', async () => {

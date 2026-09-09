@@ -27,7 +27,7 @@ import {
 } from '../../../../src/support/serenity/handlers/markets-subworkspace.js';
 import { clearTagCache } from '../../../../src/support/serenity/handlers/markets.js';
 import { SerenityTransportError } from '../../../../src/support/serenity/rest-transport.js';
-import { ERROR_CODES } from '../../../../src/support/serenity/errors.js';
+import { ERROR_CODES, MainBrandBenchmarkInvariantError } from '../../../../src/support/serenity/errors.js';
 import { TAG_IDS, dimensionTreeLevels, makeListProjectTagsStub } from '../fixtures/tag-tree.js';
 
 use(chaiAsPromised);
@@ -515,7 +515,12 @@ describe('markets-subworkspace handlers', () => {
         null,
         { brandUrlSources },
       );
-      expect(transport.listBenchmarks).to.have.been.calledOnceWith(WS, 'new-proj');
+      // Exactly two reads: the blocking LLMO-7421 ensure + assert, both draft.
+      // attachBrandUrlsToProject does NOT re-list — it reuses the already-resolved
+      // ownBrandBenchmarkId (passed as its existingBenchmarkId arg), so a third
+      // read here would mean that reuse silently broke.
+      expect(transport.listBenchmarks).to.have.callCount(2);
+      expect(transport.listBenchmarks).to.have.been.calledWith(WS, 'new-proj', { draft: true });
       // http:// dropped; de-region social dropped; us social + region-less earned kept.
       expect(transport.createBrandUrls).to.have.been.calledOnceWith(WS, 'new-proj', 'bench-1', [
         { url: 'https://b.com', type: 'website' },
@@ -640,7 +645,11 @@ describe('markets-subworkspace handlers', () => {
     it('resolves the own-brand benchmark without writing brand URLs when there are no sources', async () => {
       const transport = makeTransport();
       await handleCreateMarketSubworkspace(transport, makeBrand(), PARENT, createBody, log);
-      expect(transport.listBenchmarks).to.have.been.calledOnceWith(WS, 'new-proj');
+      // listBenchmarks IS still called (exactly twice: ensure + assert) — the
+      // LLMO-7421 benchmark invariant is blocking regardless of whether there
+      // are brand URLs to push.
+      expect(transport.listBenchmarks).to.have.callCount(2);
+      expect(transport.listBenchmarks).to.have.been.calledWith(WS, 'new-proj', { draft: true });
       expect(transport.createBrandUrls).to.not.have.been.called;
     });
 
@@ -699,6 +708,83 @@ describe('markets-subworkspace handlers', () => {
       ).to.be.rejectedWith(/recase failed/);
       expect(transport.updateBenchmark).to.have.been.calledThrice;
       expect(transport.publishProject).to.not.have.been.called;
+    });
+
+    describe('LLMO-7421: main-brand benchmark invariant is blocking', () => {
+      it('aborts before publish and does not persist the mapping row when the benchmark cannot be established', async () => {
+        const transport = makeTransport({
+          listBenchmarks: sinon.stub().resolves({ aio_benchmarks: [] }),
+          createBenchmarks: sinon.stub().resolves({}), // no id — create silently failed to flag
+        });
+        const create = sinon.stub().resolves({});
+        const dataAccess = { BrandSemrushProject: { create } };
+
+        const err = await handleCreateMarketSubworkspace(
+          transport,
+          makeBrand(),
+          PARENT,
+          createBody,
+          log,
+          null,
+          null,
+          { dataAccess },
+        ).then(() => null, (e) => e);
+
+        expect(err).to.be.instanceOf(MainBrandBenchmarkInvariantError);
+        expect(transport.publishProject).to.not.have.been.called;
+        expect(create).to.not.have.been.called;
+      });
+
+      it('does not re-check the published view after publish (publish is asynchronous) and persists the mapping row', async () => {
+        // Only the pre-publish draft check runs. A published-view read taken
+        // immediately after publishProject resolves would race the async
+        // publish transition (see MainBrandBenchmarkInvariantError's doc) —
+        // asserting that no such read happens is what protects the
+        // 409-forever regression a post-publish failure used to cause here.
+        const transport = makeTransport({
+          listBenchmarks: sinon.stub().resolves({ aio_benchmarks: [{ id: 'bench-1', main_brand: true }] }),
+        });
+        const create = sinon.stub().resolves({});
+        const dataAccess = { BrandSemrushProject: { create } };
+
+        const res = await handleCreateMarketSubworkspace(
+          transport,
+          makeBrand(),
+          PARENT,
+          createBody,
+          log,
+          null,
+          null,
+          { dataAccess },
+        );
+
+        expect(res.status).to.equal(201);
+        expect(transport.publishProject).to.have.been.calledOnce;
+        expect(create).to.have.been.calledOnce;
+        // ensureOwnBrandBenchmark's own read + the pre-publish assert; nothing
+        // after publish.
+        expect(transport.listBenchmarks).to.have.callCount(2);
+      });
+
+      it('still checks the benchmark invariant even when publishMode is skip (no publish, but the gate still runs)', async () => {
+        const transport = makeTransport();
+        const res = await handleCreateMarketSubworkspace(
+          transport,
+          makeBrand(),
+          PARENT,
+          createBody,
+          log,
+          null,
+          null,
+          { publishMode: 'skip' },
+        );
+        expect(res.status).to.equal(201);
+        expect(res.body.published).to.equal(false);
+        expect(transport.publishProject).to.not.have.been.called;
+        // The benchmark invariant is not conditional on publishMode — it still
+        // runs (ensure + assert) even when publish itself is deferred.
+        expect(transport.listBenchmarks).to.have.callCount(2);
+      });
     });
 
     it('does NOT fail the create when the brand-URL push fails (best-effort)', async () => {
