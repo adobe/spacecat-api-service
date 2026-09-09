@@ -12103,6 +12103,24 @@ SerenityCreatePromptsResponse:
   properties:
     created:
       type: array
+      description: Prompts that did not previously exist in the project and were created.
+      items: { $ref: '#/SerenityPrompt' }
+    updated:
+      type: array
+      description: >
+        Prompts whose text ALREADY existed in the project: rather than being
+        created again, their tags were REPLACED with the ones this request
+        supplied (plus the server-computed `type` and `intent`, and the prompt's
+        stored `source`, which is a creation fact and is never re-derived on an
+        edit). This is what makes a repeated CSV import an update rather than an
+        additive write — the upstream create folds a repeated text into
+        `existing_count` but still attaches the tag ids it is given, which would
+        otherwise leave the prompt carrying several categories at once.
+
+        Always present on a live response. NOT in `required` because an async
+        job's stored `result` may have been persisted before this field existed
+        (`GET .../serenity/prompts/jobs/{jobId}` replays that stored payload
+        verbatim); treat an absent value as an empty list.
       items: { $ref: '#/SerenityPrompt' }
     skipped:
       type: array

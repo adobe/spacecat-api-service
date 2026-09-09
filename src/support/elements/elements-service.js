@@ -630,7 +630,9 @@ export function createElementsService(transport, log) {
      * is applied client-side by the controller (Semrush has no server-side paging).
      *
      * @param {string} workspaceId - Semrush sub-workspace UUID (projects/prompts live here).
-     * @param {object} params - Query params (topic, model/platform, startDate, endDate, projectId).
+     * @param {object} params - Query params (topic, model/platform, startDate, endDate,
+     *   projectId, brandName). `brandName` → `CBF_brand`; omit only to deliberately count
+     *   every tracked brand (see buildTopicPromptsPayload).
      * @returns {Promise<Array<object>>} Per-prompt rows (see transformTopicPromptsResponse).
      */
     /* c8 ignore start -- LLMO-6418 POC endpoint; unit tests intentionally deferred */
@@ -712,7 +714,9 @@ export function createElementsService(transport, log) {
      * Single upstream call; no fan-out.
      *
      * @param {string} workspaceId - Semrush sub-workspace UUID.
-     * @param {object} params - Query params (model/platform, startDate, endDate, projectId).
+     * @param {object} params - Query params (model/platform, startDate, endDate, projectId,
+     *   brandName). `brandName` → `CBF_brand`, same brand-scoping contract as
+     *   {@link getTopicPrompts}.
      * @returns {Promise<Array<object>>} Per-topic aggregate rows.
      */
     /* c8 ignore start -- LLMO-6418 POC endpoint; unit tests intentionally deferred */
