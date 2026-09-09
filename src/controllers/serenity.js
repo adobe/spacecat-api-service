@@ -276,6 +276,21 @@ function mapError(e, log, reqCtx = {}) {
     // default for plain throws.
     const errorToken = e.code && hasText(e.code) ? e.code : errorTokenForStatus(status);
     const details = publicErrorDetails(errorToken, /** @type {any} */ (e).details);
+    // `serenityLogged` is set ad hoc by project-provisioning.js's
+    // cleanupAndRethrow, not declared on ErrorWithStatusCode itself.
+    const alreadyLogged = /** @type {{ serenityLogged?: boolean }} */ (e).serenityLogged;
+    if (e.code === ERROR_CODES.MAIN_BRAND_BENCHMARK_INVARIANT && !alreadyLogged) {
+      // The client-facing message is deliberately generic (LLMO-7421 review) —
+      // log the workspace/project/count detail server-side only, via the
+      // error's own properties. Skipped when `e.serenityLogged` is already set
+      // (project-provisioning.js's cleanupAndRethrow logged this exact failure
+      // on the flat provisioning path) so both provisioning paths log the
+      // invariant exactly once, not twice on one path and once on the other.
+      // reqCtx passed as a structured field, not string-interpolated into the
+      // message, so it can't be mistaken for (or exploit) log-format control
+      // characters in a caller-controlled value (MysticatBot review).
+      log?.error?.('Serenity controller error', { reqCtx, error: e });
+    }
     return createResponse(
       {
         error: errorToken,
@@ -319,9 +334,11 @@ function mapError(e, log, reqCtx = {}) {
       message: 'Upstream request failed',
     }, 502);
   }
-  // Not an upstream error: keep the Error as the second argument — the stack
-  // is the useful part here — and carry the tenant ids in the message.
-  log.error(`Serenity controller error ${JSON.stringify(reqCtx)}`, err);
+  // Not an upstream error: reqCtx passed as a structured field (not
+  // JSON.stringify'd into the message string), matching the benchmark
+  // invariant branch above — a caller-controlled reqCtx value can't be
+  // mistaken for log-format control characters this way (MysticatBot review).
+  log.error('Serenity controller error', { reqCtx, error: err });
   return createResponse(
     { error: 'internalServerError', message: 'Internal server error' },
     500,

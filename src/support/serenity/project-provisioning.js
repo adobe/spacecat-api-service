@@ -14,6 +14,8 @@
 
 import { hasText } from '@adobe/spacecat-shared-utils';
 
+import { ensureOwnBrandBenchmark, assertMainBrandBenchmark } from './brand-urls.js';
+
 /** @typedef {import('./rest-transport.js').SerenityTransport} SerenityTransport */
 
 /**
@@ -89,9 +91,24 @@ export function primaryUrlPatchBody(primaryUrl) {
  * repairs in place. Deleting an otherwise-valid project because a refinement could
  * not be applied trades a recoverable degradation for no market at all.
  *
+ * Unlike the primary-url PATCH, the own-brand benchmark is a BLOCKING invariant
+ * (LLMO-7421): exactly one `main_brand: true` benchmark must exist in the DRAFT
+ * before publish, or Brand Presence has no customer baseline. Checked only
+ * pre-publish, not after — publish is asynchronous (see
+ * `errors.js` `MainBrandBenchmarkInvariantError`), so a published-view read
+ * taken immediately after `publishProject` resolves would race that transition
+ * and cannot soundly confirm the invariant here; that confirmation is deferred
+ * to the fleet reconciliation this ticket also scopes. A pre-publish failure
+ * triggers the same best-effort-cleanup-then-rethrow as a publish failure — the
+ * caller (markets.js `handleCreateMarket`) never persists the
+ * `BrandSemrushProject` row on that path, so a retry is a byte-identical create
+ * rather than an adoption of a half-provisioned one.
+ *
  * @param {SerenityTransport} transport - the Semrush transport.
  * @param {string} semrushWorkspaceId - the (sub-)workspace to create in.
- * @param {object} createBody - the `createProject` body; carries `domain`.
+ * @param {object} createBody - the `createProject` body; carries `domain`,
+ *   `brand_name_display`, `brand_names` — also used to resolve/create the
+ *   own-brand benchmark.
  * @param {object} [opts] - optional extras.
  * @param {string|null} [opts.primaryUrl] - the url the project tracks. Skipped when
  *   absent, which leaves the upstream's own apex default in place rather than
@@ -101,6 +118,9 @@ export function primaryUrlPatchBody(primaryUrl) {
  * @param {string} [opts.caller] - name used to prefix the failure logs.
  * @returns {Promise<string>} the new project's id.
  * @throws {CreateNoProjectIdError} when create returns no id.
+ * @throws {import('./errors.js').MainBrandBenchmarkInvariantError} when the
+ *   pre-publish benchmark invariant cannot be established, after a best-effort
+ *   cleanup delete.
  * @throws when the publish fails, after a best-effort cleanup delete. A failed
  *   PATCH never throws.
  */
@@ -144,9 +164,18 @@ export async function createProvisionAndPublishProject(
     }
   }
 
-  try {
-    await transport.publishProject(semrushWorkspaceId, semrushProjectId);
-  } catch (e) {
+  // Best-effort cleanup-then-rethrow, shared by every failure past this point
+  // (the pre-publish benchmark invariant, and publish itself) so a
+  // half-provisioned project is never left for a caller to mistakenly persist
+  // as complete.
+  /**
+   * @param {Error & { count?: number, serenityLogged?: boolean }} e - the
+   *   original failure; always rethrown after cleanup. `count` is set only by
+   *   `MainBrandBenchmarkInvariantError`; `serenityLogged` is written below,
+   *   never read on entry.
+   * @returns {Promise<never>}
+   */
+  const cleanupAndRethrow = async (e) => {
     let cleanedUp = false;
     try {
       await transport.deleteProject(semrushWorkspaceId, semrushProjectId);
@@ -164,10 +193,69 @@ export async function createProvisionAndPublishProject(
         ? `${caller}: provisioning failed; upstream project cleaned up`
         : `${caller}: orphaned upstream project after provisioning failure`,
       {
-        ...logContext, semrushWorkspaceId, semrushProjectId, error: e.message, cleanedUp,
+        ...logContext,
+        semrushWorkspaceId,
+        semrushProjectId,
+        error: e.message,
+        // Present only for MainBrandBenchmarkInvariantError; undefined (and
+        // dropped) for every other failure this function handles.
+        count: e.count,
+        cleanedUp,
       },
     );
+    // This log call already carries workspaceId/projectId/count server-side —
+    // mark it so mapError's own dedicated log for the benchmark invariant
+    // (controllers/serenity.js) does not re-log the same failure a second
+    // time. The sub-workspace path has no cleanup step and never sets this,
+    // so mapError's log remains its only (and sole) log there — same
+    // once-per-failure shape on both provisioning paths (MysticatBot review).
+    e.serenityLogged = true;
     throw e;
+  };
+
+  // Blocking invariant (LLMO-7421): resolve/repair the own-brand benchmark and
+  // confirm exactly one main_brand:true benchmark exists in the DRAFT before
+  // publishing. This is the fix for the root cause — the prior version of this
+  // function never touched benchmark state at all, so a project could publish
+  // and be recorded as provisioned with zero main-brand benchmarks.
+  const brand = {
+    name: hasText(createBody?.brand_name_display)
+      ? createBody.brand_name_display
+      : createBody?.brand_names?.[0],
+    domain: createBody?.domain,
+    // The market's tracked url, not just its host — matches the PATCH above and
+    // the sub-workspace path's `ownBrand.primaryUrl` (markets-subworkspace.js).
+    // Falls back to `domain` inside ensureOwnBrandBenchmark when absent, but a
+    // subpath/subdomain market must carry its real tracked url here or the
+    // own-brand benchmark's `primary_url` silently scores it against its bare
+    // host — omitting this was a merge-integration miss (LLMO-7421 review).
+    primaryUrl: trackedUrl || undefined,
+    aliases: hasText(createBody?.brand_name_display)
+      ? createBody?.brand_names
+      : createBody?.brand_names?.slice(1),
+  };
+  try {
+    // repairAliasCase is deliberately NOT requested here: createBody's aliases
+    // are fully caller-controlled (unlike the sub-workspace path, which repairs
+    // mixed-case aliases Semrush may have auto-provisioned from customer input),
+    // so there is nothing upstream-cased to reconcile on this path.
+    await ensureOwnBrandBenchmark(
+      transport,
+      semrushWorkspaceId,
+      semrushProjectId,
+      brand,
+      log,
+      { repairUnflagged: true },
+    );
+    await assertMainBrandBenchmark(transport, semrushWorkspaceId, semrushProjectId);
+  } catch (e) {
+    await cleanupAndRethrow(e);
+  }
+
+  try {
+    await transport.publishProject(semrushWorkspaceId, semrushProjectId);
+  } catch (e) {
+    await cleanupAndRethrow(e);
   }
 
   return semrushProjectId;
