@@ -421,6 +421,9 @@ describe('SerenityController', () => {
       '../../src/support/serenity/handlers/activate-markets-job.js': {
         ACTIVATE_MARKETS_JOB_TYPE: 'serenity-activate-markets',
       },
+      '../../src/support/serenity/handlers/activate-brand-workspace-job.js': {
+        ACTIVATE_BRAND_WORKSPACE_JOB_TYPE: 'serenity-activate-brand-workspace',
+      },
     })).default;
   });
 
@@ -2452,6 +2455,119 @@ describe('SerenityController', () => {
       const response = await controller.activate(fakeContext({ brand, data: { brandNames: ['X'] } }));
       expect(response.status).to.equal(409);
       expect(ensureSubworkspaceStub).to.not.have.been.called;
+    });
+
+    it('Phase 4: pending→active activation mints a provisioning attempt and enqueues the provision->activate-brand-workspace job chain when async: true', async () => {
+      getBrandBaseSiteIdStub.resolves('primary-site');
+      const brand = makeBrandModel({});
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.activate(fakeContext({
+        brand, data: { brandNames: ['X'], async: true },
+      }));
+
+      expect(response.status).to.equal(202);
+      expect(ensureSubworkspaceStub).to.not.have.been.called;
+      expect(guardAgainstConcurrentProvisioningStub).to.not.have.been.called;
+      expect(brand.setStatus).to.not.have.been.called;
+      expect(beginProvisioningAttemptStub).to.have.been.calledOnce;
+      expect(beginProvisioningAttemptStub.firstCall.args[0]).to.include({
+        brandId: BRAND, updatedBy: 'serenity-activate',
+      });
+      expect(createAndEnqueueJobStub).to.have.been.calledOnce;
+      const [, enqueueArgs] = createAndEnqueueJobStub.firstCall.args;
+      expect(enqueueArgs.jobType).to.equal('serenity-provision-workspace');
+      expect(enqueueArgs.metadata.chainedJobType).to.equal('serenity-activate-brand-workspace');
+      expect(enqueueArgs.metadata.chainedJobMetadata)
+        .to.deep.equal({ brandId: BRAND, wasPending: true });
+    });
+
+    it('Phase 4: pending→active activation answers 409 without enqueuing when async: true and a provisioning attempt is already in flight', async () => {
+      getBrandBaseSiteIdStub.resolves('primary-site');
+      beginProvisioningAttemptStub.resolves(false);
+      const brand = makeBrandModel({});
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.activate(fakeContext({
+        brand, data: { brandNames: ['X'], async: true },
+      }));
+      expect(response.status).to.equal(409);
+      expect(createAndEnqueueJobStub).to.not.have.been.called;
+    });
+
+    it('Phase 4: pending→active activation 400s when async is present but not a boolean', async () => {
+      getBrandBaseSiteIdStub.resolves('primary-site');
+      const brand = makeBrandModel({});
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.activate(fakeContext({
+        brand, data: { brandNames: ['X'], async: 'yes' },
+      }));
+      expect(response.status).to.equal(400);
+      expect(createAndEnqueueJobStub).to.not.have.been.called;
+      expect(ensureSubworkspaceStub).to.not.have.been.called;
+    });
+
+    it('Phase 4: pending→active activation runs the same synchronous flip as an absent flag when async is explicitly false', async () => {
+      getBrandBaseSiteIdStub.resolves('primary-site');
+      handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: {} });
+      const brand = makeBrandModel({});
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.activate(fakeContext({
+        brand, data: { brandNames: ['X'], async: false },
+      }));
+      expect(response.status).to.equal(200);
+      expect(guardAgainstConcurrentProvisioningStub).to.have.been.calledOnce;
+      expect(ensureSubworkspaceStub).to.have.been.calledOnce;
+      expect(createAndEnqueueJobStub).to.not.have.been.called;
+    });
+
+    it('Phase 4: bare reactivation mints a provisioning attempt and enqueues the provision->activate-brand-workspace job chain when async: true', async () => {
+      const brand = makeBrandModel({ getStatus: () => 'active' });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.activate(fakeContext({
+        brand, data: { brandNames: ['X'], async: true },
+      }));
+
+      expect(response.status).to.equal(202);
+      expect(ensureSubworkspaceStub).to.not.have.been.called;
+      expect(guardAgainstConcurrentProvisioningStub).to.not.have.been.called;
+      expect(createAndEnqueueJobStub).to.have.been.calledOnce;
+      const [, enqueueArgs] = createAndEnqueueJobStub.firstCall.args;
+      expect(enqueueArgs.metadata.chainedJobType).to.equal('serenity-activate-brand-workspace');
+      expect(enqueueArgs.metadata.chainedJobMetadata)
+        .to.deep.equal({ brandId: BRAND, wasPending: false });
+    });
+
+    it('Phase 4: bare reactivation answers 409 without enqueuing when async: true and a provisioning attempt is already in flight', async () => {
+      beginProvisioningAttemptStub.resolves(false);
+      const brand = makeBrandModel({ getStatus: () => 'active' });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.activate(fakeContext({
+        brand, data: { brandNames: ['X'], async: true },
+      }));
+      expect(response.status).to.equal(409);
+      expect(createAndEnqueueJobStub).to.not.have.been.called;
+    });
+
+    it('Phase 4: bare reactivation 400s when async is present but not a boolean', async () => {
+      const brand = makeBrandModel({ getStatus: () => 'active' });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.activate(fakeContext({
+        brand, data: { brandNames: ['X'], async: 'yes' },
+      }));
+      expect(response.status).to.equal(400);
+      expect(createAndEnqueueJobStub).to.not.have.been.called;
+      expect(ensureSubworkspaceStub).to.not.have.been.called;
+    });
+
+    it('Phase 4: bare reactivation runs the same synchronous flip as an absent flag when async is explicitly false', async () => {
+      const brand = makeBrandModel({ getStatus: () => 'active' });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.activate(fakeContext({
+        brand, data: { brandNames: ['X'], async: false },
+      }));
+      expect(response.status).to.equal(200);
+      expect(guardAgainstConcurrentProvisioningStub).to.have.been.calledOnce;
+      expect(ensureSubworkspaceStub).to.have.been.calledOnce;
+      expect(createAndEnqueueJobStub).to.not.have.been.called;
     });
 
     it('activate 400s when the markets array exceeds the cap (validated before either branch dispatches)', async () => {

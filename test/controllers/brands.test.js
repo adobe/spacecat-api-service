@@ -5743,8 +5743,10 @@ describe('Brands Controller', () => {
 
       it('creates a bare sub-workspace (no project) when no market is supplied (serenity-active)', async () => {
         // LLMO-6405: market-scoped inputs moved to market creation, so a serenity-active
-        // create with no market provisions just the sub-workspace (no project), synchronously
-        // (unconverted, out of PR-C's scope) — the async job chain is never started.
+        // create with no market provisions just the sub-workspace (no project). Phase 4
+        // (LLMO-7352/LLMO-7418) converted this branch too, but async is absent/false here, so
+        // this stays the EXACT synchronous provisionBrandSubworkspaceBare call — see the
+        // dedicated async tests below for the `async: true` job-chain path.
         const bareStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-bare' });
         const upsertStub = sinon.stub().resolves({ id: 'forced-id', name: 'New Brand' });
         const enqueueStub = sinon.stub().resolves({ getId: () => 'job-xyz' });
@@ -5769,6 +5771,81 @@ describe('Brands Controller', () => {
         // Anchored by BOTH the bare sub-workspace and the primary site.
         expect(upsertArgs.semrushSubWorkspaceId).to.equal('ws-bare');
         expect(upsertArgs.brand.baseSiteId).to.equal('site-123');
+      });
+
+      it('Phase 4: bare create mints a provisioning attempt and enqueues provision-workspace-job with NO chained job when async: true', async () => {
+        const bareStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-bare' });
+        const upsertStub = sinon.stub().resolves({ id: 'forced-id', name: 'New Brand' });
+        const enqueueStub = sinon.stub().resolves({ getId: () => 'job-xyz' });
+        const controller = await buildController({
+          provisionBrandSubworkspaceBare: bareStub,
+          upsertBrand: upsertStub,
+          createAndEnqueueJob: enqueueStub,
+        });
+
+        const response = await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: { name: 'New Brand', baseSiteId: 'site-123', async: true },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(202);
+        const body = await response.json();
+        expect(body.status).to.equal('pending');
+        expect(body.jobId).to.equal('job-xyz');
+        // The bare-sync provisioner never runs on the async path.
+        expect(bareStub.called).to.equal(false);
+        expect(enqueueStub.calledOnce).to.equal(true);
+        const [, enqueueArgs] = enqueueStub.firstCall.args;
+        expect(enqueueArgs.jobType).to.equal('serenity-provision-workspace');
+        expect(enqueueArgs.metadata.parentWorkspaceId).to.equal('parent-ws-1');
+        expect(enqueueArgs.metadata.chainedJobType).to.equal(undefined);
+        expect(enqueueArgs.metadata.chainedJobMetadata).to.equal(undefined);
+        // The row is persisted with no workspace pointer yet.
+        const upsertArgs = upsertStub.firstCall.args[0];
+        expect(upsertArgs.semrushSubWorkspaceId).to.equal(null);
+      });
+
+      it('Phase 4: bare create returns 409 without enqueuing when a provisioning attempt is already in flight', async () => {
+        const upsertStub = sinon.stub().resolves({ id: 'forced-id', name: 'New Brand' });
+        const beginStub = sinon.stub().resolves(false);
+        const enqueueStub = sinon.stub().resolves({ getId: () => 'job-xyz' });
+        const controller = await buildController({
+          upsertBrand: upsertStub,
+          beginProvisioningAttempt: beginStub,
+          createAndEnqueueJob: enqueueStub,
+        });
+
+        const response = await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: { name: 'New Brand', baseSiteId: 'site-123', async: true },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(409);
+        expect(enqueueStub.called).to.equal(false);
+      });
+
+      it('Phase 4: bare create returns 400 without persisting a row when the organization has no Semrush parent workspace configured', async () => {
+        const upsertStub = sinon.stub().resolves({ id: 'forced-id', name: 'New Brand' });
+        const controller = await buildController({
+          upsertBrand: upsertStub, resolveWorkspaceId: sinon.stub().resolves(null),
+        });
+
+        const response = await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: { name: 'New Brand', baseSiteId: 'site-123', async: true },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(400);
+        expect(upsertStub.called).to.equal(false);
       });
 
       it('surfaces a bare sub-workspace provisioning failure and does not write the brand', async () => {

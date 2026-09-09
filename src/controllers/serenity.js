@@ -47,6 +47,7 @@ import { CLASSIFY_PROMPTS_JOB_TYPE } from '../support/serenity/handlers/classify
 import { PROVISION_WORKSPACE_JOB_TYPE } from '../support/serenity/handlers/provision-workspace-job.js';
 import { CREATE_MARKET_JOB_TYPE } from '../support/serenity/handlers/create-market-job.js';
 import { ACTIVATE_MARKETS_JOB_TYPE } from '../support/serenity/handlers/activate-markets-job.js';
+import { ACTIVATE_BRAND_WORKSPACE_JOB_TYPE } from '../support/serenity/handlers/activate-brand-workspace-job.js';
 import { ORIGIN_VALUE } from '../support/serenity/prompt-tags.js';
 import {
   BULK_TAGS_JOB_TYPE,
@@ -1672,6 +1673,41 @@ function SerenityController(context, log, env) {
         if (!existingSiteId) {
           throw new ErrorWithStatusCode(`Brand has no onboarded primary site: ${brandUuid}`, 400);
         }
+        // Phase 4 (LLMO-7352/LLMO-7418): opt-in only (mirrors this endpoint's own
+        // project-activation branch below, and createMarket's/createBrandForOrg's `async` flag).
+        // Absent/false runs the EXACT synchronous pending->active flip this branch has always
+        // run. `async: true` hands the sub-workspace-ensure + status flip off to the
+        // `provision-workspace-job` ->
+        // `serenity-activate-brand-workspace` job chain instead.
+        if (validateAsync(body)) {
+          const attemptId = randomUUID();
+          const began = await beginProvisioningAttempt({
+            brandId: brandUuid,
+            attemptId,
+            postgrestClient: ctx.dataAccess.services.postgrestClient,
+            updatedBy: 'serenity-activate',
+          });
+          if (!began) {
+            const err = new ErrorWithStatusCode(
+              'A Semrush sub-workspace provisioning attempt is already in progress for this '
+              + 'brand; please retry shortly.',
+              409,
+            );
+            err.code = 'semrush_provisioning_in_progress';
+            throw err;
+          }
+          const job = await createAndEnqueueJob(ctx, {
+            jobType: PROVISION_WORKSPACE_JOB_TYPE,
+            metadata: {
+              brandId: brandUuid,
+              attemptId,
+              parentWorkspaceId: auth.parentWorkspaceId ?? '',
+              chainedJobType: ACTIVATE_BRAND_WORKSPACE_JOB_TYPE,
+              chainedJobMetadata: { brandId: brandUuid, wasPending: true },
+            },
+          });
+          return accepted({ jobId: job.getId(), status: job.getStatus() });
+        }
         // PR-C guard (LLMO-7352/LLMO-7418): this branch stays synchronous, but a market-creating
         // endpoint may have an async provisioning attempt in flight for this SAME brand — without
         // this check, ensureSubworkspace below could independently create a second workspace.
@@ -1748,6 +1784,40 @@ function SerenityController(context, log, env) {
         }
         if (generatePrompts) {
           throw new ErrorWithStatusCode('A primary URL is required to generate prompts', 400);
+        }
+        // Phase 4 (LLMO-7352/LLMO-7418): opt-in only — see the wasPending branch above for the
+        // full rationale. `wasPending: false` in the chained metadata distinguishes this
+        // already-active no-op re-affirm from a real pending->active transition, so
+        // activate-brand-workspace-job.js's save-divergence handling matches this branch's own
+        // 207-not-502 contract.
+        if (validateAsync(body)) {
+          const attemptId = randomUUID();
+          const began = await beginProvisioningAttempt({
+            brandId: brandUuid,
+            attemptId,
+            postgrestClient: ctx.dataAccess.services.postgrestClient,
+            updatedBy: 'serenity-activate',
+          });
+          if (!began) {
+            const err = new ErrorWithStatusCode(
+              'A Semrush sub-workspace provisioning attempt is already in progress for this '
+              + 'brand; please retry shortly.',
+              409,
+            );
+            err.code = 'semrush_provisioning_in_progress';
+            throw err;
+          }
+          const job = await createAndEnqueueJob(ctx, {
+            jobType: PROVISION_WORKSPACE_JOB_TYPE,
+            metadata: {
+              brandId: brandUuid,
+              attemptId,
+              parentWorkspaceId: auth.parentWorkspaceId ?? '',
+              chainedJobType: ACTIVATE_BRAND_WORKSPACE_JOB_TYPE,
+              chainedJobMetadata: { brandId: brandUuid, wasPending: false },
+            },
+          });
+          return accepted({ jobId: job.getId(), status: job.getStatus() });
         }
         // PR-C guard (LLMO-7352/LLMO-7418): see the wasPending branch above for rationale.
         await guardAgainstConcurrentProvisioning(
