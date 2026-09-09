@@ -1036,6 +1036,53 @@ export default function serenityTests(
       expect(list.body.items.filter((p) => p.text === text)).to.have.lengthOf(1);
     });
 
+    // The customer-reported CSV round trip, end to end (Sony, Brand-A / CH-de). Re-importing a
+    // prompt with a DIFFERENT category must change that category — and, critically, must be
+    // reversible. Before the upsert the second import attached the new category alongside the old
+    // one and the third attached nothing new at all (the tag was already there), so the prompt was
+    // stuck displaying whichever category upstream happened to return first.
+    it('POST /serenity/prompts re-imports change a prompt\'s category, and can change it back', async () => {
+      await createUsMarket();
+      const original = await createCategory('Features & Pricing');
+      const replacement = await createCategory('Reviews');
+      const text = 'What features does the product offer?';
+      const importRow = (tagId) => ({
+        prompts: [{
+          text, tagIds: [tagId], geoTargetId: US_GEO, languageCode: 'en',
+        }],
+      });
+      const categoriesOf = async () => {
+        const list = await getHttpClient().admin.get(
+          `${base}/prompts?geoTargetId=${US_GEO}&languageCode=en`,
+        );
+        expect(list.status).to.equal(200);
+        const rows = list.body.items.filter((p) => p.text === text);
+        // One prompt throughout: an upsert must never mint a duplicate.
+        expect(rows).to.have.lengthOf(1);
+        return rows[0].tags
+          .filter((t) => Array.isArray(t.path) && t.path.length === 1 && t.path[0].name === 'category')
+          .map((t) => t.name);
+      };
+
+      const first = await getHttpClient().admin.post(`${base}/prompts`, importRow(original));
+      expect(first.status).to.equal(200);
+      expect(first.body.created).to.have.lengthOf(1);
+      expect(await categoriesOf()).to.deep.equal(['Features & Pricing']);
+
+      // Import 2 — change it. Exactly ONE category, not two.
+      const second = await getHttpClient().admin.post(`${base}/prompts`, importRow(replacement));
+      expect(second.status).to.equal(200);
+      expect(second.body.created).to.be.an('array').that.is.empty;
+      expect(second.body.updated).to.have.lengthOf(1);
+      expect(await categoriesOf()).to.deep.equal(['Reviews']);
+
+      // Import 3 — change it BACK. This is the step that was impossible before.
+      const third = await getHttpClient().admin.post(`${base}/prompts`, importRow(original));
+      expect(third.status).to.equal(200);
+      expect(third.body.updated).to.have.lengthOf(1);
+      expect(await categoriesOf()).to.deep.equal(['Features & Pricing']);
+    });
+
     // In-place edit (serenity-docs#63, gate G1): PATCH edits the prompt via the
     // upstream rename + batch tag write, so the id survives the edit — the
     // response echoes it unchanged, the listing carries the new text under the
@@ -1303,10 +1350,13 @@ export default function serenityTests(
       expect(Date.parse(after.updated_at)).to.be.at.least(Date.parse(before.updated_at));
     });
 
-    // Re-posting an existing text folds into `existing_count` upstream instead of creating a
-    // second row, and the stored stamp is PRESERVED — a dedupe hit must not re-attribute an
-    // existing prompt to whoever re-submitted it.
-    it('POST /serenity/prompts preserves the original stamp when a repeated text dedups', async () => {
+    // Re-posting an existing text no longer creates a second row — it REPLACES that prompt's tags
+    // (the upsert). `created_*` must survive that: a merge-patch writes only the `updated_*` pair,
+    // so the prompt keeps its original author while gaining the identity of whoever re-submitted
+    // it. Before the upsert this was asserted as a full no-op, which was never quite true: the
+    // upstream create silently ATTACHED the re-posted tag ids to the existing prompt without any
+    // stamp at all, so the row changed with nothing in its authorship to show for it.
+    it('POST /serenity/prompts preserves created_* and re-stamps updated_* when a repeated text upserts', async () => {
       await createUsMarket();
       const tagId = await createCategory('Headphones');
       const text = 'Which noise-cancelling headphones are best?';
@@ -1319,8 +1369,15 @@ export default function serenityTests(
         }],
       });
       expect(second.status).to.equal(200);
+      expect(second.body.updated).to.have.lengthOf(1);
+      expect(second.body.created).to.be.an('array').that.is.empty;
 
-      expect(await storedMetadataById(promptId)).to.deep.equal(before);
+      const after = await storedMetadataById(promptId);
+      // Authorship of the ORIGINAL create is never re-attributed.
+      expect(after.created_at).to.equal(before.created_at);
+      expect(after.created_by).to.equal(before.created_by);
+      // The re-submitter is recorded as the editor, because they genuinely edited it.
+      expect(after.updated_by).to.equal('test-user@example.com');
     });
 
     // Gate G2 refusal: a rename onto a sibling's exact text is a 409 and the combined upstream
