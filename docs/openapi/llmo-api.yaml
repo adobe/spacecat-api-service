@@ -5969,7 +5969,6 @@ site-llmo-cloudflare-config:
               type: object
               required:
                 - clientId
-                - targetHost
               properties:
                 clientId:
                   type: string
@@ -5979,7 +5978,9 @@ site-llmo-cloudflare-config:
                   type: string
                   description: >-
                     The origin host `deployWorker` would use if `targetHost` is omitted from the
-                    request — a suggestion, not a guarantee of the live canonical host.
+                    request — a suggestion, not a guarantee of the live canonical host. Omitted
+                    (rather than failing the request) when it could not be derived from the
+                    site's base URL.
                   example: 'www.example.com'
       '403':
         $ref: './responses.yaml#/403'

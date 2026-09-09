@@ -262,10 +262,12 @@ function LlmoCloudflareController(ctx) {
 
   /**
    * GET /sites/:siteId/llmo/cdn-onboard/cloudflare/config
-   * Returns the Cloudflare OAuth client ID for browser PKCE flow, plus a read-only preview of
+   * Returns the Cloudflare OAuth client ID for browser PKCE flow, plus a best-effort preview of
    * the target host deployWorker would derive server-side when the caller omits targetHost —
    * lets the frontend prefill/suggest a value before the user reaches the deploy step, without
-   * needing a Cloudflare token or performing any deploy side effect.
+   * needing a Cloudflare token or performing any deploy side effect. clientId is the value this
+   * endpoint exists to serve (OAuth bootstrap); targetHost is a nice-to-have derived from the
+   * customer's own site, so a failed derivation omits targetHost rather than failing the request.
    */
   const getCloudflareConfig = async (context) => {
     const result = await getSiteAndCheckAccess(context);
@@ -280,15 +282,15 @@ function LlmoCloudflareController(ctx) {
       return internalServerError('Cloudflare client ID is not configured');
     }
 
+    let targetHost;
     try {
-      const targetHost = await resolveCanonicalHost(site.getBaseURL(), log);
-      return ok({ clientId, targetHost });
+      targetHost = await resolveCanonicalHost(site.getBaseURL(), log);
     } catch (e) {
-      log.error(auditLine(context, 'target-host', 'resolve-failed', {
-        severity: 'error', siteId: site.getId(), error: e.message,
+      log.warn(auditLine(context, 'target-host', 'resolve-failed', {
+        severity: 'warn', siteId: site.getId(), error: e.message,
       }));
-      return internalServerError('Could not derive target host from site base URL');
     }
+    return ok(targetHost ? { clientId, targetHost } : { clientId });
   };
 
   // GET /sites/:siteId/llmo/cdn-onboard/cloudflare/accounts

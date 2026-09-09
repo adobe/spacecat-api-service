@@ -191,12 +191,14 @@ describe('LlmoCloudflareController', () => {
       expect(res.status).to.equal(500);
     });
 
-    it('returns 500 when the target host cannot be derived from the site base URL', async () => {
+    it('returns the clientId without targetHost when the target host cannot be derived', async () => {
       mockResolveCanonicalHost = () => {
         throw new Error('cannot derive host');
       };
       const res = await controller.getCloudflareConfig(mockContext);
-      expect(res.status).to.equal(500);
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body).to.deep.equal({ clientId: CF_CLIENT_ID });
     });
   });
 
