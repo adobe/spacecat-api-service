@@ -1711,6 +1711,12 @@ function SerenityController(context, log, env) {
               brandId: brandUuid,
               attemptId,
               parentWorkspaceId: auth.parentWorkspaceId ?? '',
+              // LLMO-7418 external-review Finding 4: this branch's brand is GUARANTEED
+              // pointer-less (a pending brand never has a workspace pointer), so the worker
+              // ALWAYS takes the create-or-adopt path here, never the existing-pointer fast
+              // path — omitting `title` would call Semrush with an untitled sub-workspace on
+              // every single pending->active async activation.
+              title: brand.getName?.() ?? '',
               chainedJobType: ACTIVATE_BRAND_WORKSPACE_JOB_TYPE,
               chainedJobMetadata: { brandId: brandUuid, wasPending: true },
             },
@@ -1829,6 +1835,13 @@ function SerenityController(context, log, env) {
               brandId: brandUuid,
               attemptId,
               parentWorkspaceId: auth.parentWorkspaceId ?? '',
+              // LLMO-7418 external-review Finding 4: see the wasPending branch above — an
+              // already-active brand isn't as reliably pointer-less as a pending one, but the
+              // SYNCHRONOUS twin of this exact branch still defensively calls the general-purpose
+              // `ensureSubworkspace` (create-or-existing), so the async path must be able to
+              // create with a real title too, not assume the existing-pointer fast path always
+              // applies.
+              title: brand.getName?.() ?? '',
               chainedJobType: ACTIVATE_BRAND_WORKSPACE_JOB_TYPE,
               chainedJobMetadata: { brandId: brandUuid, wasPending: false },
             },

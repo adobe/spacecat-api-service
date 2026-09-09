@@ -2480,6 +2480,10 @@ describe('SerenityController', () => {
       expect(enqueueArgs.metadata.chainedJobType).to.equal('serenity-activate-brand-workspace');
       expect(enqueueArgs.metadata.chainedJobMetadata)
         .to.deep.equal({ brandId: BRAND, wasPending: true });
+      // LLMO-7418 external-review Finding 4: a pending brand is GUARANTEED pointer-less, so the
+      // worker always takes the create path here — omitting title would create an untitled
+      // sub-workspace on every single async pending->active activation.
+      expect(enqueueArgs.metadata.title).to.equal('Test Brand');
     });
 
     it('Phase 4: pending→active activation answers 409 without enqueuing when async: true and a provisioning attempt is already in flight', async () => {
@@ -2536,6 +2540,10 @@ describe('SerenityController', () => {
       expect(enqueueArgs.metadata.chainedJobType).to.equal('serenity-activate-brand-workspace');
       expect(enqueueArgs.metadata.chainedJobMetadata)
         .to.deep.equal({ brandId: BRAND, wasPending: false });
+      // LLMO-7418 external-review Finding 4: this branch's own synchronous twin defensively
+      // handles a pointer-less brand via ensureSubworkspace, so the async path needs a real
+      // title too rather than assuming a pointer always exists.
+      expect(enqueueArgs.metadata.title).to.equal('Test Brand');
     });
 
     it('Phase 4: bare reactivation answers 409 without enqueuing when async: true and a provisioning attempt is already in flight', async () => {
