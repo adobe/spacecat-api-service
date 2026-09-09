@@ -12,6 +12,7 @@
 
 import { resolveElementModel } from '../constants.js';
 import { dateToIsoWeek } from '../week-utils.js';
+import { buildFacetedTagFilters } from './prompts.js';
 
 /* c8 ignore start -- LLMO-6086 POC endpoint; unit tests intentionally deferred */
 
@@ -35,7 +36,7 @@ import { dateToIsoWeek } from '../week-utils.js';
  * @param {string} [params.projectId] - Semrush project id (region scope, top-level).
  */
 export function buildOwnedUrlsStatsPayload({
-  model, platform, startDate, endDate, category, projectId,
+  model, platform, startDate, endDate, category, tagPaths, projectId,
 } = {}) {
   const resolvedModel = resolveElementModel(model || platform);
   const advancedFilters = [
@@ -43,9 +44,7 @@ export function buildOwnedUrlsStatsPayload({
     { op: 'gte', val: startDate, col: 'CBF_date__start' },
     { op: 'lte', val: endDate, col: 'CBF_date__end' },
   ];
-  if (category) {
-    advancedFilters.push({ op: 'eq', val: category, col: 'CBF_tags' });
-  }
+  advancedFilters.push(...buildFacetedTagFilters({ tagPaths, category }));
   return {
     ...(projectId && { project_id: projectId }),
     comparison_data_formatting: 'union',
@@ -67,7 +66,7 @@ export function buildOwnedUrlsStatsPayload({
  * could exceed its totals.
  */
 export function buildOwnedUrlsTrendPayload({
-  model, platform, startDate, endDate, category, projectId,
+  model, platform, startDate, endDate, category, tagPaths, projectId,
 } = {}) {
   const resolvedModel = resolveElementModel(model || platform);
   const advancedFilters = [
@@ -75,9 +74,7 @@ export function buildOwnedUrlsTrendPayload({
     { op: 'gte', val: startDate, col: 'CBF_date__start' },
     { op: 'lte', val: endDate, col: 'CBF_date__end' },
   ];
-  if (category) {
-    advancedFilters.push({ op: 'eq', val: category, col: 'CBF_tags' });
-  }
+  advancedFilters.push(...buildFacetedTagFilters({ tagPaths, category }));
   return {
     ...(projectId && { project_id: projectId }),
     comparison_data_formatting: 'union',

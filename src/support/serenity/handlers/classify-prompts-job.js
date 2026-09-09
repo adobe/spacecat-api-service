@@ -140,25 +140,20 @@ async function requeuePending(context, job, semrushWorkspaceId, items) {
  * @param {SerenityTransport} transport - Serenity transport built from the exchanged
  *   access token.
  * @param {object} metadata - the job's metadata (`brandId`, `semrushWorkspaceId`,
- *   `prompts`, `originValue` — the trusted authorship captured at enqueue
- *   time, part of the cross-deploy wire contract between the enqueue site and
- *   this worker (see the `originValue` default below) — and, for a
- *   subworkspace-mode CSV import, `authMode`, `workspaceId`,
- *   `parentWorkspaceId`).
+ *   `prompts`, and — for a subworkspace-mode CSV import — `authMode`,
+ *   `workspaceId`, `parentWorkspaceId`).
  * @returns {Promise<object>} the job result.
  */
 async function createAndClassify(context, job, transport, metadata) {
   const {
     dataAccess, env, log,
   } = context;
-  // Capture both audit attribution and trusted authorship at enqueue time so the
-  // async worker stamps the submitting principal rather than the job runner.
+  // Authorship (LLMO-6289): the caller id captured at enqueue time in the create
+  // controller, carried through the async job so classified-on-create prompts are
+  // stamped with the human/service that submitted them, not the job runner.
   const {
     brandId, semrushWorkspaceId, callerId = 'unknown', authMode,
-    // Fail-safe for jobs enqueued by a pre-deploy build (before this field
-    // existed on the wire) — every CURRENT enqueue site always sets
-    // `originValue` explicitly (see serenity.js's createPrompts). Once the
-    // queue has drained past this deploy, this default is never exercised.
+    // Jobs enqueued before origin propagation default to human authorship.
     originValue = ORIGIN_VALUE.HUMAN,
   } = metadata;
   const inputs = Array.isArray(metadata.prompts) ? metadata.prompts : [];
@@ -192,18 +187,16 @@ async function createAndClassify(context, job, transport, metadata) {
   }
 
   const classifyPromptType = await buildPromptTypeClassifier(dataAccess, brandId);
-  // `sourceValue` is a second, deliberate behavior change riding alongside the
-  // origin restoration: the base branch passed `originValue` alone here, so
-  // `itemSource` resolved to null and no `source` tag was ever attached to an
-  // async-imported prompt. Passing `PROXY_CREATE_SOURCE_VALUE` brings this
-  // path in line with the sync create paths (source-dimension.md's write-path
-  // table) — every async-created prompt now carries `source/config` too.
   const injectComputedTags = makePromptTagInjector(
     transport,
     semrushWorkspaceId,
     classifyPromptType,
     log,
-    { originValue, sourceValue: PROXY_CREATE_SOURCE_VALUE },
+    {
+      originValue,
+      sourceValue: PROXY_CREATE_SOURCE_VALUE,
+      normalizeCustomerTags: true,
+    },
   );
 
   // No time budget (serenity-docs#33): retries with backoff until resolved or
@@ -327,10 +320,9 @@ async function createAndClassify(context, job, transport, metadata) {
  * @param {SerenityTransport} transport
  * @param {object} metadata - `{ semrushWorkspaceId, items: [{ projectId,
  *   promptId, text, tagIds }] }` — `tagIds` is the FULL desired tag set minus
- *   `intent` (caller tags + the server `type`/`origin`/`source` ids already
- *   resolved and stamped at create time — this reclassify pass never
- *   re-derives them), matching the edit handlers' "recompute the whole set,
- *   then replace" contract.
+ *   `intent` (caller tags plus independent server-managed type/origin/source),
+ *   matching the edit handlers'
+ *   "recompute the whole set, then replace" contract.
  * @returns {Promise<object>} the job result.
  */
 async function reclassifyExisting(context, job, transport, metadata) {

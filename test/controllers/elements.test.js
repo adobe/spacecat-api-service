@@ -199,14 +199,12 @@ describe('ElementsController', () => {
   let createElementsServiceStub;
   let createElementsTransportStub;
   let exchangePromiseTokenStub;
-  let resolveBrandUuidStub;
   let MockElementsTransportError;
   let getWorkspaceResourcesStub;
   let createSerenityTransportStub;
   let ElementsController;
 
   beforeEach(async () => {
-    resolveBrandUuidStub = sinon.stub().resolves(BRAND_ID);
     resolveBrandWorkspaceStub = sinon.stub().resolves({
       mode: 'subworkspace', workspaceId: SUB_WORKSPACE_ID, parentWorkspaceId: WORKSPACE_ID,
     });
@@ -226,6 +224,8 @@ describe('ElementsController', () => {
       getUrlInspectorStats: sinon.stub().resolves(URL_INSPECTOR_STATS_RESULT),
       getDomainUrls: sinon.stub().resolves({ urls: [], totalCount: 0 }),
       getOwnedUrlProjects: sinon.stub().resolves([{ region: 'US', projectId: 'proj-1' }]),
+      getTopics: sinon.stub().resolves([]),
+      getTopicPrompts: sinon.stub().resolves([]),
     };
     createElementsServiceStub = sinon.stub().returns(serviceStub);
     createElementsTransportStub = sinon.stub().returns({ fetchElement: sinon.stub() });
@@ -265,9 +265,6 @@ describe('ElementsController', () => {
       '../../src/support/brands-storage.js': {
         getBrandIdentity: getBrandIdentityStub,
         getBrandBySite: getBrandBySiteStub,
-      },
-      '../../src/support/prompts-storage.js': {
-        resolveBrandUuid: resolveBrandUuidStub,
       },
       '../../src/support/serenity/workspace-resolver.js': {
         resolveBrandWorkspace: resolveBrandWorkspaceStub,
@@ -822,6 +819,39 @@ describe('ElementsController', () => {
       });
     });
 
+    it('uses the Elements-specific filter mode for repeated tagPath filters', async () => {
+      const ctx = fakeContext({
+        url: promptsUrl('?tagPath=tag__Campaign&tagPath=tag__Audience__Enterprise'
+          + '&tagFilterMode=elements-faceted-v1'),
+      });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+
+      const res = await ctrl.listPrompts(ctx);
+
+      expect(res.status).to.equal(200);
+      expect(serviceStub.getPrompts).to.have.been.calledWith(
+        SUB_WORKSPACE_ID,
+        sinon.match({
+          tagPaths: ['tag__Campaign', 'tag__Audience__Enterprise'],
+        }),
+      );
+    });
+
+    it('rejects native faceted-v1 on the incompatible Elements filter engine', async () => {
+      const ctx = fakeContext({
+        url: promptsUrl('?tagPath=tag__Campaign&tagFilterMode=faceted-v1'),
+      });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+
+      const res = await ctrl.listPrompts(ctx);
+      const body = await readBody(res);
+
+      expect(res.status).to.equal(400);
+      expect(body.error).to.equal('invalidTagFilter');
+      expect(body.message).to.match(/elements-faceted-v1/);
+      expect(serviceStub.getPrompts).not.to.have.been.called;
+    });
+
     it('passes enrichUserIntent: true to getPrompts when ?userIntent=true', async () => {
       const ctx = fakeContext({ url: promptsUrl('?projectId=proj-a&userIntent=true') });
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
@@ -830,11 +860,11 @@ describe('ElementsController', () => {
       expect(params.enrichUserIntent).to.equal(true);
     });
 
-    it('resolves the brand uuid via resolveBrandUuid before querying', async () => {
+    it('resolves the brand identity via getBrandIdentity before querying', async () => {
       const ctx = fakeContext({ url: promptsUrl() });
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       await ctrl.listPrompts(ctx);
-      expect(resolveBrandUuidStub).to.have.been.calledWith(ORG_ID, BRAND_ID, sinon.match.object);
+      expect(getBrandIdentityStub).to.have.been.calledWith(ORG_ID, BRAND_ID, sinon.match.object);
       expect(resolveBrandWorkspaceStub)
         .to.have.been.calledWith(sinon.match.object, ORG_ID, BRAND_ID);
     });
@@ -874,7 +904,7 @@ describe('ElementsController', () => {
     });
 
     it('404s when the brand does not resolve for the org', async () => {
-      resolveBrandUuidStub.resolves(null);
+      getBrandIdentityStub.resolves(null);
       const ctx = fakeContext({ url: promptsUrl() });
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       const res = await ctrl.listPrompts(ctx);
@@ -1967,6 +1997,60 @@ describe('ElementsController', () => {
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       const res = await ctrl.getUrlInspectorPromptsCount(ctx);
       expect(res.status).to.equal(502);
+    });
+  });
+
+  // ─── listTopics / listTopicPrompts brand scoping (LLMO-7443) ──────────────
+  describe('listTopics / listTopicPrompts brand scoping', () => {
+    const TOPIC = '3 ft Bean Bag';
+    const topicsUrl = (qs = '') => `https://api.example.com/v2/orgs/${ORG_ID}`
+      + `/brands/${BRAND_ID}/serenity/brand-presence/topics${qs}`;
+    const promptsUrlForTopic = (qs = '') => `https://api.example.com/v2/orgs/${ORG_ID}`
+      + `/brands/${BRAND_ID}/serenity/brand-presence/topics/${encodeURIComponent(TOPIC)}/prompts${qs}`;
+
+    const topicsCtx = (overrides = {}) => fakeContext({
+      url: topicsUrl(),
+      withBrandSemrushProject: true,
+      brandSemrushProjects: [makeBrandSemrushProject({ getSemrushProjectId: () => 'proj-1' })],
+      ...overrides,
+    });
+
+    it('passes the brand display name to getTopics as brandName (CBF_brand)', async () => {
+      const ctx = topicsCtx({
+        url: topicsUrl('?tagPath=tag__Campaign__Q1&tagFilterMode=elements-faceted-v1'),
+      });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      await ctrl.listTopics(ctx);
+      const [, params] = serviceStub.getTopics.firstCall.args;
+      expect(params.brandName).to.equal('Adobe Brand');
+      expect(params.tagPaths).to.deep.equal(['tag__Campaign__Q1']);
+    });
+
+    it('passes the brand display name to getTopicPrompts as brandName (CBF_brand)', async () => {
+      const ctx = topicsCtx({
+        url: promptsUrlForTopic('?tagPath=category__Furniture&tagFilterMode=elements-faceted-v1'),
+        params: { topicId: encodeURIComponent(TOPIC) },
+      });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      await ctrl.listTopicPrompts(ctx);
+      const [, params] = serviceStub.getTopicPrompts.firstCall.args;
+      expect(params.brandName).to.equal('Adobe Brand');
+      expect(params.tagPaths).to.deep.equal(['category__Furniture']);
+    });
+
+    // Fail-open: a brand with no usable display name must degrade to brand-agnostic
+    // counts rather than send a garbage CBF_brand, and must say so in the log.
+    // `hasText` does not trim, so whitespace-only is the case that would slip through
+    // a naive guard — assert it explicitly.
+    it('omits brandName and warns when the brand name is whitespace-only', async () => {
+      getBrandIdentityStub.resolves({ id: BRAND_ID, name: '   ' });
+      const log = fakeLog();
+      const ctx = topicsCtx();
+      const ctrl = ElementsController(ctx, log, ENV);
+      await ctrl.listTopics(ctx);
+      const [, params] = serviceStub.getTopics.firstCall.args;
+      expect(params.brandName).to.be.undefined;
+      expect(log.warn.calledWithMatch(/falls back to brand-agnostic counts/)).to.equal(true);
     });
   });
 

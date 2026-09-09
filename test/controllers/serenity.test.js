@@ -23,6 +23,8 @@ import { brandPointerReloader } from '../../src/controllers/serenity.js';
 // ProjectEngineApiError by `instanceof`. The mapError tests below must feed those real types
 // (a bare mock class would not be recognised → would wrongly fall through to the generic 500).
 import { SerenityTransportError as RealSerenityTransportError } from '../../src/support/serenity/serenity-transport-error.js';
+import { MainBrandBenchmarkInvariantError } from '../../src/support/serenity/errors.js';
+import { assertCreatePromptTagLimits } from '../../src/support/serenity/handlers/prompts.js';
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -96,6 +98,7 @@ function fakeContext({
   brand = makeBrandModel(),
   env = {},
   promiseToken = undefined,
+  headers = {},
 } = {}) {
   return {
     env,
@@ -103,6 +106,7 @@ function fakeContext({
       headers: {
         ...(bearer ? { authorization: `Bearer ${bearer}` } : {}),
         ...(promiseToken ? { 'x-promise-token': promiseToken } : {}),
+        ...headers,
       },
     },
     attributes: {
@@ -165,6 +169,10 @@ describe('SerenityController', () => {
     handleUpdateTagSubworkspace: sinon.stub(),
     handleDeleteTag: sinon.stub(),
     handleDeleteTagSubworkspace: sinon.stub(),
+    handleTagImpact: sinon.stub(),
+    handleTagImpactSubworkspace: sinon.stub(),
+    handleBulkTags: sinon.stub(),
+    handleBulkTagsSubworkspace: sinon.stub(),
   };
   let decommissionStub;
   let ensureSubworkspaceStub;
@@ -191,7 +199,8 @@ describe('SerenityController', () => {
   let MockTransportError;
   let SerenityController;
 
-  beforeEach(async () => {
+  beforeEach(async function setupSerenityController() {
+    this.timeout(10000);
     Object.values(handlers).forEach((s) => s.reset());
     resolveWorkspaceIdStub = sinon.stub().resolves(WORKSPACE);
     // Default: flat mode — existing assertions (handlers called with
@@ -254,6 +263,7 @@ describe('SerenityController', () => {
         handleCreatePrompts: handlers.handleCreatePrompts,
         handleUpdatePrompt: handlers.handleUpdatePrompt,
         handleBulkDeletePrompts: handlers.handleBulkDeletePrompts,
+        assertCreatePromptTagLimits,
       },
       '../../src/support/serenity/handlers/markets.js': {
         handleListMarkets: handlers.handleListMarkets,
@@ -288,6 +298,8 @@ describe('SerenityController', () => {
         handleUpdateTagSubworkspace: handlers.handleUpdateTagSubworkspace,
         handleDeleteTag: handlers.handleDeleteTag,
         handleDeleteTagSubworkspace: handlers.handleDeleteTagSubworkspace,
+        handleTagImpact: handlers.handleTagImpact,
+        handleTagImpactSubworkspace: handlers.handleTagImpactSubworkspace,
       },
       '../../src/support/serenity/workspace-lifecycle.js': {
         ensureSubworkspace: ensureSubworkspaceStub,
@@ -333,6 +345,13 @@ describe('SerenityController', () => {
       },
       '../../src/support/serenity/handlers/classify-prompts-job.js': {
         CLASSIFY_PROMPTS_JOB_TYPE: 'serenity-classify-prompts',
+      },
+      '../../src/support/serenity/handlers/bulk-tags-job.js': {
+        BULK_TAGS_JOB_TYPE: 'serenity-bulk-tags',
+        BULK_TAGS_PUBLIC_JOB_TYPE: 'bulkTags',
+        handleBulkTags: handlers.handleBulkTags,
+        handleBulkTagsSubworkspace: handlers.handleBulkTagsSubworkspace,
+        pageBulkFailures: (result) => result,
       },
     })).default;
   });
@@ -580,7 +599,8 @@ describe('SerenityController', () => {
       handlers.handleListPrompts.resolves({
         items: [], total: 0, page: 1, limit: 50,
       });
-      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const log = fakeLog();
+      const controller = SerenityController({ env: {} }, log, {});
       const ctx = fakeContext();
       ctx.request = {
         url: 'https://x/v2/orgs/x/brands/y/serenity/prompts?geoTargetId=2840&languageCode=en&page=2',
@@ -593,6 +613,7 @@ describe('SerenityController', () => {
       expect(args[4]).to.include({
         geoTargetId: 2840, languageCode: 'en', page: 2,
       });
+      expect(args[5]).to.equal(log);
     });
 
     it('listPrompts coerces limit query param to integer and forwards it', async () => {
@@ -931,7 +952,8 @@ describe('SerenityController', () => {
 
     // SITES-49993: when authorize() itself throws (before returning), the
     // hoisted `auth` is still undefined — the fallback log line must still
-    // carry the route ids from params, with no brandUuid/workspaceId keys.
+    // carry the route ids from params, with brandUuid/workspaceId left
+    // undefined rather than populated with stale/wrong values.
     it('logs route ids on the fallback when authorize throws before resolving', async () => {
       const boom = new Error('db down');
       const log = fakeLog();
@@ -941,15 +963,15 @@ describe('SerenityController', () => {
       const response = await controller.listMarkets(ctx);
       expect(response.status).to.equal(500);
       const call = log.error.getCalls().find(
-        (c) => typeof c.args[0] === 'string' && c.args[0].startsWith('Serenity controller error {'),
+        (c) => c.args[0] === 'Serenity controller error',
       );
       expect(call).to.exist;
-      const payload = JSON.parse(call.args[0].slice('Serenity controller error '.length));
-      expect(payload.spaceCatId).to.equal(ORG);
-      expect(payload.brandId).to.equal(BRAND);
-      expect(payload).to.not.have.property('brandUuid');
-      expect(payload).to.not.have.property('workspaceId');
-      expect(call.args[1]).to.equal(boom);
+      const { reqCtx, error } = call.args[1];
+      expect(reqCtx.spaceCatId).to.equal(ORG);
+      expect(reqCtx.brandId).to.equal(BRAND);
+      expect(reqCtx.brandUuid).to.be.undefined;
+      expect(reqCtx.workspaceId).to.be.undefined;
+      expect(error).to.equal(boom);
     });
 
     // LLMO-6386: a Project Engine call now throws ProjectEngineApiError directly (adaptPE gone).
@@ -1232,6 +1254,48 @@ describe('SerenityController', () => {
       expect(handlers.handleCreateMarketSubworkspace).to.not.have.been.called;
     });
 
+    it('createMarket maps MainBrandBenchmarkInvariantError to a generic 502 and logs server-side (MysticatBot review)', async () => {
+      // Simulates the sub-workspace path: nothing upstream of mapError sets
+      // `serenityLogged`, so this is the error's only log.
+      const err = new MainBrandBenchmarkInvariantError('ws-1', 'proj-1', { count: 0 });
+      handlers.handleCreateMarket.rejects(err);
+      const log = fakeLog();
+      const controller = SerenityController({ env: {} }, log, {});
+      const response = await controller.createMarket(fakeContext({
+        data: {
+          market: 'us', languageCode: 'en', brandDomain: 'x.com', brandNames: ['X'],
+        },
+      }));
+      expect(response.status).to.equal(502);
+      const body = await readBody(response);
+      expect(body.error).to.equal('mainBrandBenchmarkInvariant');
+      // Client-facing message stays generic — no workspace/project id leak.
+      expect(body.message).to.not.include('ws-1');
+      expect(body.message).to.not.include('proj-1');
+      expect(log.error).to.have.been.calledOnce;
+      expect(log.error).to.have.been.calledWithMatch(
+        'Serenity controller error',
+        sinon.match({ error: sinon.match({ workspaceId: 'ws-1', projectId: 'proj-1', count: 0 }) }),
+      );
+    });
+
+    it('createMarket does not double-log MainBrandBenchmarkInvariantError already logged upstream (flat path cleanup)', async () => {
+      // Simulates the flat path: project-provisioning.js's cleanupAndRethrow
+      // already logged this exact failure (and marked it) before rethrowing.
+      const err = new MainBrandBenchmarkInvariantError('ws-1', 'proj-1', { count: 2 });
+      err.serenityLogged = true;
+      handlers.handleCreateMarket.rejects(err);
+      const log = fakeLog();
+      const controller = SerenityController({ env: {} }, log, {});
+      const response = await controller.createMarket(fakeContext({
+        data: {
+          market: 'us', languageCode: 'en', brandDomain: 'x.com', brandNames: ['X'],
+        },
+      }));
+      expect(response.status).to.equal(502);
+      expect(log.error).to.not.have.been.called;
+    });
+
     it('bulkDeletePrompts routes to the flat handler in flat mode', async () => {
       handlers.handleBulkDeletePrompts.resolves({ deleted: 1, failed: [] });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
@@ -1254,6 +1318,44 @@ describe('SerenityController', () => {
       }));
       const options = handlers.handleBulkDeletePrompts.firstCall.args[6];
       expect(options.callerId).to.equal('unknown');
+    });
+
+    it('bulkTagPrompts dispatches flat arguments and reads Idempotency-Key case-insensitively', async () => {
+      const data = {
+        geoTargetId: 2840,
+        languageCode: 'en',
+        operation: 'assign',
+        tagIds: ['tag-1'],
+        filter: { tagIds: [], tagFilterMode: 'faceted-v1' },
+      };
+      handlers.handleBulkTags.resolves({
+        status: 202,
+        body: {
+          jobId: 'job-1', jobType: 'bulkTags', status: 'IN_PROGRESS', replayed: false,
+        },
+      });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({
+        data,
+        headers: { 'iDeMpOtEnCy-KeY': 'flat-key' },
+      });
+
+      const response = await controller.bulkTagPrompts(ctx);
+
+      expect(response.status).to.equal(202);
+      expect(handlers.handleBulkTags).to.have.been.calledOnceWith(
+        ctx,
+        { name: 'transport' },
+        ctx.dataAccess,
+        BRAND,
+        ORG,
+        WORKSPACE,
+        data,
+        'unknown',
+        'flat-key',
+        sinon.match.object,
+      );
+      expect(handlers.handleBulkTagsSubworkspace).not.to.have.been.called;
     });
 
     it('createTag routes to the flat handler in flat mode and returns its status', async () => {
@@ -1336,6 +1438,35 @@ describe('SerenityController', () => {
       expect(handlers.handleUpdateTagSubworkspace).to.not.have.been.called;
     });
 
+    it('getTagImpact dispatches flat arguments and returns the revision as ETag', async () => {
+      handlers.handleTagImpact.resolves({
+        status: 200,
+        body: {
+          tagId: 'tag-1',
+          revision: '"impact-revision"',
+          affectedPromptCount: 2,
+        },
+      });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({ params: { tagId: 'tag-1' } });
+      ctx.request = { url: 'https://x?geoTargetId=2840&languageCode=en' };
+
+      const response = await controller.getTagImpact(ctx);
+
+      expect(response.status).to.equal(200);
+      expect(response.headers.get('etag')).to.equal('"impact-revision"');
+      expect(handlers.handleTagImpact).to.have.been.calledOnceWith(
+        { name: 'transport' },
+        ctx.dataAccess,
+        BRAND,
+        WORKSPACE,
+        'tag-1',
+        { geoTargetId: 2840, languageCode: 'en' },
+        sinon.match.object,
+      );
+      expect(handlers.handleTagImpactSubworkspace).not.to.have.been.called;
+    });
+
     it('deleteTag requires the :tagId path param', async () => {
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.deleteTag(fakeContext({ params: {} }));
@@ -1353,6 +1484,19 @@ describe('SerenityController', () => {
       expect(handlers.handleDeleteTag).to.have.been.calledOnce;
       expect(handlers.handleDeleteTag.firstCall.args[4]).to.equal('tag-1');
       expect(handlers.handleDeleteTagSubworkspace).to.not.have.been.called;
+    });
+
+    it('deleteTag resolves If-Match case-insensitively', async () => {
+      handlers.handleDeleteTag.resolves({ status: 204 });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({ params: { tagId: 'tag-1' } });
+      ctx.request = { url: 'https://x?geoTargetId=2840&languageCode=en' };
+      ctx.pathInfo.headers['iF-mAtCh'] = '"impact-revision"';
+
+      const response = await controller.deleteTag(ctx);
+
+      expect(response.status).to.equal(204);
+      expect(handlers.handleDeleteTag.firstCall.args[7]).to.equal('"impact-revision"');
     });
 
     it('deleteTag returns the authorize error without throwing (auth.error short-circuit)', async () => {
@@ -1973,6 +2117,28 @@ describe('SerenityController', () => {
       expect(handlers.handleDeleteTag).to.not.have.been.called;
     });
 
+    it('getTagImpact dispatches subworkspace arguments', async () => {
+      handlers.handleTagImpactSubworkspace.resolves({
+        status: 200,
+        body: { tagId: 'tag-1', revision: '"subworkspace-revision"' },
+      });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({ params: { tagId: 'tag-1' } });
+      ctx.request = { url: 'https://x?geoTargetId=2840&languageCode=en' };
+
+      const response = await controller.getTagImpact(ctx);
+
+      expect(response.status).to.equal(200);
+      expect(handlers.handleTagImpactSubworkspace).to.have.been.calledOnceWith(
+        { name: 'transport' },
+        'subworkspace-ws-1',
+        'tag-1',
+        { geoTargetId: 2840, languageCode: 'en' },
+        sinon.match.object,
+      );
+      expect(handlers.handleTagImpact).not.to.have.been.called;
+    });
+
     it('bulkDeletePrompts routes to the subworkspace handler in subworkspace mode', async () => {
       handlers.handleBulkDeletePromptsSubworkspace.resolves({ deleted: 0, failed: [] });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
@@ -1988,6 +2154,45 @@ describe('SerenityController', () => {
       await controller.bulkDeletePrompts(fakeContext({ data: { prompts: [] } }));
       const options = handlers.handleBulkDeletePromptsSubworkspace.firstCall.args[4];
       expect(options.callerId).to.equal('unknown');
+    });
+
+    it('bulkTagPrompts reads Idempotency-Key from Headers-like objects in subworkspace mode', async () => {
+      const data = {
+        geoTargetId: 2840,
+        languageCode: 'en',
+        operation: 'remove',
+        tagIds: ['tag-1'],
+        filter: { tagIds: [], tagFilterMode: 'faceted-v1' },
+      };
+      handlers.handleBulkTagsSubworkspace.resolves({
+        status: 202,
+        body: {
+          jobId: 'job-2', jobType: 'bulkTags', status: 'IN_PROGRESS', replayed: false,
+        },
+      });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const headers = {
+        get: sinon.stub().callsFake((name) => (
+          name.toLowerCase() === 'idempotency-key' ? 'headers-key' : null
+        )),
+      };
+      const ctx = fakeContext({ data, headers });
+
+      const response = await controller.bulkTagPrompts(ctx);
+
+      expect(response.status).to.equal(202);
+      expect(handlers.handleBulkTagsSubworkspace).to.have.been.calledOnceWith(
+        ctx,
+        { name: 'transport' },
+        BRAND,
+        ORG,
+        'subworkspace-ws-1',
+        data,
+        'unknown',
+        'headers-key',
+        sinon.match.object,
+      );
+      expect(handlers.handleBulkTags).not.to.have.been.called;
     });
 
     it('listTags routes to the subworkspace handler in subworkspace mode', async () => {
@@ -2942,7 +3147,9 @@ describe('SerenityController', () => {
 
         expect(response.status).to.equal(202);
         const body = await readBody(response);
-        expect(body).to.deep.equal({ jobId: 'job-abc', status: 'IN_PROGRESS' });
+        expect(body).to.deep.equal({
+          jobId: 'job-abc', jobType: 'classifyPrompts', status: 'IN_PROGRESS',
+        });
         expect(createAndEnqueueJobStub).to.have.been.calledOnce;
         const [, enqueueArgs] = createAndEnqueueJobStub.firstCall.args;
         expect(enqueueArgs.jobType).to.equal('serenity-classify-prompts');
@@ -2979,7 +3186,9 @@ describe('SerenityController', () => {
 
         expect(response.status).to.equal(202);
         const body = await readBody(response);
-        expect(body).to.deep.equal({ jobId: 'job-abc', status: 'IN_PROGRESS' });
+        expect(body).to.deep.equal({
+          jobId: 'job-abc', jobType: 'classifyPrompts', status: 'IN_PROGRESS',
+        });
         expect(createAndEnqueueJobStub).to.have.been.calledOnce;
         const [, enqueueArgs] = createAndEnqueueJobStub.firstCall.args;
         expect(enqueueArgs.jobType).to.equal('serenity-classify-prompts');
@@ -3093,20 +3302,51 @@ describe('SerenityController', () => {
         expect(response.status).to.equal(400);
         expect(createAndEnqueueJobStub).to.not.have.been.called;
       });
+
+      it('409s without enqueueing an async create whose caller tag set exceeds 50', async () => {
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const response = await controller.createPrompts(fakeContext({
+          data: {
+            async: true,
+            prompts: [{
+              text: 'over limit',
+              geoTargetId: 2840,
+              languageCode: 'en',
+              tagIds: Array.from({ length: 51 }, (_, index) => `tag-${index}`),
+            }],
+          },
+        }));
+
+        expect(response.status).to.equal(409);
+        expect(await readBody(response)).to.deep.include({
+          error: 'tagLimitExceeded',
+          details: { attemptedCount: 51, maxPromptTagIds: 50 },
+        });
+        expect(createAndEnqueueJobStub).not.to.have.been.called;
+      });
     });
 
     describe('getPromptsJobStatus — async job polling (serenity-docs#33 Layer 1)', () => {
       const JOB = '99999999-8888-7777-6666-555555555555';
 
       function makeAsyncJob({
-        status = 'COMPLETED', result = null, error = null, brandId = BRAND,
+        id = JOB,
+        status = 'COMPLETED',
+        result = null,
+        error = null,
+        brandId = BRAND,
+        jobType = undefined,
       } = {}) {
         return {
-          getId: () => JOB,
+          getId: () => id,
           getStatus: () => status,
           getResult: () => result,
           getError: () => error,
-          getMetadata: () => ({ brandId, promiseToken: { promise_token: 'secret' } }),
+          getMetadata: () => ({
+            brandId,
+            promiseToken: { promise_token: 'secret' },
+            ...(jobType ? { jobType } : {}),
+          }),
         };
       }
 
@@ -3125,22 +3365,114 @@ describe('SerenityController', () => {
         expect(response.status).to.equal(200);
         const body = await readBody(response);
         expect(body).to.deep.equal({
-          jobId: JOB, status: 'COMPLETED', result, error: null,
+          jobId: JOB, jobType: 'classifyPrompts', status: 'COMPLETED', result, error: null,
         });
         // Secrets on the job metadata are never exposed.
         expect(body).to.not.have.property('metadata');
       });
 
-      it('surfaces the error envelope for a FAILED job', async () => {
+      it('exposes an explicit partial-failure outcome for a completed bulk-tags job', async () => {
         const controller = SerenityController({ env: {} }, fakeLog(), {});
-        const error = { code: 'NEEDS_REAUTH', message: 'Promise token exchange rejected' };
+        const result = {
+          outcome: 'PARTIAL_FAILURE',
+          matchedCount: 2,
+          updatedCount: 1,
+          unchangedCount: 0,
+          failureCount: 1,
+          failures: [{
+            semrushPromptId: 'p-2',
+            code: 'serenityUpstreamError',
+            message: 'The prompt could not be updated',
+            retryable: true,
+          }],
+          publish: { state: 'SUCCEEDED', error: null },
+        };
+        const response = await controller.getPromptsJobStatus(
+          ctxWithJob(makeAsyncJob({
+            status: 'COMPLETED',
+            result,
+            jobType: 'serenity-bulk-tags',
+          })),
+        );
+        const body = await readBody(response);
+
+        expect(body.jobType).to.equal('bulkTags');
+        expect(body.status).to.equal('COMPLETED');
+        expect(body.result.outcome).to.equal('PARTIAL_FAILURE');
+        expect(body.error).to.equal(null);
+      });
+
+      it('sanitizes a FAILED job error to the documented public envelope', async () => {
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const error = {
+          code: 'NEEDS_REAUTH',
+          message: 'Promise token exchange rejected',
+          details: { promiseToken: 'secret', upstreamStatus: 401 },
+        };
         const response = await controller.getPromptsJobStatus(
           ctxWithJob(makeAsyncJob({ status: 'FAILED', result: null, error })),
         );
         expect(response.status).to.equal(200);
         const body = await readBody(response);
         expect(body).to.deep.equal({
-          jobId: JOB, status: 'FAILED', result: null, error,
+          jobId: JOB,
+          jobType: 'classifyPrompts',
+          status: 'FAILED',
+          result: null,
+          error: {
+            code: 'jobFailed',
+            message: 'The background job failed',
+            retryable: false,
+          },
+        });
+        expect(JSON.stringify(body)).not.to.include('NEEDS_REAUTH');
+        expect(JSON.stringify(body)).not.to.include('promiseToken');
+      });
+
+      it('surfaces promptCorpusIncomplete as a retryable public worker failure', async () => {
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const response = await controller.getPromptsJobStatus(
+          ctxWithJob(makeAsyncJob({
+            status: 'FAILED',
+            jobType: 'serenity-bulk-tags',
+            error: {
+              code: 'promptCorpusIncomplete',
+              message: 'Unable to read the complete prompt cohort',
+              retryable: true,
+            },
+          })),
+        );
+
+        expect(await readBody(response)).to.deep.equal({
+          jobId: JOB,
+          jobType: 'bulkTags',
+          status: 'FAILED',
+          result: null,
+          error: {
+            code: 'promptCorpusIncomplete',
+            message: 'Unable to read the complete prompt cohort',
+            retryable: true,
+          },
+        });
+      });
+
+      it('does not expose an upstream URL from a FAILED job error', async () => {
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const response = await controller.getPromptsJobStatus(
+          ctxWithJob(makeAsyncJob({
+            status: 'FAILED',
+            error: {
+              code: 'serenityUpstreamError',
+              message: 'POST https://internal.example/workspaces/secret failed',
+              retryable: true,
+            },
+          })),
+        );
+        const body = await readBody(response);
+        expect(body.error).to.deep.equal({
+          code: 'serenityUpstreamError',
+          message: 'Upstream request failed',
+          retryable: true,
         });
       });
 
