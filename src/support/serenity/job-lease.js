@@ -42,12 +42,14 @@ import { randomUUID } from 'crypto';
 const ASYNC_JOBS_TABLE = 'async_jobs';
 
 /**
- * Default lease lifetime. Deliberately generous and above the worker timeout: a
- * live worker renews it at phase boundaries ({@link renewJobLease}); the TTL only
- * governs how long a DEAD worker's job stays un-reclaimable. Coordinate the SQS
- * visibility timeout (infra#780) to exceed the worker timeout by a similar margin.
+ * Default lease lifetime, sized to sit STRICTLY BETWEEN the worker Lambda timeout
+ * and the SQS visibility timeout that spacecat-infrastructure#780 asserts:
+ * `visibility 960s > lease 930s > worker 900s > (DRS 300s + Semrush writes 120s)`.
+ * A live worker therefore holds its lease for its entire run, while a genuinely
+ * dead worker's lease frees (at ~930s) just BEFORE the 960s redelivery, so the
+ * redelivery can atomically re-claim rather than being blocked by a stale lease.
  */
-export const DEFAULT_LEASE_TTL_MS = 15 * 60 * 1000;
+export const DEFAULT_LEASE_TTL_MS = 930 * 1000;
 
 /**
  * Mints a fresh, unguessable lease token identifying one worker's claim.

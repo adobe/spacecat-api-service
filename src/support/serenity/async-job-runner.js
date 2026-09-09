@@ -148,6 +148,11 @@ const REAUTH_STATUS_PATTERN = /status: (401|403)\b/;
  *   A token-bearing Semrush-write job type passes {@link PROMISE_PAIR_SEMRUSH} here
  *   so it can never silently run on the default IMS pair when `x-promise-audience`
  *   is absent (which current callers never send).
+ * @param {string} [params.queueUrl] - SQS queue to enqueue onto. Defaults to
+ *   `env.SERENITY_JOB_RUNNER_QUEUE_URL` (the shared classify/bulk-tags queue).
+ *   A token-bearing Semrush-write job passes its own dedicated queue
+ *   (`env.SERENITY_MARKET_JOBS_QUEUE_URL`, spacecat-infrastructure#780) whose DLQ
+ *   is deliberately NOT auto-redriven — recovery is the lease-aware runbook.
  * @returns {Promise<object>} The created job (an AsyncJob instance).
  * @throws On SQS send failure, after rolling back the created job record; on an
  *   unresolvable required pair (`PROMISE_PAIR_REQUIRED`); on a non-typed token
@@ -156,12 +161,13 @@ const REAUTH_STATUS_PATTERN = /status: (401|403)\b/;
 export async function createAndEnqueueJob(
   context,
   {
-    jobType, metadata = {}, promiseToken, promisePair, jobId, requirePair,
+    jobType, metadata = {}, promiseToken, promisePair, jobId, requirePair, queueUrl,
   },
 ) {
   const {
     dataAccess, sqs, env, log,
   } = context;
+  const targetQueueUrl = queueUrl ?? env.SERENITY_JOB_RUNNER_QUEUE_URL;
 
   // When a pre-minted token is supplied (worker self-requeue), the pair must come
   // from the explicit promisePair only — never re-derived from the request context,
@@ -197,7 +203,7 @@ export async function createAndEnqueueJob(
   });
 
   try {
-    await sqs.sendMessage(env.SERENITY_JOB_RUNNER_QUEUE_URL, {
+    await sqs.sendMessage(targetQueueUrl, {
       jobId: job.getId(),
       type: jobType,
     });

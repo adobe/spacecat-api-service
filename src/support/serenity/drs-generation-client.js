@@ -14,6 +14,7 @@
 
 import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
 import { retryableJobError } from './async-job-runner.js';
+import { emitMetric, resolveEnvironment } from '../metrics-emf.js';
 
 /**
  * Client for the stateless SYNCHRONOUS DRS prompt-generation service
@@ -36,6 +37,22 @@ import { retryableJobError } from './async-job-runner.js';
  * wiring lands in spacecat-infrastructure#780 — this repo must not hard-code an ARN.
  */
 export const DRS_GENERATION_TARGET_ENV = 'DRS_PROMPT_GENERATION_FUNCTION';
+
+/**
+ * CloudWatch namespace the worker's DRS-invoke metrics land in — the alarms in
+ * spacecat-infrastructure#780 read `DRSInvokeFailure` (Count) and
+ * `DRSInvokeDurationMs` (Milliseconds) here. DRS emits no stuck/DLQ signal by
+ * design, so these observability points must live on the api-service worker.
+ */
+export const METRICS_NAMESPACE = 'SpacecatSerenityMarketWorker';
+
+/**
+ * Client-side budget for a single DRS invoke, sized to fit UNDER the worker Lambda
+ * timeout with headroom for the Semrush write/publish phase — the timeout nesting
+ * spacecat-infrastructure#780 asserts is `worker 900s > (DRS 300s + writes 120s)`.
+ * Enforced via an abort signal so a hung DRS invoke can't consume the whole run.
+ */
+export const DRS_INVOKE_TIMEOUT_MS = 300 * 1000;
 
 /**
  * @typedef {object} DrsGenerationRequest
@@ -93,11 +110,23 @@ export function createLambdaInvoker(context) {
   const region = context?.runtime?.region;
   const client = new LambdaClient({ region });
   return async (functionName, payload) => {
-    const response = await client.send(new InvokeCommand({
-      FunctionName: functionName,
-      InvocationType: 'RequestResponse',
-      Payload: Buffer.from(JSON.stringify(payload)),
-    }));
+    // Bound the invoke with an abort signal so a hung DRS call can't consume the
+    // whole worker budget (DRS_INVOKE_TIMEOUT_MS). AbortSignal.timeout is Node 18+.
+    const abortSignal = AbortSignal.timeout(DRS_INVOKE_TIMEOUT_MS);
+    let response;
+    try {
+      response = await client.send(new InvokeCommand({
+        FunctionName: functionName,
+        InvocationType: 'RequestResponse',
+        Payload: Buffer.from(JSON.stringify(payload)),
+      }), { abortSignal });
+    } catch (error) {
+      // A timeout/abort or transport error is transient — retry within the bound.
+      if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
+        throw retryableJobError(`DRS generation invoke timed out after ${DRS_INVOKE_TIMEOUT_MS}ms`);
+      }
+      throw error;
+    }
 
     // A Lambda-level failure (unhandled exception, init failure) or a non-200
     // status is transport-shaped: transient by default, so retry within the
@@ -175,8 +204,35 @@ export async function invokeDrsGeneration(context, request, { invoke } = {}) {
     );
   }
 
+  // Best-effort EMF metrics (spacecat-infrastructure#780 alarms read these). BOTH
+  // `DRSInvokeFailure` and `DRSInvokeDurationMs` carry EXACTLY the `Environment`
+  // dimension the EMF helper always adds — no `Reason`/jobType/region dimension —
+  // so the two metrics share one dimension set the infra alarms match on
+  // (`Environment=<env>`); the failure reason is logged, not dimensioned, to avoid
+  // fragmenting the count and leaving the alarm at INSUFFICIENT_DATA.
+  const metricsOpts = { environment: resolveEnvironment(env), namespace: METRICS_NAMESPACE };
+  const emitFailure = (reason) => {
+    log?.warn?.('[drs-generation] invoke failure', { reason, market: request.market, siteId: request.siteId });
+    try {
+      emitMetric({ name: 'DRSInvokeFailure', value: 1 }, metricsOpts);
+    } catch { /* metrics are best-effort, never mask the real error */ }
+  };
+
   const invoker = invoke ?? createLambdaInvoker(context);
-  const parsed = await invoker(functionName, request);
+  const startedAt = Date.now();
+  let parsed;
+  try {
+    parsed = await invoker(functionName, request);
+  } catch (error) {
+    emitFailure('invoke');
+    throw error;
+  } finally {
+    try {
+      emitMetric({
+        name: 'DRSInvokeDurationMs', value: Date.now() - startedAt, unit: 'Milliseconds',
+      }, metricsOpts);
+    } catch { /* best-effort */ }
+  }
   const body = unwrapDrsBody(parsed);
 
   const shipSummary = body?.ship_summary ?? {};
@@ -187,6 +243,7 @@ export async function invokeDrsGeneration(context, request, { invoke } = {}) {
     log?.info?.('[drs-generation] non-ship verdict', {
       siteId: request.siteId, market: request.market, verdict, errorCategory,
     });
+    emitFailure(`verdict:${verdict ?? 'unknown'}`);
     // `gate_error` with a `retryable` category is the ONLY retryable non-ship
     // outcome; `held` and any `terminal` category fail the job (never publish an
     // empty/held market).

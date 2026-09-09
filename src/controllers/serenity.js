@@ -2507,7 +2507,9 @@ function SerenityController(context, log, env) {
       job.setStatus('IN_PROGRESS');
       job.setError(null);
       await job.save();
-      await ctx.sqs.sendMessage(ctx.env.SERENITY_JOB_RUNNER_QUEUE_URL, {
+      // Re-enqueue onto the DEDICATED market-jobs queue (infra#780), not the
+      // shared classify/bulk-tags queue.
+      await ctx.sqs.sendMessage(ctx.env.SERENITY_MARKET_JOBS_QUEUE_URL, {
         jobId: job.getId(),
         type: SEMRUSH_MARKET_GENERATION_JOB_TYPE,
       });

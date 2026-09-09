@@ -14,6 +14,7 @@ import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
+import esmock from 'esmock';
 
 import {
   invokeDrsGeneration,
@@ -24,6 +25,18 @@ import { isRetryableJobError } from '../../../src/support/serenity/async-job-run
 
 use(chaiAsPromised);
 use(sinonChai);
+
+// A constructor that returns an object is used by `new` as-is, so these avoid
+// class syntax (max-classes-per-file / class-methods-use-this) for the esmock.
+function lambdaMock(sendStub) {
+  function LambdaClient() {
+    return { send: sendStub };
+  }
+  function InvokeCommand(input) {
+    return { input };
+  }
+  return { LambdaClient, InvokeCommand };
+}
 
 const baseRequest = {
   seeds: [{ topic: 'running shoes', volume: 100, examplePrompts: ['best running shoes'] }],
@@ -110,6 +123,46 @@ describe('drs-generation-client', () => {
   it('treats a proxy 5xx as retryable', async () => {
     const invoke = sinon.stub().resolves({ statusCode: 502, body: 'bad gateway' });
     const err = await invokeDrsGeneration(ctx(), baseRequest, { invoke }).catch((e) => e);
+    expect(isRetryableJobError(err)).to.equal(true);
+  });
+
+  it('emits DRSInvokeDurationMs + DRSInvokeFailure in the infra namespace on a non-ship verdict', async () => {
+    const heldInvoke = sinon.stub().resolves({ prompts: [], ship_summary: { verdict: 'held' } });
+    const logs = [];
+    const orig = console.log;
+    console.log = (...a) => logs.push(a.join(' '));
+    try {
+      await invokeDrsGeneration(ctx(), baseRequest, { invoke: heldInvoke }).catch(() => {});
+    } finally {
+      console.log = orig;
+    }
+    const joined = logs.join('\n');
+    expect(joined).to.contain('DRSInvokeDurationMs');
+    expect(joined).to.contain('DRSInvokeFailure');
+    expect(joined).to.contain('SpacecatSerenityMarketWorker');
+  });
+});
+
+describe('drs-generation-client — createLambdaInvoker', () => {
+  it('converts an AWS TimeoutError into a retryable job error', async () => {
+    const sendStub = sinon.stub().rejects(Object.assign(new Error('aborted'), { name: 'TimeoutError' }));
+    const { createLambdaInvoker } = await esmock(
+      '../../../src/support/serenity/drs-generation-client.js',
+      { '@aws-sdk/client-lambda': lambdaMock(sendStub) },
+    );
+    const invoker = createLambdaInvoker({ runtime: { region: 'us-east-1' } });
+    const err = await invoker('fn', { a: 1 }).catch((e) => e);
+    expect(isRetryableJobError(err)).to.equal(true);
+  });
+
+  it('treats a Lambda FunctionError response as retryable', async () => {
+    const sendStub = sinon.stub().resolves({ StatusCode: 200, FunctionError: 'Unhandled', Payload: Buffer.from('boom') });
+    const { createLambdaInvoker } = await esmock(
+      '../../../src/support/serenity/drs-generation-client.js',
+      { '@aws-sdk/client-lambda': lambdaMock(sendStub) },
+    );
+    const invoker = createLambdaInvoker({ runtime: { region: 'us-east-1' } });
+    const err = await invoker('fn', {}).catch((e) => e);
     expect(isRetryableJobError(err)).to.equal(true);
   });
 });

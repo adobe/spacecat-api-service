@@ -74,12 +74,14 @@ describe('semrush-market-generation-job — pure helpers', () => {
 describe('semrush-market-generation-job — producer', () => {
   let sandbox;
   let createAndEnqueueJobStub;
+  let isMarketConsumerReadyStub;
   let enqueueSemrushMarketGeneration;
   let PROMISE_PAIR_SEMRUSH;
 
   beforeEach(async () => {
     sandbox = sinon.createSandbox();
     createAndEnqueueJobStub = sandbox.stub().resolves(makeJob());
+    isMarketConsumerReadyStub = sandbox.stub().resolves(true);
     ({ PROMISE_PAIR_SEMRUSH } = await import('../../../../src/support/serenity/async-job-runner.js'));
 
     ({ enqueueSemrushMarketGeneration } = await esmock(
@@ -88,6 +90,9 @@ describe('semrush-market-generation-job — producer', () => {
         '../../../../src/support/serenity/async-job-runner.js': {
           createAndEnqueueJob: createAndEnqueueJobStub,
           PROMISE_PAIR_SEMRUSH,
+        },
+        '../../../../src/support/serenity/market-worker-readiness.js': {
+          isMarketConsumerReady: isMarketConsumerReadyStub,
         },
       },
     ));
@@ -118,9 +123,17 @@ describe('semrush-market-generation-job — producer', () => {
   function context(existing = null) {
     return {
       dataAccess: { AsyncJob: { findById: sandbox.stub().resolves(existing) } },
+      env: { SERENITY_MARKET_JOBS_QUEUE_URL: 'market-queue-url' },
       log: { info: sandbox.stub(), warn: sandbox.stub() },
     };
   }
+
+  it('does NOT enqueue when the consumer readiness gate is closed (fail-closed)', async () => {
+    isMarketConsumerReadyStub.resolves(false);
+    const result = await enqueueSemrushMarketGeneration(context(), baseParams());
+    expect(result).to.deep.equal({ enqueued: false, reason: 'consumer-not-ready' });
+    expect(createAndEnqueueJobStub).to.not.have.been.called;
+  });
 
   it('is a clean no-op when the catalogue yields no seeds', async () => {
     const params = baseParams({ transport: { getBrandTopics: sandbox.stub().resolves([]) } });
@@ -154,6 +167,8 @@ describe('semrush-market-generation-job — producer', () => {
     expect(opts.jobId).to.equal(reservationJobId('brand-1', 2840, 'en'));
     expect(opts.requirePair).to.equal(PROMISE_PAIR_SEMRUSH);
     expect(opts.promisePair).to.equal(PROMISE_PAIR_SEMRUSH);
+    // Enqueued onto the DEDICATED market queue, not the shared runner queue.
+    expect(opts.queueUrl).to.equal('market-queue-url');
     expect(opts.metadata.seeds).to.have.length(1);
     expect(opts.metadata.siteId).to.equal('site-1');
     const serialized = JSON.stringify(opts.metadata).toLowerCase();

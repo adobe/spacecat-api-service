@@ -79,7 +79,7 @@ describe('SerenityController — Semrush-market generation endpoints', () => {
 
   function baseCtx(overrides = {}) {
     return {
-      env: {},
+      env: { SERENITY_MARKET_JOBS_QUEUE_URL: 'market-queue-url' },
       params: { spaceCatId: ORG, brandId: BRAND, jobId: JOB_ID },
       dataAccess: {
         Organization: { findById: sinon.stub().resolves({ getId: () => ORG }) },
@@ -190,7 +190,7 @@ describe('SerenityController — Semrush-market generation endpoints', () => {
       expect(persisted.promiseToken).to.deep.equal({ promise_token: 'fresh-ptok', expires_in: 300 });
       expect(persisted.promisePair).to.equal('SEMRUSH');
       expect(save).to.have.been.calledOnce;
-      expect(ctx.sqs.sendMessage).to.have.been.calledOnceWith(undefined, {
+      expect(ctx.sqs.sendMessage).to.have.been.calledOnceWith('market-queue-url', {
         jobId: JOB_ID, type: 'serenity-generate-semrush-market',
       });
     });

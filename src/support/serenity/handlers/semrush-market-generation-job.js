@@ -24,6 +24,7 @@ import {
 } from '../async-job-runner.js';
 import { invokeDrsGeneration, DrsGenerationTerminalError } from '../drs-generation-client.js';
 import { provisionDimensionTree, ensureServerOwnedValue } from '../tag-tree.js';
+import { isMarketConsumerReady } from '../market-worker-readiness.js';
 import { resolveProject } from '../subworkspace-projects.js';
 import { publishAffected, buildCreateMetadata } from './prompts.js';
 import { DIMENSION, GENERATED_PROMPT_SOURCE_VALUE, ORIGIN_VALUE } from '../prompt-tags.js';
@@ -48,6 +49,14 @@ import { DIMENSION, GENERATED_PROMPT_SOURCE_VALUE, ORIGIN_VALUE } from '../promp
 
 /** Job type the worker dispatches on (stored on `metadata.jobType`). */
 export const SEMRUSH_MARKET_GENERATION_JOB_TYPE = 'serenity-generate-semrush-market';
+
+/**
+ * Env key holding the DEDICATED market-jobs SQS queue url (spacecat-infrastructure#780),
+ * separate from the shared classify/bulk-tags `SERENITY_JOB_RUNNER_QUEUE_URL`. Its DLQ
+ * is deliberately NOT auto-redriven (token-bearing double-write hazard) — recovery is
+ * the manual lease-aware runbook.
+ */
+export const SEMRUSH_MARKET_JOBS_QUEUE_ENV = 'SERENITY_MARKET_JOBS_QUEUE_URL';
 
 /** Public (client-facing) job type for the polling DTO. */
 export const SEMRUSH_MARKET_GENERATION_PUBLIC_JOB_TYPE = 'generateSemrushMarket';
@@ -171,6 +180,17 @@ export async function enqueueSemrushMarketGeneration(context, params) {
     imsUserId = null,
   } = params;
 
+  // Fail-closed consumer-readiness gate (infra#780): do not enqueue until the
+  // operator has flipped the SSM param to "true" (the worker/queue/DRS-invoke IAM
+  // must be live and post-deploy-verified). Until then this is a clean no-op — the
+  // market stands without generated prompts.
+  if (!await isMarketConsumerReady(context)) {
+    log?.info?.('[semrush-market-gen] consumer not ready; skipping enqueue', {
+      brandId, workspaceId, market,
+    });
+    return { enqueued: false, reason: 'consumer-not-ready' };
+  }
+
   // Resolve seeds server-side (a bounded read, same single upstream call the old
   // synchronous path made). An empty catalogue is a clean no-op — nothing to
   // generate, so nothing to enqueue.
@@ -211,6 +231,7 @@ export async function enqueueSemrushMarketGeneration(context, params) {
     jobId,
     requirePair: PROMISE_PAIR_SEMRUSH,
     promisePair: PROMISE_PAIR_SEMRUSH,
+    queueUrl: context.env?.[SEMRUSH_MARKET_JOBS_QUEUE_ENV],
     metadata: {
       brandId,
       siteId,
