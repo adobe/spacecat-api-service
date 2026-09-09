@@ -213,6 +213,20 @@ describe('sentiment-overview definitions', () => {
           { op: 'eq', val: 'category__Paint', col: 'CBF_tags' },
         ]);
       });
+
+      // Guards the merge of LLMO-7456 (brandName) with the faceted-tag work, which added
+      // tagPaths to this same signature: both must survive and be emitted together.
+      it('coexists with faceted tagPaths', () => {
+        const payload = buildSentimentOverviewPayload({
+          brandName: 'au',
+          tagPaths: ['category__Paint', 'type__branded'],
+        });
+        expect(findBrandFilter(payload)).to.deep.equal({ op: 'eq', val: 'au', col: 'CBF_brand' });
+        expect(payload.filters.advanced.filters).to.deep.include.members([
+          { op: 'or', filters: [{ op: 'eq', val: 'category__Paint', col: 'CBF_tags' }] },
+          { op: 'or', filters: [{ op: 'eq', val: 'type__branded', col: 'CBF_tags' }] },
+        ]);
+      });
     });
   });
 

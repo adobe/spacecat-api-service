@@ -176,12 +176,64 @@ function extractQuery(context) {
       const u = new URL(context.request.url);
       const out = {};
       for (const [k, v] of u.searchParams) {
-        out[k] = v;
+        if (k !== 'tagPath') {
+          out[k] = v;
+        }
+      }
+      const tagPaths = u.searchParams.getAll('tagPath');
+      if (tagPaths.length > 0) {
+        out.tagPath = tagPaths;
       }
       return out;
     } catch { /* fall through */ }
   }
   return {};
+}
+
+function tagFilterParams(query) {
+  const tagPaths = Array.isArray(query?.tagPath) ? query.tagPath : [];
+  if (tagPaths.length === 0) {
+    return {};
+  }
+
+  if (query.tagFilterMode !== 'elements-faceted-v1') {
+    const error = new ErrorWithStatusCode(
+      'tagFilterMode must be elements-faceted-v1 when tagPath is supplied',
+      400,
+    );
+    error.code = 'invalidTagFilter';
+    throw error;
+  }
+  if (tagPaths.length > 50) {
+    const error = new ErrorWithStatusCode('Too many tagPath values', 400);
+    error.code = 'tagFilterTooLarge';
+    throw error;
+  }
+  const normalized = [...new Set(tagPaths.map((path) => String(path).trim()))];
+  const invalid = normalized.some((path) => {
+    const parts = path.split('__');
+    return parts.length < 2
+      || parts.length > 3
+      || parts.some((part) => !part)
+      || !['tag', 'category'].includes(parts[0]);
+  });
+  if (invalid) {
+    const error = new ErrorWithStatusCode('tagPath contains an invalid full tag path', 400);
+    error.code = 'invalidTagFilter';
+    throw error;
+  }
+  return { tagPaths: normalized };
+}
+
+function rejectUnsupportedTagFilter(query) {
+  if (Array.isArray(query?.tagPath) && query.tagPath.length > 0) {
+    const error = new ErrorWithStatusCode(
+      'This analytics source does not support custom tag filtering',
+      400,
+    );
+    error.code = 'unsupportedTagFilter';
+    throw error;
+  }
 }
 
 /**
@@ -812,6 +864,7 @@ export default function ElementsController(context, log, env) {
         tags: splitCsv(query.tag),
         projectIds: splitCsv(query.projectId || query.project_id),
         enrichUserIntent: parseUserIntent(query),
+        ...tagFilterParams(query),
       });
       return ok(result);
     } catch (e) {
@@ -877,6 +930,7 @@ export default function ElementsController(context, log, env) {
         startDate,
         endDate,
         category: query.categoryId || query.category,
+        ...tagFilterParams(query),
         channel: query.channel || query.selectedChannel,
         page: query.page,
         pageSize: query.pageSize,
@@ -905,6 +959,7 @@ export default function ElementsController(context, log, env) {
       }
       const { workspaceId, brand } = auth;
       const query = extractQuery(ctx);
+      rejectUnsupportedTagFilter(query);
 
       // Date range is required + validated (mirrors cited-domains/sentiment-overview) —
       // never silently default to a rolling window nor forward a malformed date to Semrush.
@@ -971,6 +1026,7 @@ export default function ElementsController(context, log, env) {
       }
       const { workspaceId, brand } = auth;
       const query = extractQuery(ctx);
+      rejectUnsupportedTagFilter(query);
 
       // Date range is required + validated (mirrors subreddits/cited-domains) —
       // never silently default to a rolling window nor forward a malformed date to Semrush.
@@ -1037,6 +1093,7 @@ export default function ElementsController(context, log, env) {
       }
       const { workspaceId, brand } = auth;
       const query = extractQuery(ctx);
+      rejectUnsupportedTagFilter(query);
 
       // Date range is required + validated (mirrors reddit-threads/subreddits) —
       // never silently default to a rolling window nor forward a malformed date to Semrush.
@@ -1152,6 +1209,7 @@ export default function ElementsController(context, log, env) {
         endDate,
         category: query.categoryId || query.category,
         brandName: resolveBrandFilterName(brand, log, 'listSentimentOverview'),
+        ...tagFilterParams(query),
       };
 
       const result = await service.getSentimentOverview(workspaceId, params);
@@ -1224,6 +1282,7 @@ export default function ElementsController(context, log, env) {
         startDate: hasText(startDate) ? startDate : undefined,
         endDate: hasText(endDate) ? endDate : undefined,
         projectIds,
+        ...tagFilterParams(query),
         brandName: resolveBrandFilterName(brand, log, 'listTopics'),
       });
 
@@ -1311,6 +1370,7 @@ export default function ElementsController(context, log, env) {
         startDate: hasText(startDate) ? startDate : undefined,
         endDate: hasText(endDate) ? endDate : undefined,
         projectIds,
+        ...tagFilterParams(query),
         brandName: resolveBrandFilterName(brand, log, 'listTopicPrompts'),
       });
 
@@ -1412,6 +1472,7 @@ export default function ElementsController(context, log, env) {
         category: query.categoryId || query.category,
         // Fan out per market + union/dedupe by prompt text (element takes one project_id).
         projectIds: requestedProjectIds,
+        ...tagFilterParams(query),
       });
 
       // Match the PG url-prompts envelope this endpoint will replace: a bare `{ prompts }`
@@ -1506,6 +1567,7 @@ export default function ElementsController(context, log, env) {
         startDate,
         endDate,
         category: query.categoryId || query.category,
+        ...tagFilterParams(query),
       });
 
       // Client-side pagination — Semrush has no server-side pagination; totalCount is
@@ -1614,6 +1676,7 @@ export default function ElementsController(context, log, env) {
         category: query.categoryId || query.category,
         page: query.page,
         pageSize: query.pageSize,
+        ...tagFilterParams(query),
       });
 
       return cachedOk(result);
@@ -1725,6 +1788,7 @@ export default function ElementsController(context, log, env) {
         endDate,
         projectIds,
         brandName: brand.name,
+        ...tagFilterParams(query),
       });
       return cachedOk(result);
     } catch (e) {
@@ -1823,6 +1887,7 @@ export default function ElementsController(context, log, env) {
         projectIds,
         brandName: brand.name,
         showTrends: parseShowTrends(query),
+        ...tagFilterParams(query),
       });
 
       return cachedOk(result);
@@ -1906,6 +1971,7 @@ export default function ElementsController(context, log, env) {
         startDate,
         endDate,
         category: query.categoryId || query.category,
+        ...tagFilterParams(query),
       });
 
       return cachedOk(result);
@@ -1959,6 +2025,7 @@ export default function ElementsController(context, log, env) {
         platform: query.platform,
         tags: category ? [category] : [],
         projectIds,
+        ...tagFilterParams(query),
       });
 
       return cachedOk({ totalPrompts });
@@ -2050,6 +2117,7 @@ export default function ElementsController(context, log, env) {
         endDate,
         projectIds,
         brandName: brand.name,
+        ...tagFilterParams(query),
       });
       return cachedOk(result);
     } catch (e) {
@@ -2143,6 +2211,7 @@ export default function ElementsController(context, log, env) {
         // Already carries the `category__<label>` prefix from the caller; sent
         // through as-is, not re-prefixed (see PR #2912).
         category: query.categoryId || query.category,
+        ...tagFilterParams(query),
       });
       return cachedOk(result);
     } catch (e) {
@@ -2233,6 +2302,7 @@ export default function ElementsController(context, log, env) {
         // Already carries the `category__<label>` prefix from the caller; sent
         // through as-is, not re-prefixed (see PR #2912).
         category: query.categoryId || query.category,
+        ...tagFilterParams(query),
       });
       return cachedOk(result);
     } catch (e) {

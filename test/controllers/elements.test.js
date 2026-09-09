@@ -819,6 +819,39 @@ describe('ElementsController', () => {
       });
     });
 
+    it('uses the Elements-specific filter mode for repeated tagPath filters', async () => {
+      const ctx = fakeContext({
+        url: promptsUrl('?tagPath=tag__Campaign&tagPath=tag__Audience__Enterprise'
+          + '&tagFilterMode=elements-faceted-v1'),
+      });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+
+      const res = await ctrl.listPrompts(ctx);
+
+      expect(res.status).to.equal(200);
+      expect(serviceStub.getPrompts).to.have.been.calledWith(
+        SUB_WORKSPACE_ID,
+        sinon.match({
+          tagPaths: ['tag__Campaign', 'tag__Audience__Enterprise'],
+        }),
+      );
+    });
+
+    it('rejects native faceted-v1 on the incompatible Elements filter engine', async () => {
+      const ctx = fakeContext({
+        url: promptsUrl('?tagPath=tag__Campaign&tagFilterMode=faceted-v1'),
+      });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+
+      const res = await ctrl.listPrompts(ctx);
+      const body = await readBody(res);
+
+      expect(res.status).to.equal(400);
+      expect(body.error).to.equal('invalidTagFilter');
+      expect(body.message).to.match(/elements-faceted-v1/);
+      expect(serviceStub.getPrompts).not.to.have.been.called;
+    });
+
     it('passes enrichUserIntent: true to getPrompts when ?userIntent=true', async () => {
       const ctx = fakeContext({ url: promptsUrl('?projectId=proj-a&userIntent=true') });
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
@@ -1983,22 +2016,26 @@ describe('ElementsController', () => {
     });
 
     it('passes the brand display name to getTopics as brandName (CBF_brand)', async () => {
-      const ctx = topicsCtx();
+      const ctx = topicsCtx({
+        url: topicsUrl('?tagPath=tag__Campaign__Q1&tagFilterMode=elements-faceted-v1'),
+      });
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       await ctrl.listTopics(ctx);
       const [, params] = serviceStub.getTopics.firstCall.args;
       expect(params.brandName).to.equal('Adobe Brand');
+      expect(params.tagPaths).to.deep.equal(['tag__Campaign__Q1']);
     });
 
     it('passes the brand display name to getTopicPrompts as brandName (CBF_brand)', async () => {
       const ctx = topicsCtx({
-        url: promptsUrlForTopic(),
+        url: promptsUrlForTopic('?tagPath=category__Furniture&tagFilterMode=elements-faceted-v1'),
         params: { topicId: encodeURIComponent(TOPIC) },
       });
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       await ctrl.listTopicPrompts(ctx);
       const [, params] = serviceStub.getTopicPrompts.firstCall.args;
       expect(params.brandName).to.equal('Adobe Brand');
+      expect(params.tagPaths).to.deep.equal(['category__Furniture']);
     });
 
     // Fail-open: a brand with no usable display name must degrade to brand-agnostic
