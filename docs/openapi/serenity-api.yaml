@@ -3734,3 +3734,55 @@ v2-serenity-competitor-summary:
           application/json:
             schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
       '500': { $ref: './responses.yaml#/500' }
+
+v2-serenity-job-by-id:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID-only on the /serenity/* surface)
+      schema:
+        type: string
+        format: uuid
+    - name: jobId
+      in: path
+      required: true
+      description: 'Async job id returned by any `async: true` 202 response.'
+      schema:
+        type: string
+        format: uuid
+  get:
+    tags: [serenity]
+    summary: Poll any Serenity async job (PR-C, LLMO-7352/LLMO-7418)
+    description: |
+      Job-type-agnostic alias of `GET .../serenity/prompts/jobs/{jobId}` (same
+      handler — it never inspects the job's `type`, only its `brandId`). Use this
+      path, not the prompts-named one, to poll a job returned by `async: true` on
+      `POST .../serenity/markets`, `POST .../serenity/activate`, or
+      `POST /v2/orgs/{spaceCatId}/brands` — the prompts path works too, but this
+      one doesn't say "prompts" for a workspace-provisioning or market/activation
+      job. Access is gated by the same org/brand access + serenity-active checks
+      as every other serenity endpoint; a job that does not belong to the
+      addressed brand 404s exactly like a missing job (jobs are never leaked
+      across brands). The response is secret-free — only
+      `{ jobId, status, result, error }`.
+    operationId: getSerenityJobStatus
+    security:
+      - session_token: []
+    responses:
+      '200':
+        description: Job status (and result when COMPLETED / error when FAILED).
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityJobStatus' }
+      '400': { $ref: './responses.yaml#/400' }
+      '404':
+        description: Organization, brand, or job not found, serenity is not active for the brand, or the job belongs to a different brand.
+      '500': { $ref: './responses.yaml#/500' }
