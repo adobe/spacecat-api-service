@@ -336,6 +336,8 @@ describe('getRouteHandlers', () => {
     patchLlmoDataRow: () => null,
     getLlmoRationale: () => null,
     getBrandClaims: () => null,
+    getBrandClaimsWeeks: () => null,
+    requestBrandClaims: () => null,
     createOrUpdateEdgeConfig: () => null,
     getEdgeConfig: () => null,
     createOrUpdateStageEdgeConfig: () => null,
@@ -374,6 +376,7 @@ describe('getRouteHandlers', () => {
     deploy: () => null,
     plan: () => null,
     getPermissions: () => null,
+    getTemplate: () => null,
   };
 
   const mockLlmoAkamaiController = {
@@ -762,7 +765,6 @@ describe('getRouteHandlers', () => {
       'POST /sites',
       'GET /sites.csv',
       'GET /sites.xlsx',
-      'GET /slack/events',
       'POST /slack/events',
       'GET /trigger',
       'POST /event/fulfillment',
@@ -975,12 +977,14 @@ describe('getRouteHandlers', () => {
       'GET /organizations/by-ims-org-id/:imsOrgId',
       'GET /organizations/by-ims-org-id/:imsOrgId/slack-config',
       'GET /organizations/by-product-code/:productCode',
+      'GET /organizations/by-access-map-sheet/:productCode',
       'PATCH /organizations/:organizationId',
       'DELETE /organizations/:organizationId',
       'GET /organizations/:organizationId/sites',
       'GET /organizations/:organizationId/brands',
       'GET /v2/orgs/:spaceCatId/brands',
       'GET /v2/orgs/:spaceCatId/brands/:brandId',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/markets',
       'GET /v2/orgs/:spaceCatId/categories',
       'POST /v2/orgs/:spaceCatId/categories',
       'PATCH /v2/orgs/:spaceCatId/categories/:categoryId',
@@ -1004,6 +1008,7 @@ describe('getRouteHandlers', () => {
       'POST /v2/orgs/:spaceCatId/brands/:brandId/prompts/check',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts',
+      'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/bulk-tags',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/bulk-delete',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/jobs/:jobId',
       'PATCH /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/:semrushPromptId',
@@ -1014,6 +1019,8 @@ describe('getRouteHandlers', () => {
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags',
       'PATCH /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags/:tagId',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags/:tagId/impact',
+      'DELETE /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags/:tagId',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/models',
       'PUT /v2/orgs/:spaceCatId/brands/:brandId/serenity/models',
       'GET /v2/orgs/:spaceCatId/serenity/models',
@@ -1023,6 +1030,7 @@ describe('getRouteHandlers', () => {
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/access',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/prompts',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/cited-domains',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/responses',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/sentiment-overview',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/subreddits',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/reddit-threads',
@@ -1299,6 +1307,8 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/llmo/global-sheet-data/:configName',
       'GET /sites/:siteId/llmo/rationale',
       'GET /sites/:siteId/llmo/brand-claims',
+      'GET /sites/:siteId/llmo/brand-claims/weeks',
+      'POST /sites/:siteId/llmo/brand-claims/request',
       'GET /sites/:siteId/llmo/strategy/demo/brand-presence',
       'GET /sites/:siteId/llmo/strategy/demo/recommendations',
       'POST /sites/:siteId/llmo/offboard',
@@ -1323,6 +1333,7 @@ describe('getRouteHandlers', () => {
       'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/deploy',
       'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/plan',
       'GET /sites/:siteId/llmo/cdn-onboard/cloudfront/permissions',
+      'GET /sites/:siteId/llmo/cdn-onboard/cloudfront/template',
       'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/log-delivery',
       'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/log-rescan',
       'GET /sites/:siteId/llmo/edge-optimize-status',
@@ -1716,6 +1727,8 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['GET /sites/:siteId/llmo/rationale'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/brand-claims'].handler).to.equal(mockLlmoController.getBrandClaims);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/brand-claims'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/brand-claims/weeks'].handler).to.equal(mockLlmoController.getBrandClaimsWeeks);
+    expect(dynamicRoutes['GET /sites/:siteId/llmo/brand-claims/weeks'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['POST /sites/:siteId/llmo/sheet-data/:dataSource'].handler).to.equal(mockLlmoController.queryLlmoSheetData);
     expect(dynamicRoutes['POST /sites/:siteId/llmo/sheet-data/:dataSource'].paramNames).to.deep.equal(['siteId', 'dataSource']);
     expect(dynamicRoutes['POST /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource'].handler).to.equal(mockLlmoController.queryLlmoSheetData);

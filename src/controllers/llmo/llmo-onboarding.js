@@ -24,7 +24,11 @@ import {
   readCustomerConfigV2FromPostgres,
   writeCustomerConfigV2ToPostgres,
 } from '../../support/customer-config-v2-storage.js';
-import { convertV1ToV2, generateBrandId } from '../../support/customer-config-mapper.js';
+import {
+  convertV1ToV2,
+  generateBrandId,
+  DEFAULT_BRAND_REGION,
+} from '../../support/customer-config-mapper.js';
 import {
   resolveLlmoOnboardingMode,
   LLMO_ONBOARDING_MODE_V1,
@@ -211,13 +215,15 @@ export async function triggerBrandalfOnboardingJob({
 // submitOnboardingPromptGenerationJob removed — prompt generation is now
 // triggered by DRS after Brandalf completes (LLMO-4258, option b).
 
-// LLMO-5645: the initial stub brand uses 'gl' (worldwide) as a placeholder until
-// Brandalf returns the real region. When the operator selected a market we seed
-// it directly so the brand record is correct immediately and stays correct even
-// if Brandalf never completes. `region` is a validated ISO 3166-1 alpha-2 code
-// (e.g. 'US'); absent → keep the 'gl' placeholder that Brandalf overwrites.
+// LLMO-5645: the initial stub brand uses DEFAULT_BRAND_REGION ('US') as a
+// placeholder until Brandalf returns the real region. When the operator
+// selected a market we seed it directly so the brand record is correct
+// immediately and stays correct even if Brandalf never completes. `region`
+// is a validated ISO 3166-1 alpha-2 code (e.g. 'US'); absent → keep the
+// DEFAULT_BRAND_REGION placeholder that Brandalf overwrites. #3168: the
+// previous 'gl' placeholder collided with Greenland's real ISO code.
 export function onboardingStubRegions(region) {
-  return region ? [region] : ['gl'];
+  return region ? [region] : [DEFAULT_BRAND_REGION];
 }
 
 export function buildInitialCustomerConfigV2({
@@ -1439,9 +1445,9 @@ export async function activateBrandAndGeneratePrompts({
         // No collision: proceed with upsert (new brand, existing brand with a
         // null primary site, or a re-onboard of the same site). upsertBrand's
         // own guard keeps an already-set site_id immutable on the last case.
-        // LLMO-5645: seed operator market when supplied; else the 'gl'
-        // placeholder (consistent with the V2 config + brandAliases, both
-        // overwritten by Brandalf's async result).
+        // LLMO-5645: seed operator market when supplied; else the
+        // DEFAULT_BRAND_REGION placeholder (consistent with the V2 config +
+        // brandAliases, both overwritten by Brandalf's async result).
         const stubRegions = onboardingStubRegions(region);
         await upsertBrand({
           organizationId: organization.getId(),

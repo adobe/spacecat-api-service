@@ -13,11 +13,17 @@
 import { composeBaseURL, hasText } from '@adobe/spacecat-shared-utils';
 
 import { SERENITY_BRAND_SITE_TYPE } from './serenity/site-linkage.js';
+import {
+  BRAND_GUIDANCE_MAX_LENGTH,
+  codePointLength,
+  sanitizeGuidanceText,
+} from './brand-guidance.js';
 import { readFeatureFlagScopes, resolveFlagRowForBrand } from './feature-flags-storage.js';
 import {
   SERENITY_FEATURE_FLAG_NAME,
   SERENITY_FEATURE_FLAG_PRODUCT,
 } from './serenity/serenity-active.js';
+import { sanitizeRegions } from './customer-config-mapper.js';
 
 /**
  * PostgREST select string — joins all normalized child tables.
@@ -66,7 +72,18 @@ function normalizeNullableText(value, fieldName) {
     error.status = 400;
     throw error;
   }
-  const trimmed = value.trim();
+  // Strip unsafe control/invisible/bidi chars before trimming so leading/trailing
+  // whitespace exposed by their removal is also collapsed to null.
+  const trimmed = sanitizeGuidanceText(value).trim();
+  // Defense-in-depth cap at the persistence boundary, mirroring the controller's
+  // validateBrandGuidanceFields (both measure code points via codePointLength, so they
+  // agree on the limit). buildBrandRow/updateBrand are exported and reachable without
+  // the controller; without this backstop such a caller could persist unbounded text.
+  if (codePointLength(trimmed) > BRAND_GUIDANCE_MAX_LENGTH) {
+    const error = new Error(`${fieldName} must be at most ${BRAND_GUIDANCE_MAX_LENGTH} characters`);
+    error.status = 400;
+    throw error;
+  }
   return hasText(trimmed) ? trimmed : null;
 }
 
@@ -159,26 +176,10 @@ export function withSerenityState(brand, scopes) {
   };
 }
 
-/**
- * Maps a DB brand row (with all joined child tables) to the V2 config shape
- * the UI expects.
- *
- * `urls[]` unions `brand_urls` (raw user-submitted list) with `brand_sites`
- * (join to the sites table). Each entry carries `onboarded` — true when the
- * URL's base resolves to a site row in the org — and `siteId` for onboarded
- * entries. Legacy brands with no `brand_urls` rows fall back to the
- * `brand_sites` expansion, where every entry is by definition onboarded.
- *
- * The derived per-brand serenity fields are NOT set here — a handler returning
- * this payload to a client adds them with {@link withSerenityState}.
- *
- * @param {object} row - DB brand row with joined child tables.
- * @returns {object} Brand in V2 config shape.
- */
-function mapDbBrandToV2(row) {
+function mapBrandUrlsToV2(brandUrls, brandSites) {
   // The set of base URLs the brand explicitly lists as its own (brand_urls).
   const brandUrlBases = new Set(
-    (row.brand_urls || [])
+    (brandUrls || [])
       .map((bu) => composeBaseURL(parseUrlParts(bu.url).base))
       .filter(hasText),
   );
@@ -194,7 +195,7 @@ function mapDbBrandToV2(row) {
   // serenity-typed row (one row per (brand, site)); surfacing it here is what keeps
   // a brand URL from silently flipping to onboarded:false the moment a market is
   // created for the same domain.
-  const ownBrandSites = (row.brand_sites || [])
+  const ownBrandSites = (brandSites || [])
     .filter((bs) => bs.type !== SERENITY_BRAND_SITE_TYPE
       || (hasText(bs.sites?.base_url) && brandUrlBases.has(composeBaseURL(bs.sites.base_url))));
 
@@ -239,7 +240,7 @@ function mapDbBrandToV2(row) {
     });
   });
 
-  const brandUrlsEntries = (row.brand_urls || []).map((bu) => {
+  const brandUrlsEntries = (brandUrls || []).map((bu) => {
     const { base } = parseUrlParts(bu.url);
     const siteInfo = siteByBase.get(composeBaseURL(base));
     const entry = { value: bu.url, onboarded: Boolean(siteInfo) };
@@ -256,7 +257,50 @@ function mapDbBrandToV2(row) {
   });
 
   const urls = brandUrlsEntries.length > 0 ? brandUrlsEntries : brandSitesUrls;
+  return { urls, siteIds };
+}
 
+const mapSocialAccountsToV2 = (rows) => (rows || []).map((s) => ({
+  url: s.url,
+  regions: s.regions || [],
+}));
+
+const mapEarnedContentToV2 = (rows) => (rows || []).map((e) => ({
+  name: e.name,
+  url: e.url,
+  regions: e.regions || [],
+}));
+
+const mapBrandAliasesToV2 = (rows) => (rows || []).map((a) => ({
+  name: a.alias,
+  regions: a.regions || [],
+}));
+
+const mapCompetitorsToV2 = (rows) => (rows || []).map((c) => ({
+  name: c.name,
+  url: c.url || null,
+  aliases: c.aliases || [],
+  regions: c.regions || [],
+}));
+
+/**
+ * Maps a DB brand row (with all joined child tables) to the V2 config shape
+ * the UI expects.
+ *
+ * `urls[]` unions `brand_urls` (raw user-submitted list) with `brand_sites`
+ * (join to the sites table). Each entry carries `onboarded` — true when the
+ * URL's base resolves to a site row in the org — and `siteId` for onboarded
+ * entries. Legacy brands with no `brand_urls` rows fall back to the
+ * `brand_sites` expansion, where every entry is by definition onboarded.
+ *
+ * The derived per-brand serenity fields are NOT set here — a handler returning
+ * this payload to a client adds them with {@link withSerenityState}.
+ *
+ * @param {object} row - DB brand row with joined child tables.
+ * @returns {object} Brand in V2 config shape.
+ */
+function mapDbBrandToV2(row) {
+  const { urls, siteIds } = mapBrandUrlsToV2(row.brand_urls, row.brand_sites);
   return {
     id: row.id,
     name: row.name,
@@ -286,25 +330,10 @@ function mapDbBrandToV2(row) {
     brandClaimsEnabled: row.brand_claims_enabled ?? false,
     region: row.regions || [],
     urls,
-    socialAccounts: (row.brand_social_accounts || []).map((s) => ({
-      url: s.url,
-      regions: s.regions || [],
-    })),
-    earnedContent: (row.brand_earned_sources || []).map((e) => ({
-      name: e.name,
-      url: e.url,
-      regions: e.regions || [],
-    })),
-    brandAliases: (row.brand_aliases || []).map((a) => ({
-      name: a.alias,
-      regions: a.regions || [],
-    })),
-    competitors: (row.competitors || []).map((c) => ({
-      name: c.name,
-      url: c.url || null,
-      aliases: c.aliases || [],
-      regions: c.regions || [],
-    })),
+    socialAccounts: mapSocialAccountsToV2(row.brand_social_accounts),
+    earnedContent: mapEarnedContentToV2(row.brand_earned_sources),
+    brandAliases: mapBrandAliasesToV2(row.brand_aliases),
+    competitors: mapCompetitorsToV2(row.competitors),
     siteIds,
     createdAt: row.created_at,
     createdBy: row.created_by,
@@ -434,7 +463,7 @@ async function syncBrandSites(organizationId, brandId, urls, postgrestClient, up
   }
 
   if (!urls || urls.length === 0) {
-    return;
+    return [];
   }
 
   // Group paths by base URL and track type
@@ -460,7 +489,7 @@ async function syncBrandSites(organizationId, brandId, urls, postgrestClient, up
     });
 
   if (pathsByBase.size === 0) {
-    return;
+    return [];
   }
 
   const { data: sites, error: sitesError } = await postgrestClient
@@ -473,10 +502,10 @@ async function syncBrandSites(organizationId, brandId, urls, postgrestClient, up
   }
 
   if (!sites || sites.length === 0) {
-    return;
+    return [];
   }
 
-  const rows = sites.map((s) => ({
+  const canonicalRows = sites.map((s) => ({
     organization_id: organizationId,
     brand_id: brandId,
     site_id: s.id,
@@ -487,7 +516,9 @@ async function syncBrandSites(organizationId, brandId, urls, postgrestClient, up
       ? SERENITY_BRAND_SITE_TYPE
       : (typeByBase.get(s.base_url) || null),
     updated_by: updatedBy,
+    sites: { base_url: s.base_url },
   }));
+  const rows = canonicalRows.map(({ sites: _, ...dbFields }) => dbFields);
 
   const { error } = await postgrestClient
     .from('brand_sites')
@@ -495,6 +526,7 @@ async function syncBrandSites(organizationId, brandId, urls, postgrestClient, up
   if (error) {
     throw new Error(`Failed to sync brand_sites: ${error.message}`);
   }
+  return canonicalRows;
 }
 
 /**
@@ -506,7 +538,7 @@ async function syncBrandSites(organizationId, brandId, urls, postgrestClient, up
  */
 async function syncBrandUrls(organizationId, brandId, urls, postgrestClient, updatedBy) {
   const seen = new Set();
-  const rows = (urls || [])
+  const canonicalRows = (urls || [])
     .map((u) => {
       const value = typeof u === 'string' ? u : u?.value;
       if (!hasText(value)) {
@@ -515,14 +547,15 @@ async function syncBrandUrls(organizationId, brandId, urls, postgrestClient, upd
       const { base, path } = parseUrlParts(value);
       return { url: `${composeBaseURL(base)}${path}` };
     })
-    .filter((u) => u && !seen.has(u.url) && seen.add(u.url))
-    .map((u) => ({
-      organization_id: organizationId,
-      brand_id: brandId,
-      url: u.url,
-      updated_by: updatedBy,
-    }));
+    .filter((u) => u && !seen.has(u.url) && seen.add(u.url));
+  const rows = canonicalRows.map((u) => ({
+    ...u,
+    organization_id: organizationId,
+    brand_id: brandId,
+    updated_by: updatedBy,
+  }));
   await replaceChildRows('brand_urls', brandId, rows, 'brand_id,url', postgrestClient);
+  return canonicalRows;
 }
 
 /**
@@ -538,18 +571,22 @@ async function syncBrandUrls(organizationId, brandId, urls, postgrestClient, upd
 // eslint-disable-next-line max-len
 async function syncSocialAccounts(brandId, organizationId, socialAccounts, postgrestClient, updatedBy) {
   if (socialAccounts === undefined || socialAccounts === null) {
-    return;
+    return undefined;
   }
-  const rows = (socialAccounts || [])
+  const canonicalRows = (socialAccounts || [])
     .filter((s) => hasText(s?.url))
     .map((s) => ({
-      organization_id: organizationId,
-      brand_id: brandId,
       url: s.url,
-      regions: s.regions || [],
-      updated_by: updatedBy,
+      regions: sanitizeRegions(s.regions),
     }));
+  const rows = canonicalRows.map((s) => ({
+    ...s,
+    organization_id: organizationId,
+    brand_id: brandId,
+    updated_by: updatedBy,
+  }));
   await replaceChildRows('brand_social_accounts', brandId, rows, 'brand_id,url', postgrestClient);
+  return mapSocialAccountsToV2(canonicalRows);
 }
 
 /**
@@ -561,19 +598,23 @@ async function syncSocialAccounts(brandId, organizationId, socialAccounts, postg
 // eslint-disable-next-line max-len
 async function syncEarnedSources(brandId, organizationId, earnedContent, postgrestClient, updatedBy) {
   if (earnedContent === undefined || earnedContent === null) {
-    return;
+    return undefined;
   }
-  const rows = (earnedContent || [])
+  const canonicalRows = (earnedContent || [])
     .filter((e) => hasText(e?.url) && hasText(e?.name))
     .map((e) => ({
-      organization_id: organizationId,
-      brand_id: brandId,
       name: e.name,
       url: e.url,
-      regions: e.regions || [],
-      updated_by: updatedBy,
+      regions: sanitizeRegions(e.regions),
     }));
+  const rows = canonicalRows.map((e) => ({
+    ...e,
+    organization_id: organizationId,
+    brand_id: brandId,
+    updated_by: updatedBy,
+  }));
   await replaceChildRows('brand_earned_sources', brandId, rows, 'brand_id,url', postgrestClient);
+  return mapEarnedContentToV2(canonicalRows);
 }
 
 /**
@@ -584,20 +625,23 @@ async function syncEarnedSources(brandId, organizationId, earnedContent, postgre
  */
 async function syncAliases(brandId, organizationId, brandAliases, postgrestClient, updatedBy) {
   if (brandAliases === undefined || brandAliases === null) {
-    return;
+    return undefined;
   }
   const seen = new Set();
-  const rows = (brandAliases || [])
-    .map((a) => ({ alias: typeof a === 'string' ? a : a?.name, regions: a?.regions || [] }))
-    .filter((a) => hasText(a.alias) && !seen.has(a.alias) && seen.add(a.alias))
+  const canonicalRows = (brandAliases || [])
     .map((a) => ({
-      organization_id: organizationId,
-      brand_id: brandId,
-      alias: a.alias,
-      regions: a.regions,
-      updated_by: updatedBy,
-    }));
+      alias: typeof a === 'string' ? a : a?.name,
+      regions: sanitizeRegions(a?.regions),
+    }))
+    .filter((a) => hasText(a.alias) && !seen.has(a.alias) && seen.add(a.alias));
+  const rows = canonicalRows.map((a) => ({
+    ...a,
+    organization_id: organizationId,
+    brand_id: brandId,
+    updated_by: updatedBy,
+  }));
   await replaceChildRows('brand_aliases', brandId, rows, 'brand_id,alias', postgrestClient);
+  return mapBrandAliasesToV2(canonicalRows);
 }
 
 /**
@@ -608,27 +652,25 @@ async function syncAliases(brandId, organizationId, brandAliases, postgrestClien
  */
 async function syncCompetitors(brandId, organizationId, competitors, postgrestClient, updatedBy) {
   if (competitors === undefined || competitors === null) {
-    return;
+    return undefined;
   }
   const seen = new Set();
-  const rows = (competitors || [])
+  const canonicalRows = (competitors || [])
     .map((c) => ({
       name: typeof c === 'string' ? c : c?.name,
       url: c?.url || null,
       aliases: Array.isArray(c?.aliases) ? c.aliases : [],
-      regions: c?.regions || [],
+      regions: sanitizeRegions(c?.regions),
     }))
-    .filter((c) => hasText(c.name) && !seen.has(c.name) && seen.add(c.name))
-    .map((c) => ({
-      organization_id: organizationId,
-      brand_id: brandId,
-      name: c.name,
-      url: c.url,
-      aliases: c.aliases,
-      regions: c.regions,
-      updated_by: updatedBy,
-    }));
+    .filter((c) => hasText(c.name) && !seen.has(c.name) && seen.add(c.name));
+  const rows = canonicalRows.map((c) => ({
+    ...c,
+    organization_id: organizationId,
+    brand_id: brandId,
+    updated_by: updatedBy,
+  }));
   await replaceChildRows('competitors', brandId, rows, 'brand_id,name', postgrestClient);
+  return mapCompetitorsToV2(canonicalRows);
 }
 
 /**
@@ -1149,8 +1191,7 @@ export async function upsertBrand({
     throw new Error('Brand name is required');
   }
 
-  const regions = (brand.region || [])
-    .map((r) => (typeof r === 'string' ? r : String(r))).filter(hasText);
+  const regions = sanitizeRegions(brand.region);
 
   // Check if a non-deleted brand already exists with this name. Soft-deleted
   // brands are excluded (.neq('status', 'deleted')) so that creating a brand
@@ -1495,8 +1536,7 @@ export async function updateBrand({
   }
 
   if (updates.region !== undefined) {
-    patch.regions = (updates.region || [])
-      .map((r) => (typeof r === 'string' ? r : String(r))).filter(hasText);
+    patch.regions = sanitizeRegions(updates.region);
   }
 
   // Clear legacy columns on any brand update so old data doesn't linger.
@@ -1564,21 +1604,41 @@ export async function updateBrand({
     return null;
   }
 
-  // Each sync function now skips itself when its collection is `undefined`
-  // (LLMO-6591), so the per-field `!== undefined` guards that used to live
-  // here are redundant — call unconditionally and let the shared guard decide.
-  await Promise.all([
+  // Nullable collections skip themselves when omitted or explicitly null
+  // (LLMO-6591), so call them unconditionally and let each helper decide
+  // whether the collection was touched.
+  const [
+    brandAliases,
+    competitors,
+    socialAccounts,
+    earnedContent,
+  ] = await Promise.all([
     syncAliases(brandId, organizationId, updates.brandAliases, postgrestClient, updatedBy),
     syncCompetitors(brandId, organizationId, updates.competitors, postgrestClient, updatedBy),
     syncSocialAccounts(brandId, organizationId, updates.socialAccounts, postgrestClient, updatedBy),
     syncEarnedSources(brandId, organizationId, updates.earnedContent, postgrestClient, updatedBy),
   ]);
 
+  const authoritativeCollections = {};
+  if (brandAliases !== undefined) {
+    authoritativeCollections.brandAliases = brandAliases;
+  }
+  if (competitors !== undefined) {
+    authoritativeCollections.competitors = competitors;
+  }
+  if (socialAccounts !== undefined) {
+    authoritativeCollections.socialAccounts = socialAccounts;
+  }
+  if (earnedContent !== undefined) {
+    authoritativeCollections.earnedContent = earnedContent;
+  }
+
   if (updates.urls !== undefined) {
-    await Promise.all([
+    const [brandSites, brandUrls] = await Promise.all([
       syncBrandSites(organizationId, brandId, updates.urls, postgrestClient, updatedBy),
       syncBrandUrls(organizationId, brandId, updates.urls, postgrestClient, updatedBy),
     ]);
+    Object.assign(authoritativeCollections, mapBrandUrlsToV2(brandUrls, brandSites));
   }
 
   // Whether a follow-up read is even needed depends on what this call actually
@@ -1587,35 +1647,32 @@ export async function updateBrand({
   // the reader-replica staleness risk described above. A request that touched no
   // child-table collection can therefore return it directly: no second read, no
   // race, period.
-  const childTablesTouched = updates.brandAliases !== undefined
-    || updates.competitors !== undefined
-    || updates.socialAccounts !== undefined
-    || updates.earnedContent !== undefined
-    || updates.urls !== undefined;
+  const childTablesTouched = Object.keys(authoritativeCollections).length > 0;
+  const writerRow = mapDbBrandToV2(data);
 
   if (!childTablesTouched) {
-    return mapDbBrandToV2(data);
+    return writerRow;
   }
 
   // The child-table syncs above ran as separate requests AFTER this UPDATE
-  // committed, so their effect isn't part of `data`'s RETURNING payload — a
-  // follow-up read is genuinely unavoidable to pick up aliases/competitors/
-  // social/earned/urls. That follow-up is a plain GET, so on this host it CAN be
-  // served by the lagging reader fleet described above. Rather than trust it for
-  // the one field the #3131 safety net downstream actually gates on, override
-  // baseSiteId/baseUrl with the values this call already knows are correct from
-  // `data` — read back on the writer, in this same request, from the very UPDATE
-  // that changed `site_id` (or deliberately left it unchanged). This makes the
-  // re-point contract (returned baseSiteId always reflects the just-applied
-  // write) hold unconditionally, regardless of how stale the follow-up read's
-  // OTHER fields might transiently be.
+  // committed, so their effect isn't part of `data`'s RETURNING payload. Reload
+  // the child collections, but never let the replica overwrite parent fields
+  // already returned authoritatively by the writer — especially `updatedAt`,
+  // which is the optimistic-concurrency token for the next edit.
   const freshRow = await getBrandById(organizationId, brandId, postgrestClient);
-  if (!freshRow) {
-    return null;
-  }
-  freshRow.baseSiteId = data.base_site?.id ?? data.site_id ?? null;
-  freshRow.baseUrl = data.base_site?.base_url || null;
-  return freshRow;
+  const replicaCollections = freshRow ? {
+    brandAliases: freshRow.brandAliases,
+    competitors: freshRow.competitors,
+    socialAccounts: freshRow.socialAccounts,
+    earnedContent: freshRow.earnedContent,
+    urls: freshRow.urls,
+    siteIds: freshRow.siteIds,
+  } : {};
+  return {
+    ...writerRow,
+    ...replicaCollections,
+    ...authoritativeCollections,
+  };
 }
 
 /**

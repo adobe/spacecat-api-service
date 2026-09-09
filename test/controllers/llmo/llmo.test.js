@@ -4529,6 +4529,98 @@ describe('LlmoController', () => {
     });
   });
 
+  describe('getBrandClaimsWeeks', () => {
+    let brandClaimsWeeksContext;
+    let mockS3Send;
+
+    beforeEach(() => {
+      // ListObjectsV2 returns two week folders (newest first once sorted).
+      mockS3Send = sinon.stub().resolves({
+        CommonPrefixes: [
+          { Prefix: `brand_claims/llmo/${TEST_SITE_ID}/2026-W16/` },
+          { Prefix: `brand_claims/llmo/${TEST_SITE_ID}/2026-W17/` },
+        ],
+      });
+
+      brandClaimsWeeksContext = {
+        ...mockContext,
+        params: { siteId: TEST_SITE_ID },
+        env: { ...mockEnv, ENV: 'dev' },
+        s3: { s3Client: { send: mockS3Send }, s3Bucket: 'test-bucket' },
+        data: {},
+      };
+    });
+
+    it('should return the available weeks newest first', async () => {
+      const result = await controller.getBrandClaimsWeeks(brandClaimsWeeksContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      expect(responseBody.siteId).to.equal(TEST_SITE_ID);
+      expect(responseBody.weeks).to.deep.equal(['2026-W17', '2026-W16']);
+      expect(responseBody.count).to.equal(2);
+    });
+
+    it('should return 403 when LLMO access validation fails', async () => {
+      const controllerDenied = controllerWithAccessDenied(mockContext);
+      const result = await controllerDenied.getBrandClaimsWeeks(brandClaimsWeeksContext);
+
+      expect(result.status).to.equal(403);
+    });
+
+    it('should return 404 when site is not found', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+      const result = await controller.getBrandClaimsWeeks(brandClaimsWeeksContext);
+      expect(result.status).to.equal(404);
+    });
+
+    it('should return 400 when LLMO is not enabled for site', async () => {
+      mockConfig.getLlmoConfig.returns({});
+      const result = await controller.getBrandClaimsWeeks(brandClaimsWeeksContext);
+      expect(result.status).to.equal(400);
+      const responseBody = await result.json();
+      expect(responseBody.message).to.include('LLM Optimizer is not enabled');
+    });
+  });
+
+  describe('requestBrandClaims', () => {
+    let reqCtx;
+
+    beforeEach(() => {
+      reqCtx = {
+        ...mockContext,
+        params: { siteId: TEST_SITE_ID },
+        env: { ...mockEnv, AUDIT_JOBS_QUEUE_URL: 'audit-q' },
+        sqs: { sendMessage: sinon.stub().resolves() },
+        data: {},
+      };
+    });
+
+    it('validates LLMO access, triggers the audit, and returns 202', async () => {
+      const result = await controller.requestBrandClaims(reqCtx);
+      expect(result.status).to.equal(202);
+      expect(reqCtx.sqs.sendMessage).to.have.been.calledOnce;
+    });
+
+    it('returns 403 when LLMO access validation fails', async () => {
+      const controllerDenied = controllerWithAccessDenied(mockContext);
+      const result = await controllerDenied.requestBrandClaims(reqCtx);
+      expect(result.status).to.equal(403);
+    });
+
+    it('returns 404 when the site is not found', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+      const result = await controller.requestBrandClaims(reqCtx);
+      expect(result.status).to.equal(404);
+    });
+
+    it('returns 400 when site resolution throws', async () => {
+      mockDataAccess.Site.findById.rejects(new Error('db boom'));
+      const result = await controller.requestBrandClaims(reqCtx);
+      expect(result.status).to.equal(400);
+    });
+  });
+
   describe('getDemoBrandPresence', () => {
     let demoContext;
     let mockGetSignedUrl;

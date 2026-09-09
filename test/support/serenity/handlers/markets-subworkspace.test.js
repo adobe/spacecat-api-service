@@ -27,18 +27,17 @@ import {
 } from '../../../../src/support/serenity/handlers/markets-subworkspace.js';
 import { clearTagCache } from '../../../../src/support/serenity/handlers/markets.js';
 import { SerenityTransportError } from '../../../../src/support/serenity/rest-transport.js';
-import { ERROR_CODES } from '../../../../src/support/serenity/errors.js';
+import { ERROR_CODES, MainBrandBenchmarkInvariantError } from '../../../../src/support/serenity/errors.js';
 import { TAG_IDS, dimensionTreeLevels, makeListProjectTagsStub } from '../fixtures/tag-tree.js';
 
 use(chaiAsPromised);
 use(sinonChai);
 
-// Every generated prompt carries the seeded default intent (Informational —
-// `origin` is retired, tag-display-names.md §3: STANDARD_PROMPT_TAG_VALUES no
-// longer contributes an `origin/ai` id here) plus the producing
+// Every generated prompt carries origin/ai and the seeded default intent
+// (Informational) plus the producing
 // `source/semrush` value; the last tag is the per-prompt computed `type`.
-// Order matches the write site: [intentId, sourceId, typeId].
-const STANDARD_IDS = [TAG_IDS.intentInformational];
+// Order matches the write site: [originId, intentId, sourceId, typeId].
+const STANDARD_IDS = [TAG_IDS.originAi, TAG_IDS.intentInformational];
 const GENERATED_IDS = [...STANDARD_IDS, TAG_IDS.sourceSemrush];
 
 // Matches one v3 create item `{ name, metadata }` (LLMO-6289). These handlers
@@ -91,7 +90,7 @@ function makeTransport(overrides = {}) {
     updateProject: sinon.stub().resolves(null),
     publishProject: sinon.stub().resolves(null),
     deleteProject: sinon.stub().resolves(null),
-    listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+    listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English', code: 'en' }] }),
     getWorkspaceStatus: sinon.stub().resolves({ status: 'created' }),
     listPromptsByTags: sinon.stub().resolves({ items: [] }),
     listAiModels: sinon.stub().resolves({ items: [] }),
@@ -104,6 +103,7 @@ function makeTransport(overrides = {}) {
     listBenchmarks: sinon.stub().resolves({ aio_benchmarks: [{ id: 'bench-1', main_brand: true }] }),
     createBrandUrls: sinon.stub().resolves({ ids: [], existing_count: 0 }),
     createBenchmarks: sinon.stub().resolves({ ids: ['bm-new'], existing_count: 0 }),
+    updateBenchmark: sinon.stub().resolves(null),
     deleteBenchmarks: sinon.stub().resolves(null),
     ...overrides,
   };
@@ -515,7 +515,12 @@ describe('markets-subworkspace handlers', () => {
         null,
         { brandUrlSources },
       );
-      expect(transport.listBenchmarks).to.have.been.calledOnceWith(WS, 'new-proj');
+      // Exactly two reads: the blocking LLMO-7421 ensure + assert, both draft.
+      // attachBrandUrlsToProject does NOT re-list — it reuses the already-resolved
+      // ownBrandBenchmarkId (passed as its existingBenchmarkId arg), so a third
+      // read here would mean that reuse silently broke.
+      expect(transport.listBenchmarks).to.have.callCount(2);
+      expect(transport.listBenchmarks).to.have.been.calledWith(WS, 'new-proj', { draft: true });
       // http:// dropped; de-region social dropped; us social + region-less earned kept.
       expect(transport.createBrandUrls).to.have.been.calledOnceWith(WS, 'new-proj', 'bench-1', [
         { url: 'https://b.com', type: 'website' },
@@ -637,11 +642,149 @@ describe('markets-subworkspace handlers', () => {
       expect(transport.publishProject).to.have.been.called;
     });
 
-    it('does not touch the brand-URL API when there are no sources', async () => {
+    it('resolves the own-brand benchmark without writing brand URLs when there are no sources', async () => {
       const transport = makeTransport();
       await handleCreateMarketSubworkspace(transport, makeBrand(), PARENT, createBody, log);
-      expect(transport.listBenchmarks).to.not.have.been.called;
+      // listBenchmarks IS still called (exactly twice: ensure + assert) — the
+      // LLMO-7421 benchmark invariant is blocking regardless of whether there
+      // are brand URLs to push.
+      expect(transport.listBenchmarks).to.have.callCount(2);
+      expect(transport.listBenchmarks).to.have.been.calledWith(WS, 'new-proj', { draft: true });
       expect(transport.createBrandUrls).to.not.have.been.called;
+    });
+
+    it('repairs auto-created mixed-case aliases before publishing without URL sources', async () => {
+      const transport = makeTransport({
+        listBenchmarks: sinon.stub().resolves({
+          aio_benchmarks: [{
+            id: 'bench-1',
+            main_brand: true,
+            brand_name: 'Adobe Express',
+            brand_aliases: ['Adobe Express', 'Firefly', 'vendor-added'],
+            domain: 'example.com',
+            primary_url: 'example.com/products/express',
+          }],
+        }),
+      });
+
+      await handleCreateMarketSubworkspace(transport, makeBrand(), PARENT, createBody, log);
+
+      expect(transport.updateBenchmark).to.have.been.calledTwice;
+      expect(transport.updateBenchmark.firstCall.args[3]).to.deep.equal({
+        brand_name: 'Adobe Express',
+        brand_aliases: ['vendor-added'],
+        domain: 'example.com/products/express',
+        primary_url: 'example.com/products/express',
+      });
+      expect(transport.updateBenchmark.secondCall.args[3]).to.deep.equal({
+        brand_name: 'Adobe Express',
+        brand_aliases: ['adobe express', 'firefly', 'vendor-added'],
+        domain: 'example.com/products/express',
+        primary_url: 'example.com/products/express',
+      });
+      expect(transport.updateBenchmark).to.have.been.calledBefore(transport.publishProject);
+      expect(transport.createBrandUrls).to.not.have.been.called;
+    });
+
+    it('does not publish when auto-created alias repair leaves the draft dirty', async () => {
+      const updateBenchmark = sinon.stub();
+      updateBenchmark.onFirstCall().resolves(null);
+      updateBenchmark.onSecondCall().rejects(new SerenityTransportError(500, 'recase failed'));
+      const transport = makeTransport({
+        listBenchmarks: sinon.stub().resolves({
+          aio_benchmarks: [{
+            id: 'bench-1',
+            main_brand: true,
+            brand_name: 'Adobe Express',
+            brand_aliases: ['Adobe Express'],
+            domain: 'example.com',
+          }],
+        }),
+        updateBenchmark,
+      });
+
+      await expect(
+        handleCreateMarketSubworkspace(transport, makeBrand(), PARENT, createBody, log),
+      ).to.be.rejectedWith(/recase failed/);
+      expect(transport.updateBenchmark).to.have.been.calledThrice;
+      expect(transport.publishProject).to.not.have.been.called;
+    });
+
+    describe('LLMO-7421: main-brand benchmark invariant is blocking', () => {
+      it('aborts before publish and does not persist the mapping row when the benchmark cannot be established', async () => {
+        const transport = makeTransport({
+          listBenchmarks: sinon.stub().resolves({ aio_benchmarks: [] }),
+          createBenchmarks: sinon.stub().resolves({}), // no id — create silently failed to flag
+        });
+        const create = sinon.stub().resolves({});
+        const dataAccess = { BrandSemrushProject: { create } };
+
+        const err = await handleCreateMarketSubworkspace(
+          transport,
+          makeBrand(),
+          PARENT,
+          createBody,
+          log,
+          null,
+          null,
+          { dataAccess },
+        ).then(() => null, (e) => e);
+
+        expect(err).to.be.instanceOf(MainBrandBenchmarkInvariantError);
+        expect(transport.publishProject).to.not.have.been.called;
+        expect(create).to.not.have.been.called;
+      });
+
+      it('does not re-check the published view after publish (publish is asynchronous) and persists the mapping row', async () => {
+        // Only the pre-publish draft check runs. A published-view read taken
+        // immediately after publishProject resolves would race the async
+        // publish transition (see MainBrandBenchmarkInvariantError's doc) —
+        // asserting that no such read happens is what protects the
+        // 409-forever regression a post-publish failure used to cause here.
+        const transport = makeTransport({
+          listBenchmarks: sinon.stub().resolves({ aio_benchmarks: [{ id: 'bench-1', main_brand: true }] }),
+        });
+        const create = sinon.stub().resolves({});
+        const dataAccess = { BrandSemrushProject: { create } };
+
+        const res = await handleCreateMarketSubworkspace(
+          transport,
+          makeBrand(),
+          PARENT,
+          createBody,
+          log,
+          null,
+          null,
+          { dataAccess },
+        );
+
+        expect(res.status).to.equal(201);
+        expect(transport.publishProject).to.have.been.calledOnce;
+        expect(create).to.have.been.calledOnce;
+        // ensureOwnBrandBenchmark's own read + the pre-publish assert; nothing
+        // after publish.
+        expect(transport.listBenchmarks).to.have.callCount(2);
+      });
+
+      it('still checks the benchmark invariant even when publishMode is skip (no publish, but the gate still runs)', async () => {
+        const transport = makeTransport();
+        const res = await handleCreateMarketSubworkspace(
+          transport,
+          makeBrand(),
+          PARENT,
+          createBody,
+          log,
+          null,
+          null,
+          { publishMode: 'skip' },
+        );
+        expect(res.status).to.equal(201);
+        expect(res.body.published).to.equal(false);
+        expect(transport.publishProject).to.not.have.been.called;
+        // The benchmark invariant is not conditional on publishMode — it still
+        // runs (ensure + assert) even when publish itself is deferred.
+        expect(transport.listBenchmarks).to.have.callCount(2);
+      });
     });
 
     it('does NOT fail the create when the brand-URL push fails (best-effort)', async () => {
@@ -759,7 +902,7 @@ describe('markets-subworkspace handlers', () => {
       );
       expect(res.status).to.equal(201);
       // The taxonomy is provisioned by resolving the tree; this project already
-      // carries all four roots and every closed value, so nothing is created.
+      // carries all six roots and every closed value, so nothing is created.
       expect(transport.createProjectTags).to.not.have.been.called;
       // models attached
       expect(transport.addAiModel).to.have.been.calledWith(WS, 'new-proj', 'm-1');
@@ -1177,7 +1320,9 @@ describe('markets-subworkspace handlers', () => {
         name: 'category:Sneakers',
         parentId: 'root-1',
         childrenCount: 0,
+        promptsCount: 0,
         path: [{ id: 'root-1', name: 'category:Footwear' }],
+        compatibility: { state: 'readOnly', reason: 'separatorInName' },
       }]);
       expect(transport.listPromptsByTags).to.not.have.been.called;
       expect(transport.listProjectTags).to.have.been.calledOnceWithExactly(WS, 'p-tag', {
@@ -1236,7 +1381,7 @@ describe('markets-subworkspace handlers', () => {
       expect(transport.listProjectTags).to.have.been.calledWith(WS, 'p-tag');
     });
 
-    it('keeps prompt-derived tags when the standalone tag list call fails (best-effort)', async () => {
+    it('fails closed when the standalone tag list cannot be completed', async () => {
       const transport = makeTransport({
         listProjects: sinon.stub().resolves({ items: [proj({ id: 'p-tag' })] }),
         listPromptsByTags: sinon.stub().resolves({
@@ -1244,8 +1389,12 @@ describe('markets-subworkspace handlers', () => {
         }),
         listProjectTags: sinon.stub().rejects(new Error('boom')),
       });
-      const result = await handleListTagsSubworkspace(transport, WS, { geoTargetId: 2840, languageCode: 'en' }, log);
-      expect(result.items).to.deep.equal([{ id: 't-1', name: 'category:Running Shoes' }]);
+      await expect(handleListTagsSubworkspace(
+        transport,
+        WS,
+        { geoTargetId: 2840, languageCode: 'en' },
+        log,
+      )).to.be.rejectedWith('boom');
     });
 
     it('upgrades a synthetic prompt-derived id to the canonical standalone id (no shadowing)', async () => {
@@ -1302,7 +1451,7 @@ describe('markets-subworkspace handlers', () => {
       expect(result.items).to.deep.equal([{ id: 'human', name: 'human' }]);
     });
 
-    it('warns when the standalone tag page ceiling is hit (possible truncation)', async () => {
+    it('returns partial results when the standalone tag page ceiling is hit', async () => {
       const fullPage = Array.from({ length: 100 }, (_, i) => ({ id: `t${i}`, name: `category:C${i}` }));
       const warnLog = { info: () => {}, error: () => {}, warn: sinon.stub() };
       const transport = makeTransport({
@@ -1311,7 +1460,13 @@ describe('markets-subworkspace handlers', () => {
         // Every page is full → the walk never short-circuits and runs to the ceiling.
         listProjectTags: sinon.stub().resolves({ items: fullPage }),
       });
-      await handleListTagsSubworkspace(transport, WS, { geoTargetId: 2840, languageCode: 'en' }, warnLog);
+      const result = await handleListTagsSubworkspace(
+        transport,
+        WS,
+        { geoTargetId: 2840, languageCode: 'en' },
+        warnLog,
+      );
+      expect(result.complete).to.equal(false);
       expect(warnLog.warn).to.have.been.calledWithMatch(/page ceiling hit/);
       expect(transport.listProjectTags.callCount).to.equal(50);
     });
@@ -1777,8 +1932,8 @@ describe('markets-subworkspace — defensive branch coverage', () => {
     );
     expect(res.status).to.equal(201);
     // Both are non-branded ('Trail' not mentioned); intent differs, so two calls.
-    expect(transport.createPromptsWithMetadata).to.have.been.calledWithExactly(WS, 'new-proj', [genItemMatch('buy now')], [TAG_IDS.intentTransactional, TAG_IDS.sourceSemrush, TAG_IDS.typeNonBranded]);
-    expect(transport.createPromptsWithMetadata).to.have.been.calledWithExactly(WS, 'new-proj', [genItemMatch('about it')], [TAG_IDS.intentInformational, TAG_IDS.sourceSemrush, TAG_IDS.typeNonBranded]);
+    expect(transport.createPromptsWithMetadata).to.have.been.calledWithExactly(WS, 'new-proj', [genItemMatch('buy now')], [TAG_IDS.originAi, TAG_IDS.intentTransactional, TAG_IDS.sourceSemrush, TAG_IDS.typeNonBranded]);
+    expect(transport.createPromptsWithMetadata).to.have.been.calledWithExactly(WS, 'new-proj', [genItemMatch('about it')], [TAG_IDS.originAi, TAG_IDS.intentInformational, TAG_IDS.sourceSemrush, TAG_IDS.typeNonBranded]);
   });
 
   // Boundary: at exactly AI_GEN_CLASSIFY_MAX + 1 texts, only the first MAX are
@@ -1818,8 +1973,8 @@ describe('markets-subworkspace — defensive branch coverage', () => {
     expect(classifySpy).to.have.been.calledOnce;
     expect(classifySpy.firstCall.args[0]).to.deep.equal(['p1', 'p2']);
     // p1/p2 classified Transactional; p3 (beyond the cap) defaults Informational.
-    expect(transport.createPromptsWithMetadata).to.have.been.calledWithExactly(WS, 'new-proj', [genItemMatch('p1'), genItemMatch('p2')], [TAG_IDS.intentTransactional, TAG_IDS.sourceSemrush, TAG_IDS.typeNonBranded]);
-    expect(transport.createPromptsWithMetadata).to.have.been.calledWithExactly(WS, 'new-proj', [genItemMatch('p3')], [TAG_IDS.intentInformational, TAG_IDS.sourceSemrush, TAG_IDS.typeNonBranded]);
+    expect(transport.createPromptsWithMetadata).to.have.been.calledWithExactly(WS, 'new-proj', [genItemMatch('p1'), genItemMatch('p2')], [TAG_IDS.originAi, TAG_IDS.intentTransactional, TAG_IDS.sourceSemrush, TAG_IDS.typeNonBranded]);
+    expect(transport.createPromptsWithMetadata).to.have.been.calledWithExactly(WS, 'new-proj', [genItemMatch('p3')], [TAG_IDS.originAi, TAG_IDS.intentInformational, TAG_IDS.sourceSemrush, TAG_IDS.typeNonBranded]);
     // The cap-hit is observable, not silent.
     expect(capLog.info).to.have.been.calledWithMatch(
       'generateAndAttachPrompts: AI-gen classify cap hit — tail defaults to Informational',
@@ -1838,7 +1993,7 @@ describe('markets-subworkspace — defensive branch coverage', () => {
   // `createPromptsWithMetadata` is ATOMIC on an unresolvable id — it 500s and writes
   // nothing — so the handler must fail before it builds the call, not after.
   it('generateAndAttachPrompts: 502s when the standard prompt tag ids cannot be resolved', async () => {
-    // The four roots exist; no closed value under any of them does, and the
+    // The six roots exist; no closed value under any of them does, and the
     // create echoes nothing back. `provisionDimensionTree` fails closed, so the
     // handler never reaches a prompt write holding an unresolved id.
     const transport = makeTransport({
@@ -1859,7 +2014,7 @@ describe('markets-subworkspace — defensive branch coverage', () => {
     ).then(() => null, (e) => e);
 
     expect(err.status).to.equal(502);
-    expect(err.message).to.match(/did not persist the tag\(s\)/);
+    expect(err.message).to.match(/upstream created the tag but echoed no id/);
     // Nothing was attached — the seam fails before any prompt write is built.
     expect(transport.createPromptsWithMetadata).to.have.not.been.called;
   });
@@ -1888,7 +2043,7 @@ describe('markets-subworkspace — defensive branch coverage', () => {
     ).then(() => null, (e) => e);
 
     expect(err.status).to.equal(502);
-    expect(err.message).to.match(/did not persist the tag\(s\): non-branded/);
+    expect(err.message).to.match(/upstream created the tag but echoed no id/);
     expect(transport.createPromptsWithMetadata).to.have.not.been.called;
   });
 });

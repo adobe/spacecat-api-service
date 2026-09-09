@@ -2942,6 +2942,89 @@ describe('Suggestions Controller', () => {
     expect(createResponse.suggestions[1]).to.have.property('message', 'Validation error');
   });
 
+  describe('createSuggestions suggestionKey gating', () => {
+    it('strips suggestionKey silently when caller is neither admin nor a granted S2S consumer', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(false);
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
+      sandbox.stub(AccessControlUtil.prototype, 'hasS2SCapability').resolves({ allowed: false, reason: 'not-s2s' });
+
+      suggs[0].suggestionKey = `site:${SITE_ID}:backlink:abc:referrer:def`;
+
+      const response = await suggestionsController.createSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: [suggs[0]],
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      const createResponse = await response.json();
+      expect(createResponse.suggestions[0]).to.have.property('statusCode', 201);
+      expect(mockSuggestion.create.calledOnce).to.be.true;
+      expect(mockSuggestion.create.firstCall.args[0].suggestionKey).to.be.undefined;
+    });
+
+    it('preserves a correctly site-scoped suggestionKey when caller is an admin', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(true);
+      sandbox.stub(AccessControlUtil.prototype, 'hasS2SCapability').resolves({ allowed: false, reason: 'not-s2s' });
+
+      const key = `site:${SITE_ID}:backlink:abc:referrer:def`;
+      suggs[0].suggestionKey = key;
+
+      const response = await suggestionsController.createSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: [suggs[0]],
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      const createResponse = await response.json();
+      expect(createResponse.suggestions[0]).to.have.property('statusCode', 201);
+      expect(mockSuggestion.create.calledOnce).to.be.true;
+      expect(mockSuggestion.create.firstCall.args[0].suggestionKey).to.equal(key);
+    });
+
+    it('preserves a correctly site-scoped suggestionKey when caller is a granted S2S consumer', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(false);
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
+      sandbox.stub(AccessControlUtil.prototype, 'hasS2SCapability')
+        .resolves({ allowed: true, reason: 'granted', clientId: 'svc-suggestions', consumerId: 'consumer-1' });
+
+      const key = `site:${SITE_ID}:backlink:abc:referrer:def`;
+      suggs[0].suggestionKey = key;
+
+      const response = await suggestionsController.createSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: [suggs[0]],
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      const createResponse = await response.json();
+      expect(createResponse.suggestions[0]).to.have.property('statusCode', 201);
+      expect(mockSuggestion.create.calledOnce).to.be.true;
+      expect(mockSuggestion.create.firstCall.args[0].suggestionKey).to.equal(key);
+    });
+
+    it('rejects a suggestionKey scoped to a different site even for an admin caller', async () => {
+      sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(true);
+      sandbox.stub(AccessControlUtil.prototype, 'hasS2SCapability').resolves({ allowed: false, reason: 'not-s2s' });
+
+      suggs[0].suggestionKey = 'site:some-other-site-id:backlink:abc:referrer:def';
+
+      const response = await suggestionsController.createSuggestions({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: [suggs[0]],
+        ...context,
+      });
+
+      expect(response.status).to.equal(207);
+      const createResponse = await response.json();
+      expect(createResponse.suggestions[0]).to.have.property('statusCode', 400);
+      expect(createResponse.suggestions[0]).to.have.property('message', `suggestionKey must be scoped to site ${SITE_ID}`);
+      expect(mockSuggestion.create.calledOnce).to.be.false;
+    });
+  });
+
   it('creates a suggestion returns bad request if no site ID is passed', async () => {
     const response = await suggestionsController.createSuggestions({
       params: { opportunityId: OPPORTUNITY_ID },
@@ -3622,6 +3705,24 @@ describe('Suggestions Controller', () => {
   });
 
   describe('PLG skip Slack alert', () => {
+    beforeEach(() => {
+      // The skip alert is now gated to PLG-relevant opportunity types
+      // (cwv, alt-text, broken-backlinks); mockSuggestionEntity's getOpportunity()
+      // otherwise reports a generic 'test-opportunity-type' that the gate excludes.
+      mockSuggestion.findById.callsFake((id) => {
+        const s = suggs.find((sg) => sg.id === id);
+        if (!s) {
+          return Promise.resolve(null);
+        }
+        const entity = mockSuggestionEntity(s, removeStub);
+        entity.getOpportunity = () => ({
+          getSiteId: () => SITE_ID,
+          getType: () => 'broken-backlinks',
+        });
+        return Promise.resolve(entity);
+      });
+    });
+
     const makePlgSite = (tier) => {
       const entitlement = { getProductCode: () => 'ASO', getTier: () => tier };
       const enrollment = { getEntitlement: sandbox.stub().resolves(entitlement) };
@@ -3673,6 +3774,37 @@ describe('Suggestions Controller', () => {
       expect(postSlackMessageStub.firstCall.args[0]).to.equal('C_SKIP');
       expect(postSlackMessageStub.firstCall.args[1]).to.include('PLG Customer Skipped');
       expect(postSlackMessageStub.firstCall.args[1]).to.include('TOO_RISKY');
+    });
+
+    it('includes empty Skip Reason and Skip Detail lines when neither is provided', async () => {
+      const postSlackMessageStub = sandbox.stub().resolves();
+      const ControllerWithSlack = await esmock.p('../../src/controllers/suggestions.js', {
+        '../../src/utils/slack/base.js': { postSlackMessage: postSlackMessageStub },
+      });
+
+      const plgSite = makePlgSite('PLG');
+      const da = { ...mockSuggestionDataAccess, Site: { findById: sandbox.stub().resolves(plgSite) } };
+      const ctrl = ControllerWithSlack({
+        dataAccess: da, pathInfo: { headers: {} }, ...authContext,
+      }, mockSqs, {
+      AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue',
+      LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL: 'https://llmo-experimentation-engine-queue',
+    });
+
+      const response = await ctrl.patchSuggestion({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, suggestionId: SUGGESTION_IDS[0] },
+        data: { status: 'SKIPPED' },
+        env: { SLACK_PLG_SKIP_CHANNEL_ID: 'C_SKIP', SLACK_BOT_TOKEN: 'xoxb-token' },
+        ...context,
+        dataAccess: da,
+      });
+      await new Promise(setImmediate);
+
+      expect(response.status).to.equal(200);
+      expect(postSlackMessageStub).to.have.been.calledOnce;
+      const slackBody = postSlackMessageStub.firstCall.args[1];
+      expect(slackBody).to.include('*Skip Reason:* ``');
+      expect(slackBody).to.include('*Skip Detail:* ``');
     });
 
     it('does not send PLG skip alert when patchSuggestion skips for a PAID site', async () => {
@@ -3752,6 +3884,44 @@ describe('Suggestions Controller', () => {
         ...context,
         dataAccess: da,
       });
+
+      expect(response.status).to.equal(200);
+      expect(postSlackMessageStub).to.not.have.been.called;
+    });
+
+    it('does not send PLG skip alert when opportunity type is outside the PLG allow-list (cwv, alt-text, broken-backlinks)', async () => {
+      const postSlackMessageStub = sandbox.stub().resolves();
+      const ControllerWithSlack = await esmock.p('../../src/controllers/suggestions.js', {
+        '../../src/utils/slack/base.js': { postSlackMessage: postSlackMessageStub },
+      });
+
+      mockSuggestion.findById.callsFake((id) => {
+        const s = suggs.find((sg) => sg.id === id);
+        const entity = mockSuggestionEntity(s, removeStub);
+        entity.getOpportunity = () => ({
+          getSiteId: () => SITE_ID,
+          getType: () => 'meta-tags',
+        });
+        return Promise.resolve(entity);
+      });
+
+      const plgSite = makePlgSite('PLG');
+      const da = { ...mockSuggestionDataAccess, Site: { findById: sandbox.stub().resolves(plgSite) } };
+      const ctrl = ControllerWithSlack({
+        dataAccess: da, pathInfo: { headers: {} }, ...authContext,
+      }, mockSqs, {
+      AUTOFIX_JOBS_QUEUE: 'https://autofix-jobs-queue',
+      LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL: 'https://llmo-experimentation-engine-queue',
+    });
+
+      const response = await ctrl.patchSuggestion({
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, suggestionId: SUGGESTION_IDS[0] },
+        data: { status: 'SKIPPED', skipReason: 'TOO_RISKY' },
+        env: { SLACK_PLG_SKIP_CHANNEL_ID: 'C_SKIP', SLACK_BOT_TOKEN: 'xoxb-token' },
+        ...context,
+        dataAccess: da,
+      });
+      await new Promise(setImmediate);
 
       expect(response.status).to.equal(200);
       expect(postSlackMessageStub).to.not.have.been.called;
@@ -14590,7 +14760,7 @@ describe('Suggestions Controller', () => {
       expect(fetchStub).to.have.been.calledOnce;
       const fetchArgs = fetchStub.getCall(0).args;
       expect(fetchArgs[0]).to.equal('https://www.lovesac.com/sactionals');
-      expect(fetchArgs[1].headers['User-Agent']).to.equal('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Tokowaka-AI Tokowaka/1.0 AdobeEdgeOptimize-AI AdobeEdgeOptimize/1.0');
+      expect(fetchArgs[1].headers['User-Agent']).to.equal('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Spacecat/1.0 Tokowaka-AI AdobeEdgeOptimize-AI');
     });
 
     it('should handle fetch failure with 404', async () => {
@@ -14630,11 +14800,14 @@ describe('Suggestions Controller', () => {
 
     it('should log x-tokowaka-request-id when present in error response', async () => {
       const mockRequestId = 'req-abc-123-xyz';
+      const getHeaderStub = sandbox.stub();
+      getHeaderStub.withArgs('x-tokowaka-request-id').returns(mockRequestId);
+      getHeaderStub.withArgs('x-edgeoptimize-request-id').returns(null);
       const mockResponse = {
         ok: false,
         status: 503,
         headers: {
-          get: sandbox.stub().withArgs('x-tokowaka-request-id').returns(mockRequestId),
+          get: getHeaderStub,
         },
       };
 
@@ -14661,8 +14834,49 @@ describe('Suggestions Controller', () => {
       const body = await response.json();
       expect(body.status).to.equal('error');
       expect(body.statusCode).to.equal(503);
-      expect(warnStub).to.have.been.calledWith(
-        `Failed to fetch URL. Status: 503, x-tokowaka-request-id: ${mockRequestId}`,
+      expect(warnStub.getCall(0).args[0]).to.match(
+        new RegExp(`^\\[edge-live-preview\\] Failed to fetch URL siteId=${SITE_ID} opportunityId=${OPPORTUNITY_ID} url=https://www\\.lovesac\\.com/error-page status=503 elapsedMs=\\d+ x-tokowaka-request-id=${mockRequestId}$`),
+      );
+    });
+
+    it('should log x-edgeoptimize-request-id when x-tokowaka-request-id is absent', async () => {
+      const mockRequestId = 'edgeopt-req-456';
+      const getHeaderStub = sandbox.stub();
+      getHeaderStub.withArgs('x-tokowaka-request-id').returns(null);
+      getHeaderStub.withArgs('x-edgeoptimize-request-id').returns(mockRequestId);
+      const mockResponse = {
+        ok: false,
+        status: 503,
+        headers: {
+          get: getHeaderStub,
+        },
+      };
+
+      fetchStub.resolves(mockResponse);
+
+      const warnStub = sandbox.stub();
+      const response = await suggestionsController.fetchFromEdge({
+        ...context,
+        log: {
+          info: sandbox.stub(),
+          warn: warnStub,
+          error: sandbox.stub(),
+        },
+        params: {
+          siteId: SITE_ID,
+          opportunityId: OPPORTUNITY_ID,
+        },
+        data: {
+          url: 'https://www.lovesac.com/error-page',
+        },
+      });
+
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body.status).to.equal('error');
+      expect(body.statusCode).to.equal(503);
+      expect(warnStub.getCall(0).args[0]).to.match(
+        new RegExp(`^\\[edge-live-preview\\] Failed to fetch URL siteId=${SITE_ID} opportunityId=${OPPORTUNITY_ID} url=https://www\\.lovesac\\.com/error-page status=503 elapsedMs=\\d+ x-edgeoptimize-request-id=${mockRequestId}$`),
       );
     });
 
@@ -15135,7 +15349,8 @@ describe('Suggestions Controller', () => {
         const opportunityWithGetId = {
           getSiteId: () => SITE_ID,
           getId: () => 'covered-opp-id',
-          // intentionally NO getType — exercises line 83 `?.` undefined branch
+          // PLG-gated type so the alert path is reached; getId is exercised below
+          getType: () => 'broken-backlinks',
         };
 
         const minimalSuggestion = {
@@ -15192,8 +15407,6 @@ describe('Suggestions Controller', () => {
         const slackBody = postSlackMessageStub.firstCall.args[1];
         // siteBaseURL fell back to site.getId()
         expect(slackBody).to.include(SITE_ID);
-        // opportunityType fell back to 'unknown' (getType missing)
-        expect(slackBody).to.include('unknown');
         // opportunityId resolved from opportunity.getId?.() (defined branch)
         expect(slackBody).to.include('covered-opp-id');
       });

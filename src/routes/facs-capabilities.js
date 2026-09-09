@@ -177,6 +177,7 @@ const routeFacsCapabilities = {
     // Admin-only reads
     'GET /organizations', // admin OR S2S readAll
     'GET /organizations/by-product-code/:productCode', // admin OR S2S readAll
+    'GET /organizations/by-access-map-sheet/:productCode', // hasAdminReadAccess only
     'GET /sites', // admin OR S2S readAll
     'GET /sites.csv', // hasAdminReadAccess
     'GET /sites.xlsx', // hasAdminReadAccess
@@ -195,8 +196,7 @@ const routeFacsCapabilities = {
     'POST /hooks/site-detection/cdn/:hookSecret', // hookSecret in path
     'POST /hooks/site-detection/rum/:hookSecret', // hookSecret in path
     'POST /webhooks/github', // HMAC-signed webhook
-    'GET /slack/events', // Slack signature verification
-    'POST /slack/events', // Slack signature verification
+    'POST /slack/events', // Slack signature verification (slackSignatureWrapper)
     'POST /slack/channels/invite-by-user-id', // Slack-internal
     'GET /trigger', // internal scheduler
 
@@ -288,6 +288,7 @@ const routeFacsCapabilities = {
       // Site-level LLMO config
       'POST /sites/:siteId/llmo/config': 'llmo/can_configure',
       'PATCH /sites/:siteId/llmo/config': 'llmo/can_configure',
+      'POST /sites/:siteId/llmo/brand-claims/request': 'llmo/can_configure',
       // Site-level scraper config — a site write surfaced through the
       // generic /config namespace rather than under /llmo/, but
       // configuration nonetheless.
@@ -516,6 +517,7 @@ const routeFacsCapabilities = {
       'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/deploy': 'llmo/can_configure',
       'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/plan': 'llmo/can_configure',
       'GET /sites/:siteId/llmo/cdn-onboard/cloudfront/permissions': 'llmo/can_configure',
+      'GET /sites/:siteId/llmo/cdn-onboard/cloudfront/template': 'llmo/can_configure',
       'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/log-delivery': 'llmo/can_configure',
       'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/log-rescan': 'llmo/can_configure',
       'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/config': 'llmo/can_configure',
@@ -548,6 +550,7 @@ const routeFacsCapabilities = {
 
       // Site LLMO surfaces — read side
       'GET /sites/:siteId/llmo/brand-claims': 'llmo/can_view',
+      'GET /sites/:siteId/llmo/brand-claims/weeks': 'llmo/can_view',
       'GET /sites/:siteId/llmo/config': 'llmo/can_view',
       'GET /sites/:siteId/llmo/customer-intent': 'llmo/can_view',
       'GET /sites/:siteId/llmo/data': 'llmo/can_view',
@@ -669,12 +672,14 @@ const routeFacsCapabilities = {
       'POST /v2/orgs/:spaceCatId/topics': 'llmo/can_configure',
       // Serenity proxy writes — prompts / markets / models under brand
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts': 'llmo/can_configure',
+      'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/bulk-tags': 'llmo/can_configure',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/bulk-delete': 'llmo/can_configure',
       'PATCH /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/:semrushPromptId': 'llmo/can_configure',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets': 'llmo/can_configure',
       'DELETE /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode': 'llmo/can_configure',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags': 'llmo/can_configure',
       'PATCH /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags/:tagId': 'llmo/can_configure',
+      'DELETE /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags/:tagId': 'llmo/can_configure',
       'PUT /v2/orgs/:spaceCatId/brands/:brandId/serenity/models': 'llmo/can_configure',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/activate': 'llmo/can_configure',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/deactivate': 'llmo/can_configure',
@@ -873,6 +878,7 @@ const routeFacsCapabilities = {
       'GET /trial-users/email-preferences': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId': 'llmo/can_view',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/markets': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': 'llmo/can_view',
       // Serenity proxy (Semrush AIO replacement) — reads under brand
@@ -881,6 +887,7 @@ const routeFacsCapabilities = {
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags': 'llmo/can_view',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags/:tagId/impact': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/models': 'llmo/can_view',
       // Org-level Serenity catalog reads (no brandId).
       'GET /v2/orgs/:spaceCatId/serenity/models': 'llmo/can_view',
@@ -890,6 +897,9 @@ const routeFacsCapabilities = {
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/access': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/prompts': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/cited-domains': 'llmo/can_view',
+      // Brand Claims response feed. Sits under Brand Presence within the ABV product, and
+      // is a read of the brand's own answer corpus — same `can_view` gate as its siblings.
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/responses': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/sentiment-overview': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/subreddits': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/reddit-threads': 'llmo/can_view',
@@ -1366,9 +1376,9 @@ const routeFacsCapabilities = {
     // Filter / pagination / format params (not entities):
     'base64PageUrl', 'base64Url', 'baseURL', 'channel', 'cursor',
     'dataSource', 'deliveryType', 'endDate', 'eventType',
-    'exportId', 'flagName', 'geo', 'handlerType', 'hookSecret', 'limit',
+    'exportId', 'failureCursor', 'failureLimit', 'flagName', 'geo', 'handlerType', 'hookSecret', 'limit',
     'metric', 'processingType', 'product', 'productCode', 'projectName',
-    'sheetType', 'source', 'startDate', 'status', 'tier', 'tokenType', 'type',
+    'sheetType', 'source', 'startDate', 'status', 'tagFilterMode', 'tagPath', 'tier', 'tokenType', 'type',
     'url', 'version', 'week',
     // Single-row id used by the state-layer management endpoints
     // (`/state/access-mappings/:id` — the binding row's own UUID, never a

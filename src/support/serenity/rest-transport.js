@@ -370,13 +370,15 @@ export function createSerenityTransport({ env, imsToken }) {
   // layer wraps it and calls it once per attempt).
   const projects = createSerenityProjectEngineTransport(projectEngineOptions);
 
-  // Raw Project Engine client, ONLY for GET /v1/workspaces/{id}/brand-topics: the
-  // facade does not expose a brand-topics method yet (it is in-spec — the future
-  // 29th facade method — but unshipped as of 1.14.0), so this one call keeps the
-  // raw client + the local `unwrap`. Same options as the facade above.
-  // TODO(LLMO): once @adobe/spacecat-shared-project-engine-client ships a brand-topics facade
-  // method, retire `projectsRaw` and route brand-topics through `projects` like the other 28 ops
-  // (this is the only remaining raw Project Engine caller in this file).
+  // Raw Project Engine client, for the ops the facade does not expose yet — both
+  // in-spec (the underlying generated `paths` type has the operation) but
+  // unshipped as a named facade method: GET /v1/workspaces/{id}/brand-topics
+  // (unshipped as of 1.14.0) and DELETE .../aio/tags (`deleteProjectTags`,
+  // expected in spacecat-shared#1903/1.21.0 but still missing). Same options as
+  // the facade above.
+  // TODO(LLMO): once @adobe/spacecat-shared-project-engine-client ships facade
+  // methods for brand-topics and tag-delete, retire `projectsRaw` and route both
+  // through `projects` like the other facade ops.
   const projectsRaw = createSerenityProjectEngineApiClient(projectEngineOptions);
 
   // Typed User Manager client over the sub-workspace lifecycle gateway (same
@@ -583,8 +585,11 @@ export function createSerenityTransport({ env, imsToken }) {
      * batch is ATOMIC upstream: a CHECK violation on ANY item (e.g. a `created_by`
      * / `updated_by` longer than 100 chars) rolls the WHOLE batch back and answers
      * 400 — so callers must isolate a deterministic offender rather than retry the
-     * batch whole. No caller yet; it exposes the batch write surface the ADR pins
-     * for bulk stampers.
+     * batch whole. Called by the create endpoint's upsert path to stamp the rows it
+     * replaced; that caller logs rather than isolating, and treats a failure as
+     * non-fatal, because the tag write it follows has already landed and `callerId`
+     * — the only field that could trip the CHECK — is length-capped by
+     * `resolveCallerId`.
      *
      * @param {string} semrushWorkspaceId
      * @param {string} projectId
@@ -888,6 +893,51 @@ export function createSerenityTransport({ env, imsToken }) {
     },
 
     /**
+     * DELETE /v2/workspaces/{ws}/projects/{pid}/aio/tags — batch-deletes tags by
+     * id (model.BatchDeleteRequest body). Detaches every id from every carrying
+     * prompt before removing the tag record; never deletes a prompt (category-
+     * delete.md §3). 204 on success.
+     *
+     * FACADE GAP: `deleteProjectTags` was expected to ship as a named facade
+     * method in spacecat-shared#1903 (released as 1.21.0, this repo's pinned
+     * version) — it did not; the currently-published client exposes no such
+     * method (only `get`/`post` are wrapped for this path), even though the
+     * underlying generated `paths` type DOES declare the `delete` operation
+     * (`aio-delete-tags`). Routed through the raw client + local `unwrap`
+     * (same escape hatch as `getBrandTopics` above) until a future
+     * spacecat-shared release adds the facade method.
+     *
+     * No `prompt_id` query is sent — the vendored contract's declared-required
+     * `prompt_id` is corrected optional (spacecat-shared CR25): a live batch
+     * delete with no `prompt_id` at all 204s and deletes exactly the requested
+     * ids, and every delete this proxy composes is project-wide (a whole tag
+     * subtree), never scoped to one prompt. The generated operation type still
+     * declares `prompt_id` required (the CR25 "corrected optional" half also
+     * hasn't shipped), so `query` below is cast past that stale requirement —
+     * narrowly, on the `query` value alone, so `params.path` and `body` stay
+     * checked against the real generated types. The cast changes what
+     * TYPESCRIPT accepts, not what is SENT: `query` is `undefined`, so nothing
+     * is added to the request URL.
+     *
+     * @param {string} semrushWorkspaceId
+     * @param {string} projectId
+     * @param {string[]} tagIds - upstream tag ids to delete (a subtree,
+     *   composed by the caller — see tag-tree.js collectSubtreeIds).
+     */
+    async deleteProjectTags(semrushWorkspaceId, projectId, tagIds) {
+      return unwrap('DELETE', await projectsRaw.DELETE(
+        '/v2/workspaces/{id}/projects/{project_id}/aio/tags',
+        {
+          params: {
+            path: { id: semrushWorkspaceId, project_id: projectId },
+            query: /** @type {any} */ (undefined),
+          },
+          body: { ids: tagIds },
+        },
+      ));
+    },
+
+    /**
      * POST /v1/workspaces/{ws}/projects — creates a new Semrush AIO project.
      *
      * @param {string} semrushWorkspaceId
@@ -997,8 +1047,9 @@ export function createSerenityTransport({ env, imsToken }) {
 
     /**
      * GET /v1/languages — returns Semrush's language catalog. Used to resolve
-     * the language_id UUID from an ISO 639-1 code (e.g. 'en' → UUID). The
-     * caller is expected to cache the result (catalog is stable).
+     * the language_id UUID from a BCP-47 `code` (e.g. 'zh-Hans' → UUID),
+     * exact match, case-insensitive (LLMO-7420 — no English-name matching).
+     * The caller is expected to cache the result (catalog is stable).
      */
     async listLanguages() {
       return projects.listLanguages({});
@@ -1239,13 +1290,19 @@ export function createSerenityTransport({ env, imsToken }) {
     /**
      * POST /v2/workspaces/{ws}/projects/{pid}/ai_models/benchmarks — batch-create
      * benchmarks. Body is an ARRAY of `{ brand_name, domain, primary_url?,
-     * brand_aliases?, color? }`. `primary_url` is honoured at create
+     * brand_aliases?, color?, main_brand? }`. `primary_url` is honoured at create
      * (live-verified 2026-08-19) and is what a subpath brand must carry, since
-     * `domain` alone scores it against its bare host. The API cannot set
-     * `main_brand` (system-managed); a created
-     * benchmark is a regular tracked brand. Returns `{ ids: [...], existing_count }`.
-     * We use it to create the project's own-brand benchmark when Semrush has not
-     * auto-provisioned one (the `benchmark_id` brand URLs must attach to).
+     * `domain` alone scores it against its bare host. `main_brand: true` IS ALSO
+     * accepted and honoured at create (live-verified; see mysticat-data-service
+     * PR #945/executor.py `_own_brand_body` — a prior version of this doc claimed
+     * the API cannot set it, which was the root cause of LLMO-7421: every
+     * benchmark this codebase created was left unflagged). It can only be set at
+     * create — a PUT never sets it (see `updateBenchmark` below) — so repairing
+     * an unflagged own-domain benchmark means delete-then-recreate-flagged, not
+     * an in-place update. Returns `{ ids: [...], existing_count }`. We use it to
+     * create/repair the project's own-brand benchmark (see
+     * `ensureOwnBrandBenchmark` / `assertMainBrandBenchmark` in `brand-urls.js`)
+     * — the `benchmark_id` brand URLs must attach to.
      *
      * @param {string} workspaceId
      * @param {string} projectId

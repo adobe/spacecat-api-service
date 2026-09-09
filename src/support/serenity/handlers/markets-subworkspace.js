@@ -27,6 +27,7 @@ import {
   defaultMarketName,
   listTagsForProject,
   listProjectTagTree,
+  tagConstraints,
   listSliceModels,
   listUnionModels,
   syncModelsForProject,
@@ -44,7 +45,12 @@ import { provisionDimensionTree, ensureServerOwnedValue } from '../tag-tree.js';
 import { classifyBrandedTag, needlesFromNames } from '../branded-classifier.js';
 import { classifyPromptIntents, AI_GEN_CLASSIFY_MAX, computeWriteDeadline } from '../intent-classification.js';
 import {
-  collectBrandUrlEntries, attachBrandUrlsToProject, primaryDomainSet, primaryIdentitySet,
+  collectBrandUrlEntries,
+  attachBrandUrlsToProject,
+  ensureOwnBrandBenchmark,
+  assertMainBrandBenchmark,
+  primaryDomainSet,
+  primaryIdentitySet,
 } from '../brand-urls.js';
 import { resolveProjects } from '../resolve-projects.js';
 import {
@@ -296,8 +302,7 @@ function validateCreateBody(body) {
  * (transport.getBrandTopics) and attaches them to the project. Keeps the top
  * `topicCap` topics by search volume (0 = keep all) and tags every prompt with
  * the standard closed-dimension values ({@link STANDARD_PROMPT_TAG_VALUES} —
- * today just its seeded `intent` default, since the `origin` entry it used to
- * carry is retired, tag-display-names.md §3 — minus that seeded `intent`
+ * `origin/ai` plus the seeded `intent` default — minus that seeded `intent`
  * default, which is classified per prompt below instead), the producing
  * `source/semrush` value, plus a branded / non-branded `type` value derived
  * from `brandNames` (brand name + aliases) and a per-prompt server-classified
@@ -531,7 +536,14 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
  *   `require` throws on failure (the default markets endpoint, and — since
  *   SITES-49206 — every create, including an empty-units project: Semrush no
  *   longer enforces AI limits, so there is no quota 405 left to tolerate);
- *   `skip` does not publish at all (LLMO-5492 defer-publish).
+ *   `skip` does not publish at all (LLMO-5492 defer-publish). The main-brand
+ *   benchmark invariant (LLMO-7421) still runs regardless of `publishMode` —
+ *   see the `assertMainBrandBenchmark` call below — but only confirms the
+ *   DRAFT state AT THIS CALL. A `skip` caller that later triggers its OWN
+ *   publish (outside this function) must re-run `ensureOwnBrandBenchmark` +
+ *   `assertMainBrandBenchmark` immediately before that publish, since project
+ *   state can drift between the two calls; this function does not, and
+ *   cannot, guarantee the invariant still holds at a publish it never makes.
  * @param {any} [options.dataAccess] - when supplied, upserts the
  *   `brand_to_semrush_projects` mapping row for this project (best-effort,
  *   never fails the create). Omit for a `brand` that is not yet a persisted
@@ -683,7 +695,7 @@ export async function handleCreateMarketSubworkspace(
   // so classification can later apply intent/origin/type values per prompt and the
   // Categories surface has a `category` root to hang customer categories under.
   // Idempotent (resolve-before-create), and unconditional: every project carries
-  // exactly the four dimension roots, whether or not it has prompts yet.
+  // exactly the six dimension roots, whether or not it has prompts yet.
   const provisioned = await provisionDimensionTree(transport, workspaceId, projectId, log);
 
   // Attach the selected AI models (LLMs) to the project before populating /
@@ -731,13 +743,47 @@ export async function handleCreateMarketSubworkspace(
     );
   }
 
-  // Push the brand's URLs (own sites + social + earned) onto this market's
-  // own-brand benchmark (created on demand when Semrush hasn't provisioned one),
-  // region-filtered to the market. Done before publish so the URLs are part of
-  // the same published version. Best-effort: URL enrichment must never abort the
-  // brand create — a benchmark/URL hiccup is logged and skipped, not propagated,
-  // so the whole block (INCLUDING the project listing the skip set needs) sits
-  // inside the try.
+  // Resolve/repair the own-brand benchmark before best-effort URL enrichment.
+  // Two concerns converge here, both blocking (NOT best-effort like the
+  // URL/competitor syncs below):
+  //   - LLMO-7421: exactly one main_brand:true benchmark must exist in the
+  //     DRAFT before this market is allowed to publish, or Brand Presence has
+  //     no customer baseline. A project that can't establish its own-brand
+  //     benchmark must not publish and must not reach `upsertMappingRow`
+  //     (recorded as complete). A retry re-enters this handler, re-resolves
+  //     the same still-draft project via the leftover-draft adopt branch
+  //     above, and retries idempotently (ensureOwnBrandBenchmark is safe to
+  //     re-run). Checked only pre-publish: publish is asynchronous (a 202
+  //     with the project transitioning to live in the background — see
+  //     `publish-status.js`), so a published-view read taken immediately
+  //     after the publish call below resolves would race that transition
+  //     rather than confirm anything; that confirmation is deferred to the
+  //     fleet reconciliation this ticket also scopes.
+  //   - Semrush may have auto-created the benchmark from customer-cased
+  //     brand_names, so project creation is also the blocking point that
+  //     repairs those stored aliases (mixed-case aliases need a blocking
+  //     withhold/re-add repair) before publish.
+  const ownBrand = {
+    name: hasText(body.brandDisplayName) ? body.brandDisplayName : body.brandNames[0],
+    domain: body.brandDomain,
+    primaryUrl,
+    aliases: aliasNames,
+  };
+  await ensureOwnBrandBenchmark(
+    transport,
+    workspaceId,
+    projectId,
+    ownBrand,
+    log,
+    { repairUnflagged: true, repairAliasCase: true },
+  );
+  // The authoritative id: assertMainBrandBenchmark re-reads and requires
+  // exactly one flagged benchmark, so it (not ensureOwnBrandBenchmark's own
+  // return value) is the single source of truth callers below should use.
+  const ownBrandBenchmarkId = await assertMainBrandBenchmark(transport, workspaceId, projectId);
+
+  // URL attachment remains best-effort. The benchmark itself is already
+  // guaranteed to exist and be flagged by this point.
   try {
     // Skip EVERY market's primary domain, not just this one's: a market-mirror
     // brand's other-market primary must not surface as a website URL here either
@@ -766,13 +812,9 @@ export async function handleCreateMarketSubworkspace(
       workspaceId,
       projectId,
       brandUrlEntries,
-      {
-        name: body.brandDisplayName,
-        domain: body.brandDomain,
-        primaryUrl,
-        aliases: aliasNames,
-      },
+      ownBrand,
       log,
+      ownBrandBenchmarkId,
     );
   } catch (e) {
     // Best-effort, but DELIBERATELY non-self-healing: the brand is left live with
@@ -970,7 +1012,7 @@ export async function handleDeleteMarketSubworkspace(
  * @param {string} workspaceId - Semrush (sub-)workspace id.
  * @param {string} projectId - AIO project id.
  * @param {any} [log] - logger, used to surface a ceiling-hit truncation warning.
- * @returns {Promise<{ items: Array<{ id?: string, name?: string }> }>}
+ * @returns {Promise<{ items: Array<{ id?: string, name?: string }>, complete: boolean }>}
  */
 async function listStandaloneProjectTags(transport, workspaceId, projectId, log) {
   const items = [];
@@ -994,11 +1036,11 @@ async function listStandaloneProjectTags(transport, workspaceId, projectId, log)
       log?.warn?.('listStandaloneProjectTags: page ceiling hit; standalone tag set may be truncated', {
         workspaceId, projectId, pages: PAGE_LIMIT, limit: LIMIT,
       });
-      break;
+      return { items, complete: false };
     }
     page += 1;
   }
-  return { items };
+  return { items, complete: true };
 }
 
 /**
@@ -1025,30 +1067,29 @@ export async function handleListTagsSubworkspace(transport, workspaceId, query, 
   // NESTED-TREE MODE (parity with flat handleListTags): a `parentId` query param
   // drills the standalone AIO tag tree instead of the prompt-derived merge below.
   if (query?.parentId !== undefined) {
-    return listProjectTagTree(
+    const explicitPaging = query.page !== undefined || query.limit !== undefined;
+    const result = await listProjectTagTree(
       transport,
       workspaceId,
       projectId,
       validateParentIdQuery(String(query.parentId)),
       log,
+      undefined,
+      {
+        explicit: explicitPaging,
+        page: query.page,
+        limit: query.limit,
+      },
     );
+    return { ...result, constraints: tagConstraints() };
   }
   // A tag exists in two forms: attached to ≥1 prompt (listTagsForProject scans the
   // prompt vocabulary) OR standalone (registered via createProjectTags but not yet
   // carried by any prompt — e.g. a just-created, still-empty category).
-  // The Categories surface must round-trip BOTH, so merge them by tag name. The
-  // standalone list is best-effort: a hiccup there must not regress the
-  // prompt-derived behavior that already worked.
+  // The Categories surface must round-trip BOTH, so merge them by tag name.
   const [fromPrompts, standalone] = await Promise.all([
     listTagsForProject(transport, workspaceId, projectId, { geoTargetId, languageCode }, log),
-    Promise.resolve()
-      .then(() => listStandaloneProjectTags(transport, workspaceId, projectId, log))
-      .catch((e) => {
-        log?.warn?.('handleListTagsSubworkspace: standalone tag list failed (non-fatal)', {
-          workspaceId, projectId, error: e?.message,
-        });
-        return { items: [] };
-      }),
+    listStandaloneProjectTags(transport, workspaceId, projectId, log),
   ]);
   // Merge by ID, not by name. Names are unique only per (project, parent), so a
   // sub-category `human` and the `origin` value `human` are two distinct tags —
@@ -1091,7 +1132,7 @@ export async function handleListTagsSubworkspace(transport, workspaceId, query, 
       byId.set(entry.id, entry);
     }
   }
-  return { items: [...byId.values()] };
+  return { items: [...byId.values()], complete: fromPrompts.complete && standalone.complete };
 }
 
 /**

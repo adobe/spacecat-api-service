@@ -4470,12 +4470,12 @@ describe('LLMO Onboarding Functions', () => {
       expect(brand.v1SiteId).to.equal('site-123');
       expect(brand.baseUrl).to.equal('https://www.example.com');
       expect(brand.urls).to.deep.equal([{ value: 'https://www.example.com', type: 'base' }]);
-      expect(brand.brandAliases).to.deep.equal([{ name: 'Test Brand', regions: ['gl'] }]);
+      expect(brand.brandAliases).to.deep.equal([{ name: 'Test Brand', regions: ['US'] }]);
       expect(brand.updatedBy).to.equal('tester@example.com');
       expect(brand.prompts).to.deep.equal([]);
     });
 
-    it('seeds the operator-selected market in place of the gl placeholder (LLMO-5645)', async () => {
+    it('seeds the operator-selected market in place of the default US placeholder (LLMO-5645)', async () => {
       const { buildInitialCustomerConfigV2 } = await esmock('../../../src/controllers/llmo/llmo-onboarding.js', {});
 
       const result = buildInitialCustomerConfigV2({
@@ -4672,9 +4672,9 @@ describe('LLMO Onboarding Functions', () => {
       expect(newBrand.baseUrl).to.equal('https://www.example.com');
       expect(newBrand.status).to.equal('active');
       expect(newBrand.origin).to.equal('system');
-      expect(newBrand.regions).to.deep.equal(['gl']);
+      expect(newBrand.regions).to.deep.equal(['US']);
       expect(newBrand.urls).to.deep.equal([{ value: 'https://www.example.com', type: 'base' }]);
-      expect(newBrand.brandAliases).to.deep.equal([{ name: 'New Brand', regions: ['gl'] }]);
+      expect(newBrand.brandAliases).to.deep.equal([{ name: 'New Brand', regions: ['US'] }]);
 
       expect(mockCustomerConfigV2Storage.writeCustomerConfigV2ToPostgres).to.have.been.calledOnce;
       expect(mockCustomerConfigV2Storage.writeCustomerConfigV2ToPostgres.firstCall.args[0])
@@ -6430,7 +6430,10 @@ describe('LLMO Onboarding Functions', () => {
       ]);
     });
 
-    it('defaults to one-time runs (trial) and WARNs when the tier cannot be read', async () => {
+    it('defaults to one-time runs (trial) and ERRORs when the tier cannot be read', async () => {
+      // .error, not .warn (LLMO-7366): a thrown lookup failure is a real operational
+      // problem, distinct from "no entitlement found" below, and this result also
+      // decides a customer-visible schedule's tier param elsewhere -- must be alertable.
       const mockDrsClient = createMockDrsClient(sandbox);
       // TierClient whose entitlement lookup throws → tier indeterminate.
       const failingTierClient = {
@@ -6453,8 +6456,8 @@ describe('LLMO Onboarding Functions', () => {
       // Fail-safe: no recurring schedule for a site of unknown paying status.
       expect(instance.createSchedule).to.not.have.been.called;
       expect(instance.submitJob.callCount).to.equal(4); // Brandalf + 3 one-shots
-      const warnLogs = context.log.warn.getCalls().map((c) => c.args[0]);
-      expect(warnLogs.some((m) => m.includes('Failed to read LLMO tier for site site-123'))).to.be.true;
+      const errorLogs = context.log.error.getCalls().map((c) => c.args[0]);
+      expect(errorLogs.some((m) => m.includes('Failed to read LLMO tier for site site-123'))).to.be.true;
     });
 
     it('defaults to one-time runs (trial) and WARNs when no entitlement exists', async () => {

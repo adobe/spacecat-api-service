@@ -3,7 +3,7 @@
 /* eslint-disable */
 
 import type { GenFile, GenService } from "@bufbuild/protobuf/codegenv2";
-import type { BrandCompetitorsRequestSchema, BrandCompetitorsResponseSchema } from "./messages_pb.js";
+import type { BrandCompetitorsRequestSchema, BrandCompetitorsResponseSchema, StatsRequestSchema, StatsResponseSchema } from "./messages_pb.js";
 
 /**
  * Describes the file v2/competitor/service.proto.
@@ -21,6 +21,17 @@ export declare const CompetitorService: GenService<{
     methodKind: "unary";
     input: typeof BrandCompetitorsRequestSchema;
     output: typeof BrandCompetitorsResponseSchema;
+  },
+  /**
+   * Stats retrieves statistics for a target brand and its competitors by date.
+   * The target is scoped by search_type; competitors stay at their root domain.
+   *
+   * @generated from rpc semrush.services.ai_seo.v2.competitor.CompetitorService.Stats
+   */
+  stats: {
+    methodKind: "unary";
+    input: typeof StatsRequestSchema;
+    output: typeof StatsResponseSchema;
   },
 }>;
 

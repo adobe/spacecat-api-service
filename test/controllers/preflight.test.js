@@ -71,6 +71,9 @@ describe('Preflight Controller', () => {
     save: sandbox.stub().resolves(),
   };
 
+  // A caller who belongs to the job's owning org (hasOrganization -> true), so the
+  // ownership check in loadJobScopedToCaller passes. Security tests below build a
+  // non-owner variant (hasOrganization -> false).
   const mockAuthInfo = {
     getProfile: () => ({
       email: 'user@example.com',
@@ -78,11 +81,17 @@ describe('Preflight Controller', () => {
       last_name: 'User',
       name: 'Test User',
     }),
+    getType: () => 'ims',
+    getScopes: () => [],
+    isAdmin: () => false,
+    isReadOnlyAdmin: () => false,
+    hasOrganization: () => true,
   };
 
   const mockSite = {
     getId: () => 'test-site-123',
     getOrganizationId: () => 'org-123',
+    getOrganization: () => ({ getImsOrgId: () => 'ims-org-123' }),
     getAuthoringType: () => SiteModel.AUTHORING_TYPES.SP,
     // Default site identity getters for the mock. Per-test AEM CS / EDS site
     // fixtures override as needed.
@@ -1422,6 +1431,110 @@ describe('Preflight Controller', () => {
       expect(result).to.deep.equal({
         message: 'Something went wrong',
       });
+    });
+
+    // ── SEC-5: cross-tenant credential-exposure (IDOR) regression tests ────────
+
+    it('returns 404 (not 200) for a non-preflight, token-bearing job and never leaks its token', async () => {
+      const PROMISE_TOKEN = 'SECRET-PROMISE-TOKEN-do-not-leak';
+      const serenityJob = {
+        getId: () => jobId,
+        getStatus: () => 'IN_PROGRESS',
+        getResult: () => null,
+        getError: () => null,
+        // A serenity-classify-prompts job persists a live promise token on metadata.
+        getMetadata: () => ({
+          jobType: 'serenity-classify-prompts',
+          promiseToken: PROMISE_TOKEN,
+          payload: { siteId: 'test-site-123' },
+        }),
+      };
+      mockDataAccess.AsyncJob.findById = sandbox.stub().resolves(serenityJob);
+      loggerStub.debug.resetHistory();
+      loggerStub.info.resetHistory();
+
+      const context = { params: { jobId } };
+      const response = await preflightController.getPreflightJobStatusAndResult(context);
+
+      // Existence of a job of another type is not revealed.
+      expect(response.status).to.equal(404);
+      const body = await response.json();
+      expect(body).to.deep.equal({ message: `Job with ID ${jobId} not found` });
+
+      // The token appears in neither the response body nor any log line.
+      expect(JSON.stringify(body)).to.not.include(PROMISE_TOKEN);
+      const allLogArgs = [
+        ...loggerStub.debug.getCalls(),
+        ...loggerStub.info.getCalls(),
+        ...loggerStub.warn.getCalls(),
+        ...loggerStub.error.getCalls(),
+      ].map((c) => JSON.stringify(c.args)).join(' ');
+      expect(allLogArgs).to.not.include(PROMISE_TOKEN);
+    });
+
+    it('returns 404 for a preflight job owned by a different tenant (no cross-tenant read)', async () => {
+      const nonOwnerAuthInfo = {
+        getProfile: () => ({ email: 'attacker@example.com' }),
+        getType: () => 'ims',
+        getScopes: () => [],
+        isAdmin: () => false,
+        isReadOnlyAdmin: () => false,
+        hasOrganization: () => false, // not a member of the job's owning org
+      };
+      const nonOwnerController = PreflightController(
+        {
+          dataAccess: mockDataAccess,
+          sqs: mockSqs,
+          attributes: { authInfo: nonOwnerAuthInfo },
+          pathInfo: { headers: {} },
+        },
+        loggerStub,
+        { AUDIT_JOBS_QUEUE_URL: 'https://sqs.test.amazonaws.com/audit-queue', AWS_ENV: 'prod' },
+      );
+      mockDataAccess.AsyncJob.findById = sandbox.stub().resolves(mockJob);
+      mockDataAccess.Site.findById = sandbox.stub().resolves(mockSite);
+
+      const context = { params: { jobId } };
+      const response = await nonOwnerController.getPreflightJobStatusAndResult(context);
+
+      expect(response.status).to.equal(404);
+      const body = await response.json();
+      expect(body).to.deep.equal({ message: `Job with ID ${jobId} not found` });
+    });
+
+    it('preserves metadata.payload.step for the legitimate preflight consumer (MFE contract)', async () => {
+      // Even if a token were ever present at the metadata top level, the DTO must
+      // never surface it; the MFE reads metadata.payload.{step,reason,errorCode}.
+      const jobWithToken = {
+        ...mockJob,
+        getMetadata: () => ({
+          jobType: 'preflight',
+          tags: ['preflight'],
+          promiseToken: 'should-never-be-returned',
+          payload: {
+            siteId: 'test-site-123',
+            urls: ['https://main--example-site.aem.page/test.html'],
+            step: 'suggest',
+            reason: 'user cancelled',
+            errorCode: 'CANCELLED',
+          },
+        }),
+      };
+      mockDataAccess.AsyncJob.findById = sandbox.stub().resolves(jobWithToken);
+      mockDataAccess.Site.findById = sandbox.stub().resolves(mockSite);
+
+      const context = { params: { jobId } };
+      const response = await preflightController.getPreflightJobStatusAndResult(context);
+      expect(response.status).to.equal(200);
+
+      const body = await response.json();
+      // MFE contract fields survive.
+      expect(body.metadata.payload.step).to.equal('suggest');
+      expect(body.metadata.payload.reason).to.equal('user cancelled');
+      expect(body.metadata.payload.errorCode).to.equal('CANCELLED');
+      // Top-level token must not be echoed back.
+      expect(body.metadata.promiseToken).to.be.undefined;
+      expect(JSON.stringify(body)).to.not.include('should-never-be-returned');
     });
   });
 });

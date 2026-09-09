@@ -116,6 +116,35 @@ export const sendAuditMessage = async (
   data: auditData,
 });
 
+/**
+ * Triggers a Brand Claims off-site opportunity ENRICHMENT run for a site (LLMO-7312).
+ *
+ * Sends the `brand-claims` audit message with a top-level `mode: 'enrich'` field
+ * (mirrors `onDemand`), which the audit worker forwards onto its ready-signal so
+ * mystique's BP consumer runs the cache-safe link refresh (force only the matcher +
+ * delivery) instead of a full claims recompute.
+ *
+ * @param {Site} site - The site object.
+ * @param {Object} slackContext - The Slack context object.
+ * @param {Object} lambdaContext - The Lambda context object.
+ * @returns {Promise} A promise representing the trigger operation.
+ */
+export const triggerBrandClaimsEnrich = async (
+  site,
+  slackContext,
+  lambdaContext,
+) => lambdaContext.sqs.sendMessage(lambdaContext.env.AUDIT_JOBS_QUEUE_URL, {
+  type: 'brand-claims',
+  siteId: site.getId(),
+  mode: 'enrich',
+  auditContext: {
+    slackContext: {
+      channelId: slackContext.channelId,
+      threadTs: slackContext.threadTs,
+    },
+  },
+});
+
 // todo: prototype - untested
 /* c8 ignore start */
 export const sendExperimentationCandidatesMessage = async (
@@ -422,6 +451,33 @@ export const triggerGeoExperimentImpactMeasurement = async (
   lambdaContext,
 ) => lambdaContext.sqs.sendMessage(lambdaContext.env.LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL, {
   type: 'TRIGGER_IMPACT_MEASUREMENT',
+  geoExperimentId,
+  triggeredBy: triggeredBy || 'unknown',
+});
+
+/**
+ * Sends a message to the llmo-experimentation-engine-queue to manually check an in-flight
+ * Mystique impact-measurement task for a GeoExperiment (see
+ * llmo-experimentation-engine's docs/decisions/007-manual-impact-measurement-check-completed-
+ * status.md for the handler contract).
+ *
+ * NOTE: this does NOT return the check result — it only requests that the engine poll Mystique
+ * and update the GeoExperiment if the task has finished. Needed because
+ * triggerGeoExperimentImpactMeasurement can re-arm a COMPLETED experiment while leaving it
+ * COMPLETED (invisible to the engine's cron sweep), so a manual check is the only way to advance
+ * it short of the engine's own bounded stuck-check safety net.
+ *
+ * @param {string} geoExperimentId - The GeoExperiment ID to check.
+ * @param {string} triggeredBy - Identity of the caller, for the engine's log line.
+ * @param {Object} lambdaContext - The Lambda context object (sqs, env).
+ * @return {Promise} - A promise representing the SQS send operation.
+ */
+export const checkGeoExperimentImpactMeasurement = async (
+  geoExperimentId,
+  triggeredBy,
+  lambdaContext,
+) => lambdaContext.sqs.sendMessage(lambdaContext.env.LLMO_EXPERIMENTATION_ENGINE_QUEUE_URL, {
+  type: 'CHECK_IMPACT_MEASUREMENT',
   geoExperimentId,
   triggeredBy: triggeredBy || 'unknown',
 });

@@ -11,9 +11,94 @@
  */
 
 import { expect } from 'chai';
-import { transformMarketTrackingTrends } from '../../../../src/support/elements/definitions/market-tracking-trends.js';
+import {
+  transformMarketTrackingTrends,
+  buildMarketMentionsTrendPayload,
+  buildMarketCitationsTrendPayload,
+} from '../../../../src/support/elements/definitions/market-tracking-trends.js';
+
+// Returns the CBF_model value inside the advanced filter tree, or undefined if absent
+// (including when the whole `advanced` block is omitted).
+function findModelVal(payload) {
+  for (const block of payload.filters.advanced?.filters ?? []) {
+    const hit = Array.isArray(block.filters)
+      ? block.filters.find((f) => f.col === 'CBF_model')
+      : undefined;
+    if (hit) {
+      return hit.val;
+    }
+  }
+  return undefined;
+}
 
 describe('market-tracking-trends definitions', () => {
+  describe('buildMarketMentionsTrendPayload / buildMarketCitationsTrendPayload', () => {
+    const range = { startDate: '2026-07-01', endDate: '2026-07-28' };
+
+    it('scopes mentions to CBF_project (singular) and citations to CBF_projects (plural)', () => {
+      const mentions = buildMarketMentionsTrendPayload({ ...range, model: 'search-gpt', projectIds: ['p1'] });
+      const citations = buildMarketCitationsTrendPayload({ ...range, model: 'search-gpt', projectIds: ['p1'] });
+      expect(mentions.auto_bucketing).to.equal('week');
+      expect(mentions.filters.advanced.filters).to.deep.include({
+        op: 'or', filters: [{ op: 'eq', val: 'p1', col: 'CBF_project' }],
+      });
+      expect(citations.filters.advanced.filters).to.deep.include({
+        op: 'or', filters: [{ op: 'eq', val: 'p1', col: 'CBF_projects' }],
+      });
+    });
+
+    it('adds a CBF_model or-block for a concrete model (single-model path)', () => {
+      const payload = buildMarketMentionsTrendPayload({ ...range, model: 'openai', projectIds: ['p1'] });
+      expect(findModelVal(payload)).to.equal('chatgpt-paid');
+    });
+
+    it('omits the CBF_model filter when the model/platform is absent (All Platforms aggregate)', () => {
+      const payload = buildMarketMentionsTrendPayload({ ...range, projectIds: ['p1'] });
+      expect(findModelVal(payload)).to.be.undefined;
+      // project scoping is preserved
+      expect(payload.filters.advanced.filters).to.deep.equal([
+        { op: 'or', filters: [{ op: 'eq', val: 'p1', col: 'CBF_project' }] },
+      ]);
+    });
+
+    it("omits the CBF_model filter for the explicit 'all' sentinel", () => {
+      const payload = buildMarketCitationsTrendPayload({ ...range, platform: 'all', projectIds: ['p1'] });
+      expect(findModelVal(payload)).to.be.undefined;
+    });
+
+    // Semrush 422s on `advanced: { op: 'and', filters: [] }` — it is NOT treated as
+    // "match all". Verified live 2026-09-02 against TRENDS_MV (b5281393) and
+    // MARKET_CITATIONS_TREND (2e5a6f4e): empty AND → 422, key omitted → 200.
+    it('omits the advanced block entirely for the mentions element (all-platforms, no region)', () => {
+      const payload = buildMarketMentionsTrendPayload({ ...range, platform: 'all' });
+      expect(payload.filters).to.not.have.property('advanced');
+      expect(payload.filters.simple).to.deep.equal({
+        start_date: '2026-07-01', end_date: '2026-07-28',
+      });
+    });
+
+    it('omits the advanced block entirely for the citations element (all-platforms, no region)', () => {
+      const payload = buildMarketCitationsTrendPayload({ ...range, platform: 'all' });
+      expect(payload.filters).to.not.have.property('advanced');
+      expect(payload.filters.simple).to.deep.equal({
+        start_date: '2026-07-01', end_date: '2026-07-28',
+      });
+    });
+
+    it('omits the advanced block when both the model and projectIds are absent', () => {
+      const payload = buildMarketMentionsTrendPayload({ ...range, projectIds: [] });
+      expect(payload.filters).to.not.have.property('advanced');
+    });
+
+    it('still emits the advanced block when only a region applies (all-platforms)', () => {
+      const payload = buildMarketMentionsTrendPayload({ ...range, platform: 'all', projectIds: ['p1'] });
+      expect(payload.filters.advanced).to.deep.equal({
+        op: 'and',
+        filters: [{ op: 'or', filters: [{ op: 'eq', val: 'p1', col: 'CBF_project' }] }],
+      });
+    });
+  });
+
   describe('transformMarketTrackingTrends', () => {
     it('adds shareOfVoice/brandVisibility (from mentions) and sourceVisibility (from citations) for the tracked brand row', () => {
       const mentionsRaw = {
