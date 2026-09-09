@@ -54,6 +54,46 @@ export const METRICS_NAMESPACE = 'SpacecatSerenityMarketWorker';
  */
 export const DRS_INVOKE_TIMEOUT_MS = 300 * 1000;
 
+/** Env key overriding the generation model sent to DRS. */
+export const DRS_MODEL_ENV = 'DRS_PROMPT_GENERATION_MODEL';
+
+/** Default generation model (matches the canonical contract fixture). */
+export const DEFAULT_DRS_MODEL = 'gpt-5-nano';
+
+/**
+ * Maps the semantic (camelCase) generation request the worker assembles onto the
+ * EXACT snake_case wire payload the DRS Lambda consumes — the canonical contract
+ * pinned in `test/fixtures/semrush_market_generation_contract.json` (DRS #3194).
+ * Centralised here (not the handler) so the wire contract lives with the client
+ * and the fixture test asserts against a single mapping.
+ *
+ * NOTE: `imsOrgId` deliberately stays camelCase INSIDE `metadata` (per the fixture).
+ *
+ * @param {DrsGenerationRequest} request - the server-resolved semantic request.
+ * @param {Record<string, any>} [env] - context env (for the model default).
+ * @returns {object} the canonical wire payload.
+ */
+export function toDrsRequestPayload(request, env = {}) {
+  return {
+    site_id: request.siteId,
+    brand: request.brand,
+    brand_aliases: Array.isArray(request.aliases) ? request.aliases : [],
+    base_url: request.baseUrl,
+    market_country: request.market,
+    language_code: request.languageCode,
+    audience: request.audience,
+    num_prompts: request.count,
+    model: request.model ?? env?.[DRS_MODEL_ENV] ?? DEFAULT_DRS_MODEL,
+    catalogue_seeds: (Array.isArray(request.seeds) ? request.seeds : []).map((s) => ({
+      topic: s.topic,
+      volume: s.volume,
+      example_prompts: Array.isArray(s.examplePrompts) ? s.examplePrompts : [],
+    })),
+    catalogue_status: request.catalogueStatus ?? 'populated',
+    metadata: { imsOrgId: request.imsOrgId },
+  };
+}
+
 /**
  * @typedef {object} DrsGenerationRequest
  * @property {Array<{ topic: string, volume?: number, examplePrompts?: string[] }>} seeds
@@ -61,11 +101,13 @@ export const DRS_INVOKE_TIMEOUT_MS = 300 * 1000;
  * @property {string} brand - brand display name.
  * @property {string[]} [aliases] - brand aliases.
  * @property {string} baseUrl - brand base URL.
- * @property {string} [subpath] - market subpath, if any.
- * @property {string} market - market country code.
+ * @property {string} [subpath] - market subpath, if any (NOT sent — not in the wire contract).
+ * @property {string} market - market country (mapped to `market_country`).
  * @property {string} languageCode - the AUTHORITATIVE language code (api-service resolves it).
  * @property {string} [audience] - audience descriptor.
- * @property {number} count - desired prompt count.
+ * @property {number} count - desired prompt count (mapped to `num_prompts`).
+ * @property {string} [model] - generation model override (else env/default).
+ * @property {string} [catalogueStatus] - catalogue status (default `populated`).
  * @property {string} siteId - SpaceCat site id.
  * @property {string} imsOrgId - IMS org id.
  */
@@ -243,10 +285,11 @@ export async function invokeDrsGeneration(context, request, { invoke } = {}) {
   };
 
   const invoker = invoke ?? createLambdaInvoker(context);
+  const wirePayload = toDrsRequestPayload(request, env);
   const startedAt = Date.now();
   let parsed;
   try {
-    parsed = await invoker(functionName, request);
+    parsed = await invoker(functionName, wirePayload);
   } catch (error) {
     // A transport/invoke error (including a timeout) is a genuine failure.
     emitFailure('invoke');

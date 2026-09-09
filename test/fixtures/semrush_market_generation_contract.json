@@ -1,0 +1,100 @@
+{
+  "_comment": "Canonical request/response contract for the Semrush-market generation Lambda (#3165). api-service PR #3252 mirrors this exact shape. 'request' is the RequestResponse payload the handler consumes; 'service_response' is what generate_validated_prompts returns (category populated internally); 'response' is what the DEPLOYED handler emits on the wire — category deferred to '' for v1 (_V1_INCLUDE_CATEGORY=False). language_evidence[i] is index-aligned with prompts[i].",
+  "request": {
+    "site_id": "0c400d4b-9a1e-4f2b-8c7d-1e2f3a4b5c6d",
+    "brand": "Lumiere Skincare",
+    "brand_aliases": ["Lumiere", "Lumiere Paris"],
+    "base_url": "https://lumiere-skincare.example",
+    "market_country": "France",
+    "language_code": "fr",
+    "audience": "skincare shoppers in France",
+    "num_prompts": 2,
+    "model": "gpt-5-nano",
+    "catalogue_seeds": [
+      {
+        "topic": "creme hydratante visage",
+        "volume": 8100,
+        "example_prompts": ["meilleure creme hydratante pour peau seche"]
+      },
+      {
+        "topic": "serum vitamine c",
+        "volume": 5400,
+        "example_prompts": ["serum vitamine c avis"]
+      }
+    ],
+    "catalogue_status": "populated",
+    "metadata": {
+      "imsOrgId": "ABCDEF1234567890ABCDEF01@AdobeOrg"
+    }
+  },
+  "service_response": {
+    "prompts": [
+      {
+        "prompt": "Quelle creme hydratante convient le mieux aux peaux seches en hiver ?",
+        "category": "soins hydratants"
+      },
+      {
+        "prompt": "Comment integrer un serum a la vitamine C dans une routine de soin du visage ?",
+        "category": "serums"
+      }
+    ],
+    "language_evidence": [
+      {
+        "detected_language": "fr",
+        "language_confidence": 0.8123,
+        "language_validation_passed": true
+      },
+      {
+        "detected_language": "fr",
+        "language_confidence": 0.7846,
+        "language_validation_passed": true
+      }
+    ],
+    "ship_summary": {
+      "generated": 2,
+      "hard_validated": 2,
+      "guardrail_dropped": 0,
+      "language_rejected": 0,
+      "quality_downranked": 0,
+      "final_count": 2,
+      "verdict": "ship",
+      "error_category": null,
+      "reason": "ok"
+    }
+  },
+  "response": {
+    "prompts": [
+      {
+        "prompt": "Quelle creme hydratante convient le mieux aux peaux seches en hiver ?",
+        "category": ""
+      },
+      {
+        "prompt": "Comment integrer un serum a la vitamine C dans une routine de soin du visage ?",
+        "category": ""
+      }
+    ],
+    "language_evidence": [
+      {
+        "detected_language": "fr",
+        "language_confidence": 0.8123,
+        "language_validation_passed": true
+      },
+      {
+        "detected_language": "fr",
+        "language_confidence": 0.7846,
+        "language_validation_passed": true
+      }
+    ],
+    "ship_summary": {
+      "generated": 2,
+      "hard_validated": 2,
+      "guardrail_dropped": 0,
+      "language_rejected": 0,
+      "quality_downranked": 0,
+      "final_count": 2,
+      "verdict": "ship",
+      "error_category": null,
+      "reason": "ok"
+    }
+  }
+}

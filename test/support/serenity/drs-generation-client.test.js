@@ -10,6 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
+import { readFileSync } from 'fs';
 import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinonChai from 'sinon-chai';
@@ -18,10 +19,16 @@ import esmock from 'esmock';
 
 import {
   invokeDrsGeneration,
+  toDrsRequestPayload,
   DrsGenerationTerminalError,
   DRS_GENERATION_TARGET_ENV,
 } from '../../../src/support/serenity/drs-generation-client.js';
 import { isRetryableJobError } from '../../../src/support/serenity/async-job-runner.js';
+
+// The canonical cross-repo contract fixture, mirrored from DRS #3194.
+const CONTRACT = JSON.parse(readFileSync(
+  new URL('../../fixtures/semrush_market_generation_contract.json', import.meta.url),
+));
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -65,7 +72,8 @@ describe('drs-generation-client', () => {
 
     expect(result.prompts).to.have.length(2);
     expect(result.shipSummary.verdict).to.equal('ship');
-    expect(invoke).to.have.been.calledOnceWith('drs-fn', baseRequest);
+    // The invoker receives the canonical snake_case wire payload, not the semantic request.
+    expect(invoke).to.have.been.calledOnceWith('drs-fn', toDrsRequestPayload(baseRequest));
   });
 
   it('does NOT pass a promise/IMS token to DRS (security invariant)', async () => {
@@ -196,5 +204,47 @@ describe('drs-generation-client — createLambdaInvoker', () => {
     const invoker = createLambdaInvoker({ runtime: { region: 'us-east-1' } });
     const err = await invoker('fn', {}).catch((e) => e);
     expect(isRetryableJobError(err)).to.equal(true);
+  });
+});
+
+describe('drs-generation-client — canonical contract fixture (DRS #3194)', () => {
+  // Reverse-map the fixture's canonical request back to the semantic (camelCase)
+  // shape the worker assembles, so we can assert our mapping reproduces it exactly.
+  function semanticFromFixture(req) {
+    return {
+      siteId: req.site_id,
+      brand: req.brand,
+      aliases: req.brand_aliases,
+      baseUrl: req.base_url,
+      market: req.market_country,
+      languageCode: req.language_code,
+      audience: req.audience,
+      count: req.num_prompts,
+      model: req.model,
+      seeds: req.catalogue_seeds.map((s) => ({
+        topic: s.topic, volume: s.volume, examplePrompts: s.example_prompts,
+      })),
+      catalogueStatus: req.catalogue_status,
+      imsOrgId: req.metadata.imsOrgId,
+    };
+  }
+
+  it('builds the EXACT canonical request wire payload', () => {
+    const semantic = semanticFromFixture(CONTRACT.request);
+    expect(toDrsRequestPayload(semantic)).to.deep.equal(CONTRACT.request);
+  });
+
+  it('parses the canonical wire response (category deferred to empty in v1)', async () => {
+    const invoke = sinon.stub().resolves(CONTRACT.response);
+    const result = await invokeDrsGeneration(
+      { env: { [DRS_GENERATION_TARGET_ENV]: 'drs-fn' }, log: { info: sinon.stub() } },
+      semanticFromFixture(CONTRACT.request),
+      { invoke },
+    );
+    expect(result.prompts).to.deep.equal(CONTRACT.response.prompts);
+    expect(result.prompts.every((p) => p.category === '')).to.equal(true);
+    expect(result.shipSummary.verdict).to.equal('ship');
+    expect(result.shipSummary.error_category).to.equal(null);
+    expect(result.languageEvidence).to.have.length(CONTRACT.response.language_evidence.length);
   });
 });
