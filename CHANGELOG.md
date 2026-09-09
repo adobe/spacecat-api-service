@@ -1,3 +1,11 @@
+## [1.800.2](https://github.com/adobe/spacecat-api-service/compare/v1.800.1...v1.800.2) (2026-09-09)
+
+
+### Bug Fixes
+
+* **brands:** sanitize and bound brand-claims guidance input (LLMO-7450) ([#3245](https://github.com/adobe/spacecat-api-service/issues/3245)) ([d34fde4](https://github.com/adobe/spacecat-api-service/commit/d34fde45922401201c8b308294e7a54e4ed23a52)), closes [adobe/project-elmo-ui#3121](https://github.com/adobe/project-elmo-ui/issues/3121)
+* **serenity:** stabilize tag re-parent response ([#3248](https://github.com/adobe/spacecat-api-service/issues/3248)) ([a7cf7d0](https://github.com/adobe/spacecat-api-service/commit/a7cf7d0d0f4f2a11137987c48bbfe37edd7f644f))
+
 ## [1.800.1](https://github.com/adobe/spacecat-api-service/compare/v1.800.0...v1.800.1) (2026-09-09)
 
 
