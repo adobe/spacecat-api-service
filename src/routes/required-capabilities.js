@@ -338,10 +338,13 @@ const routeRequiredCapabilities = {
   // access enforced in the controller (listOrgModels / listOrgLanguages).
   'GET /v2/orgs/:spaceCatId/serenity/models': 'organization:read',
   'GET /v2/orgs/:spaceCatId/serenity/languages': 'organization:read',
-  'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/filter-dimensions': 'organization:read',
-  'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/weeks': 'organization:read',
-  'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/access': 'organization:read',
-  'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/prompts': 'organization:read',
+  // Elements/brand-presence routes - all are :brandId-scoped, so S2S consumers need
+  // brand:read (matching the entity:action convention), scoped in the controller
+  // (authorizeOrgAccess) to the consumer's own registered IMS org, not readAll.
+  'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/filter-dimensions': 'brand:read',
+  'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/weeks': 'brand:read',
+  'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/access': 'brand:read',
+  'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/prompts': 'brand:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/cited-domains': 'brand:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/sentiment-overview': 'brand:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/responses': 'brand:read',
@@ -360,7 +363,6 @@ const routeRequiredCapabilities = {
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/prompts/count': 'brand:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/competitor-summary': 'brand:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/kpi-headlines': 'brand:read',
-  // eslint-disable-next-line max-len
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/source-visibility-headline': 'brand:read',
   'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/activate': 'organization:write',
   'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/deactivate': 'organization:write',
@@ -412,7 +414,9 @@ const routeRequiredCapabilities = {
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/domain-urls': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/url-prompts': 'brand:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/url-prompts': 'brand:read',
-  'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/prompts-by-url': 'brand:read',
+  // The 'all' variant returns org-wide (cross-brand) data, so it's gated on organization:read
+  // rather than brand:read, unlike its :brandId-scoped sibling below.
+  'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/prompts-by-url': 'organization:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/prompts-by-url': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/filter-dimensions': 'brand:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/filter-dimensions': 'brand:read',
@@ -734,6 +738,7 @@ const routeRequiredCapabilities = {
   'GET /sites/:siteId/llmo/edge-optimize-status': 'site:read',
   'GET /sites/:siteId/llmo/probes/edge-optimize': 'site:read',
   'GET /sites/:siteId/llmo/brand-claims': 'site:read',
+  'GET /sites/:siteId/llmo/brand-claims/weeks': 'site:read',
   'POST /sites/:siteId/llmo/brand-claims/request': 'site:write',
   'GET /sites/:siteId/llmo/strategy/demo/brand-presence': 'site:read',
   'GET /sites/:siteId/llmo/strategy/demo/recommendations': 'site:read',
