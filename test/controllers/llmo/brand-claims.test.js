@@ -75,7 +75,7 @@ describe('handleBrandClaims', () => {
         return listBehavior();
       }
       if (command instanceof HeadObjectCommand) {
-        return headBehavior();
+        return headBehavior(command);
       }
       return Promise.resolve({});
     });
@@ -283,6 +283,130 @@ describe('handleBrandClaims', () => {
     expect(result.status).to.equal(200);
     const headCmd = mockS3Send.getCall(0).args[0];
     expect(headCmd.input.Key).to.equal(`brand_claims/llmo/${TEST_SITE_ID}/gpt-4.1.json.gz`);
+  });
+
+  const headCalls = () => mockS3Send.getCalls()
+    .filter((c) => c.args[0] instanceof HeadObjectCommand);
+
+  it('serves English with default locale fields when no locale is requested', async () => {
+    const result = await handleBrandClaims(baseContext);
+
+    expect(result.status).to.equal(200);
+    const body = await result.json();
+    expect(body.requestedLocale).to.equal(null);
+    expect(body.servedLocale).to.equal('default');
+    expect(signedKey()).to.equal(FLAT_KEY);
+    // Only the existence HEAD — no extra localized probe when locale is absent.
+    expect(headCalls()).to.have.length(1);
+  });
+
+  it('serves the localized sibling when it exists (single HEAD, no English probe)', async () => {
+    listResult = { CommonPrefixes: [weekPrefix('2026-W17')] };
+    const context = { ...baseContext, data: { locale: 'ja_jp' } };
+
+    const result = await handleBrandClaims(context);
+
+    expect(result.status).to.equal(200);
+    const body = await result.json();
+    expect(body.requestedLocale).to.equal('ja_jp');
+    expect(body.servedLocale).to.equal('ja_jp');
+    const localizedKey = `brand_claims/llmo/${TEST_SITE_ID}/2026-W17/data.ja_jp.json.gz`;
+    expect(signedKey()).to.equal(localizedKey);
+    // The localized HEAD confirmed existence, so there is no redundant English HEAD.
+    const heads = headCalls();
+    expect(heads).to.have.length(1);
+    expect(heads[0].args[0].input.Key).to.equal(localizedKey);
+  });
+
+  it('applies locale to an explicit week folder', async () => {
+    const context = { ...baseContext, data: { week: '2026-W17', locale: 'fr_fr' } };
+
+    const result = await handleBrandClaims(context);
+
+    expect(result.status).to.equal(200);
+    const body = await result.json();
+    expect(body.servedLocale).to.equal('fr_fr');
+    expect(signedKey()).to.equal(`brand_claims/llmo/${TEST_SITE_ID}/2026-W17/data.fr_fr.json.gz`);
+  });
+
+  it('falls back to English when the localized sibling is missing (HEAD 404)', async () => {
+    const notFoundError = new Error('Not Found');
+    notFoundError.name = 'NotFound';
+    // Localized HEAD 404s; the English existence HEAD succeeds.
+    headBehavior = (command) => (command.input.Key.endsWith('data.ja_jp.json.gz')
+      ? Promise.reject(notFoundError)
+      : Promise.resolve({}));
+    const context = { ...baseContext, data: { locale: 'ja_jp' } };
+
+    const result = await handleBrandClaims(context);
+
+    expect(result.status).to.equal(200);
+    const body = await result.json();
+    expect(body.requestedLocale).to.equal('ja_jp');
+    expect(body.servedLocale).to.equal('default'); // fell back to English
+    expect(signedKey()).to.equal(FLAT_KEY);
+    // Two HEADs: localized (404) then the English existence check.
+    const heads = headCalls();
+    expect(heads).to.have.length(2);
+    expect(heads[0].args[0].input.Key).to.equal(`brand_claims/llmo/${TEST_SITE_ID}/data.ja_jp.json.gz`);
+    expect(heads[1].args[0].input.Key).to.equal(FLAT_KEY);
+    expect(mockLog.info).to.have.been.calledWithMatch(/falling back to English/);
+  });
+
+  it('returns 404 when both the localized and English objects are missing', async () => {
+    const notFoundError = new Error('Not Found');
+    notFoundError.name = 'NotFound';
+    headBehavior = () => Promise.reject(notFoundError); // every HEAD 404s
+    const context = { ...baseContext, data: { locale: 'ja_jp' } };
+
+    const result = await handleBrandClaims(context);
+
+    expect(result.status).to.equal(404);
+    expect(mockGetSignedUrl).not.to.have.been.called;
+  });
+
+  it('ignores locale when model is supplied (model files are not localized)', async () => {
+    const context = { ...baseContext, data: { model: 'gpt-4.1', locale: 'ja_jp' } };
+
+    const result = await handleBrandClaims(context);
+
+    expect(result.status).to.equal(200);
+    const body = await result.json();
+    expect(body.requestedLocale).to.equal(null);
+    expect(body.servedLocale).to.equal('default');
+    expect(signedKey()).to.equal(`brand_claims/llmo/${TEST_SITE_ID}/gpt-4.1.json.gz`);
+    // Flat model path: exactly one HEAD, no localized probe and no listing.
+    expect(mockS3Send).to.have.been.calledOnce;
+    expect(mockS3Send.getCall(0).args[0]).to.be.instanceOf(HeadObjectCommand);
+  });
+
+  it('returns 400 for an invalid locale string', async () => {
+    const context = { ...baseContext, data: { locale: 'japanese' } };
+
+    const result = await handleBrandClaims(context);
+
+    expect(result.status).to.equal(400);
+    expect((await result.json()).message).to.equal('Invalid locale parameter: expected e.g. ja_jp');
+    expect(mockS3Send).not.to.have.been.called;
+  });
+
+  it('returns 400 for a locale with a path separator (no key probing)', async () => {
+    const context = { ...baseContext, data: { locale: '../secret' } };
+
+    const result = await handleBrandClaims(context);
+
+    expect(result.status).to.equal(400);
+    expect((await result.json()).message).to.equal('Invalid locale parameter: expected e.g. ja_jp');
+    expect(mockS3Send).not.to.have.been.called;
+  });
+
+  it('returns 400 when locale has uppercase letters (strict lowercase only)', async () => {
+    const context = { ...baseContext, data: { locale: 'JA_JP' } };
+
+    const result = await handleBrandClaims(context);
+
+    expect(result.status).to.equal(400);
+    expect(mockS3Send).not.to.have.been.called;
   });
 
   it('returns 400 when S3 is not configured', async () => {

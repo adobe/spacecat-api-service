@@ -70,6 +70,11 @@ const BRAND_CLAIMS_REQUEST_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
 // dots, hyphens, underscores — no `/` — to prevent using HeadObject as an
 // object-existence probe across arbitrary key paths.
 const MODEL_RE = /^[\w.-]+$/;
+// `locale` is interpolated into the S3 key too, so accept only the strict
+// `xx_yy` shape (two lowercase letters, `_`, two lowercase letters — e.g.
+// `ja_jp`). This blocks `..`, slashes, and arbitrary path segments (S3 key
+// injection) just like MODEL_RE.
+const LOCALE_RE = /^[a-z]{2}_[a-z]{2}$/;
 
 /**
  * Latest run key for a site: the lexically-greatest `YYYY-Www` folder under the
@@ -106,7 +111,9 @@ async function latestWeekKey(s3, bucketName, siteId, log) {
 export async function handleBrandClaims(context) {
   const { log, s3 } = context;
   const { siteId } = context.params;
-  const { model, date, week } = context.data;
+  const {
+    model, date, week, locale,
+  } = context.data;
 
   if (!s3 || !s3.s3Client) {
     return badRequest('S3 storage is not configured for this environment');
@@ -119,6 +126,16 @@ export async function handleBrandClaims(context) {
 
   if (model !== undefined && !MODEL_RE.test(model)) {
     return badRequest('Invalid model parameter');
+  }
+
+  // `locale` selects a localized sibling of the default `data.json.gz`
+  // (`data.<locale>.json.gz`). It applies ONLY to the default `data` family, so
+  // it is ignored when `model` is set (model files are not localized) — model
+  // wins, keeping the two selectors from interacting. Validate strictly here,
+  // before it can reach an S3 key (trust boundary).
+  const useLocale = !model && hasText(locale);
+  if (useLocale && !LOCALE_RE.test(locale)) {
+    return badRequest('Invalid locale parameter: expected e.g. ja_jp');
   }
 
   // Model files are managed flat (not week-partitioned) and take precedence;
@@ -166,12 +183,41 @@ export async function handleBrandClaims(context) {
       }
     }
 
+    // Localization: when a valid `locale` is requested, prefer the localized
+    // sibling that mystique writes next to the resolved English file
+    // (`data.json.gz` -> `data.<locale>.json.gz`, in the same week/flat folder),
+    // and transparently fall back to English when that sibling does not exist.
+    // getSignedUrl never checks existence, so an explicit HeadObject is the only
+    // way to detect a missing localized file. `servedLocale` reports which one
+    // the caller actually got so the UI can tell whether it fell back.
+    let servedLocale = 'default';
+    let verified = false;
+    if (useLocale) {
+      const localizedKey = s3Key.replace(/data\.json\.gz$/, `data.${locale}.json.gz`);
+      try {
+        await s3.s3Client.send(new HeadObjectCommand({ Bucket: bucketName, Key: localizedKey }));
+        s3Key = localizedKey;
+        servedLocale = locale;
+        verified = true; // localized object confirmed present; no second HEAD needed
+      } catch (localeError) {
+        if (localeError.name === 'NotFound' || localeError.$metadata?.httpStatusCode === 404) {
+          log.info(`Localized brand claims not found for site ${siteId} locale ${locale}; falling back to English`);
+        } else {
+          throw localeError; // NoSuchBucket / transient faults -> shared handler below
+        }
+      }
+    }
+
     // Presigning a GetObject URL is an offline operation and never checks that
     // the object exists, so without this HeadObject the endpoint would happily
     // hand out a URL that 404s on fetch. Verify existence first and return a
-    // clean 404 otherwise (mirrors getFanoutReport). This also lets callers use
-    // the endpoint as a cheap availability probe (e.g. an "all brands" view).
-    await s3.s3Client.send(new HeadObjectCommand({ Bucket: bucketName, Key: s3Key }));
+    // clean 404 otherwise (mirrors getFanoutReport). Skipped only when the
+    // localized HEAD above already confirmed this exact key. This also lets
+    // callers use the endpoint as a cheap availability probe (e.g. an "all
+    // brands" view).
+    if (!verified) {
+      await s3.s3Client.send(new HeadObjectCommand({ Bucket: bucketName, Key: s3Key }));
+    }
 
     const command = new GetObjectCommand({
       Bucket: bucketName,
@@ -184,6 +230,8 @@ export async function handleBrandClaims(context) {
     return cachedOk({
       siteId,
       model: model || 'default',
+      requestedLocale: useLocale ? locale : null,
+      servedLocale,
       presignedUrl: url,
       expiresAt: new Date(Date.now() + expiresIn * 1000).toISOString(),
     });
