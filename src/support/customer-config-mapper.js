@@ -58,8 +58,12 @@ function normalizeBrandGuidance(value) {
   if (!hasText(trimmed)) {
     return null;
   }
-  return trimmed.length > BRAND_GUIDANCE_MAX_LENGTH
-    ? trimmed.slice(0, BRAND_GUIDANCE_MAX_LENGTH)
+  // Truncate on code-point boundaries (spread, not slice): a plain slice(0, n) counts
+  // UTF-16 code units and can cut an emoji / non-BMP CJK char in half, leaving a lone
+  // surrogate that is invalid UTF-8 and breaks Postgres/JSON downstream.
+  const codePoints = [...trimmed];
+  return codePoints.length > BRAND_GUIDANCE_MAX_LENGTH
+    ? codePoints.slice(0, BRAND_GUIDANCE_MAX_LENGTH).join('')
     : trimmed;
 }
 
