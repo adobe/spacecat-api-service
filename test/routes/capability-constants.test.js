@@ -90,6 +90,8 @@ describe('capability-constants drift coverage', () => {
       join(projectRoot, 'src/controllers/configuration.js'),
       join(projectRoot, 'src/controllers/trial-users.js'),
       join(projectRoot, 'src/controllers/llmo/prompt-suggestion-schedules.js'),
+      join(projectRoot, 'src/controllers/entitlements.js'),
+      join(projectRoot, 'src/controllers/site-enrollments.js'),
     ];
     const controllerSource = controllerFiles
       .map((file) => readFileSync(file, 'utf8'))
@@ -106,7 +108,7 @@ describe('capability-constants drift coverage', () => {
       const hasCallSite = callByName.test(controllerSource) || callByLiteral.test(controllerSource);
       expect(hasCallSite).to.equal(
         true,
-        `Constant ${name} ("${value}") has no hasS2SCapability(...) call site in any scanned controller (sites.js / organizations.js / suggestions.js / configuration.js). Without the Layer 2 check the endpoint stays admin-only - this is a silent denial of intended access.`,
+        `Constant ${name} ("${value}") has no hasS2SCapability(...) call site in any scanned controller (see controllerFiles above). Without the Layer 2 check the endpoint stays admin-only - this is a silent denial of intended access.`,
       );
     });
   });

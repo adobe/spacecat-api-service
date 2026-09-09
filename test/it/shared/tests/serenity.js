@@ -15,6 +15,7 @@ import {
   ORG_1_ID, BRAND_1_ID, SITE_1_ID, SITE_2_ID,
 } from '../seed-ids.js';
 import { INTENT_ROOT_NAME } from '../../../../src/support/serenity/prompt-tags.js';
+import { SERENITY_CLASSIFY_JOB_ID } from '../../postgres/seed-data/async-jobs.js';
 
 /**
  * End-to-end tests for the /serenity/* surface (LLMO-5190), driven against the
@@ -261,6 +262,64 @@ export default function serenityTests(
     });
   });
 
+  describe('Serenity API — poll a prompt-import (classify) job (serenity-docs#33 Layer 1)', () => {
+    const base = `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/serenity`;
+
+    it('GET /serenity/prompts/jobs/:jobId returns the secret-free status contract for an owned COMPLETED job', async () => {
+      const res = await getHttpClient().admin.get(`${base}/prompts/jobs/${SERENITY_CLASSIFY_JOB_ID}`);
+      expect(res.status).to.equal(200);
+      // Exactly the five camelCase fields the UI is built against — nothing else.
+      expect(Object.keys(res.body).sort()).to.deep.equal(['error', 'jobId', 'jobType', 'result', 'status']);
+      expect(res.body.jobId).to.equal(SERENITY_CLASSIFY_JOB_ID);
+      expect(res.body.jobType).to.equal('classifyPrompts');
+      expect(res.body.status).to.equal('COMPLETED');
+      expect(res.body.result).to.deep.include({ published: true, pendingClassificationCount: 0 });
+      expect(res.body.error).to.equal(null);
+      // The job's internal metadata (promise token etc.) must never leak.
+      expect(res.body).to.not.have.property('metadata');
+      expect(JSON.stringify(res.body)).to.not.match(/promise/i);
+    });
+
+    describe('Serenity API — bulk tag and impact route contracts', () => {
+      const routeBase = `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/serenity`;
+
+      it('POST /serenity/prompts/bulk-tags reaches bulk validation', async () => {
+        const res = await getHttpClient().admin.post(`${routeBase}/prompts/bulk-tags`, {});
+        expect(res.status).to.equal(400);
+        expect(res.body.error).to.equal('invalidRequest');
+      });
+
+      it('GET /serenity/tags/:tagId/impact validates the market slice', async () => {
+        const res = await getHttpClient().admin.get(`${routeBase}/tags/not-a-tag/impact`);
+        expect(res.status).to.equal(400);
+      });
+
+      it('GET /serenity/prompts/jobs/:jobId accepts bulk failure pagination params', async () => {
+        const res = await getHttpClient().admin.get(
+          `${routeBase}/prompts/jobs/${SERENITY_CLASSIFY_JOB_ID}?failureCursor=MA&failureLimit=1`,
+        );
+        expect(res.status).to.equal(200);
+        expect(res.body).to.have.property('result');
+      });
+    });
+
+    it('GET /serenity/prompts/jobs/:jobId 404s for an unknown job id', async () => {
+      const res = await getHttpClient().admin.get(`${base}/prompts/jobs/eeee9999-9999-4999-a999-999999999999`);
+      expect(res.status).to.equal(404);
+    });
+
+    it('GET /serenity/prompts/jobs/:jobId 404s (does not leak) for a job owned by another brand', async () => {
+      // The seeded COMPLETED preflight job carries no matching brandId.
+      const res = await getHttpClient().admin.get(`${base}/prompts/jobs/eeee1111-1111-4111-b111-111111111111`);
+      expect(res.status).to.equal(404);
+    });
+
+    it('GET /serenity/prompts/jobs/:jobId 400s on a non-UUID jobId', async () => {
+      const res = await getHttpClient().admin.get(`${base}/prompts/jobs/not-a-uuid`);
+      expect(res.status).to.equal(400);
+    });
+  });
+
   describe('Serenity API — sub-workspace lifecycle (mutating, live mock)', () => {
     // These mutate Project Engine mock state: a market provisions a project and
     // PUBLISHES it (the publish step needs PE mock >= 1.3.1, which fixed the
@@ -310,6 +369,20 @@ export default function serenityTests(
       expect(res.body.languageCode).to.equal('en');
     });
 
+    it('POST /serenity/markets treats a supplied siteId as authoritative over a conflicting brandDomain', async () => {
+      // SITE_2 (site2.example.com) is a real, distinct ORG_1 Site from the literal
+      // brandDomain sent alongside it — the created market must track SITE_2's
+      // domain, not the literal string also supplied.
+      const created = await getHttpClient().admin.post(`${base}/markets`, {
+        market: 'US', languageCode: 'en', siteId: SITE_2_ID, brandDomain: 'example.com', brandNames: ['Test Brand'],
+      });
+      expect(created.status).to.equal(201);
+
+      const detail = await getHttpClient().admin.get(`${base}/markets/${US_GEO}/en`);
+      expect(detail.status).to.equal(200);
+      expect(detail.body.domain).to.equal('site2.example.com');
+    });
+
     it('DELETE /serenity/markets/:geo/:lang removes a siteId-linked market and cleans up (LLMO-6405 R12)', async () => {
       // Create via siteId (links SITE_1), then delete: the last market on that
       // non-primary site is removed, so its brand_sites 'serenity' link is unlinked.
@@ -344,7 +417,7 @@ export default function serenityTests(
       // The create echoes the upstream tag id (needed to nest / re-parent).
       expect(res.body.id).to.be.a('string').that.is.not.empty;
 
-      // The five dimension roots are provisioned on first touch (the server-owned
+      // The six dimension roots are provisioned on first touch (the server-owned
       // `source` producing-system root joined category/intent/origin/type — WP-S2,
       // LLMO-6282), and the new category is a CHILD of the `category` root, not a
       // root itself.
@@ -357,7 +430,7 @@ export default function serenityTests(
       // filter, and a project provisioned here must not need the rename sweep
       // (LLMO-6985) to come back for it.
       expect(roots.body.items.map((t) => t.name))
-        .to.have.members(['category', INTENT_ROOT_NAME, 'origin', 'type', 'source']);
+        .to.have.members(['category', 'tag', INTENT_ROOT_NAME, 'origin', 'type', 'source']);
       const categoryRoot = roots.body.items.find((t) => t.name === 'category');
       expect(res.body.parentId).to.equal(categoryRoot.id);
     });
@@ -554,6 +627,184 @@ export default function serenityTests(
       expect(res.status).to.equal(400);
     });
 
+    // category-delete.md: a real delete, not the old untag-only behavior. A
+    // prompt-less category was previously a no-op forever; here it is gone.
+    it('DELETE /serenity/tags/:tagId removes a prompt-less category for good', async () => {
+      await createUsMarket();
+      const category = await createTag('Photography');
+
+      const del = await getHttpClient().admin.delete(
+        `${base}/tags/${category.body.id}?geoTargetId=${US_GEO}&languageCode=en`,
+      );
+      expect(del.status).to.equal(204);
+
+      const roots = await getHttpClient().admin.get(
+        `${base}/tags?geoTargetId=${US_GEO}&languageCode=en&parentId=`,
+      );
+      const categoryRoot = roots.body.items.find((t) => t.name === 'category');
+      const children = await getHttpClient().admin.get(
+        `${base}/tags?geoTargetId=${US_GEO}&languageCode=en&parentId=${categoryRoot.id}`,
+      );
+      expect(children.body.items.map((t) => t.id)).to.not.include(category.body.id);
+
+      // Idempotent: deleting the already-gone id again is a clean 404, not a
+      // resurrection or a 500 — the id-keyed-route convention.
+      const again = await getHttpClient().admin.delete(
+        `${base}/tags/${category.body.id}?geoTargetId=${US_GEO}&languageCode=en`,
+      );
+      expect(again.status).to.equal(404);
+    });
+
+    // The whole subtree is composed and deleted in ONE proxy-side batch call —
+    // deleting the parent takes every sub-category with it.
+    it('DELETE /serenity/tags/:tagId deletes a parent category and its whole subtree', async () => {
+      await createUsMarket();
+      const parent = await createTag('Footwear');
+      const child = await createTag('Sneakers', parent.body.id);
+
+      const del = await getHttpClient().admin.delete(
+        `${base}/tags/${parent.body.id}?geoTargetId=${US_GEO}&languageCode=en`,
+      );
+      expect(del.status).to.equal(204);
+
+      const orphanCheck = await getHttpClient().admin.get(
+        `${base}/tags?geoTargetId=${US_GEO}&languageCode=en&parentId=${parent.body.id}`,
+      );
+      // The parent itself is gone, so its former children level reads empty.
+      expect(orphanCheck.body.items).to.deep.equal([]);
+
+      const rootsAfter = await getHttpClient().admin.get(
+        `${base}/tags?geoTargetId=${US_GEO}&languageCode=en&parentId=`,
+      );
+      const categoryRoot = rootsAfter.body.items.find((t) => t.name === 'category');
+      const remaining = await getHttpClient().admin.get(
+        `${base}/tags?geoTargetId=${US_GEO}&languageCode=en&parentId=${categoryRoot.id}`,
+      );
+      expect(remaining.body.items.map((t) => t.id)).to.not.include.members([
+        parent.body.id, child.body.id,
+      ]);
+    });
+
+    // Multi-branch shape: the parent has TWO children, and only ONE of them has
+    // its own child. The single-branch-chain test above cannot catch a bug in
+    // the per-level fan-out (e.g. only capturing the last frontier node's
+    // children); this one exercises the shape the headline "whole subtree"
+    // guarantee actually depends on.
+    it('DELETE /serenity/tags/:tagId deletes a parent with multiple children, only one of which has its own child', async () => {
+      await createUsMarket();
+      const parent = await createTag('Outdoor Gear');
+      const childWithGrandchild = await createTag('Tents', parent.body.id);
+      const grandchild = await createTag('Backpacking Tents', childWithGrandchild.body.id);
+      const leafChild = await createTag('Sleeping Bags', parent.body.id);
+
+      const del = await getHttpClient().admin.delete(
+        `${base}/tags/${parent.body.id}?geoTargetId=${US_GEO}&languageCode=en`,
+      );
+      expect(del.status).to.equal(204);
+
+      // `parent` itself is gone, so its former children level reads empty —
+      // this is the only check that can distinguish "both children deleted"
+      // from "only the branch with a grandchild followed" (a fan-out bug that
+      // only captures the LAST frontier node's children would still delete
+      // childWithGrandchild and leave leafChild behind as an orphan the
+      // category-root-level check alone could never catch, since leafChild
+      // was never a category-root-level node to begin with).
+      const underParent = await getHttpClient().admin.get(
+        `${base}/tags?geoTargetId=${US_GEO}&languageCode=en&parentId=${parent.body.id}`,
+      );
+      expect(underParent.body.items).to.deep.equal([]);
+      expect(underParent.body.items.map((t) => t.id)).to.not.include.members([
+        childWithGrandchild.body.id, leafChild.body.id,
+      ]);
+
+      // The deeper grandchild is gone too — proves the walk followed the
+      // WITH-grandchild branch to its own second level, not just its first.
+      const underChildWithGrandchild = await getHttpClient().admin.get(
+        `${base}/tags?geoTargetId=${US_GEO}&languageCode=en&parentId=${childWithGrandchild.body.id}`,
+      );
+      expect(underChildWithGrandchild.body.items).to.deep.equal([]);
+      expect(underChildWithGrandchild.body.items.map((t) => t.id)).to.not.include(
+        grandchild.body.id,
+      );
+
+      const rootsAfter = await getHttpClient().admin.get(
+        `${base}/tags?geoTargetId=${US_GEO}&languageCode=en&parentId=`,
+      );
+      const categoryRoot = rootsAfter.body.items.find((t) => t.name === 'category');
+      const remaining = await getHttpClient().admin.get(
+        `${base}/tags?geoTargetId=${US_GEO}&languageCode=en&parentId=${categoryRoot.id}`,
+      );
+      expect(remaining.body.items.map((t) => t.id)).to.not.include(parent.body.id);
+    });
+
+    // Prompt preservation is the upstream detach, not client choreography: the
+    // delete never reads or writes a prompt, and the prompt survives fully
+    // present, just no longer carrying the deleted category tag.
+    it('DELETE /serenity/tags/:tagId preserves carrying prompts, unassigned', async () => {
+      await createUsMarket();
+      const category = await createTag('Photography');
+      const created = await getHttpClient().admin.post(`${base}/prompts`, {
+        prompts: [{
+          text: 'What is the best mirrorless camera?',
+          tagIds: [category.body.id],
+          geoTargetId: US_GEO,
+          languageCode: 'en',
+        }],
+      });
+      expect(created.status).to.equal(200);
+      const promptId = created.body.created[0].semrushPromptId;
+
+      const del = await getHttpClient().admin.delete(
+        `${base}/tags/${category.body.id}?geoTargetId=${US_GEO}&languageCode=en`,
+      );
+      expect(del.status).to.equal(204);
+
+      const byOldTag = await getHttpClient().admin.get(
+        `${base}/prompts?geoTargetId=${US_GEO}&languageCode=en&tagIds=${category.body.id}`,
+      );
+      // The deleted tag id no longer resolves to anything, so filtering by it
+      // finds nothing — not an error, and not a resurrection of the tag.
+      expect(byOldTag.status).to.equal(200);
+      expect(byOldTag.body.items.map((p) => p.semrushPromptId)).to.not.include(promptId);
+
+      const all = await getHttpClient().admin.get(
+        `${base}/prompts?geoTargetId=${US_GEO}&languageCode=en`,
+      );
+      expect(all.body.items.map((p) => p.semrushPromptId)).to.include(promptId);
+    });
+
+    it('DELETE /serenity/tags/:tagId 400s a delete of a dimension root', async () => {
+      await createUsMarket();
+      const roots = await getHttpClient().admin.get(
+        `${base}/tags?geoTargetId=${US_GEO}&languageCode=en&parentId=`,
+      );
+      const categoryRoot = roots.body.items.find((t) => t.name === 'category');
+      const res = await getHttpClient().admin.delete(
+        `${base}/tags/${categoryRoot.id}?geoTargetId=${US_GEO}&languageCode=en`,
+      );
+      expect(res.status).to.equal(400);
+    });
+
+    it('DELETE /serenity/tags/:tagId 400s a delete of a server-owned dimension value', async () => {
+      await createUsMarket();
+      const originValue = await getHttpClient().admin.post(`${base}/tags`, {
+        type: 'origin', name: 'ai', geoTargetId: US_GEO, languageCode: 'en',
+      });
+      expect(originValue.status).to.equal(200);
+      const res = await getHttpClient().admin.delete(
+        `${base}/tags/${originValue.body.id}?geoTargetId=${US_GEO}&languageCode=en`,
+      );
+      expect(res.status).to.equal(400);
+    });
+
+    it('DELETE /serenity/tags/:tagId 404s an id absent from this market tree', async () => {
+      await createUsMarket();
+      const res = await getHttpClient().admin.delete(
+        `${base}/tags/00000000-0000-4000-8000-000000000000?geoTargetId=${US_GEO}&languageCode=en`,
+      );
+      expect(res.status).to.equal(404);
+    });
+
     it('POST /serenity/prompts creates a prompt by id-based tagIds (serenity-docs#24)', async () => {
       await createUsMarket();
       const category = await createTag('Photography');
@@ -571,17 +822,47 @@ export default function serenityTests(
       expect(created.body.created).to.have.lengthOf(1);
       expect(created.body.created[0].semrushPromptId).to.be.a('string').that.is.not.empty;
       // The write path server-stamps FOUR dimensions the caller may not set: a
-      // branded/non-branded `type:` tag (classified from the text), the derived
-      // `origin:` tag (`human`, on a user-authenticated create — origin-dimension.md
-      // §3 / WP-O2b), the producing `source:` tag (`config` on this proxy-create
-      // path — source-dimension.md §1 / WP-S2, LLMO-6282), AND an `intent:<Value>`
-      // tag (serenity-docs#31, #32). Azure OpenAI is not configured in this IT
-      // environment, so intent deterministically defaults to `intent:Informational`
-      // (never null/omitted — see the fallback ladder). So the created prompt
-      // carries the two supplied tags plus the four computed ones.
+      // branded/non-branded `type:` tag (classified from the text), the producing
+      // `source:` tag (`config` on this proxy-create path — source-dimension.md
+      // §1 / WP-S2, LLMO-6282), AND an `intent:<Value>` tag (serenity-docs#31,
+      // #32). Azure OpenAI is not configured in this IT environment, so intent
+      // deterministically defaults to `intent:Informational` (never null/omitted
+      // — see the fallback ladder). The `admin` persona's JWT carries
+      // `isS2SAdmin: true` (see FACS bypass logging: "bypass: internal-identity"),
+      // which `isServicePrincipal` (prompts-storage.js) classifies as a SERVICE
+      // principal regardless of `authType` being `jwt` — so this create carries
+      // `origin:ai`, not `origin:human`. So the created prompt carries the two
+      // supplied tags plus the four computed ones.
+      //
+      // COUPLING (review nit): this test's expected origin value depends on
+      // `test/it/shared/auth.js`'s `admin` persona carrying `is_s2s_admin: true`.
+      // If that fixture ever changes to represent a true end-user admin instead
+      // (isS2SAdmin: false), this assertion needs to flip from `ai` to `human`
+      // — grep `is_s2s_admin` in auth.js if this test starts failing after an
+      // auth-fixture change.
       expect(created.body.created[0].tagIds).to.include.members([category.body.id, child.body.id]);
       expect(created.body.created[0].tagIds).to.have.lengthOf(6);
       expect(created.body.failed).to.deep.equal([]);
+
+      // Resolve the origin root's `ai` child BY READING the tree the create just
+      // wrote to (never by a separate resolve-or-create call, which could land a
+      // second, differently-id'd node if it ever raced the create's own tag-tree
+      // provisioning) — then confirm ONE of the created prompt's own tagIds
+      // actually IS that id, not just that the count is right (a double-stamped
+      // intent, or any other tag, would also satisfy a bare lengthOf(6)).
+      const roots = await getHttpClient().admin.get(
+        `${base}/tags?geoTargetId=${US_GEO}&languageCode=en&parentId=`,
+      );
+      expect(roots.status).to.equal(200);
+      const originRoot = roots.body.items.find((t) => t.name === 'origin');
+      expect(originRoot, 'the origin root should list among the roots').to.exist;
+      const originChildren = await getHttpClient().admin.get(
+        `${base}/tags?geoTargetId=${US_GEO}&languageCode=en&parentId=${originRoot.id}`,
+      );
+      expect(originChildren.status).to.equal(200);
+      const originAi = originChildren.body.items.find((t) => t.name === 'ai');
+      expect(originAi, 'origin/ai should exist under the origin root').to.exist;
+      expect(created.body.created[0].tagIds).to.include(originAi.id);
 
       // by_tags correlation: the id-based create embeds the tag ids, so filtering the prompt list
       // by the child's id surfaces the new prompt.
@@ -777,6 +1058,53 @@ export default function serenityTests(
       );
       expect(list.status).to.equal(200);
       expect(list.body.items.filter((p) => p.text === text)).to.have.lengthOf(1);
+    });
+
+    // The customer-reported CSV round trip, end to end (Sony, Brand-A / CH-de). Re-importing a
+    // prompt with a DIFFERENT category must change that category — and, critically, must be
+    // reversible. Before the upsert the second import attached the new category alongside the old
+    // one and the third attached nothing new at all (the tag was already there), so the prompt was
+    // stuck displaying whichever category upstream happened to return first.
+    it('POST /serenity/prompts re-imports change a prompt\'s category, and can change it back', async () => {
+      await createUsMarket();
+      const original = await createCategory('Features & Pricing');
+      const replacement = await createCategory('Reviews');
+      const text = 'What features does the product offer?';
+      const importRow = (tagId) => ({
+        prompts: [{
+          text, tagIds: [tagId], geoTargetId: US_GEO, languageCode: 'en',
+        }],
+      });
+      const categoriesOf = async () => {
+        const list = await getHttpClient().admin.get(
+          `${base}/prompts?geoTargetId=${US_GEO}&languageCode=en`,
+        );
+        expect(list.status).to.equal(200);
+        const rows = list.body.items.filter((p) => p.text === text);
+        // One prompt throughout: an upsert must never mint a duplicate.
+        expect(rows).to.have.lengthOf(1);
+        return rows[0].tags
+          .filter((t) => Array.isArray(t.path) && t.path.length === 1 && t.path[0].name === 'category')
+          .map((t) => t.name);
+      };
+
+      const first = await getHttpClient().admin.post(`${base}/prompts`, importRow(original));
+      expect(first.status).to.equal(200);
+      expect(first.body.created).to.have.lengthOf(1);
+      expect(await categoriesOf()).to.deep.equal(['Features & Pricing']);
+
+      // Import 2 — change it. Exactly ONE category, not two.
+      const second = await getHttpClient().admin.post(`${base}/prompts`, importRow(replacement));
+      expect(second.status).to.equal(200);
+      expect(second.body.created).to.be.an('array').that.is.empty;
+      expect(second.body.updated).to.have.lengthOf(1);
+      expect(await categoriesOf()).to.deep.equal(['Reviews']);
+
+      // Import 3 — change it BACK. This is the step that was impossible before.
+      const third = await getHttpClient().admin.post(`${base}/prompts`, importRow(original));
+      expect(third.status).to.equal(200);
+      expect(third.body.updated).to.have.lengthOf(1);
+      expect(await categoriesOf()).to.deep.equal(['Features & Pricing']);
     });
 
     // In-place edit (serenity-docs#63, gate G1): PATCH edits the prompt via the
@@ -1046,10 +1374,13 @@ export default function serenityTests(
       expect(Date.parse(after.updated_at)).to.be.at.least(Date.parse(before.updated_at));
     });
 
-    // Re-posting an existing text folds into `existing_count` upstream instead of creating a
-    // second row, and the stored stamp is PRESERVED — a dedupe hit must not re-attribute an
-    // existing prompt to whoever re-submitted it.
-    it('POST /serenity/prompts preserves the original stamp when a repeated text dedups', async () => {
+    // Re-posting an existing text no longer creates a second row — it REPLACES that prompt's tags
+    // (the upsert). `created_*` must survive that: a merge-patch writes only the `updated_*` pair,
+    // so the prompt keeps its original author while gaining the identity of whoever re-submitted
+    // it. Before the upsert this was asserted as a full no-op, which was never quite true: the
+    // upstream create silently ATTACHED the re-posted tag ids to the existing prompt without any
+    // stamp at all, so the row changed with nothing in its authorship to show for it.
+    it('POST /serenity/prompts preserves created_* and re-stamps updated_* when a repeated text upserts', async () => {
       await createUsMarket();
       const tagId = await createCategory('Headphones');
       const text = 'Which noise-cancelling headphones are best?';
@@ -1062,8 +1393,15 @@ export default function serenityTests(
         }],
       });
       expect(second.status).to.equal(200);
+      expect(second.body.updated).to.have.lengthOf(1);
+      expect(second.body.created).to.be.an('array').that.is.empty;
 
-      expect(await storedMetadataById(promptId)).to.deep.equal(before);
+      const after = await storedMetadataById(promptId);
+      // Authorship of the ORIGINAL create is never re-attributed.
+      expect(after.created_at).to.equal(before.created_at);
+      expect(after.created_by).to.equal(before.created_by);
+      // The re-submitter is recorded as the editor, because they genuinely edited it.
+      expect(after.updated_by).to.equal('test-user@example.com');
     });
 
     // Gate G2 refusal: a rename onto a sibling's exact text is a 409 and the combined upstream

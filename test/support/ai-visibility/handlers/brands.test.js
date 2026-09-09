@@ -15,7 +15,7 @@
 import { expect } from 'chai';
 import sinon from 'sinon';
 import { ConnectError, Code } from '@connectrpc/connect';
-import { SOURCES_REQUEST_ORDER_BY_ENUM, DOMAINS_REQUEST_ORDER_BY_ENUM } from '@quazar/ai-seo-ts/v2/source/enums_pb.js';
+import { SOURCES_REQUEST_ORDER_BY_ENUM, DOMAINS_REQUEST_ORDER_BY_ENUM, SEARCH_TYPE_ENUM } from '@quazar/ai-seo-ts/v2/source/enums_pb.js';
 import { ORDER_DIRECTION_ENUM } from '@quazar/ai-seo-ts/common/types_pb.js';
 import {
   handleBrandStats,
@@ -31,7 +31,9 @@ import {
   mapGrpcPromptToBrandPromptRow,
   citedPagesOwnedCountFromStatsByLlmForMonth,
 } from '../../../../src/support/ai-visibility/handlers/brands.js';
-import { FTS_LLMS, LLM_ENUM, COUNTRY_ENUM, brandTarget } from '../../../../src/support/ai-visibility/grpc-utils.js';
+import {
+  FTS_LLMS, LLM_ENUM, COUNTRY_ENUM, brandTarget, resolveSearchType,
+} from '../../../../src/support/ai-visibility/grpc-utils.js';
 
 describe('AI Visibility – brands handlers', () => {
   let sandbox;
@@ -1714,6 +1716,110 @@ describe('AI Visibility – brands handlers', () => {
       const res = await handleBrandCompetitors(sp, clients);
       expect(res.body.data[0].domain).to.equal('');
       expect(res.body.data[0].name).to.equal('');
+    });
+  });
+
+  /* ------------------------------------------------------------------ */
+  /*  brands/* search_type subdomain scoping                            */
+  /* ------------------------------------------------------------------ */
+  describe('brands/* search_type scoping', () => {
+    beforeEach(() => {
+      clients.topicClient.brandTopics.resolves({ topics: [] });
+      clients.topicClient.brandTopicsTotals.resolves({ total: 0 });
+      clients.competitorClient.brandCompetitors.resolves({ competitors: [] });
+      clients.brandClient.statsByLLM.resolves({ llm: [] });
+      clients.brandClient.statsByCountry.resolves({ byCountry: [] });
+      clients.promptClient.prompts.resolves({ prompts: [] });
+      clients.promptClient.promptsTotals.resolves({ total: 0 });
+      clients.sourceClient.sources.resolves({ sources: [] });
+      clients.voSourcesClient.sourcesTotals.resolves({ categories: [] });
+      clients.sourceClient.gapSourceDomains.resolves({ domains: [] });
+      clients.sourceClient.gapSourceDomainsTotals.resolves({ total: 0 });
+      clients.brandClient.topBrandsByDomain.resolves({ brands: [] });
+    });
+
+    it('handleBrandTopics resolves search_type DOMAIN for an apex domain on list and totals', async () => {
+      await handleBrandTopics(new URLSearchParams('domain=intuit.com'), clients);
+      expect(clients.topicClient.brandTopics.firstCall.args[0].searchType).to.equal(SEARCH_TYPE_ENUM.DOMAIN);
+      expect(clients.topicClient.brandTopicsTotals.firstCall.args[0].searchType).to.equal(SEARCH_TYPE_ENUM.DOMAIN);
+    });
+
+    it('handleBrandTopics resolves search_type SUBDOMAIN for a non-www subdomain on list and totals', async () => {
+      await handleBrandTopics(new URLSearchParams('domain=quickbooks.intuit.com'), clients);
+      expect(clients.topicClient.brandTopics.firstCall.args[0].searchType).to.equal(SEARCH_TYPE_ENUM.SUBDOMAIN);
+      expect(clients.topicClient.brandTopicsTotals.firstCall.args[0].searchType).to.equal(SEARCH_TYPE_ENUM.SUBDOMAIN);
+    });
+
+    it('handleBrandTopics treats a bare www. host as DOMAIN', async () => {
+      await handleBrandTopics(new URLSearchParams('domain=www.intuit.com'), clients);
+      expect(clients.topicClient.brandTopics.firstCall.args[0].searchType).to.equal(SEARCH_TYPE_ENUM.DOMAIN);
+    });
+
+    it('handleBrandCompetitors resolves search_type DOMAIN for an apex domain', async () => {
+      await handleBrandCompetitors(new URLSearchParams('domain=intuit.com'), clients);
+      expect(clients.competitorClient.brandCompetitors.firstCall.args[0].searchType).to.equal(SEARCH_TYPE_ENUM.DOMAIN);
+    });
+
+    it('handleBrandCompetitors resolves search_type SUBDOMAIN for a non-www subdomain', async () => {
+      await handleBrandCompetitors(new URLSearchParams('domain=quickbooks.intuit.com'), clients);
+      expect(clients.competitorClient.brandCompetitors.firstCall.args[0].searchType).to.equal(SEARCH_TYPE_ENUM.SUBDOMAIN);
+    });
+
+    it('handleBrandStats resolves search_type SUBDOMAIN on statsByLLM and statsByCountry for a subdomain', async () => {
+      await handleBrandStats(new URLSearchParams('domain=quickbooks.intuit.com'), clients);
+      expect(clients.brandClient.statsByLLM.firstCall.args[0].searchType).to.equal(SEARCH_TYPE_ENUM.SUBDOMAIN);
+      expect(clients.brandClient.statsByCountry.firstCall.args[0].searchType).to.equal(SEARCH_TYPE_ENUM.SUBDOMAIN);
+    });
+
+    it('handleBrandStats resolves search_type DOMAIN for an apex domain', async () => {
+      await handleBrandStats(new URLSearchParams('domain=intuit.com'), clients);
+      expect(clients.brandClient.statsByLLM.firstCall.args[0].searchType).to.equal(SEARCH_TYPE_ENUM.DOMAIN);
+      expect(clients.brandClient.statsByCountry.firstCall.args[0].searchType).to.equal(SEARCH_TYPE_ENUM.DOMAIN);
+    });
+
+    it('handleBrandPrompts sets SUBDOMAIN on prompts + promptsTotals for a subdomain', async () => {
+      await handleBrandPrompts(new URLSearchParams('domain=quickbooks.intuit.com'), clients);
+      expect(clients.promptClient.prompts.firstCall.args[0].searchType).to.equal(SEARCH_TYPE_ENUM.SUBDOMAIN);
+      expect(clients.promptClient.promptsTotals.firstCall.args[0].searchType).to.equal(SEARCH_TYPE_ENUM.SUBDOMAIN);
+    });
+
+    it('handleBrandPrompts sets DOMAIN on prompts + promptsTotals for an apex domain', async () => {
+      await handleBrandPrompts(new URLSearchParams('domain=intuit.com'), clients);
+      expect(clients.promptClient.prompts.firstCall.args[0].searchType).to.equal(SEARCH_TYPE_ENUM.DOMAIN);
+      expect(clients.promptClient.promptsTotals.firstCall.args[0].searchType).to.equal(SEARCH_TYPE_ENUM.DOMAIN);
+    });
+
+    it('handleBrandCitedPages sets SUBDOMAIN on the sources list request for a subdomain', async () => {
+      await handleBrandCitedPages(new URLSearchParams('domain=quickbooks.intuit.com'), clients);
+      expect(clients.sourceClient.sources.firstCall.args[0].searchType).to.equal(SEARCH_TYPE_ENUM.SUBDOMAIN);
+    });
+
+    it('handleBrandSourceOpportunities sets SUBDOMAIN on gapSourceDomains + totals for a subdomain', async () => {
+      await handleBrandSourceOpportunities(new URLSearchParams('domain=quickbooks.intuit.com'), clients);
+      expect(clients.sourceClient.gapSourceDomains.firstCall.args[0].searchType).to.equal(SEARCH_TYPE_ENUM.SUBDOMAIN);
+      expect(clients.sourceClient.gapSourceDomainsTotals.firstCall.args[0].searchType).to.equal(SEARCH_TYPE_ENUM.SUBDOMAIN);
+    });
+  });
+
+  /* ------------------------------------------------------------------ */
+  /*  resolveSearchType unit (incl. multi-part TLDs)                     */
+  /* ------------------------------------------------------------------ */
+  describe('resolveSearchType', () => {
+    it('classifies apex, www, and subdomain on a simple TLD', () => {
+      expect(resolveSearchType('intuit.com')).to.equal(SEARCH_TYPE_ENUM.DOMAIN);
+      expect(resolveSearchType('www.intuit.com')).to.equal(SEARCH_TYPE_ENUM.DOMAIN);
+      expect(resolveSearchType('quickbooks.intuit.com')).to.equal(SEARCH_TYPE_ENUM.SUBDOMAIN);
+    });
+
+    it('handles multi-part TLDs correctly', () => {
+      expect(resolveSearchType('example.co.uk')).to.equal(SEARCH_TYPE_ENUM.DOMAIN);
+      expect(resolveSearchType('shop.example.co.uk')).to.equal(SEARCH_TYPE_ENUM.SUBDOMAIN);
+    });
+
+    it('defaults to DOMAIN on empty/unparseable input', () => {
+      expect(resolveSearchType('')).to.equal(SEARCH_TYPE_ENUM.DOMAIN);
+      expect(resolveSearchType(null)).to.equal(SEARCH_TYPE_ENUM.DOMAIN);
+      expect(resolveSearchType(undefined)).to.equal(SEARCH_TYPE_ENUM.DOMAIN);
     });
   });
 });

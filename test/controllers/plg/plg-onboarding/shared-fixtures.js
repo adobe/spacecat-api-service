@@ -144,6 +144,7 @@ export function createSharedMocks(sandbox) {
   // Shared-utils stubs
   const composeBaseURLStub = sandbox.stub().returns(TEST_BASE_URL);
   const detectBotBlockerStub = sandbox.stub().resolves({ crawlable: true });
+  const detectAuthWallStub = sandbox.stub().resolves({ authenticated: false, signal: null });
   const detectLocaleStub = sandbox.stub().resolves({ language: 'en', region: 'US' });
   const resolveCanonicalUrlStub = sandbox.stub().resolves(TEST_BASE_URL);
 
@@ -218,11 +219,16 @@ export function createSharedMocks(sandbox) {
     enableImport: sandbox.stub(),
   };
 
-  // Project
+  // Project. getOrganizationId defaults to the resolved customer org so
+  // reparentSiteProjectToOrg is a no-op unless a test overrides it to a
+  // different (internal/demo) org.
   const mockProject = {
     getId: sandbox.stub().returns(TEST_PROJECT_ID),
     getProjectName: sandbox.stub().returns('example.com'),
+    getOrganizationId: sandbox.stub().returns(TEST_ORG_ID),
+    setOrganizationId: sandbox.stub(),
   };
+  mockProject.save = sandbox.stub().resolves(mockProject);
 
   const mockLog = {
     info: sandbox.stub(),
@@ -244,6 +250,7 @@ export function createSharedMocks(sandbox) {
     updateRumConfigStub,
     composeBaseURLStub,
     detectBotBlockerStub,
+    detectAuthWallStub,
     detectLocaleStub,
     resolveCanonicalUrlStub,
     createOrFindOrganizationStub,
@@ -285,6 +292,9 @@ export function createMockDataAccess(sandbox, {
       findByBaseURL: sandbox.stub().resolves(null),
       findById: sandbox.stub().resolves(null),
       create: sandbox.stub().resolves(mockSite),
+      // Solo-on-project by default, so reparentSiteProjectToOrg takes the
+      // "move project" branch rather than the split branch.
+      allByProjectId: sandbox.stub().resolves([mockSite]),
     },
     Organization: {
       findByImsOrgId: sandbox.stub().resolves(mockOrganization),
@@ -292,6 +302,7 @@ export function createMockDataAccess(sandbox, {
     },
     Project: {
       allByOrganizationId: sandbox.stub().resolves([]),
+      findById: sandbox.stub().resolves(mockProject),
       create: sandbox.stub().resolves(mockProject),
     },
     Configuration: {
@@ -378,6 +389,7 @@ export function resetStubDefaults(stubs) {
   stubs.rumApiClientCreateFromStub.returns({ retrieveDomainkey: stubs.rumRetrieveDomainkeyStub });
   stubs.updateRumConfigStub.resolves(true);
   stubs.detectBotBlockerStub.resolves({ crawlable: true });
+  stubs.detectAuthWallStub.resolves({ authenticated: false, signal: null });
   stubs.detectLocaleStub.resolves({ language: 'en', region: 'US' });
   stubs.resolveCanonicalUrlStub.resolves(TEST_BASE_URL);
   stubs.createOrFindOrganizationStub.resolves(mockOrganization);
@@ -430,6 +442,8 @@ export function resetStubDefaults(stubs) {
   mockOrganization.getName.returns('Test Org');
   mockProject.getId.returns(TEST_PROJECT_ID);
   mockProject.getProjectName.returns(TEST_DOMAIN);
+  mockProject.getOrganizationId.returns(TEST_ORG_ID);
+  mockProject.save.resolves(mockProject);
   mockSiteConfig.getFetchConfig.returns({});
   mockSiteConfig.getImports.returns([]);
 }

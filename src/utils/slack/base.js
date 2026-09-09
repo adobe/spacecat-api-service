@@ -22,7 +22,8 @@ import { Readable } from 'stream';
 import { parse } from 'csv';
 
 import { Blocks, Elements, Message } from 'slack-block-builder';
-import { isAuditForAllUrls } from '../../support/utils.js';
+import { isAuditForAllUrls } from '../../support/audit-run-scope.js';
+import { assertSlackFileUrl } from './file-url.js';
 
 export const BACKTICKS = '```';
 export const BOT_MENTION_REGEX = /^<@[^>]+>\s+/;
@@ -354,6 +355,8 @@ const wrapSayForThread = (say, threadTs) => {
  */
 const fetchFile = async (file, token) => {
   const fileUrl = file.url_private;
+  // Only ever send the bot token to a Slack-owned host (VULN-39365).
+  assertSlackFileUrl(fileUrl);
   const response = await fetch(fileUrl, {
     headers: { Authorization: `Bearer ${token}` },
     responseType: 'arraybuffer',

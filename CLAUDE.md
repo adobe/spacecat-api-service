@@ -90,19 +90,21 @@ Request → AWS Lambda → Middleware Stack → Route Matcher → Controller →
 ```
 
 **Middleware Stack** (in order, defined in `src/index.js`):
-1. `authWrapper` - Authentication (JWT, IMS, API Keys, Scoped API Keys)
-2. `logWrapper` - Structured logging
-3. `dataAccess` - Data access layer (`@adobe/spacecat-shared-data-access`)
-4. `bodyData` - Request body parsing
-5. `multipartFormData` - File upload handling
-6. `enrichPathInfo` - Path parameter extraction
-7. `sqs` - AWS SQS client
-8. `s3ClientWrapper` - AWS S3 client
-9. `imsClientWrapper` - Adobe IMS client
-10. `elevatedSlackClientWrapper` - Slack client
-11. `secrets` - AWS Secrets Manager
-12. `helixStatus` - Health checks
-13. `facsWrapper` - FACS/ReBAC customer-authorization enforcement for FACS-governed routes (innermost wrapper — attached first in the `wrap(...).with(...)` chain, so it runs last, immediately before the controller; configured with `routeFacsCapabilities` + `secondaryResolvers`; see Access Control → FACS-native authorization)
+1. `s2sAuthWrapper` - S2S JWT bearer tokens; passes non-S2S through to `authWrapper`
+2. `authWrapper` - Authentication (JWT, IMS, API Keys, Scoped API Keys)
+3. `logWrapper` - Structured logging
+4. `dataAccess` - Data access layer (`@adobe/spacecat-shared-data-access`)
+5. `bodyData` - Request body parsing
+6. `multipartFormData` - File upload handling
+7. `slackSignatureWrapper` - Slack request-signature verification for `/slack/events` (VULN-39365). Declared immediately before `enrichPathInfo` so it *runs* immediately after it (last `.with()` = outermost = runs first), which puts it after `pathInfo` is populated but before the body is consumed; it reads the body via `request.clone()`
+8. `enrichPathInfo` - Path parameter extraction
+9. `sqs` - AWS SQS client
+10. `s3ClientWrapper` - AWS S3 client
+11. `imsClientWrapper` - Adobe IMS client
+12. `elevatedSlackClientWrapper` - Slack client
+13. `secrets` - AWS Secrets Manager
+14. `helixStatus` - Health checks
+15. `facsWrapper` - FACS/ReBAC customer-authorization enforcement for FACS-governed routes (innermost wrapper — attached first in the `wrap(...).with(...)` chain, so it runs last, immediately before the controller; configured with `routeFacsCapabilities` + `secondaryResolvers`; see Access Control → FACS-native authorization)
 
 All dependencies are injected into `context` and available throughout the request lifecycle.
 
@@ -281,7 +283,7 @@ return accepted('Audit queued successfully');
 
 **Files**:
 - `src/controllers/slack.js` - Main controller
-- `src/support/slack/commands/` - Command handlers (36 commands)
+- `src/support/slack/commands/` - Command handlers
 - `src/support/slack/actions/` - Action handlers (17 actions)
 
 Architecture:
@@ -317,7 +319,7 @@ Agents in `src/agents/` use `@langchain/langgraph` for workflow orchestration.
 2. **Specification Sync**: Keep OpenAPI specs and implementation in sync
    - Run `npm run docs:lint` after modifying specs
    - Run `npm run docs:build` before completing implementation
-3. **Routing Consistency**: Add routes to BOTH `src/index.js` and `src/routes/index.js`
+3. **Routing Consistency**: Add routes to `src/routes/index.js`. `src/index.js` only wires each domain's controller into context (e.g. `SerenityController(context, log, context.env)`) — it does not list individual routes, so it needs a change only when adding a new controller/pattern, not for a new route on an existing one.
 4. **Access Control**: Always use `AccessControlUtil` for tenant data
 5. **DTO Usage**: Transform all responses through DTOs
 6. **HTTP Helpers**: Use shared helpers from `@adobe/spacecat-shared-http-utils` (`ok`, `badRequest`, `notFound`, `forbidden`, `accepted`, etc.)
@@ -535,12 +537,13 @@ Most complex domain:
 ### Slack Commands
 **Location**: `src/support/slack/commands/`
 
-36 commands for operations:
+Commands for operations (see `src/support/slack/commands.js` for the full, current list):
 - Site management: `/add-site`, `/update-site`, `/remove-site`
 - Audit operations: `/run-audit`, `/run-audit-for-all-sites`
 - Organization setup: `/add-slack-channel`, `/configure-slack`
 - Debugging: `/site-info`, `/audit-info`
 - LLMO: `/brand-profile`, `/llmo-onboard`, `enable-brand-claims`, `disable-brand-claims`
+- Geo-experiments: `/trigger-impact-measurement`, `/check-impact-measurement`, `/get-experiment`
 
 ## Common Utilities
 

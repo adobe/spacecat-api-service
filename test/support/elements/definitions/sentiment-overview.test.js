@@ -16,12 +16,12 @@ import {
   transformSentimentOverviewResponse,
   SENTIMENT_COLORS,
 } from '../../../../src/support/elements/definitions/sentiment-overview.js';
-import { DEFAULT_ELEMENT_MODEL } from '../../../../src/support/elements/constants.js';
 
 // Locates the CBF_project value inside the advanced filter tree (it sits in its own
-// `or` block, like the CBF_model block), or returns undefined if absent.
+// `or` block, like the CBF_model block), or returns undefined if absent (including when
+// the whole `advanced` block is omitted).
 function findProjectFilterVal(payload) {
-  const blocks = payload.filters.advanced.filters;
+  const blocks = payload.filters.advanced?.filters ?? [];
   for (const block of blocks) {
     const inner = Array.isArray(block.filters) ? block.filters : [];
     const hit = inner.find((f) => f.col === 'CBF_project');
@@ -57,18 +57,52 @@ describe('sentiment-overview definitions', () => {
     });
 
     it('uses an AND operator over the advanced filters', () => {
-      expect(buildSentimentOverviewPayload().filters.advanced.op).to.equal('and');
+      expect(buildSentimentOverviewPayload({ projectId: 'proj-1' }).filters.advanced.op).to.equal('and');
     });
 
-    it('defaults the model to DEFAULT_ELEMENT_MODEL in a CBF_model or-block', () => {
-      const modelBlock = buildSentimentOverviewPayload().filters.advanced.filters[0];
+    // Semrush 422s on `advanced: { op: 'and', filters: [] }` — it is NOT treated as
+    // "match all". Verified live 2026-09-02 against SENTIMENT (f4153af8): empty AND → 422,
+    // key omitted → 200. This is the Overview-SR default view (all platforms, no region,
+    // no category), so the empty case is reachable in production.
+    it('omits the advanced block entirely when there is nothing to filter on', () => {
+      const payload = buildSentimentOverviewPayload();
+      expect(payload.filters).to.not.have.property('advanced');
+      expect(payload.auto_bucketing).to.equal('week');
+    });
+
+    it('omits the CBF_model filter when the model is absent (All Platforms aggregate)', () => {
+      const payload = buildSentimentOverviewPayload({ projectId: 'proj-1' });
+      const hasModel = payload.filters.advanced.filters.some(
+        (f) => f.filters?.some((sub) => sub.col === 'CBF_model'),
+      );
+      expect(hasModel).to.equal(false);
+      // no model and no category → project scoping is the only advanced filter left
+      expect(payload.filters.advanced.filters).to.deep.equal([
+        { op: 'or', filters: [{ op: 'eq', val: 'proj-1', col: 'CBF_project' }] },
+      ]);
+    });
+
+    it('still emits the advanced block when only a category applies (all-platforms, no region)', () => {
+      const payload = buildSentimentOverviewPayload({ platform: 'all', category: 'category__Paint' });
+      expect(payload.filters.advanced).to.deep.equal({
+        op: 'and',
+        filters: [{ op: 'eq', val: 'category__Paint', col: 'CBF_tags' }],
+      });
+    });
+
+    it("omits the CBF_model filter for the explicit 'all' sentinel, keeping project scoping", () => {
+      const payload = buildSentimentOverviewPayload({ platform: 'all', projectId: 'proj-1' });
+      const hasModel = payload.filters.advanced.filters.some(
+        (f) => f.filters?.some((sub) => sub.col === 'CBF_model'),
+      );
+      expect(hasModel).to.equal(false);
+      expect(findProjectFilterVal(payload)).to.equal('proj-1');
+    });
+
+    it('translates a UI platform code to the Semrush model in a CBF_model or-block', () => {
+      const modelBlock = buildSentimentOverviewPayload({ model: 'openai' }).filters.advanced.filters[0];
       expect(modelBlock.op).to.equal('or');
       expect(modelBlock.filters[0].col).to.equal('CBF_model');
-      expect(modelBlock.filters[0].val).to.equal(DEFAULT_ELEMENT_MODEL);
-    });
-
-    it('translates a UI platform code to the Semrush model', () => {
-      const modelBlock = buildSentimentOverviewPayload({ model: 'openai' }).filters.advanced.filters[0];
       expect(modelBlock.filters[0].val).to.equal('chatgpt-paid');
     });
 
@@ -110,6 +144,89 @@ describe('sentiment-overview definitions', () => {
       const tagFilter = payload.filters.advanced.filters
         .find((f) => f.col === 'CBF_tags');
       expect(tagFilter).to.deep.include({ op: 'eq', val: 'category__travel', col: 'CBF_tags' });
+    });
+
+    // Brand scoping (LLMO-7456). The sub-workspace alone does NOT scope to the brand — it
+    // also holds the brand's tracked competitors — so without CBF_brand the element blends
+    // them into the sentiment counts. Verified live: brand "au", week 2026-08-23, 319/345/16
+    // with the filter vs 507/585/66 without it.
+    describe('brand scoping (CBF_brand)', () => {
+      const findBrandFilter = (payload) => (payload.filters.advanced?.filters ?? [])
+        .find((f) => f.col === 'CBF_brand');
+
+      it('sends CBF_brand as a bare eq when brandName is provided', () => {
+        const payload = buildSentimentOverviewPayload({ brandName: 'au' });
+        expect(findBrandFilter(payload)).to.deep.equal({ op: 'eq', val: 'au', col: 'CBF_brand' });
+      });
+
+      it('uses CBF_brand, not CBF_ws_brand', () => {
+        const payload = buildSentimentOverviewPayload({ brandName: 'au' });
+        expect(payload.filters.advanced.filters.some((f) => f.col === 'CBF_ws_brand')).to.equal(false);
+      });
+
+      it('omits CBF_brand when brandName is not provided', () => {
+        expect(findBrandFilter(buildSentimentOverviewPayload({ projectId: 'proj-1' }))).to.be.undefined;
+      });
+
+      // A whitespace-only name must NOT be forwarded: `CBF_brand: "   "` matches no brand
+      // and silently zeroes the counts, which is indistinguishable from a real "no
+      // sentiment". Note `hasText` does not trim, so it would not catch this.
+      it('treats a blank or whitespace-only brandName as absent', () => {
+        expect(findBrandFilter(buildSentimentOverviewPayload({ brandName: '', projectId: 'p' }))).to.be.undefined;
+        expect(findBrandFilter(buildSentimentOverviewPayload({ brandName: '   ', projectId: 'p' }))).to.be.undefined;
+      });
+
+      it('ignores a non-string brandName', () => {
+        expect(findBrandFilter(buildSentimentOverviewPayload({ brandName: 42, projectId: 'p' }))).to.be.undefined;
+      });
+
+      it('trims a padded brandName before sending it', () => {
+        const payload = buildSentimentOverviewPayload({ brandName: '  au  ' });
+        expect(findBrandFilter(payload)).to.deep.equal({ op: 'eq', val: 'au', col: 'CBF_brand' });
+      });
+
+      // Guards the documented empty-AND → HTTP 422 behaviour: a whitespace-only brand must
+      // not be the thing that keeps an otherwise-empty advanced block alive.
+      it('still omits the advanced block when a whitespace brandName is the only input', () => {
+        expect(buildSentimentOverviewPayload({ brandName: '   ' }).filters).to.not.have.property('advanced');
+      });
+
+      it('emits the advanced block when brandName is the only filter', () => {
+        const payload = buildSentimentOverviewPayload({ brandName: 'au' });
+        expect(payload.filters.advanced).to.deep.equal({
+          op: 'and',
+          filters: [{ op: 'eq', val: 'au', col: 'CBF_brand' }],
+        });
+      });
+
+      it('coexists with the model, project and category filters', () => {
+        const payload = buildSentimentOverviewPayload({
+          model: 'openai',
+          brandName: 'au',
+          projectId: 'proj-1',
+          category: 'category__Paint',
+        });
+        expect(payload.filters.advanced.filters).to.deep.equal([
+          { op: 'or', filters: [{ op: 'eq', val: 'chatgpt-paid', col: 'CBF_model' }] },
+          { op: 'eq', val: 'au', col: 'CBF_brand' },
+          { op: 'or', filters: [{ op: 'eq', val: 'proj-1', col: 'CBF_project' }] },
+          { op: 'eq', val: 'category__Paint', col: 'CBF_tags' },
+        ]);
+      });
+
+      // Guards the merge of LLMO-7456 (brandName) with the faceted-tag work, which added
+      // tagPaths to this same signature: both must survive and be emitted together.
+      it('coexists with faceted tagPaths', () => {
+        const payload = buildSentimentOverviewPayload({
+          brandName: 'au',
+          tagPaths: ['category__Paint', 'type__branded'],
+        });
+        expect(findBrandFilter(payload)).to.deep.equal({ op: 'eq', val: 'au', col: 'CBF_brand' });
+        expect(payload.filters.advanced.filters).to.deep.include.members([
+          { op: 'or', filters: [{ op: 'eq', val: 'category__Paint', col: 'CBF_tags' }] },
+          { op: 'or', filters: [{ op: 'eq', val: 'type__branded', col: 'CBF_tags' }] },
+        ]);
+      });
     });
   });
 

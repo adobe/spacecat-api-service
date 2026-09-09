@@ -208,6 +208,24 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       expect(message).to.include('is not an AEM site');
     });
 
+    it('posts rejection notification with reason for an authenticated site', async () => {
+      const onboarding = createMockOnboarding({
+        status: 'REJECTED',
+        waitlistReason: `Domain ${TEST_DOMAIN} requires authentication (login/SSO) to access, which ASO does not support (detected: login-url).`,
+      });
+      stubs.detectAuthWallStub.resolves({
+        authenticated: true, signal: 'login-url', finalUrl: 'https://example.com/login',
+      });
+
+      await SlackControllerFactory({ log: mockLog }).onboard(buildSlackContext(onboarding));
+
+      expect(postSlackMessageStub).to.have.been.called;
+      const [, message] = postSlackMessageStub.firstCall.args;
+      expect(message).to.include('Rejected');
+      expect(message).to.include('requires authentication');
+      expect(message).to.not.include('Justification:');
+    });
+
     it('logs error when postSlackMessage fails but does not propagate', async () => {
       postSlackMessageStub.rejects(new Error('Slack API unavailable'));
       const onboarding = createMockOnboarding({

@@ -387,7 +387,14 @@ describe('onboard-llmo-modal', () => {
       await onboardSite(input, lambdaCtx, slackCtx);
 
       expect(sayStub).to.have.been.calledWith(':gear: Test Brand onboarding started...');
-      expect(sayStub).to.have.been.calledWith(sinon.match(':white_check_mark: *LLMO onboarding completed successfully!*'));
+      // This test's context has no DRS client configured, so activateBrandAndGeneratePrompts
+      // skips the Brandalf submission entirely (brandalfTriggered stays false) and
+      // ensurePromptSuggestionSchedules short-circuits on !drsClient.isConfigured() — no
+      // timeout path is reached at all. requiredWorkFailed is therefore true for this v2
+      // onboarding because the required Brandalf work was never handed off (LLMO-7218 AC3),
+      // so the banner honestly reports that rather than the unconditional success message
+      // this test asserted on before that gate existed.
+      expect(sayStub).to.have.been.calledWith(sinon.match(':warning: *LLMO onboarding completed with warnings*'));
       expect(sayStub).to.have.been.calledWith(sinon.match(':link: *Site:* https://example.com'));
       expect(sayStub).to.have.been.calledWith(sinon.match(':identification_card: *Site ID:* site123'));
       expect(sayStub).to.have.been.calledWith(sinon.match(':file_folder: *Data Folder:* example-com'));
@@ -443,6 +450,66 @@ describe('onboard-llmo-modal', () => {
       });
     });
 
+    it('posts the :white_check_mark: success banner when brand activation fully succeeds (LLMO-7218 AC3)', async () => {
+      // The other onboardSite tests run against an unconfigured DRS, so their banner is
+      // always the degraded :warning: variant. Here we stub performLlmoOnboarding to return
+      // a fully-successful brand activation (requiredWorkFailed:false) — the branch that
+      // drives the :white_check_mark: banner — which had no coverage otherwise.
+      const mockSite = createDefaultMockSite(sandbox);
+      const lambdaCtx = createDefaultMockLambdaCtx(sandbox, { mockSite });
+      const slackCtx = createDefaultMockSlackCtx(sandbox);
+      const sayStub = slackCtx.say;
+
+      const performLlmoOnboardingStub = sandbox.stub().resolves({
+        site: mockSite,
+        siteId: 'site123',
+        organizationId: 'org123',
+        baseURL: 'https://example.com',
+        dataFolder: 'example-com',
+        message: 'LLMO onboarding completed successfully',
+        brandActivation: {
+          brandalfTriggered: true,
+          brandalfError: null,
+          promptGenerationJobId: null,
+          promptGenerationError: null,
+          promptSuggestionSchedules: [
+            { providerId: 'prompt_generation_semrush', status: 'created' },
+          ],
+          promptSuggestionSchedulesTimedOut: false,
+          requiredWorkFailed: false,
+        },
+      });
+
+      const modalWithSuccess = await esmock('../../../../src/support/slack/actions/onboard-llmo-modal.js', {
+        '../../../../src/controllers/llmo/llmo-onboarding.js': {
+          performLlmoOnboarding: performLlmoOnboardingStub,
+          validateSiteNotOnboarded: sandbox.stub().resolves({ isValid: true }),
+          generateDataFolder: sandbox.stub().returns('example-com'),
+        },
+        '../../../../src/utils/slack/base.js': sharedSlackMock,
+        '../../../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+        },
+      });
+
+      await modalWithSuccess.onboardSite(
+        {
+          baseURL: 'https://example.com',
+          brandName: 'Test Brand',
+          imsOrgId: 'ABC123@AdobeOrg',
+          deliveryType: 'aem_edge',
+        },
+        lambdaCtx,
+        slackCtx,
+      );
+
+      expect(performLlmoOnboardingStub).to.have.been.calledOnce;
+      // Success banner — NOT the degraded warning variant.
+      expect(sayStub).to.have.been.calledWith(sinon.match(':white_check_mark: *LLMO onboarding completed successfully!*'));
+      expect(sayStub).to.not.have.been.calledWith(sinon.match(':warning: *LLMO onboarding completed with warnings*'));
+      expect(triggerBrandProfileAgentStub).to.have.been.calledOnce;
+    });
+
     it('should surface region in the success message when supplied (LLMO-4683)', async () => {
       const input = {
         baseURL: 'https://example.com',
@@ -481,12 +548,17 @@ describe('onboard-llmo-modal', () => {
 
       await onboardSite(input, lambdaCtx, slackCtx);
 
-      const successCall = sayStub.getCalls().find(
+      // Matches either banner variant. This test's DRS-unconfigured context skips the
+      // Brandalf submission (brandalfTriggered stays false) and short-circuits schedule
+      // registration on !isConfigured() — no timeout occurs — so requiredWorkFailed is true
+      // and the banner is the "with warnings" variant here, not the plain success one
+      // (LLMO-7218 AC3).
+      const finalCall = sayStub.getCalls().find(
         (call) => typeof call.args[0] === 'string'
-          && call.args[0].includes('LLMO onboarding completed successfully'),
+          && call.args[0].includes('LLMO onboarding completed'),
       );
-      expect(successCall, 'success message was sent').to.exist;
-      expect(successCall.args[0]).to.not.include(':globe_with_meridians:');
+      expect(finalCall, 'final onboarding message was sent').to.exist;
+      expect(finalCall.args[0]).to.not.include(':globe_with_meridians:');
     });
 
     it('should always call GitHub to update helix-query.yaml, ignoring a stray tempOnboarding param (LLMO-7141)', async () => {

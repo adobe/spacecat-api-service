@@ -13,6 +13,7 @@
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
 import { hasText } from '@adobe/spacecat-shared-utils';
 import { exchangePromiseToken, getCookieValue } from './utils.js';
+import { isImsGroupMember } from './ims-group.js';
 
 // IMS service codes that represent the LLMO/Elmo product in the user's productContexts.
 // TODO: replace placeholder with the real IMS service code once confirmed.
@@ -149,19 +150,9 @@ export async function authorizeEdgeCdnRouting(context, {
       err.status = 403;
       throw err;
     }
-    let isGroupMember = false;
-    try {
-      const orgs = await context.imsClient.getImsUserOrganizations(imsUserToken);
-      const matchingOrg = orgs.find((o) => `${o.orgRef?.ident}@${o.orgRef?.authSrc}` === imsOrgId);
-      if (matchingOrg) {
-        const adminName = LLMO_ADMIN_GROUP_NAME.toLowerCase();
-        isGroupMember = matchingOrg.groups?.some(
-          (g) => g.groupName?.toLowerCase() === adminName,
-        ) ?? false;
-      }
-    } catch (groupErr) {
-      log.warn(`[edge-routing-auth] IMS group check failed for site ${siteId}: ${groupErr.message}`);
-    }
+    const isGroupMember = await isImsGroupMember(context, {
+      imsOrgId, imsUserToken, groupName: LLMO_ADMIN_GROUP_NAME,
+    }, log);
 
     if (!isGroupMember) {
       const err = new Error(`Only '${LLMO_ADMIN_GROUP_NAME}' IMS Group members can configure CDN routing`);

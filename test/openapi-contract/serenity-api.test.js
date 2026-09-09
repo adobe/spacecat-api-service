@@ -112,7 +112,11 @@ const FIXTURES = {
         languageCode: 'en',
         text: 'sample',
         tags: [{
-          id: 't-1', name: 'topic-a', parentId: null, path: null,
+          id: 't-1',
+          name: 'topic-a',
+          parentId: null,
+          path: null,
+          compatibility: { state: 'unverified', reason: 'taxonomyNotLoaded' },
         }],
         // Authorship metadata fields (LLMO-6289) on a list item.
         createdAt: '2026-07-01T00:00:00Z',
@@ -139,6 +143,14 @@ const FIXTURES = {
         languageCode: 'en',
         text: 'sample',
       }],
+      // A live response always carries `updated` — the prompts whose text already
+      // existed and had their tags replaced rather than being created again.
+      updated: [{
+        semrushPromptId: 'sem-2',
+        geoTargetId: 2840,
+        languageCode: 'en',
+        text: 'already here',
+      }],
       skipped: [],
       failed: [],
       published: true,
@@ -147,6 +159,32 @@ const FIXTURES = {
       prompts: [{
         text: 'sample', tags: ['topic-a'], geoTargetId: 2840, languageCode: 'en',
       }],
+    },
+  },
+  getSerenityPromptsJobStatus: {
+    expectedStatus: 200,
+    controllerMethod: 'getPromptsJobStatus',
+    // No handler: the controller reads the AsyncJob model directly. Pin a
+    // COMPLETED job owned by BRAND so the documented { jobId, status, result }
+    // shape is exercised. Metadata.brandId MUST match auth.brandUuid (BRAND) or
+    // the controller 404s (jobs are never leaked across brands).
+    params: { jobId: '00000000-0000-4000-8000-000000000000' },
+    asyncJob: {
+      getId: () => '00000000-0000-4000-8000-000000000000',
+      getStatus: () => 'COMPLETED',
+      getResult: () => ({
+        created: [{
+          semrushPromptId: 'sem-1',
+          geoTargetId: 2840,
+          languageCode: 'en',
+          text: 'sample',
+        }],
+        skipped: [],
+        failed: [],
+        published: true,
+      }),
+      getError: () => null,
+      getMetadata: () => ({ brandId: BRAND }),
     },
   },
   updateSerenityPrompt: {
@@ -175,6 +213,27 @@ const FIXTURES = {
     handlerResult: { deleted: 1, failed: [] },
     data: {
       prompts: [{ semrushPromptId: 'sem-1', geoTargetId: 2840, languageCode: 'en' }],
+    },
+  },
+  bulkTagSerenityPrompts: {
+    expectedStatus: 202,
+    controllerMethod: 'bulkTagPrompts',
+    handlerName: 'handleBulkTags',
+    handlerResult: {
+      status: 202,
+      body: {
+        jobId: '00000000-0000-4000-8000-000000000001',
+        jobType: 'bulkTags',
+        status: 'IN_PROGRESS',
+        replayed: false,
+      },
+    },
+    data: {
+      geoTargetId: 2840,
+      languageCode: 'en',
+      operation: 'assign',
+      tagIds: ['tag-1'],
+      filter: { tagIds: [], tagFilterMode: 'faceted-v1' },
     },
   },
   listSerenityMarkets: {
@@ -278,6 +337,36 @@ const FIXTURES = {
       name: 'category:Running Shoes', parentId: 'tag-parent', geoTargetId: 2840, languageCode: 'en',
     },
   },
+  deleteSerenityTag: {
+    expectedStatus: 204,
+    controllerMethod: 'deleteTag',
+    handlerName: 'handleDeleteTag',
+    handlerResult: undefined,
+    params: { tagId: 'tag-1' },
+    query: { geoTargetId: '2840', languageCode: 'en' },
+  },
+  getSerenityTagImpact: {
+    expectedStatus: 200,
+    controllerMethod: 'getTagImpact',
+    handlerName: 'handleTagImpact',
+    handlerResult: {
+      status: 200,
+      body: {
+        tagId: 'tag-1',
+        name: 'Campaign',
+        path: [
+          { id: 'root-tag', name: 'tag' },
+          { id: 'tag-1', name: 'Campaign' },
+        ],
+        descendantCount: 0,
+        affectedPromptCount: 1,
+        complete: true,
+        revision: '"revision"',
+      },
+    },
+    params: { tagId: 'tag-1' },
+    query: { geoTargetId: '2840', languageCode: 'en' },
+  },
   listSerenityModels: {
     expectedStatus: 200,
     controllerMethod: 'listModels',
@@ -338,7 +427,7 @@ const FIXTURES = {
     controllerMethod: 'listOrgLanguages',
     handlerName: 'listLanguageCatalog',
     handlerResult: {
-      items: [{ id: 'lang-en', name: 'English' }],
+      items: [{ id: 'lang-en', name: 'English', code: 'en' }],
     },
   },
   // Unlike the rest of this file's fixtures, this operation is served by
@@ -458,6 +547,109 @@ const FIXTURES = {
       }],
     },
   },
+  listSerenityBrandPresenceResponses: {
+    expectedStatus: 200,
+    usesElementsController: true,
+    controllerMethod: 'listResponseFeed',
+    serviceMethod: 'getResponseFeed',
+    // from/to are optional (they default to the last 7 days ending yesterday), but are
+    // supplied here so the fixture is deterministic rather than clock-dependent.
+    query: { from: '2026-08-23', to: '2026-08-24' },
+    // getResponseFeed returns the joined shape; the controller maps it through
+    // ResponseFeedDto.toEnvelopeJSON before ok().
+    handlerResult: {
+      records: [{
+        projectId: 'cb4f6443-e01f-4075-a586-85511f136e31',
+        prompt: 'best running shoes for flat feet',
+        model: 'chatgpt-paid',
+        date: '2026-08-24',
+        response: 'For flat feet, look for stability shoes with firm midsoles.',
+        sources: [{
+          url: 'https://www.runnersworld.com/gear/best-running-shoes',
+          source: 'runnersworld.com',
+          position: 1,
+          domainType: 'Earned',
+        }],
+        sourceRowCount: 1,
+      }],
+      days: ['2026-08-23', '2026-08-24'],
+      projectIds: ['cb4f6443-e01f-4075-a586-85511f136e31'],
+      pageSize: 5000,
+      truncated: false,
+      unmatchedSourceKeyCount: 0,
+    },
+  },
+  listSerenityBrandPresenceSubreddits: {
+    expectedStatus: 200,
+    usesElementsController: true,
+    controllerMethod: 'listSubreddits',
+    serviceMethod: 'getSubreddits',
+    // startDate/endDate are required + validated by the controller before the
+    // service is called (see listSubreddits) — supply them via query.
+    query: { startDate: '2026-06-01', endDate: '2026-07-16' },
+    // getSubreddits returns the final { subreddits, totalCount } shape; the
+    // controller passes it straight through via ok().
+    handlerResult: {
+      subreddits: [{
+        subreddit: 'r/Lovesac',
+        subredditKey: 'Lovesac',
+        link: 'r/Lovesac',
+        mentions: 4407,
+        prompts: 430,
+        responsesWithCitations: 2603,
+        threads: 1879,
+        visibility: 0.7477736282677392,
+        projectId: 'cb4f6443-e01f-4075-a586-85511f136e31',
+      }],
+      totalCount: 107,
+    },
+  },
+  listSerenityBrandPresenceRedditThreads: {
+    expectedStatus: 200,
+    usesElementsController: true,
+    controllerMethod: 'listRedditThreads',
+    serviceMethod: 'getRedditThreads',
+    // startDate/endDate are required + validated by the controller before the
+    // service is called (see listRedditThreads) — supply them via query.
+    query: { startDate: '2026-06-01', endDate: '2026-07-16' },
+    // getRedditThreads returns the final { threads, totalCount } shape; the
+    // controller passes it straight through via ok().
+    handlerResult: {
+      threads: [{
+        link: 'https://www.reddit.com/r/BuyItForLife/comments/1kqgvja/lovesac_sactional_is_it_worth_it',
+        mentions: 75,
+        prompts: 28,
+        responses: 62,
+        subreddit: 'r/BuyItForLife',
+        thread: 'LoveSac Sactional, is it worth it? : r/BuyItForLife - Reddit',
+        urlCbf: '59bfcb03-11df-44ff-867a-ac2b30c49578:eq:https_C0L_//www.reddit.com/r/BuyItForLife/comments/1kqgvja/lovesac_sactional_is_it_worth_it',
+      }],
+      totalCount: 42,
+    },
+  },
+  listSerenityBrandPresenceYoutubeVideos: {
+    expectedStatus: 200,
+    usesElementsController: true,
+    controllerMethod: 'listYoutubeVideos',
+    serviceMethod: 'getYoutubeVideos',
+    // startDate/endDate are required + validated by the controller before the
+    // service is called (see listYoutubeVideos) — supply them via query.
+    query: { startDate: '2026-06-01', endDate: '2026-07-16' },
+    // getYoutubeVideos returns the final { videos, totalCount } shape; the
+    // controller passes it straight through via ok().
+    handlerResult: {
+      videos: [{
+        channel: 'Lovesac',
+        citations: 53,
+        link: 'https://www.youtube.com/watch?v=4ECf112-SSc',
+        prompts: 47,
+        video: 'Lovesac Product Guide - CitySac Overview',
+        views: 106100,
+        urlCbf: '59bfcb03-11df-44ff-867a-ac2b30c49578:eq:https_C0L_//www.youtube.com/watch?v=4ECf112-SSc',
+      }],
+      totalCount: 42,
+    },
+  },
   listSerenityBrandPresenceTopics: {
     expectedStatus: 200,
     usesElementsController: true,
@@ -485,6 +677,7 @@ const FIXTURES = {
         position: 1,
         sentiment: 0.72,
         volume: 5658,
+        executions: 42,
       }],
     }, {
       topic: 'Recliners with USB Charging Ports',
@@ -517,6 +710,7 @@ const FIXTURES = {
       position: 1,
       sentiment: 0.72,
       volume: 5658,
+      executions: 42,
     }],
   },
   // Also served by ElementsController — see the note on
@@ -643,6 +837,25 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
     expect(ids).to.deep.equal(fixtureKeys);
   });
 
+  it('SerenityPromptTag rejects a runtime tag that omits compatibility', () => {
+    const schema = spec?.components?.schemas?.SerenityPromptTag;
+    expect(schema).to.exist;
+    const validate = makeAjv().compile(schema);
+
+    const valid = validate({
+      id: 'tag-1',
+      name: 'Campaign',
+      parentId: 'tag-root',
+      path: [{ id: 'tag-root', name: 'tag' }],
+    });
+
+    expect(valid).to.equal(false);
+    expect(validate.errors.some((error) => (
+      error.keyword === 'required'
+      && error.params?.missingProperty === 'compatibility'
+    ))).to.equal(true);
+  });
+
   /**
    * Each operationId in the spec gets a generated test that:
    * 1. stubs the handler to return the fixture
@@ -737,6 +950,7 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
         handleCreatePrompts: sinon.stub(),
         handleUpdatePrompt: sinon.stub(),
         handleBulkDeletePrompts: sinon.stub(),
+        handleBulkTags: sinon.stub(),
         handleListMarkets: sinon.stub(),
         handleGetMarket: sinon.stub(),
         handleCreateMarket: sinon.stub(),
@@ -744,6 +958,8 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
         handleListTags: sinon.stub(),
         handleCreateTag: sinon.stub(),
         handleUpdateTag: sinon.stub(),
+        handleDeleteTag: sinon.stub(),
+        handleTagImpact: sinon.stub(),
         handleListModels: sinon.stub(),
         handleUpdateModels: sinon.stub(),
         handleCreateMarketSubworkspace: sinon.stub(),
@@ -753,7 +969,12 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
         listGlobalModelCatalog: sinon.stub(),
         listLanguageCatalog: sinon.stub(),
       };
-      handlerStubs[fx.handlerName].resolves(fx.handlerResult);
+      // Most serenity ops route through a handler stub; a few (e.g.
+      // getSerenityPromptsJobStatus) read a data-access model directly and pin
+      // their state via `fx.asyncJob` instead of a handler.
+      if (fx.handlerName) {
+        handlerStubs[fx.handlerName].resolves(fx.handlerResult);
+      }
 
       const SerenityController = (await esmock(
         '../../src/controllers/serenity.js',
@@ -785,6 +1006,7 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
             handleCreatePrompts: handlerStubs.handleCreatePrompts,
             handleUpdatePrompt: handlerStubs.handleUpdatePrompt,
             handleBulkDeletePrompts: handlerStubs.handleBulkDeletePrompts,
+            assertCreatePromptTagLimits: () => {},
           },
           '../../src/support/serenity/handlers/markets.js': {
             handleListMarkets: handlerStubs.handleListMarkets,
@@ -802,6 +1024,17 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
             handleCreateTagSubworkspace: sinon.stub(),
             handleUpdateTag: handlerStubs.handleUpdateTag,
             handleUpdateTagSubworkspace: sinon.stub(),
+            handleDeleteTag: handlerStubs.handleDeleteTag,
+            handleDeleteTagSubworkspace: sinon.stub(),
+            handleTagImpact: handlerStubs.handleTagImpact,
+            handleTagImpactSubworkspace: sinon.stub(),
+          },
+          '../../src/support/serenity/handlers/bulk-tags-job.js': {
+            BULK_TAGS_JOB_TYPE: 'serenity-bulk-tags',
+            BULK_TAGS_PUBLIC_JOB_TYPE: 'bulkTags',
+            handleBulkTags: handlerStubs.handleBulkTags,
+            handleBulkTagsSubworkspace: sinon.stub(),
+            pageBulkFailures: (result) => result,
           },
           '../../src/support/serenity/handlers/markets-subworkspace.js': {
             handleListMarketsSubworkspace: handlerStubs.handleListMarketsSubworkspace,
@@ -856,6 +1089,11 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
         data: fx.data,
         query: fx.query || {},
       });
+      // Ops that read an AsyncJob directly (no handler) get their job pinned here.
+      if (fx.asyncJob) {
+        ctx.dataAccess.AsyncJob = { findById: sinon.stub().resolves(fx.asyncJob) };
+      }
+
       const controller = SerenityController(ctx, fakeLog());
       const response = await controller[fx.controllerMethod](ctx);
 

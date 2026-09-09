@@ -3590,6 +3590,143 @@ describe('LlmoController', () => {
       const responseBody = await result.json();
       expect(responseBody.imsOrgId).to.equal(upperCaseImsOrgId);
     });
+
+    it('surfaces brandActivation in the ok() response when performLlmoOnboarding returns it (LLMO-7218 AC4)', async () => {
+      const brandActivation = {
+        brandalfTriggered: true,
+        brandalfError: null,
+        promptGenerationJobId: null,
+        promptGenerationError: null,
+        promptSuggestionSchedules: [
+          { providerId: 'prompt_generation_semrush', status: 'created' },
+        ],
+        promptSuggestionSchedulesTimedOut: false,
+        requiredWorkFailed: false,
+      };
+      const onboardWithBrandActivation = sinon.stub().resolves({
+        siteId: 'new-site-id',
+        organizationId: 'new-org-id',
+        baseURL: 'https://example.com',
+        dataFolder: 'dev/example-com',
+        message: 'LLMO onboarding completed successfully',
+        brandActivation,
+      });
+      const LlmoControllerOnboard = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/controllers/llmo/llmo-onboarding.js': {
+          validateSiteNotOnboarded: validateSiteNotOnboardedStub,
+          performLlmoOnboarding: onboardWithBrandActivation,
+          generateDataFolder: (baseURL, env) => {
+            const url = new URL(baseURL);
+            const dataFolderName = url.hostname.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
+            return env === 'prod' ? dataFolderName : `dev/${dataFolderName}`;
+          },
+        },
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+        '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+          Config: { toDynamoItem: sinon.stub().returnsArg(0) },
+        },
+        '@adobe/spacecat-shared-utils': {
+          SPACECAT_USER_AGENT: TEST_USER_AGENT,
+          tracingFetch: tracingFetchStub,
+          hasText: (text) => text && text.trim().length > 0,
+          isObject: (obj) => obj !== null && typeof obj === 'object',
+          llmoConfig,
+          schemas: {},
+          composeBaseURL: (domain) => (domain.startsWith('http') ? domain : `https://${domain}`),
+        },
+        '../../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+        },
+        ...getCommonMocks(),
+      });
+      const testController = LlmoControllerOnboard(mockContext);
+
+      const result = await testController.onboardCustomer(onboardingContext);
+
+      expect(result.status).to.equal(200);
+      const responseBody = await result.json();
+      // Admin onboarding surfaces the full submission-outcome summary so a caller can
+      // branch on the degraded-step case (requiredWorkFailed) without reading logs.
+      expect(responseBody.brandActivation).to.deep.equal(brandActivation);
+      expect(responseBody.status).to.equal('completed');
+    });
+  });
+
+  describe('onboardSiteOnly', () => {
+    it('response does NOT include a brandActivation field (siteOnly skips brand activation)', async () => {
+      const mockOrg = {
+        getId: sinon.stub().returns('paid-org-id'),
+        getImsOrgId: sinon.stub().returns('paid-ims-org@AdobeOrg'),
+      };
+      mockDataAccess.Organization = {
+        findById: sinon.stub().resolves(mockOrg),
+      };
+      // siteOnly onboarding returns NO brandActivation (brand activation never runs).
+      const siteOnlyPerformStub = sinon.stub().resolves({
+        siteId: 'so-site-id',
+        organizationId: 'paid-org-id',
+        baseURL: 'https://example.com',
+        dataFolder: 'dev/example-com',
+        message: 'LLMO onboarding completed successfully',
+      });
+      const LlmoControllerSiteOnly = await esmock('../../../src/controllers/llmo/llmo.js', {
+        '../../../src/controllers/llmo/llmo-onboarding.js': {
+          validateSiteNotOnboarded: sinon.stub().resolves({ isValid: true }),
+          performLlmoOnboarding: siteOnlyPerformStub,
+          postLlmoAlert: sinon.stub().resolves(),
+          generateDataFolder: (baseURL, env) => {
+            const url = new URL(baseURL);
+            const dataFolderName = url.hostname.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
+            return env === 'prod' ? dataFolderName : `dev/${dataFolderName}`;
+          },
+        },
+        '../../../src/support/access-control-util.js': createMockAccessControlUtil(true),
+        '@adobe/spacecat-shared-tier-client': {
+          default: {
+            createForOrg: () => ({
+              checkValidEntitlement: sinon.stub().resolves({
+                entitlement: { getTier: () => 'PAID' },
+              }),
+            }),
+          },
+        },
+        '@adobe/spacecat-shared-utils': {
+          SPACECAT_USER_AGENT: TEST_USER_AGENT,
+          tracingFetch: tracingFetchStub,
+          hasText: (text) => text && text.trim().length > 0,
+          isObject: (obj) => obj !== null && typeof obj === 'object',
+          isValidUrl: (url) => {
+            try {
+              return Boolean(new URL(url));
+            } catch {
+              return false;
+            }
+          },
+          llmoConfig,
+          schemas: {},
+          composeBaseURL: (domain) => (domain.startsWith('http') ? domain : `https://${domain}`),
+        },
+        ...getCommonMocks(),
+      });
+      const testController = LlmoControllerSiteOnly(mockContext);
+
+      const context = {
+        ...mockContext,
+        params: { spaceCatId: 'paid-org-id' },
+        data: { domain: 'example.com', brandName: 'Test Brand' },
+      };
+
+      const result = await testController.onboardSiteOnly(context);
+
+      expect(result.status).to.equal(201);
+      const responseBody = await result.json();
+      // siteOnly onboarding never runs brand activation, so the response must not
+      // carry a brandActivation summary.
+      expect(responseBody).to.not.have.property('brandActivation');
+      expect(responseBody.status).to.equal('processing');
+      // Confirm the controller actually took the siteOnly orchestration path.
+      expect(siteOnlyPerformStub.firstCall.args[0].siteOnly).to.equal(true);
+    });
   });
 
   describe('offboardCustomer', () => {
@@ -4389,6 +4526,44 @@ describe('LlmoController', () => {
       expect(result.status).to.equal(400);
       const responseBody = await result.json();
       expect(responseBody.message).to.include('LLM Optimizer is not enabled');
+    });
+  });
+
+  describe('requestBrandClaims', () => {
+    let reqCtx;
+
+    beforeEach(() => {
+      reqCtx = {
+        ...mockContext,
+        params: { siteId: TEST_SITE_ID },
+        env: { ...mockEnv, AUDIT_JOBS_QUEUE_URL: 'audit-q' },
+        sqs: { sendMessage: sinon.stub().resolves() },
+        data: {},
+      };
+    });
+
+    it('validates LLMO access, triggers the audit, and returns 202', async () => {
+      const result = await controller.requestBrandClaims(reqCtx);
+      expect(result.status).to.equal(202);
+      expect(reqCtx.sqs.sendMessage).to.have.been.calledOnce;
+    });
+
+    it('returns 403 when LLMO access validation fails', async () => {
+      const controllerDenied = controllerWithAccessDenied(mockContext);
+      const result = await controllerDenied.requestBrandClaims(reqCtx);
+      expect(result.status).to.equal(403);
+    });
+
+    it('returns 404 when the site is not found', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+      const result = await controller.requestBrandClaims(reqCtx);
+      expect(result.status).to.equal(404);
+    });
+
+    it('returns 400 when site resolution throws', async () => {
+      mockDataAccess.Site.findById.rejects(new Error('db boom'));
+      const result = await controller.requestBrandClaims(reqCtx);
+      expect(result.status).to.equal(400);
     });
   });
 

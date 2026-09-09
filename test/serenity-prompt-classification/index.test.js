@@ -15,6 +15,8 @@ import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import esmock from 'esmock';
+import { ProjectEngineApiError } from '@adobe/spacecat-shared-project-engine-client';
+import { SerenityTransportError } from '../../src/support/serenity/rest-transport.js';
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -41,28 +43,41 @@ describe('serenity-prompt-classification worker entry', () => {
   let sandbox;
   let exchangeAndPersistStub;
   let invalidateStub;
+  let isRetryableJobError;
   let NeedsReauthError;
+  let retryableJobError;
   let run;
 
   let classifyPromptsHandlerStub;
+  let bulkTagsHandlerStub;
 
   beforeEach(async () => {
     sandbox = sinon.createSandbox();
     exchangeAndPersistStub = sandbox.stub();
     invalidateStub = sandbox.stub().resolves();
     classifyPromptsHandlerStub = sandbox.stub().resolves({ created: [] });
+    bulkTagsHandlerStub = sandbox.stub().resolves({ outcome: 'SUCCEEDED' });
 
-    ({ NeedsReauthError } = await import('../../src/support/serenity/async-job-runner.js'));
+    ({
+      NeedsReauthError,
+      isRetryableJobError,
+      retryableJobError,
+    } = await import('../../src/support/serenity/async-job-runner.js'));
 
     ({ run } = await esmock('../../src/serenity-prompt-classification/index.js', {
       '../../src/support/serenity/async-job-runner.js': {
         exchangeAndPersistPromiseToken: exchangeAndPersistStub,
         invalidateJobPromiseToken: invalidateStub,
+        isRetryableJobError,
         NeedsReauthError,
       },
       '../../src/support/serenity/handlers/classify-prompts-job.js': {
         classifyPromptsHandler: classifyPromptsHandlerStub,
         CLASSIFY_PROMPTS_JOB_TYPE: 'serenity-classify-prompts',
+      },
+      '../../src/support/serenity/handlers/bulk-tags-job.js': {
+        bulkTagsHandler: bulkTagsHandlerStub,
+        BULK_TAGS_JOB_TYPE: 'serenity-bulk-tags',
       },
     }));
   });
@@ -147,7 +162,22 @@ describe('serenity-prompt-classification worker entry', () => {
     expect(job.save).to.have.been.called;
   });
 
-  it('marks the job FAILED with JOB_FAILED when the handler throws', async () => {
+  it('leaves a bulk job IN_PROGRESS and rethrows when the handler requests SQS retry', async () => {
+    const job = makeJob();
+    const context = makeContext(job);
+    exchangeAndPersistStub.resolves('access-token');
+    bulkTagsHandlerStub.rejects(retryableJobError('retry publish'));
+
+    await expect(run({ jobId: 'job-123', type: 'serenity-bulk-tags' }, context))
+      .to.be.rejectedWith('retry publish');
+
+    expect(bulkTagsHandlerStub).to.have.been.calledOnceWith(context, job, 'access-token');
+    expect(job.getStatus()).to.equal('IN_PROGRESS');
+    expect(job.getResult()).to.equal(undefined);
+    expect(invalidateStub).not.to.have.been.called;
+  });
+
+  it('marks unknown application errors non-retryable', async () => {
     const job = makeJob();
     const context = makeContext(job);
     exchangeAndPersistStub.resolves('access-token');
@@ -156,9 +186,84 @@ describe('serenity-prompt-classification worker entry', () => {
     await run({ jobId: 'job-123', type: 'serenity-classify-prompts' }, context);
 
     expect(job.getStatus()).to.equal('FAILED');
-    expect(job.getError()).to.deep.equal({ code: 'JOB_FAILED', message: 'classification blew up' });
+    expect(job.getError()).to.deep.equal({
+      code: 'JOB_FAILED', message: 'classification blew up', retryable: false,
+    });
     expect(invalidateStub).to.have.been.called;
     expect(job.save).to.have.been.called;
+  });
+
+  it('marks plain TypeError and RangeError application bugs non-retryable', async () => {
+    exchangeAndPersistStub.resolves('access-token');
+    classifyPromptsHandlerStub.onFirstCall().rejects(new TypeError('bad property access'));
+    classifyPromptsHandlerStub.onSecondCall().rejects(new RangeError('bad range'));
+    const typeJob = makeJob();
+    const rangeJob = makeJob();
+
+    await run(
+      { jobId: 'job-123', type: 'serenity-classify-prompts' },
+      makeContext(typeJob),
+    );
+    await run(
+      { jobId: 'job-123', type: 'serenity-classify-prompts' },
+      makeContext(rangeJob),
+    );
+
+    expect(typeJob.getError().retryable).to.equal(false);
+    expect(rangeJob.getError().retryable).to.equal(false);
+  });
+
+  it('marks a known network failure retryable', async () => {
+    const job = makeJob();
+    const context = makeContext(job);
+    exchangeAndPersistStub.resolves('access-token');
+    classifyPromptsHandlerStub.rejects(
+      Object.assign(new Error('socket reset'), { code: 'ECONNRESET' }),
+    );
+
+    await run({ jobId: 'job-123', type: 'serenity-classify-prompts' }, context);
+
+    expect(job.getError()).to.deep.equal({
+      code: 'ECONNRESET', message: 'socket reset', retryable: true,
+    });
+  });
+
+  it('marks typed upstream 5xx retryable and 4xx non-retryable', async () => {
+    exchangeAndPersistStub.resolves('access-token');
+    classifyPromptsHandlerStub.onFirstCall()
+      .rejects(new SerenityTransportError(503, 'upstream unavailable'));
+    classifyPromptsHandlerStub.onSecondCall()
+      .rejects(new SerenityTransportError(400, 'bad upstream request'));
+    const serverJob = makeJob();
+    const clientJob = makeJob();
+
+    await run(
+      { jobId: 'job-123', type: 'serenity-classify-prompts' },
+      makeContext(serverJob),
+    );
+    await run(
+      { jobId: 'job-123', type: 'serenity-classify-prompts' },
+      makeContext(clientJob),
+    );
+
+    expect(serverJob.getError().retryable).to.equal(true);
+    expect(clientJob.getError().retryable).to.equal(false);
+  });
+
+  it('marks a wrapped upstream timeout retryable', async () => {
+    const job = makeJob();
+    const context = makeContext(job);
+    exchangeAndPersistStub.resolves('access-token');
+    classifyPromptsHandlerStub.rejects(new ProjectEngineApiError(
+      undefined,
+      'GET',
+      null,
+      { cause: new SerenityTransportError(504, 'request timed out') },
+    ));
+
+    await run({ jobId: 'job-123', type: 'serenity-classify-prompts' }, context);
+
+    expect(job.getError().retryable).to.equal(true);
   });
 
   it('drops a duplicate delivery for a job already in a terminal state, without re-exchanging the token', async () => {
@@ -170,5 +275,29 @@ describe('serenity-prompt-classification worker entry', () => {
     expect(exchangeAndPersistStub).to.not.have.been.called;
     expect(classifyPromptsHandlerStub).to.not.have.been.called;
     expect(job.getStatus()).to.equal('COMPLETED');
+  });
+});
+
+describe('serenity-prompt-classification vault config', () => {
+  let vaultOpts;
+
+  before(async () => {
+    ({ vaultOpts } = await import('../../src/serenity-prompt-classification/index.js'));
+  });
+
+  it('reuses api-service\'s Secrets Manager bootstrap secret (no dedicated worker bootstrap)', () => {
+    expect(vaultOpts.bootstrapPath).to.equal('/mysticat/bootstrap/api-service');
+  });
+
+  it('reads api-service\'s env-scoped Vault path, resolving env from AWS_ENV', () => {
+    expect(vaultOpts.name({ env: { AWS_ENV: 'prod' } })).to.equal('prod/api-service');
+    expect(vaultOpts.name({ env: { AWS_ENV: 'stage' } })).to.equal('stage/api-service');
+    expect(vaultOpts.name({ env: { AWS_ENV: 'dev' } })).to.equal('dev/api-service');
+  });
+
+  it('throws an actionable error when AWS_ENV is unset (no silent default, no generic ENV fallback)', () => {
+    expect(() => vaultOpts.name({ env: { ENV: 'stage' } })).to.throw('AWS_ENV must be set');
+    expect(() => vaultOpts.name({ env: {} })).to.throw('AWS_ENV must be set');
+    expect(() => vaultOpts.name({})).to.throw('AWS_ENV must be set');
   });
 });

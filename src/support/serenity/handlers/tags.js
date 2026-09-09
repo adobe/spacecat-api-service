@@ -12,6 +12,7 @@
 
 // @ts-check
 
+import { createHash } from 'node:crypto';
 import { hasText } from '@adobe/spacecat-shared-utils';
 
 import { ErrorWithStatusCode } from '../../utils.js';
@@ -23,24 +24,29 @@ import { resolveProject } from '../subworkspace-projects.js';
 import {
   ALL_DIMENSIONS, SERVER_OWNED_DIMENSIONS,
   isClosedDimension, isServerOwnedDimension, closedValuesOf, isDimensionRootName,
-  MAX_TAG_NAME_LEN,
+  MAX_TAG_NAME_LEN, dimensionOfRootName,
 } from '../prompt-tags.js';
 import {
   ensureServerOwnedValue,
+  ensureChildren,
   ensureDimensionRoots,
   findTagsInTree,
   assertParentPlacement,
   assertParentWithinDimension,
+  collectSubtreeIds,
+  readTagTreeSnapshot,
+  incompatibleTaxonomyError,
 } from '../tag-tree.js';
 import { republish } from '../brand-urls.js';
+import { invalidateTagCacheForProject } from './markets.js';
 
 /** @typedef {import('../rest-transport.js').SerenityTransport} SerenityTransport */
 
 /**
  * POST /serenity/tags — create a prompt TAG on a single market.
  *
- * Every tag is BARE-NAMED and lives under one of the five dimension roots
- * (`category`, `intent`, `origin`, `type`, `source`) on a market's project — the
+ * Every tag is BARE-NAMED and lives under one of the registered dimension roots
+ * (`category`, `tag`, `intent`, `origin`, `type`, `source`) on a market's project — the
  * `aio/tags` surface, via {@link createProjectTags}. A tag's dimension is its
  * root ancestor, never a prefix on its name, so `type` in the request body
  * names the dimension the value belongs to rather than something written into
@@ -51,10 +57,8 @@ import { republish } from '../brand-urls.js';
  * root) and are created resolve-or-create — a small, project-wide-shared set every
  * caller may need the id of. The three CLOSED ones additionally enum-check the
  * `name`; `source` is open (source-dimension.md) so any bare name resolves-or-
- * creates. The one CUSTOMER-AUTHORED open dimension (`category`) carries
- * customer values: a category hangs under the `category` root, a sub-category
- * under a category (via `parentId`). The UI's "Categories" view is the `category`
- * root's subtree across the brand's markets.
+ * creates. The CUSTOMER-AUTHORED open dimensions (`category` and `tag`) carry
+ * customer values beneath their own roots.
  *
  * Both the flat-mode and subworkspace-mode handlers resolve the market's project
  * id from the `(geoTargetId, languageCode)` slice and register one tag.
@@ -117,7 +121,7 @@ function parseParentId(raw) {
  * its dimension while every carrying prompt stays attached.
  *
  * An explicit `null` is rejected. Under the dimension-root model the root level
- * is reserved for the four dimension roots, so promoting a tag to a root is never
+ * is reserved for the six dimension roots, so promoting a tag to a root is never
  * a legal request -- it would produce a tag with no dimension.
  *
  * @param {object} body - the raw request body.
@@ -204,7 +208,10 @@ function parseCreateTagBody(body) {
   if (rawName.includes(':')) {
     throw new ErrorWithStatusCode('name must not contain ":"', 400);
   }
-  // The root level holds exactly the five dimension roots. A value may not
+  if (rawName.includes('__')) {
+    throw new ErrorWithStatusCode('name must not contain "__"', 400);
+  }
+  // The root level holds the registered dimension roots. A value may not
   // shadow one of their names, or the tree would have two tags a reader cannot
   // tell apart by name at the level that matters. The CHECK covers every reserved
   // name (both intent spellings); the MESSAGE names only the dimensions, so the
@@ -290,8 +297,37 @@ function requireCreatedId(id) {
   return id;
 }
 
+async function readTagDto(
+  transport,
+  semrushWorkspaceId,
+  projectId,
+  id,
+  fallback,
+  log,
+) {
+  const snapshot = await readTagTreeSnapshot(
+    transport,
+    semrushWorkspaceId,
+    projectId,
+    log,
+  );
+  const item = snapshot.byId.get(id);
+  if (!item) {
+    return fallback;
+  }
+  return {
+    id: item.id,
+    name: item.name,
+    parentId: item.parentId,
+    path: item.fullPath.slice(0, -1),
+    compatibility: item.compatibility,
+    childrenCount: item.childrenCount,
+    promptsCount: item.promptsCount,
+  };
+}
+
 /**
- * The id of an OPEN dimension's root tag, provisioning the four dimension roots
+ * The id of an OPEN dimension's root tag, provisioning the six dimension roots
  * if the project predates them. An open-dimension create with no `parentId`
  * hangs the new value directly under this root.
  *
@@ -340,6 +376,25 @@ async function resolveTargetParent(
 ) {
   if (parentId === undefined) {
     return resolveOpenRootId(transport, semrushWorkspaceId, projectId, dimension, log);
+  }
+  if (dimension === 'tag') {
+    const snapshot = await readTagTreeSnapshot(
+      transport,
+      semrushWorkspaceId,
+      projectId,
+      log,
+    );
+    const parent = snapshot.byId.get(parentId);
+    if (parent?.compatibility?.state === 'readOnly') {
+      throw incompatibleTaxonomyError([parent]);
+    }
+    if (!parent || parent.rootName !== 'tag' || parent.depth > 2) {
+      throw new ErrorWithStatusCode(
+        'parentId must be the "tag" root or one of its direct children',
+        400,
+      );
+    }
+    return parentId;
   }
   await assertParentWithinDimension(
     transport,
@@ -414,10 +469,31 @@ export async function handleCreateTag(
     if (created) {
       await republish(transport, semrushWorkspaceId, projectId, log);
     }
+    const tag = await readTagDto(
+      transport,
+      semrushWorkspaceId,
+      projectId,
+      id,
+      {
+        id,
+        name,
+        parentId: rootId,
+        path: null,
+        compatibility: { state: 'canonical', reason: null },
+        childrenCount: 0,
+        promptsCount: 0,
+      },
+      log,
+    );
     return {
       status: 200,
       body: {
-        brandId, geoTargetId, languageCode, type, name, id, parentId: rootId, created,
+        brandId,
+        geoTargetId,
+        languageCode,
+        type,
+        ...tag,
+        created,
       },
     };
   }
@@ -435,29 +511,49 @@ export async function handleCreateTag(
     parentId,
     log,
   );
-  const created = await transport.createProjectTags(
+  const { byName, createdNames } = await ensureChildren(
+    transport,
     semrushWorkspaceId,
     projectId,
+    targetParentId,
     [name],
-    { parentId: targetParentId },
+    log,
   );
-  const { id, parentId: createdParentId } = pickTagIds(created, targetParentId);
+  const id = byName.get(name);
+  const wasCreated = createdNames.includes(name);
   log?.info?.('handleCreateTag: registered tag', {
     brandId, geoTargetId, languageCode, name, parentId: targetParentId,
   });
   // Publish so the newly created tag is live rather than left as a draft
   // (`live_with_unpublished_updates`). See the closed-path note above.
-  await republish(transport, semrushWorkspaceId, projectId, log);
+  if (wasCreated) {
+    await republish(transport, semrushWorkspaceId, projectId, log);
+  }
+  const tag = await readTagDto(
+    transport,
+    semrushWorkspaceId,
+    projectId,
+    requireCreatedId(id),
+    {
+      id: requireCreatedId(id),
+      name,
+      parentId: targetParentId,
+      path: null,
+      compatibility: { state: 'canonical', reason: null },
+      childrenCount: 0,
+      promptsCount: 0,
+    },
+    log,
+  );
   return {
-    status: 201,
+    status: wasCreated ? 201 : 200,
     body: {
       brandId,
       geoTargetId,
       languageCode,
       type,
-      name,
-      id: requireCreatedId(id),
-      parentId: createdParentId,
+      ...tag,
+      created: wasCreated,
     },
   };
 }
@@ -503,10 +599,30 @@ export async function handleCreateTagSubworkspace(
     if (created) {
       await republish(transport, workspaceId, projectId, log);
     }
+    const tag = await readTagDto(
+      transport,
+      workspaceId,
+      projectId,
+      id,
+      {
+        id,
+        name,
+        parentId: rootId,
+        path: null,
+        compatibility: { state: 'canonical', reason: null },
+        childrenCount: 0,
+        promptsCount: 0,
+      },
+      log,
+    );
     return {
       status: 200,
       body: {
-        geoTargetId, languageCode, type, name, id, parentId: rootId, created,
+        geoTargetId,
+        languageCode,
+        type,
+        ...tag,
+        created,
       },
     };
   }
@@ -519,27 +635,47 @@ export async function handleCreateTagSubworkspace(
     parentId,
     log,
   );
-  const created = await transport.createProjectTags(
+  const { byName, createdNames } = await ensureChildren(
+    transport,
     workspaceId,
     projectId,
+    targetParentId,
     [name],
-    { parentId: targetParentId },
+    log,
   );
-  const { id, parentId: createdParentId } = pickTagIds(created, targetParentId);
+  const id = byName.get(name);
+  const wasCreated = createdNames.includes(name);
   log?.info?.('handleCreateTagSubworkspace: registered tag', {
     geoTargetId, languageCode, name, parentId: targetParentId,
   });
   // Publish so the newly created tag is live rather than a draft.
-  await republish(transport, workspaceId, projectId, log);
+  if (wasCreated) {
+    await republish(transport, workspaceId, projectId, log);
+  }
+  const tag = await readTagDto(
+    transport,
+    workspaceId,
+    projectId,
+    requireCreatedId(id),
+    {
+      id: requireCreatedId(id),
+      name,
+      parentId: targetParentId,
+      path: null,
+      compatibility: { state: 'canonical', reason: null },
+      childrenCount: 0,
+      promptsCount: 0,
+    },
+    log,
+  );
   return {
-    status: 201,
+    status: wasCreated ? 201 : 200,
     body: {
       geoTargetId,
       languageCode,
       type,
-      name,
-      id: requireCreatedId(id),
-      parentId: createdParentId,
+      ...tag,
+      created: wasCreated,
     },
   };
 }
@@ -593,6 +729,9 @@ function parseUpdateTagBody(body) {
   if (value.includes(':')) {
     throw new ErrorWithStatusCode('name must not contain ":"', 400);
   }
+  if (value.includes('__')) {
+    throw new ErrorWithStatusCode('name must not contain "__"', 400);
+  }
   if (isDimensionRootName(value)) {
     throw new ErrorWithStatusCode(
       `name must not be a reserved dimension root name (${ALL_DIMENSIONS.join(', ')})`,
@@ -621,33 +760,26 @@ function parseUpdateTagBody(body) {
 }
 
 /**
- * Resolves a PATCH's target and, when the caller supplied one, its prospective
- * parent — in a SINGLE tree walk against one snapshot. Walking twice would both
- * double the sequential upstream reads and let the parent move between the two
- * traversals, so the ancestry proved for it need not still hold.
- *
- * @param {SerenityTransport} transport
- * @param {string} semrushWorkspaceId
- * @param {string} projectId
- * @param {string} tagId - the PATCH target's id.
- * @param {string | undefined} parentId - the requested parent, when re-parenting.
- * @param {object} [log] - logger.
- * @returns {Promise<{ target: import('../tag-tree.js').TagPosition,
- *   parent: import('../tag-tree.js').TagPosition }>} `parent` mirrors `target`
- *   when no re-parent was requested; the callers ignore it in that case.
+ * @param {{
+ *   depth: number,
+ *   parentId: string | null,
+ *   rootName: string,
+ *   fullPath: Array<{ id: string }>,
+ * } | undefined} item
+ * @returns {import('../tag-tree.js').TagPosition}
  */
-async function resolveUpdateTargets(
-  transport,
-  semrushWorkspaceId,
-  projectId,
-  tagId,
-  parentId,
-  log,
-) {
-  const wanted = parentId === undefined ? [tagId] : [tagId, parentId];
-  const found = await findTagsInTree(transport, semrushWorkspaceId, projectId, wanted, log);
-  const target = /** @type {import('../tag-tree.js').TagPosition} */ (found.get(tagId));
-  return { target, parent: /** @type {any} */ (found.get(parentId ?? tagId)) };
+function positionFromSnapshot(item) {
+  if (!item) {
+    return {
+      kind: 'unknown', parentId: null, rootName: null, ancestorIds: [],
+    };
+  }
+  return {
+    kind: item.depth === 1 ? 'root' : 'descendant',
+    parentId: item.parentId,
+    rootName: dimensionOfRootName(item.rootName),
+    ancestorIds: item.fullPath.slice(0, -1).map((part) => part.id),
+  };
 }
 
 /**
@@ -693,7 +825,12 @@ function buildUpdatePayload(parsed, target, tagId) {
     err.code = ERROR_CODES.TAG_NOT_FOUND;
     throw err;
   }
-  if (isServerOwnedDimension(/** @type {string} */ (target.rootName))) {
+  if (!target.rootName) {
+    const error = new ErrorWithStatusCode('Unable to determine the tag dimension', 503);
+    error.code = ERROR_CODES.TAG_TREE_READ_INCOMPLETE;
+    throw error;
+  }
+  if (isServerOwnedDimension(target.rootName)) {
     throw new ErrorWithStatusCode(
       `a value of the server-owned "${target.rootName}" dimension cannot be renamed or re-parented`,
       400,
@@ -750,14 +887,34 @@ export async function handleUpdateTag(
     throw marketNotFound();
   }
   const projectId = row.getSemrushProjectId();
-  const { target, parent } = await resolveUpdateTargets(
-    transport,
-    semrushWorkspaceId,
-    projectId,
-    id,
-    parsed.parentId,
-    log,
-  );
+  const snapshot = parsed.parentId !== undefined
+    ? await readTagTreeSnapshot(
+      transport,
+      semrushWorkspaceId,
+      projectId,
+      log,
+      { forceRefresh: true },
+    )
+    : await readTagTreeSnapshot(transport, semrushWorkspaceId, projectId, log);
+  const snapshotTarget = snapshot.byId.get(id);
+  const snapshotParent = parsed.parentId ? snapshot.byId.get(parsed.parentId) : null;
+  const incompatible = [snapshotTarget, snapshotParent]
+    .filter((item) => item?.compatibility?.state === 'readOnly');
+  if (incompatible.length > 0) {
+    throw incompatibleTaxonomyError(incompatible);
+  }
+  if (snapshotTarget?.rootName === 'tag') {
+    const nextParent = snapshotParent
+      ?? (snapshotTarget.parentId ? snapshot.byId.get(snapshotTarget.parentId) : undefined);
+    if (!nextParent || nextParent.rootName !== 'tag' || nextParent.depth > 2) {
+      throw new ErrorWithStatusCode(
+        'plain tags may only be authored at depth 2 or 3 beneath the "tag" root',
+        400,
+      );
+    }
+  }
+  const target = positionFromSnapshot(snapshotTarget);
+  const parent = positionFromSnapshot(snapshotParent ?? snapshotTarget);
   const { name, parentIdToSend } = buildUpdatePayload(parsed, target, id);
   if (parsed.parentId !== undefined) {
     // A re-parent may move a tag within its dimension, never across one — and
@@ -770,16 +927,28 @@ export async function handleUpdateTag(
     id,
     { name, parentId: parentIdToSend },
   );
+  invalidateTagCacheForProject(semrushWorkspaceId, projectId);
   const { parentId: updatedParentId } = pickTagIds(updated, parentIdToSend);
   log?.info?.('handleUpdateTag: updated tag', {
     brandId, geoTargetId, languageCode, tagId: id, name, parentId: parentIdToSend,
   });
   // Publish so the rename / re-parent is live rather than a draft.
   await republish(transport, semrushWorkspaceId, projectId, log);
+  const parentNode = snapshot.byId.get(parentIdToSend);
   return {
     status: 200,
     body: {
-      brandId, geoTargetId, languageCode, tagId: id, name, parentId: updatedParentId,
+      brandId,
+      geoTargetId,
+      languageCode,
+      tagId: id,
+      id,
+      name,
+      parentId: updatedParentId,
+      path: parentNode?.fullPath ?? null,
+      compatibility: { state: 'canonical', reason: null },
+      childrenCount: snapshotTarget?.childrenCount ?? 0,
+      promptsCount: snapshotTarget?.promptsCount ?? 0,
     },
   };
 }
@@ -812,14 +981,34 @@ export async function handleUpdateTagSubworkspace(
     throw marketNotFound();
   }
   const projectId = String(project.id);
-  const { target, parent } = await resolveUpdateTargets(
-    transport,
-    workspaceId,
-    projectId,
-    id,
-    parsed.parentId,
-    log,
-  );
+  const snapshot = parsed.parentId !== undefined
+    ? await readTagTreeSnapshot(
+      transport,
+      workspaceId,
+      projectId,
+      log,
+      { forceRefresh: true },
+    )
+    : await readTagTreeSnapshot(transport, workspaceId, projectId, log);
+  const snapshotTarget = snapshot.byId.get(id);
+  const snapshotParent = parsed.parentId ? snapshot.byId.get(parsed.parentId) : null;
+  const incompatible = [snapshotTarget, snapshotParent]
+    .filter((item) => item?.compatibility?.state === 'readOnly');
+  if (incompatible.length > 0) {
+    throw incompatibleTaxonomyError(incompatible);
+  }
+  if (snapshotTarget?.rootName === 'tag') {
+    const nextParent = snapshotParent
+      ?? (snapshotTarget.parentId ? snapshot.byId.get(snapshotTarget.parentId) : undefined);
+    if (!nextParent || nextParent.rootName !== 'tag' || nextParent.depth > 2) {
+      throw new ErrorWithStatusCode(
+        'plain tags may only be authored at depth 2 or 3 beneath the "tag" root',
+        400,
+      );
+    }
+  }
+  const target = positionFromSnapshot(snapshotTarget);
+  const parent = positionFromSnapshot(snapshotParent ?? snapshotTarget);
   const { name, parentIdToSend } = buildUpdatePayload(parsed, target, id);
   if (parsed.parentId !== undefined) {
     // A re-parent may move a tag within its dimension, never across one — and
@@ -832,16 +1021,425 @@ export async function handleUpdateTagSubworkspace(
     id,
     { name, parentId: parentIdToSend },
   );
+  invalidateTagCacheForProject(workspaceId, projectId);
   const { parentId: updatedParentId } = pickTagIds(updated, parentIdToSend);
   log?.info?.('handleUpdateTagSubworkspace: updated tag', {
     geoTargetId, languageCode, tagId: id, name, parentId: parentIdToSend,
   });
   // Publish so the rename / re-parent is live rather than a draft.
   await republish(transport, workspaceId, projectId, log);
+  const parentNode = snapshot.byId.get(parentIdToSend);
   return {
     status: 200,
     body: {
-      geoTargetId, languageCode, tagId: id, name, parentId: updatedParentId,
+      geoTargetId,
+      languageCode,
+      tagId: id,
+      id,
+      name,
+      parentId: updatedParentId,
+      path: parentNode?.fullPath ?? null,
+      compatibility: { state: 'canonical', reason: null },
+      childrenCount: snapshotTarget?.childrenCount ?? 0,
+      promptsCount: snapshotTarget?.promptsCount ?? 0,
     },
   };
+}
+
+/**
+ * Validates the DELETE query's `(geoTargetId, languageCode)` market slice.
+ * Shared by both handler families -- there is no body on a DELETE, so the
+ * slice travels as query params, same convention as the other slice-scoped
+ * GETs (e.g. handleListTags).
+ *
+ * @param {object} query - the raw query params.
+ * @returns {{ geoTargetId: number, languageCode: string }}
+ */
+function requireSliceQuery(query) {
+  const geoTargetId = normalizeGeoTargetId(Number(query?.geoTargetId));
+  if (geoTargetId === null) {
+    throw new ErrorWithStatusCode('geoTargetId must be a positive integer', 400);
+  }
+  const languageCode = normalizeLanguageCode(query?.languageCode);
+  if (languageCode === null) {
+    throw new ErrorWithStatusCode(
+      'languageCode must match ^[a-z]{2,3}(-[a-z]{2,4})?$',
+      400,
+    );
+  }
+  return { geoTargetId, languageCode };
+}
+
+/**
+ * @param {SerenityTransport} transport
+ * @param {string} semrushWorkspaceId
+ * @param {string} projectId
+ * @param {string[]} subtreeIds
+ * @returns {Promise<string[]>}
+ */
+async function listAffectedPromptIds(
+  transport,
+  semrushWorkspaceId,
+  projectId,
+  subtreeIds,
+) {
+  const affected = new Set();
+  let page = 1;
+  const limit = 200;
+  const maxPages = 100;
+  const subtree = new Set(subtreeIds);
+  while (page <= maxPages) {
+    // eslint-disable-next-line no-await-in-loop
+    const response = await transport.listPromptsByTags(semrushWorkspaceId, projectId, {
+      tag_ids: [],
+      page,
+      limit,
+    });
+    const prompts = Array.isArray(response?.items) ? response.items : [];
+    for (const prompt of prompts) {
+      const hasAffectedTag = (Array.isArray(prompt?.tags) ? prompt.tags : [])
+        .some((tag) => subtree.has(typeof tag === 'string' ? tag : String(tag?.id ?? '')));
+      if (hasAffectedTag && prompt?.id != null) {
+        affected.add(String(prompt.id));
+      }
+    }
+    if (prompts.length < limit) {
+      return [...affected].sort();
+    }
+    page += 1;
+  }
+  const error = new ErrorWithStatusCode('Unable to establish complete tag impact', 503);
+  error.code = ERROR_CODES.IMPACT_UNAVAILABLE;
+  throw error;
+}
+
+/**
+ * @param {SerenityTransport} transport
+ * @param {string} semrushWorkspaceId
+ * @param {string} projectId
+ * @param {string} tagId
+ * @param {object} [log]
+ * @returns {Promise<{
+ *   tagId: string,
+ *   name: string,
+ *   path: Array<{ id: string, name: string }>,
+ *   descendantCount: number,
+ *   affectedPromptCount: number,
+ *   complete: true,
+ *   revision: string,
+ *   deletedIds: string[],
+ * }>}
+ */
+export async function buildTagImpact(transport, semrushWorkspaceId, projectId, tagId, log) {
+  const snapshot = await readTagTreeSnapshot(
+    transport,
+    semrushWorkspaceId,
+    projectId,
+    log,
+  );
+  const target = snapshot.byId.get(tagId);
+  if (!target) {
+    const error = new ErrorWithStatusCode('No tag with this id on this market', 404);
+    error.code = ERROR_CODES.TAG_NOT_FOUND;
+    throw error;
+  }
+  if (target.depth === 1) {
+    throw new ErrorWithStatusCode(
+      `a dimension root (${ALL_DIMENSIONS.join(', ')}) cannot be inspected for deletion`,
+      400,
+    );
+  }
+  const dimension = dimensionOfRootName(target.rootName);
+  if (isServerOwnedDimension(dimension)) {
+    throw new ErrorWithStatusCode(
+      `a value of the server-owned "${dimension}" dimension cannot be deleted`,
+      400,
+    );
+  }
+  if (target.compatibility?.state === 'readOnly') {
+    throw incompatibleTaxonomyError([target]);
+  }
+  const subtree = snapshot.items.filter((item) => (
+    item.id === tagId || item.fullPath.some((part) => part.id === tagId)
+  ));
+  const subtreeIds = subtree.map((item) => item.id);
+  const affectedPromptIds = await listAffectedPromptIds(
+    transport,
+    semrushWorkspaceId,
+    projectId,
+    subtreeIds,
+  );
+  const canonical = JSON.stringify({
+    projectId,
+    tagId,
+    nodes: subtree
+      .map((item) => ({
+        id: item.id,
+        parentId: item.parentId,
+        name: item.name,
+        rootFirstPath: item.fullPath.map((part) => ({ id: part.id, name: part.name })),
+      }))
+      .sort((a, b) => a.id.localeCompare(b.id)),
+    affectedPromptIds,
+  });
+  const revision = `"${createHash('sha256').update(canonical).digest('base64url')}"`;
+  return {
+    tagId,
+    name: target.name,
+    path: target.fullPath,
+    descendantCount: subtree.length - 1,
+    affectedPromptCount: affectedPromptIds.length,
+    complete: true,
+    revision,
+    deletedIds: subtreeIds,
+  };
+}
+
+/**
+ * Deletes a tag and its whole subtree in one upstream batch call. It refuses
+ * dimension roots, server-owned values, and unknown tags before collecting the
+ * descendant ids, then publishes the resulting draft mutation. When supplied,
+ * `ifMatch` must match a complete impact snapshot to prevent deleting a
+ * subtree that changed after the caller inspected it.
+ *
+ * @param {SerenityTransport} transport
+ * @param {string} semrushWorkspaceId
+ * @param {string} projectId
+ * @param {string} tagId - the delete target's id.
+ * @param {object} [log] - logger.
+ * @param {string} [ifMatch] - expected tag-impact revision.
+ * @returns {Promise<{ deletedIds: string[] }>}
+ */
+async function deleteResolvedTag(
+  transport,
+  semrushWorkspaceId,
+  projectId,
+  tagId,
+  log,
+  ifMatch,
+) {
+  // Two reads, not one redundant one: findTagsInTree resolves THIS id's own
+  // position/kind (root? server-owned? unknown?), while collectSubtreeIds below
+  // walks its DESCENDANTS. Neither can answer the other's question.
+  const found = await findTagsInTree(transport, semrushWorkspaceId, projectId, [tagId], log);
+  const target = found.get(tagId);
+  if (!target || target.kind === 'unknown') {
+    const err = new ErrorWithStatusCode('No tag with this id on this market', 404);
+    err.code = ERROR_CODES.TAG_NOT_FOUND;
+    throw err;
+  }
+  if (target.kind === 'root') {
+    throw new ErrorWithStatusCode(
+      `a dimension root (${ALL_DIMENSIONS.join(', ')}) cannot be deleted`,
+      400,
+    );
+  }
+  if (isServerOwnedDimension(/** @type {string} */ (target.rootName))) {
+    throw new ErrorWithStatusCode(
+      `a value of the server-owned "${target.rootName}" dimension cannot be deleted`,
+      400,
+    );
+  }
+  let deletedIds;
+  if (ifMatch) {
+    const impact = await buildTagImpact(
+      transport,
+      semrushWorkspaceId,
+      projectId,
+      tagId,
+      log,
+    );
+    if (ifMatch !== impact.revision) {
+      const error = new ErrorWithStatusCode('Tag impact changed; refresh before deleting', 412);
+      error.code = ERROR_CODES.IMPACT_STALE;
+      throw error;
+    }
+    deletedIds = impact.deletedIds;
+  } else {
+    deletedIds = await collectSubtreeIds(
+      transport,
+      semrushWorkspaceId,
+      projectId,
+      tagId,
+      log,
+    );
+  }
+  await transport.deleteProjectTags(semrushWorkspaceId, projectId, deletedIds);
+  invalidateTagCacheForProject(semrushWorkspaceId, projectId);
+  await republish(transport, semrushWorkspaceId, projectId, log);
+  return { deletedIds };
+}
+
+/**
+ * DELETE /serenity/tags/:tagId (flat mode) -- delete a category (or
+ * sub-category) and its whole subtree, preserving every carrying prompt
+ * (category-delete.md). The market's project id comes from the persisted
+ * `BrandSemrushProject` mapping, same resolution as handleUpdateTag.
+ *
+ * @param {SerenityTransport} transport
+ * @param {object} dataAccess - data-access layer (BrandSemrushProject).
+ * @param {string} brandId - brand UUID.
+ * @param {string} semrushWorkspaceId - the org's (parent) workspace id.
+ * @param {string} tagId - upstream tag id to delete.
+ * @param {object} query - query params ({ geoTargetId, languageCode }).
+ * @param {object} log - logger.
+ * @returns {Promise<{status: number, deletedIds: string[]}>} deletedIds is unread by
+ *   the controller (which always returns 204 with no body) — kept for the log line above
+ *   and for test introspection, not a consumed contract.
+ */
+export async function handleDeleteTag(
+  transport,
+  dataAccess,
+  brandId,
+  semrushWorkspaceId,
+  tagId,
+  query,
+  log,
+  ifMatch,
+) {
+  const id = requireTagId(tagId);
+  const { geoTargetId, languageCode } = requireSliceQuery(query);
+  const row = await dataAccess.BrandSemrushProject.findBySlice(
+    brandId,
+    geoTargetId,
+    languageCode,
+  );
+  if (!row) {
+    throw marketNotFound();
+  }
+  const projectId = row.getSemrushProjectId();
+  const { deletedIds } = await deleteResolvedTag(
+    transport,
+    semrushWorkspaceId,
+    projectId,
+    id,
+    log,
+    ifMatch,
+  );
+  log?.info?.('handleDeleteTag: deleted tag subtree', {
+    brandId, geoTargetId, languageCode, tagId: id, deletedIds,
+  });
+  return { status: 204, deletedIds };
+}
+
+/**
+ * DELETE /serenity/tags/:tagId (subworkspace mode) -- the market's project is
+ * resolved live from the brand's own subworkspace listing, same resolution as
+ * handleUpdateTagSubworkspace. See {@link handleDeleteTag} for the delete
+ * semantics this shares.
+ *
+ * @param {SerenityTransport} transport
+ * @param {string} workspaceId - the brand's subworkspace id.
+ * @param {string} tagId - upstream tag id to delete.
+ * @param {object} query - query params ({ geoTargetId, languageCode }).
+ * @param {object} log - logger.
+ * @returns {Promise<{status: number, deletedIds: string[]}>} deletedIds is unread by
+ *   the controller (which always returns 204 with no body) — kept for the log line above
+ *   and for test introspection, not a consumed contract.
+ */
+export async function handleDeleteTagSubworkspace(
+  transport,
+  workspaceId,
+  tagId,
+  query,
+  log,
+  ifMatch,
+) {
+  const id = requireTagId(tagId);
+  const { geoTargetId, languageCode } = requireSliceQuery(query);
+  const project = await resolveProject(transport, workspaceId, geoTargetId, languageCode, log);
+  if (!project) {
+    throw marketNotFound();
+  }
+  const projectId = String(project.id);
+  const { deletedIds } = await deleteResolvedTag(
+    transport,
+    workspaceId,
+    projectId,
+    id,
+    log,
+    ifMatch,
+  );
+  log?.info?.('handleDeleteTagSubworkspace: deleted tag subtree', {
+    geoTargetId, languageCode, tagId: id, deletedIds,
+  });
+  return { status: 204, deletedIds };
+}
+
+/**
+ * Resolves a flat-mode market and returns its complete tag-delete impact
+ * snapshot without exposing the internal `deletedIds` bookkeeping field.
+ *
+ * @param {SerenityTransport} transport
+ * @param {object} dataAccess
+ * @param {string} brandId
+ * @param {string} semrushWorkspaceId
+ * @param {string} tagId
+ * @param {object} query
+ * @param {object} [log]
+ * @returns {Promise<{status: number, body: object}>}
+ */
+export async function handleTagImpact(
+  transport,
+  dataAccess,
+  brandId,
+  semrushWorkspaceId,
+  tagId,
+  query,
+  log,
+) {
+  const id = requireTagId(tagId);
+  const { geoTargetId, languageCode } = requireSliceQuery(query);
+  const row = await dataAccess.BrandSemrushProject.findBySlice(
+    brandId,
+    geoTargetId,
+    languageCode,
+  );
+  if (!row) {
+    throw marketNotFound();
+  }
+  const impact = await buildTagImpact(
+    transport,
+    semrushWorkspaceId,
+    row.getSemrushProjectId(),
+    id,
+    log,
+  );
+  const { deletedIds: _, ...body } = impact;
+  return { status: 200, body };
+}
+
+/**
+ * Resolves a subworkspace-mode market and returns its complete tag-delete
+ * impact snapshot without exposing the internal `deletedIds` bookkeeping field.
+ *
+ * @param {SerenityTransport} transport
+ * @param {string} workspaceId
+ * @param {string} tagId
+ * @param {object} query
+ * @param {object} [log]
+ * @returns {Promise<{status: number, body: object}>}
+ */
+export async function handleTagImpactSubworkspace(
+  transport,
+  workspaceId,
+  tagId,
+  query,
+  log,
+) {
+  const id = requireTagId(tagId);
+  const { geoTargetId, languageCode } = requireSliceQuery(query);
+  const project = await resolveProject(transport, workspaceId, geoTargetId, languageCode, log);
+  if (!project) {
+    throw marketNotFound();
+  }
+  const impact = await buildTagImpact(
+    transport,
+    workspaceId,
+    String(project.id),
+    id,
+    log,
+  );
+  const { deletedIds: _, ...body } = impact;
+  return { status: 200, body };
 }

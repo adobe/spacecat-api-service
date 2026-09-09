@@ -17,11 +17,13 @@ import {
   DIMENSION_PROVISION_ORDER,
   RESERVED_ROOT_NAMES,
   INTENT_ROOT_NAME,
+  ROOT_DISPLAY_NAME,
   rootNameOfDimension,
   dimensionOfRootName,
   ORIGIN_VALUE,
   INTENT_VALUE,
   TYPE_VALUE,
+  TYPE_VALUE_DISPLAY,
   CLOSED_DIMENSION_VALUES,
   CLOSED_DIMENSIONS,
   OPEN_DIMENSIONS,
@@ -29,6 +31,7 @@ import {
   ALL_DIMENSIONS,
   SOURCE_VALUES,
   SOURCE_LABEL,
+  DERIVED_SOURCE_VALUES,
   MAX_TAG_NAME_LEN,
   STANDARD_PROMPT_TAG_VALUES,
   isDimensionRootName,
@@ -36,28 +39,35 @@ import {
   isServerOwnedDimension,
   canonicalizeSource,
   closedValuesOf,
+  displayToSlug,
+  displayNameOfValue,
+  valueSlugOfDisplayName,
+  deriveSource,
 } from '../../../src/support/serenity/prompt-tags.js';
 
 describe('serenity prompt-tags taxonomy', () => {
   describe('dimension roots', () => {
-    it('includes the five roots, all bare-named (membership, never a count)', () => {
+    it('includes the registered roots, all bare-named (membership, never a count)', () => {
       // Membership, not set-equality — a further open root is contemplated
       // (source-dimension.md header), so nothing may key on the root count.
       expect([...DIMENSION_PROVISION_ORDER]).to.include.members([
-        'category', 'intent', 'origin', 'type', 'source',
+        'category', 'tag', 'intent', 'origin', 'type', 'source',
       ]);
       DIMENSION_PROVISION_ORDER.forEach((n) => expect(n).to.not.include(':'));
     });
 
-    it('splits the roots into open (category, source) and closed (intent, origin, type)', () => {
-      expect([...OPEN_DIMENSIONS]).to.deep.equal([DIMENSION.CATEGORY, DIMENSION.SOURCE]);
+    it('splits the roots into open and closed dimensions', () => {
+      expect([...OPEN_DIMENSIONS]).to.deep.equal([
+        DIMENSION.CATEGORY, DIMENSION.TAG, DIMENSION.SOURCE,
+      ]);
       expect([...CLOSED_DIMENSIONS]).to.deep.equal(['intent', 'origin', 'type']);
       expect([...ALL_DIMENSIONS].sort()).to.deep.equal([...DIMENSION_PROVISION_ORDER].sort());
     });
 
-    it('is server-owned for everything except category (write-guard / create-semantics axis)', () => {
+    it('keeps category and tag customer-owned', () => {
       expect([...SERVER_OWNED_DIMENSIONS]).to.deep.equal(['intent', 'origin', 'type', 'source']);
       expect(isServerOwnedDimension(DIMENSION.CATEGORY)).to.equal(false);
+      expect(isServerOwnedDimension(DIMENSION.TAG)).to.equal(false);
       expect(isServerOwnedDimension(DIMENSION.SOURCE)).to.equal(true);
       expect(isServerOwnedDimension(DIMENSION.INTENT)).to.equal(true);
       // `source` is server-owned yet OPEN — a separate axis from vocabulary.
@@ -137,7 +147,7 @@ describe('serenity prompt-tags taxonomy', () => {
   });
 
   describe('STANDARD_PROMPT_TAG_VALUES', () => {
-    it('seeds source=ai + intent=Informational only (type is classified per prompt)', () => {
+    it('seeds origin=ai and intent=Informational (type is classified per prompt)', () => {
       expect(STANDARD_PROMPT_TAG_VALUES.map((t) => [t.dimension, t.name])).to.deep.equal([
         ['origin', 'ai'],
         ['intent', 'Informational'],
@@ -188,26 +198,177 @@ describe('serenity prompt-tags taxonomy', () => {
     });
   });
 
-  describe('SOURCE_LABEL', () => {
-    it('is frozen and has exactly one entry per canonical value (exhaustive, CI gate)', () => {
+  describe('SOURCE_LABEL (the tag-name map, tag-display-names.md §1 item 3)', () => {
+    it('is frozen', () => {
       expect(Object.isFrozen(SOURCE_LABEL)).to.equal(true);
-      // This assertion FAILS the moment a canonical value is added to SOURCE_VALUES
-      // without a label — the exhaustiveness gate (source-dimension.md §7). No
+    });
+
+    it('every SOURCE_VALUES entry has its own label — CI gate', () => {
+      // This assertion FAILS the moment a canonical value is added to
+      // SOURCE_VALUES without a label AND without being the one deliberate
+      // fold exemption (tag-display-names.md §6 item 1, §1 item 3). No
       // pass-through slug default is permitted.
-      expect(Object.keys(SOURCE_LABEL).sort()).to.deep.equal([...SOURCE_VALUES].sort());
       SOURCE_VALUES.forEach((slug) => {
-        expect(SOURCE_LABEL[slug], `missing SOURCE_LABEL for ${slug}`).to.be.a('string').and.not.equal('');
+        expect(SOURCE_LABEL[slug], `missing SOURCE_LABEL for ${slug}`)
+          .to.be.a('string').and.not.equal('');
       });
     });
 
-    it('every canonical value canonicalizes to itself (already folded)', () => {
-      SOURCE_VALUES.forEach((slug) => {
+    it('also labels every legacy derived source value', () => {
+      DERIVED_SOURCE_VALUES.forEach((slug) => {
+        expect(SOURCE_LABEL[slug], `missing SOURCE_LABEL for derived value ${slug}`)
+          .to.be.a('string').and.not.equal('');
+      });
+    });
+
+    it('every display name in the tag-name map is unique (bijective, never two slugs sharing one name)', () => {
+      const names = Object.values(SOURCE_LABEL);
+      expect(new Set(names).size, 'SOURCE_LABEL has a duplicate display name').to.equal(names.length);
+    });
+
+    it('no display name folds back into a DIFFERENT slug than the one it labels', () => {
+      // tag-display-names.md §1 item 7: canonicalizeSource is never applied to
+      // a display name as if it were a slug; this pins that a folded display
+      // name, if it folds to anything at all, is exactly its own slug — never
+      // silently a different SOURCE_VALUES member. Holds trivially today
+      // (identity placeholders: folded === slug) and starts doing real
+      // disambiguation work the moment SOURCE_LABEL's values diverge.
+      Object.entries(SOURCE_LABEL).forEach(([slug, displayName]) => {
+        const folded = canonicalizeSource(displayName);
+        if (folded !== null) {
+          expect(folded).to.equal(slug);
+        }
+      });
+    });
+
+    it('displayToSlug is the true inverse of SOURCE_LABEL', () => {
+      Object.entries(SOURCE_LABEL).forEach(([slug, displayName]) => {
+        expect(displayToSlug(displayName)).to.equal(slug);
+      });
+      expect(displayToSlug('not-a-known-display-name')).to.equal(undefined);
+    });
+
+    it('every canonical value that keeps its own tag name canonicalizes to itself (already folded)', () => {
+      SOURCE_VALUES.filter((slug) => slug !== 'llm-generated').forEach((slug) => {
         expect(canonicalizeSource(slug)).to.equal(slug);
       });
     });
 
     it('is frozen for SOURCE_VALUES too', () => {
       expect(Object.isFrozen(SOURCE_VALUES)).to.equal(true);
+    });
+  });
+
+  describe('DERIVED_SOURCE_VALUES legacy compatibility', () => {
+    it('is frozen and contains ai-onboarding', () => {
+      expect(Object.isFrozen(DERIVED_SOURCE_VALUES)).to.equal(true);
+      expect([...DERIVED_SOURCE_VALUES]).to.include('ai-onboarding');
+    });
+
+    it('is disjoint from the create-accepted enum (SOURCE_VALUES) — never a legal stored value', () => {
+      DERIVED_SOURCE_VALUES.forEach((value) => {
+        expect(SOURCE_VALUES).to.not.include(value);
+      });
+    });
+  });
+
+  describe('deriveSource compatibility helper', () => {
+    it('keeps config independent of origin', () => {
+      expect(deriveSource('config')).to.equal('config');
+    });
+
+    it('leaves `config` + origin `human` as config (the producer wins)', () => {
+      expect(deriveSource('config')).to.equal('config');
+    });
+
+    it('keeps llm-generated as its own producing system regardless of origin', () => {
+      expect(deriveSource('llm-generated')).to.equal('llm-generated');
+    });
+
+    it('leaves a specific producer untouched — origin carries no information for it', () => {
+      expect(deriveSource('gsc')).to.equal('gsc');
+      expect(deriveSource('drs')).to.equal('drs');
+    });
+
+    it('canonicalizes before folding (case/underscore variants)', () => {
+      expect(deriveSource('CONFIG')).to.equal('config');
+      expect(deriveSource('LLM_GENERATED')).to.equal('llm-generated');
+    });
+
+    it('propagates canonicalizeSource\'s null (do-not-tag) rather than substituting a default', () => {
+      expect(deriveSource('')).to.equal(null);
+      expect(deriveSource(undefined)).to.equal(null);
+    });
+  });
+
+  describe('ROOT_DISPLAY_NAME / rootNameOfDimension (tag-display-names.md §1 item 4)', () => {
+    it('is frozen and IDENTITY today for category/type/source', () => {
+      expect(Object.isFrozen(ROOT_DISPLAY_NAME)).to.equal(true);
+      expect(ROOT_DISPLAY_NAME[DIMENSION.CATEGORY]).to.equal(DIMENSION.CATEGORY);
+      expect(ROOT_DISPLAY_NAME[DIMENSION.TYPE]).to.equal(DIMENSION.TYPE);
+      expect(ROOT_DISPLAY_NAME[DIMENSION.SOURCE]).to.equal(DIMENSION.SOURCE);
+    });
+
+    it('does NOT display-rename intent or origin', () => {
+      expect(ROOT_DISPLAY_NAME).to.not.have.property(DIMENSION.INTENT);
+      expect(ROOT_DISPLAY_NAME).to.not.have.property(DIMENSION.ORIGIN);
+      expect(rootNameOfDimension(DIMENSION.INTENT)).to.equal(INTENT_ROOT_NAME);
+      expect(rootNameOfDimension(DIMENSION.ORIGIN)).to.equal(DIMENSION.ORIGIN);
+    });
+
+    it('RESERVED_ROOT_NAMES grows with the display root names without double-listing under identity', () => {
+      DIMENSION_PROVISION_ORDER.forEach((d) => {
+        expect(RESERVED_ROOT_NAMES).to.include(rootNameOfDimension(d));
+      });
+      // Deduped: today display === slug for category/type/source, so the set
+      // is still exactly 7 entries (6 dimensions + the one intent divergence).
+      expect(RESERVED_ROOT_NAMES.length).to.equal(7);
+    });
+  });
+
+  describe('dimensionOfRootName (resolves display names, slug names, and $abv_tags$intent)', () => {
+    it('resolves every dimension key to itself', () => {
+      DIMENSION_PROVISION_ORDER.forEach((d) => {
+        expect(dimensionOfRootName(d)).to.equal(d);
+      });
+    });
+
+    it('resolves every CURRENT root-name spelling (rootNameOfDimension) to its dimension', () => {
+      DIMENSION_PROVISION_ORDER.forEach((d) => {
+        expect(dimensionOfRootName(rootNameOfDimension(d))).to.equal(d);
+      });
+    });
+
+    it('resolves $abv_tags$intent to intent explicitly', () => {
+      expect(dimensionOfRootName(INTENT_ROOT_NAME)).to.equal(DIMENSION.INTENT);
+    });
+
+    it('is identity for anything outside the taxonomy', () => {
+      expect(dimensionOfRootName('Running Shoes')).to.equal('Running Shoes');
+    });
+  });
+
+  describe('TYPE_VALUE_DISPLAY / displayNameOfValue / valueSlugOfDisplayName', () => {
+    it('TYPE_VALUE_DISPLAY is frozen and identity today', () => {
+      expect(Object.isFrozen(TYPE_VALUE_DISPLAY)).to.equal(true);
+      expect(TYPE_VALUE_DISPLAY[TYPE_VALUE.BRANDED]).to.equal(TYPE_VALUE.BRANDED);
+      expect(TYPE_VALUE_DISPLAY[TYPE_VALUE.NON_BRANDED]).to.equal(TYPE_VALUE.NON_BRANDED);
+    });
+
+    it('displayNameOfValue routes source/type through their maps and leaves intent/origin untouched', () => {
+      expect(displayNameOfValue(DIMENSION.SOURCE, 'config')).to.equal(SOURCE_LABEL.config);
+      expect(displayNameOfValue(DIMENSION.TYPE, TYPE_VALUE.BRANDED))
+        .to.equal(TYPE_VALUE_DISPLAY[TYPE_VALUE.BRANDED]);
+      expect(displayNameOfValue(DIMENSION.INTENT, INTENT_VALUE.TASK)).to.equal(INTENT_VALUE.TASK);
+      expect(displayNameOfValue(DIMENSION.ORIGIN, ORIGIN_VALUE.AI)).to.equal(ORIGIN_VALUE.AI);
+    });
+
+    it('valueSlugOfDisplayName is the inverse for source/type, undefined for intent/origin', () => {
+      expect(valueSlugOfDisplayName(DIMENSION.SOURCE, SOURCE_LABEL.config)).to.equal('config');
+      expect(valueSlugOfDisplayName(DIMENSION.TYPE, TYPE_VALUE_DISPLAY[TYPE_VALUE.BRANDED]))
+        .to.equal(TYPE_VALUE.BRANDED);
+      expect(valueSlugOfDisplayName(DIMENSION.INTENT, INTENT_VALUE.TASK)).to.equal(undefined);
+      expect(valueSlugOfDisplayName(DIMENSION.ORIGIN, ORIGIN_VALUE.AI)).to.equal(undefined);
     });
   });
 });

@@ -10,8 +10,9 @@
  * governing permissions and limitations under the License.
  */
 
-import { resolveElementModel } from '../constants.js';
+import { buildModelFilter } from '../constants.js';
 import { addDaysToDate } from '../week-utils.js';
+import { buildFacetedTagFilters } from './prompts.js';
 
 /**
  * Payload builders + response transform for the Overview-SR KPI headline cards
@@ -66,20 +67,22 @@ export function derivePreviousPeriod(startDate, endDate) {
  *   includes the `category__` prefix), sent as-is.
  */
 export function buildKpiHeadlinePayload({
-  brandName, model, platform, startDate, endDate, projectIds = [], category,
+  brandName, model, platform, startDate, endDate, projectIds = [], category, tagPaths,
 }) {
-  const resolvedModel = resolveElementModel(model || platform);
+  // "All platforms" (param absent or 'all') → omit CBF_model so Semrush aggregates across
+  // every model that produced data; otherwise scope to the single resolved model (LLMO-7093).
+  const modelFilter = buildModelFilter(model || platform);
   const { comparisonStartDate, comparisonEndDate } = derivePreviousPeriod(startDate, endDate);
   const filters = [
     { op: 'eq', val: brandName, col: 'CBF_ws_brand' },
-    { op: 'or', filters: [{ op: 'eq', val: resolvedModel, col: 'CBF_model' }] },
   ];
+  if (modelFilter) {
+    filters.push(modelFilter);
+  }
   if (Array.isArray(projectIds) && projectIds.length > 0) {
     filters.push(orFilter('CBF_project', projectIds));
   }
-  if (category) {
-    filters.push({ op: 'eq', val: category, col: 'CBF_tags' });
-  }
+  filters.push(...buildFacetedTagFilters({ tagPaths, category }));
   return {
     comparison_data_formatting: 'union',
     auto_bucketing: 'date',
@@ -142,23 +145,25 @@ export function transformBrandUrlsResponse(raw) {
  *   includes the `category__` prefix), sent as-is.
  */
 export function buildSourceVisibilityPayload({
-  brandUrls, model, platform, startDate, endDate, projectIds = [], category,
+  brandUrls, model, platform, startDate, endDate, projectIds = [], category, tagPaths,
 }) {
-  const resolvedModel = resolveElementModel(model || platform);
+  // "All platforms" (param absent or 'all') → omit CBF_model so Semrush aggregates across
+  // every model that produced data; otherwise scope to the single resolved model (LLMO-7093).
+  const modelFilter = buildModelFilter(model || platform);
   const { comparisonStartDate, comparisonEndDate } = derivePreviousPeriod(startDate, endDate);
   const filters = [
     {
       op: 'or',
       filters: (brandUrls ?? []).map((val) => ({ op: 'url_match', val, col: 'CBF_brand_urls' })),
     },
-    { op: 'or', filters: [{ op: 'eq', val: resolvedModel, col: 'CBF_model' }] },
   ];
+  if (modelFilter) {
+    filters.push(modelFilter);
+  }
   if (Array.isArray(projectIds) && projectIds.length > 0) {
     filters.push(orFilter('CBF_project', projectIds));
   }
-  if (category) {
-    filters.push({ op: 'eq', val: category, col: 'CBF_tags' });
-  }
+  filters.push(...buildFacetedTagFilters({ tagPaths, category }));
   return {
     comparison_data_formatting: 'union',
     auto_bucketing: 'date',

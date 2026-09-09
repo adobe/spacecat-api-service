@@ -107,6 +107,7 @@ import DrsBpPgAuditController from './controllers/drs-bp-pg-audit.js';
 import routeRequiredCapabilities, { INTERNAL_ROUTES } from './routes/required-capabilities.js';
 import routeFacsCapabilities from './routes/facs-capabilities.js';
 import { secondaryResolvers } from './support/facs-secondary-resolvers.js';
+import { compositeResolvers } from './support/facs-composite-resolvers.js';
 import ContactSalesLeadsController from './controllers/contact-sales-leads.js';
 import PageRelationshipsController from './controllers/page-relationships.js';
 import PlgOnboardingController from './controllers/plg/plg-onboarding.js';
@@ -121,6 +122,7 @@ import ElementsController from './controllers/elements.js';
 import ProxyController from './controllers/proxy.js';
 import OnboardingController from './controllers/onboarding.js';
 import GitHubWebhookHmacHandler from './support/github-webhook-hmac-handler.js';
+import { slackSignatureWrapper } from './support/slack/signature-wrapper.js';
 import AsoOverlayKeyHandler from './support/aso-overlay-key-handler.js';
 import ApiKeyImsHandler from './support/api-key-ims-handler.js';
 import RouteScopedLegacyApiKeyHandler from './support/route-scoped-legacy-api-key-handler.js';
@@ -484,12 +486,25 @@ const wrappedMain = wrap(run)
   // Enforces the hybrid MAC/FACS model (JWT facs_permissions ∪ state-layer grants)
   // for FACS-governed external callers; internal identities and non-enrolled orgs
   // bypass. See routeFacsCapabilities for route → capability classification.
-  .with(facsWrapper, { routeFacsCapabilities, secondaryResolvers })
+  .with(facsWrapper, { routeFacsCapabilities, secondaryResolvers, compositeResolvers })
   .with(readOnlyAdminWrapper, {
     routeCapabilities: routeRequiredCapabilities,
     internalRoutes: INTERNAL_ROUTES,
   })
-  .with(authWrapper, { authHandlers: AUTH_HANDLERS })
+  .with(authWrapper, {
+    authHandlers: AUTH_HANDLERS,
+    // Declare the route-based anonymous bypass explicitly rather than inheriting the shared
+    // library's default, so this service owns the list of routes it leaves unauthenticated.
+    // POST /slack/events is authenticated instead by slackSignatureWrapper above, which runs
+    // before this wrapper.
+    //
+    // Inert on the currently pinned @adobe/spacecat-shared-http-utils (which does not read the
+    // option and applies its own default); it takes effect once the version carrying
+    // `anonymousEndpoints` is picked up. Declaring it now is forward-safe, not a behaviour
+    // change: the option replaces only the exact-match route list -- the unconditional OPTIONS
+    // and `POST /hooks/site-detection/*` bypasses are separate clauses it does not touch.
+    anonymousEndpoints: ['POST /slack/events'],
+  })
   .with(s2sAuthWrapper, { routeCapabilities: routeRequiredCapabilities });
 
 export const main = wrappedMain
@@ -499,6 +514,11 @@ export const main = wrappedMain
   .with(dataAccess)
   .with(bodyData)
   .with(multipartFormData)
+  // Runs immediately after enrichPathInfo (so context.pathInfo.headers is populated) and
+  // before multipartFormData/bodyData (so the request body is still unread). Verifies the
+  // Slack request signature on /slack/events, which authWrapper treats as an anonymous
+  // endpoint and which bypasses Bolt's own receiver-level check (VULN-39365).
+  .with(slackSignatureWrapper)
   .with(enrichPathInfo)
   .with(sqs)
   .with(s3ClientWrapper)

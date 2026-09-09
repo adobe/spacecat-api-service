@@ -110,6 +110,30 @@ describe('propagateSiteUrlToSemrush', () => {
     expect(transport.publishProject).to.have.been.calledOnceWith(WS, 'proj-1');
   });
 
+  it('uses caller-supplied rows verbatim and never reads projectsForSite (re-point path)', async () => {
+    // The brand primary-site re-point (brands.js #349) reads the rows against the OLD
+    // site, propagates here, then re-links them — so it passes rows in explicitly and
+    // this must NOT look them up by (the old) siteId.
+    const allByBrandId = sinon.stub().resolves([]);
+    const transport = makeTransport({ benchmarks: [] });
+    const rows = [fakeRow('proj-passed')];
+
+    const result = await propagateSiteUrlToSemrush({
+      dataAccess: { BrandSemrushProject: { allByBrandId } },
+      transport,
+      workspaceId: WS,
+      brandId: BRAND_ID,
+      siteId: SITE_ID,
+      brandIdentity: BRAND_IDENTITY,
+      newBaseURL: NEW_URL,
+      rows,
+    });
+
+    expect(result).to.deep.equal({ projectsUpdated: 1 });
+    expect(allByBrandId).to.not.have.been.called;
+    expect(transport.updateProject).to.have.been.calledOnceWith(WS, 'proj-passed');
+  });
+
   it('updates every live project mapped to the site (locale variants sharing one domain)', async () => {
     const transport = makeTransport({ benchmarks: [] });
     const rows = [fakeRow('proj-1'), fakeRow('proj-2')];

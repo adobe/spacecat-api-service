@@ -91,7 +91,7 @@ import {
 import { updateModifiedByDetails } from './llmo-config-metadata.js';
 import { notifyOptInIfNeeded } from './cdn-opt-in-notification.js';
 import { handleLlmoRationale } from './llmo-rationale.js';
-import { handleBrandClaims } from './brand-claims.js';
+import { handleBrandClaims, handleRequestBrandClaims } from './brand-claims.js';
 import { handleDemoBrandPresence, handleDemoRecommendations } from './opportunity-workspace-demo.js';
 import { notifyStrategyChanges } from '../../support/opportunity-workspace-notifications.js';
 
@@ -1038,7 +1038,7 @@ function LlmoController(ctx) {
         log.warn(`LLMO onboarding: failed to trigger brand-profile workflow for site ${result.siteId}`, hookError);
       }
 
-      log.info(`LLMO onboarding completed successfully for domain ${domain}`);
+      log.info(`LLMO onboarding ${result.brandActivation?.requiredWorkFailed ? 'completed with warnings' : 'completed successfully'} for domain ${domain}`);
 
       return ok({
         message: result.message,
@@ -1050,9 +1050,18 @@ function LlmoController(ctx) {
         organizationId: result.organizationId,
         siteId: result.siteId,
         detectedCdn: result.detectedCdn,
+        // Intentionally always 'completed', never 'failed', even when
+        // brandActivation.requiredWorkFailed is true: the site/org/entitlement/config work this
+        // endpoint owns did succeed (hence the 200 response), and 'failed' would overclaim a
+        // total failure the enum has no room to qualify. requiredWorkFailed is the correct field
+        // for a caller to branch on for the "succeeded with a degraded step" case.
         status: 'completed',
         createdAt: new Date().toISOString(),
         brandProfileExecutionName,
+        // LLMO-7218 AC4: structured submission-level context (which required step failed, if
+        // any) so a caller doesn't have to reconstruct it from logs. Absent for siteOnly
+        // onboarding, which never runs brand activation.
+        ...(result.brandActivation ? { brandActivation: result.brandActivation } : {}),
         ...(region ? { region } : {}),
       });
     } catch (error) {
@@ -1402,6 +1411,24 @@ function LlmoController(ctx) {
       return await handleBrandClaims(context);
     } catch (error) {
       log.error(`Error getting brand claims for site ${siteId}: ${error.message}`);
+      return badRequest(cleanupHeaderValue(error.message));
+    }
+  };
+
+  // Handles on-demand Brand Claims trigger requests (LLMO-7263, trial customers)
+  const requestBrandClaims = async (context) => {
+    const { log } = context;
+    const { siteId } = context.params;
+    try {
+      // Validate site and LLMO access (trials are LLMO-entitled)
+      const siteValidation = await getSiteAndValidateLlmo(context);
+      if (siteValidation.status) {
+        return siteValidation;
+      }
+
+      return await handleRequestBrandClaims(context, siteValidation.site);
+    } catch (error) {
+      log.error(`Error requesting brand claims for site ${siteId}: ${error.message}`);
       return badRequest(cleanupHeaderValue(error.message));
     }
   };
@@ -2272,6 +2299,7 @@ function LlmoController(ctx) {
     patchLlmoDataRow,
     getLlmoRationale,
     getBrandClaims,
+    requestBrandClaims,
     getDemoBrandPresence,
     getDemoRecommendations,
     createOrUpdateEdgeConfig,

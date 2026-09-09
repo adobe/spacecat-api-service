@@ -24,12 +24,21 @@ import sqs from '../support/sqs.js';
 import {
   exchangeAndPersistPromiseToken,
   invalidateJobPromiseToken,
+  isRetryableJobError,
   NeedsReauthError,
 } from '../support/serenity/async-job-runner.js';
 import {
   classifyPromptsHandler,
   CLASSIFY_PROMPTS_JOB_TYPE,
 } from '../support/serenity/handlers/classify-prompts-job.js';
+import {
+  bulkTagsHandler,
+  BULK_TAGS_JOB_TYPE,
+} from '../support/serenity/handlers/bulk-tags-job.js';
+import {
+  isRateLimited,
+  isSemrushTransportError,
+} from '../support/serenity/errors.js';
 
 // `wrap`'s runtime default export and `imsClientWrapper`'s runtime named export
 // both exist (`@adobe/helix-shared-wrap/src/wrap.js`,
@@ -44,6 +53,41 @@ const { default: wrap } = /** @type {{ default: (fn: Function) => { with: Functi
 const { imsClientWrapper } = /** @type {{ imsClientWrapper: Function }} */ (
   /** @type {unknown} */ (imsClientPkg)
 );
+
+// This worker is a second Lambda built from the api-service repo, and it needs the exact
+// same Vault secrets the synchronous serenity path already loads (IMS_PROMISE_SEMRUSH_*,
+// SEMRUSH_PROJECTS_BASE_URL, Postgres, AUTOFIX_CRYPT_*). Rather than provision a separate
+// AppRole + bootstrap secret for this function's own name (`serenity-job-runner`), reuse
+// api-service's existing Vault setup: `@adobe/spacecat-shared-vault-secrets` derives its
+// AWS Secrets Manager bootstrap path and its Vault data path from the function name by
+// default, but both are overridable. We point them at `api-service` so no vault_policies
+// change is needed — the Lambda role already reads `/mysticat/bootstrap/*` via a wildcard,
+// and api-service's env-scoped AppRole already grants read on `dx_mysticat/data/{env}/api-service`.
+//
+// AWS_ENV is a deploy-time Lambda env var (set per environment in the worker deploy scripts).
+// A wrong env fails closed rather than reading another environment's secrets: api-service's
+// AppRole is scoped to a single env, so requesting a different env's path is denied. We read
+// ONLY AWS_ENV (not the generic ENV, which CI runners and container runtimes set routinely and
+// would be an unsafe input to a Vault-path decision), and throw on absence rather than defaulting
+// to a working-looking path — so a misconfigured deploy surfaces this message in the cold-start
+// log instead of an opaque Vault 403.
+const VAULT_SERVICE = 'api-service';
+
+/**
+ * vaultSecrets options that make this worker reuse api-service's Vault identity (bootstrap
+ * secret + env-scoped data path) instead of a dedicated AppRole for its own function name.
+ * Exported for unit testing only — not a public contract.
+ */
+export const vaultOpts = {
+  bootstrapPath: `/mysticat/bootstrap/${VAULT_SERVICE}`,
+  name: (/** @type {{ env?: Record<string, string> }} */ ctx) => {
+    const env = ctx.env?.AWS_ENV;
+    if (!env) {
+      throw new Error('[serenity-job-runner] AWS_ENV must be set (see the worker deploy scripts) to resolve the Vault secrets path');
+    }
+    return `${env}/${VAULT_SERVICE}`;
+  },
+};
 
 /**
  * SQS-triggered entry point for the deferred user-context Semrush job runner
@@ -66,7 +110,82 @@ const { imsClientWrapper } = /** @type {{ imsClientWrapper: Function }} */ (
  */
 const HANDLERS = {
   [CLASSIFY_PROMPTS_JOB_TYPE]: classifyPromptsHandler,
+  [BULK_TAGS_JOB_TYPE]: bulkTagsHandler,
 };
+
+const TRANSIENT_NETWORK_ERROR_CODES = new Set([
+  'EAI_AGAIN',
+  'ECONNREFUSED',
+  'ECONNRESET',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+  'ENOTFOUND',
+  'EPIPE',
+  'ETIMEDOUT',
+  'UND_ERR_BODY_TIMEOUT',
+  'UND_ERR_CONNECT_TIMEOUT',
+  'UND_ERR_HEADERS_TIMEOUT',
+  'UND_ERR_SOCKET',
+]);
+const TRANSIENT_NETWORK_ERROR_NAMES = new Set(['AbortError', 'TimeoutError']);
+
+/**
+ * Recognises only explicit network/timeout signals, including a fetch TypeError
+ * whose cause carries the actual socket code. Plain TypeError/RangeError and
+ * arbitrary application errors deliberately do not match.
+ *
+ * @param {unknown} error
+ * @returns {boolean}
+ */
+function isTransientNetworkError(error) {
+  let current = error;
+  const seen = new Set();
+  for (let depth = 0; depth < 4 && current && typeof current === 'object'; depth += 1) {
+    if (seen.has(current)) {
+      return false;
+    }
+    seen.add(current);
+    const candidate = /** @type {{ code?: unknown, name?: unknown, cause?: unknown }} */ (
+      current
+    );
+    if (isRateLimited(current)) {
+      return true;
+    }
+    if (isSemrushTransportError(current)) {
+      const { status } = current;
+      if (typeof status === 'number' && Number.isInteger(status) && status >= 500) {
+        return true;
+      }
+    }
+    const code = typeof candidate.code === 'string' ? candidate.code : '';
+    const name = typeof candidate.name === 'string' ? candidate.name : '';
+    if (TRANSIENT_NETWORK_ERROR_CODES.has(code) || TRANSIENT_NETWORK_ERROR_NAMES.has(name)) {
+      return true;
+    }
+    current = candidate.cause;
+  }
+  return false;
+}
+
+/**
+ * Public retryability is intentionally narrower than "not a 4xx": only typed
+ * upstream 5xx/rate-limit failures and known transport/network failures qualify.
+ *
+ * @param {unknown} error
+ * @returns {boolean}
+ */
+function isRetryableFailure(error) {
+  if (isRateLimited(error)) {
+    return true;
+  }
+  if (isSemrushTransportError(error)) {
+    const { status } = error;
+    return typeof status === 'number' && Number.isInteger(status)
+      ? status >= 500
+      : isTransientNetworkError(error);
+  }
+  return isTransientNetworkError(error);
+}
 
 /**
  * @param {object} message - the SQS message body (already JSON-parsed by
@@ -102,7 +221,7 @@ export async function run(message, context) {
     if (error instanceof NeedsReauthError) {
       log.warn(`[serenity-job-runner] Job ${jobId} needs re-authentication: ${error.message}`);
       job.setStatus('FAILED');
-      job.setError({ code: error.code, message: error.message });
+      job.setError({ code: error.code, message: error.message, retryable: false });
       await job.save();
       return ok();
     }
@@ -113,7 +232,11 @@ export async function run(message, context) {
   if (!handler) {
     log.warn(`[serenity-job-runner] No handler registered for job type: ${type}`);
     job.setStatus('FAILED');
-    job.setError({ code: 'UNKNOWN_JOB_TYPE', message: `No handler for job type: ${type}` });
+    job.setError({
+      code: 'UNKNOWN_JOB_TYPE',
+      message: `No handler for job type: ${type}`,
+      retryable: false,
+    });
     await invalidateJobPromiseToken(context, job);
     await job.save();
     return ok();
@@ -131,9 +254,17 @@ export async function run(message, context) {
     // would also kill the requeued job's copy before it ever runs.
     tokenOwnershipTransferred = Boolean(result?.requeuedJobId);
   } catch (error) {
+    if (isRetryableJobError(error)) {
+      log.warn(`[serenity-job-runner] Job ${jobId} remains IN_PROGRESS for SQS retry: ${error.message}`);
+      throw error;
+    }
     log.error(`[serenity-job-runner] Job ${jobId} failed: ${error.message}`);
     job.setStatus('FAILED');
-    job.setError({ code: 'JOB_FAILED', message: error.message });
+    job.setError({
+      code: error.code ?? 'JOB_FAILED',
+      message: error.message,
+      retryable: isRetryableFailure(error),
+    });
   }
 
   if (!tokenOwnershipTransferred) {
@@ -150,5 +281,5 @@ export const main = wrap(run)
   .with(dataAccess)
   .with(sqs)
   .with(imsClientWrapper)
-  .with(vaultSecrets)
+  .with(vaultSecrets, vaultOpts)
   .with(helixStatus);

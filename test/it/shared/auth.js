@@ -326,8 +326,9 @@ export async function createS2SConsumerUnknownToken() {
 }
 
 /**
- * S2S consumer holding `site:readAll` + `organization:readAll` (CONSUMER_2).
- * Used to assert the positive path for cross-tenant list endpoints.
+ * S2S consumer holding `site:readAll` + `organization:readAll` + `trialUser:read` +
+ * `entitlement:create` (CONSUMER_2). Used to assert the positive path for cross-tenant
+ * list endpoints and the entitlement:create grant path (SITES-50526).
  */
 export async function createS2SConsumerReadAllToken() {
   return createS2SConsumerToken({

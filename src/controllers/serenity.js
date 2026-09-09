@@ -16,12 +16,14 @@ import {
   createResponse, forbidden, internalServerError, noContent, notFound, accepted,
 } from '@adobe/spacecat-shared-http-utils';
 import {
-  hasText, isNonEmptyObject, isValidUUID, siteIdentityFromUrlString,
+  hasText, isNonEmptyObject, isValidUUID,
 } from '@adobe/spacecat-shared-utils';
 import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
 
 import { createSerenityTransport } from '../support/serenity/rest-transport.js';
-import { isSemrushTransportError, unwrapTransportCause } from '../support/serenity/errors.js';
+import {
+  ERROR_CODES, isSemrushTransportError, unwrapTransportCause,
+} from '../support/serenity/errors.js';
 import {
   resolveBrandWorkspace,
   clearBrandWorkspaceCache,
@@ -31,12 +33,21 @@ import {
   handleCreatePrompts,
   handleUpdatePrompt,
   handleBulkDeletePrompts,
-  validateDeferPublish,
+  validateAsync,
   BULK_PROMPTS_MAX_ITEMS,
   resolveCallerId,
+  assertCreatePromptTagLimits,
 } from '../support/serenity/handlers/prompts.js';
 import { createAndEnqueueJob } from '../support/serenity/async-job-runner.js';
 import { CLASSIFY_PROMPTS_JOB_TYPE } from '../support/serenity/handlers/classify-prompts-job.js';
+import { ORIGIN_VALUE } from '../support/serenity/prompt-tags.js';
+import {
+  BULK_TAGS_JOB_TYPE,
+  BULK_TAGS_PUBLIC_JOB_TYPE,
+  handleBulkTags,
+  handleBulkTagsSubworkspace,
+  pageBulkFailures,
+} from '../support/serenity/handlers/bulk-tags-job.js';
 import {
   handleListMarkets,
   handleGetMarket,
@@ -68,6 +79,10 @@ import {
   handleCreateTagSubworkspace,
   handleUpdateTag,
   handleUpdateTagSubworkspace,
+  handleDeleteTag,
+  handleDeleteTagSubworkspace,
+  handleTagImpact,
+  handleTagImpactSubworkspace,
 } from '../support/serenity/handlers/tags.js';
 import { ensureSubworkspace, decommissionBrandWorkspace } from '../support/serenity/workspace-lifecycle.js';
 import { isSerenityActiveForBrand } from '../support/serenity/serenity-active.js';
@@ -77,7 +92,7 @@ import { marketForGeoTargetId } from '../support/serenity/locations.js';
 import { brandNeedles, classifyBrandedTag } from '../support/serenity/branded-classifier.js';
 import { computeWriteDeadline } from '../support/serenity/intent-classification.js';
 import AccessControlUtil from '../support/access-control-util.js';
-import { resolveBrandUuid } from '../support/prompts-storage.js';
+import { isServicePrincipal, resolveBrandUuid } from '../support/prompts-storage.js';
 import {
   getBrandAliases, getBrandUrlSources, getBrandCompetitors, updateBrand, getBrandBaseSiteId,
 } from '../support/brands-storage.js';
@@ -85,6 +100,8 @@ import { ErrorWithStatusCode, resolveSemrushImsToken as resolveImsTokenViaPromis
 import {
   ensureMarketSite,
   resolveSiteIdentity,
+  resolveMarketIdentity,
+  logMarketCreated,
   unlinkMarketSiteIfOrphaned,
 } from '../support/serenity/site-linkage.js';
 import { X_PROMISE_TOKEN_HEADER, PROMISE_TOKEN_REQUIRED_ERROR_CODE } from '../utils/constants.js';
@@ -108,6 +125,19 @@ const MAX_MARKETS = 50;
  */
 function safeError(msg) {
   return cleanupHeaderValue(String(msg || '')).slice(0, MAX_ERR_MSG_LEN);
+}
+
+function headerValue(headers, name) {
+  if (!headers || typeof headers !== 'object') {
+    return undefined;
+  }
+  if (typeof headers.get === 'function') {
+    return headers.get(name) ?? undefined;
+  }
+  const wanted = name.toLowerCase();
+  const entry = Object.entries(headers)
+    .find(([key]) => key.toLowerCase() === wanted);
+  return entry?.[1];
 }
 
 /**
@@ -154,7 +184,38 @@ function parsedQuery(context) {
     const n = parseInt(raw.limit, 10);
     out.limit = Number.isFinite(n) ? n : null;
   }
+  if (raw.failureLimit !== undefined) {
+    const n = parseInt(raw.failureLimit, 10);
+    out.failureLimit = Number.isFinite(n) ? n : null;
+  }
   return out;
+}
+
+const PUBLIC_JOB_ERROR_CODES = new Set([
+  ERROR_CODES.INVALID_REQUEST,
+  ERROR_CODES.PROMPT_NOT_FOUND,
+  ERROR_CODES.SERENITY_UPSTREAM_ERROR,
+  ERROR_CODES.TAG_LIMIT_EXCEEDED,
+  ERROR_CODES.INCOMPATIBLE_TAG_TAXONOMY,
+  ERROR_CODES.PROMPT_CORPUS_INCOMPLETE,
+]);
+
+function publicJobError(error) {
+  if (!error || typeof error !== 'object') {
+    return null;
+  }
+  const code = PUBLIC_JOB_ERROR_CODES.has(error.code) ? error.code : ERROR_CODES.JOB_FAILED;
+  let message = 'The background job failed';
+  if (code === ERROR_CODES.SERENITY_UPSTREAM_ERROR) {
+    message = 'Upstream request failed';
+  } else if (code !== ERROR_CODES.JOB_FAILED && typeof error.message === 'string') {
+    message = safeError(error.message).slice(0, 256) || message;
+  }
+  return {
+    code,
+    message,
+    retryable: error.retryable === true,
+  };
 }
 
 function errorTokenForStatus(status) {
@@ -168,13 +229,32 @@ function errorTokenForStatus(status) {
   }
 }
 
+/** @param {string} code @param {unknown} details @returns {object | undefined} */
+function publicErrorDetails(code, details) {
+  if (!details || typeof details !== 'object') {
+    return undefined;
+  }
+  const value = /** @type {any} */ (details);
+  if (code === ERROR_CODES.TAG_LIMIT_EXCEEDED
+    && Number.isInteger(value.attemptedCount)
+    && Number.isInteger(value.maxPromptTagIds)) {
+    return {
+      attemptedCount: value.attemptedCount,
+      maxPromptTagIds: value.maxPromptTagIds,
+    };
+  }
+  if (code === ERROR_CODES.TAG_FILTER_TOO_LARGE
+    && Number.isInteger(value.attemptedCount)
+    && Number.isInteger(value.maxTagFilterValues)) {
+    return {
+      attemptedCount: value.attemptedCount,
+      maxTagFilterValues: value.maxTagFilterValues,
+    };
+  }
+  return undefined;
+}
+
 /**
- * Request-context ids for the structured upstream-error log line
- * (SITES-49993): the tenant ids from the route plus the resolved Semrush
- * workspace from `authorize` — the latter is what attributes a
- * ProjectEngineApiError (which carries no ids of its own) to a tenant.
- * `auth` is the hoisted `authorize` result and may still be undefined (or its
- * `{error}` variant) when the throw happened before/inside authorization.
  * @param {object} [ctx]
  * @param {{ brandUuid?: string, workspaceId?: string | null }} [auth]
  * @returns {Record<string, unknown>}
@@ -195,8 +275,28 @@ function mapError(e, log, reqCtx = {}) {
     // error token in the response envelope; falls back to the status-based
     // default for plain throws.
     const errorToken = e.code && hasText(e.code) ? e.code : errorTokenForStatus(status);
+    const details = publicErrorDetails(errorToken, /** @type {any} */ (e).details);
+    // `serenityLogged` is set ad hoc by project-provisioning.js's
+    // cleanupAndRethrow, not declared on ErrorWithStatusCode itself.
+    const alreadyLogged = /** @type {{ serenityLogged?: boolean }} */ (e).serenityLogged;
+    if (e.code === ERROR_CODES.MAIN_BRAND_BENCHMARK_INVARIANT && !alreadyLogged) {
+      // The client-facing message is deliberately generic (LLMO-7421 review) —
+      // log the workspace/project/count detail server-side only, via the
+      // error's own properties. Skipped when `e.serenityLogged` is already set
+      // (project-provisioning.js's cleanupAndRethrow logged this exact failure
+      // on the flat provisioning path) so both provisioning paths log the
+      // invariant exactly once, not twice on one path and once on the other.
+      // reqCtx passed as a structured field, not string-interpolated into the
+      // message, so it can't be mistaken for (or exploit) log-format control
+      // characters in a caller-controlled value (MysticatBot review).
+      log?.error?.('Serenity controller error', { reqCtx, error: e });
+    }
     return createResponse(
-      { error: errorToken, message: safeError(e.message) },
+      {
+        error: errorToken,
+        message: safeError(e.message),
+        ...(details ? { details } : {}),
+      },
       status,
     );
   }
@@ -234,9 +334,11 @@ function mapError(e, log, reqCtx = {}) {
       message: 'Upstream request failed',
     }, 502);
   }
-  // Not an upstream error: keep the Error as the second argument — the stack
-  // is the useful part here — and carry the tenant ids in the message.
-  log.error(`Serenity controller error ${JSON.stringify(reqCtx)}`, err);
+  // Not an upstream error: reqCtx passed as a structured field (not
+  // JSON.stringify'd into the message string), matching the benchmark
+  // invariant branch above — a caller-controlled reqCtx value can't be
+  // mistaken for log-format control characters this way (MysticatBot review).
+  log.error('Serenity controller error', { reqCtx, error: err });
   return createResponse(
     { error: 'internalServerError', message: 'Internal server error' },
     500,
@@ -546,9 +648,10 @@ function SerenityController(context, log, env) {
         : await handleListPrompts(
           transport,
           ctx.dataAccess,
-          auth.brandUuid,
-          auth.workspaceId,
+          /** @type {string} */ (auth.brandUuid),
+          /** @type {string} */ (auth.workspaceId),
           parsedQuery(ctx),
+          log,
         );
       return createResponse(result, 200);
     } catch (e) {
@@ -564,16 +667,34 @@ function SerenityController(context, log, env) {
       if (auth.error) {
         return auth.error;
       }
-      // serenity-docs#33: CSV import is the ONLY bulk write path that routes to
-      // the async job runner — every other write path (single create, single
-      // edit, UI multi-add) stays synchronous. Routing is by SOURCE, not array
-      // length: `deferPublish` is the exact flag CSV-chunking already sets
-      // (see handleCreatePrompts' docstring) precisely because a UI multi-add
-      // never sets it, so a three-prompt UI add never pays queue+worker+publish
-      // latency. Flat-mode brands only for now — see this PR's report for why
-      // subworkspace-mode CSV import stays on the synchronous path.
+      // serenity-docs#33 (Layer 1, #2920): async routing is keyed off a DEDICATED
+      // `async: true` flag, NOT `deferPublish`. `deferPublish` is a publish-
+      // batching hint on the SYNCHRONOUS CSV-chunking path (set on every non-final
+      // chunk); conflating the two made that sync client silently receive 202s it
+      // never handled (a multi-chunk import broke). Keying async off its own
+      // explicit opt-in keeps every existing write path — single create/edit, UI
+      // multi-add, and the sync CSV-chunking client — synchronous and untouched,
+      // and makes the async job runner strictly opt-in for callers that will poll
+      // the job. BOTH modes enqueue: the worker reconstructs the write from the
+      // metadata below — `authMode` picks the subworkspace-vs-flat create branch,
+      // `workspaceId`/`parentWorkspaceId` give it the sub-workspace and org parent
+      // it needs.
       const body = ctx.data || {};
-      if (auth.mode !== 'subworkspace' && validateDeferPublish(body)) {
+      // Deliberately diverges from the v2/Postgres path's `deriveV2PromptOrigin`
+      // (prompts-storage.js), which reuses this SAME `isServicePrincipal`
+      // classifier but then honours a service principal's declared body
+      // `origin` (defaulting to `human` when absent/invalid). This proxy route
+      // has no such body-origin write surface — `origin` is a closed,
+      // server-owned dimension here (see makePromptTagInjector) — so a service
+      // principal is unconditionally `ai`, matching origin-dimension.md §3's
+      // "Serenity AI generation, service, ai" row. That is safe only because no
+      // non-AI service principal is expected to front this route; if one ever
+      // does (e.g. an S2S integration proxying human-authored prompts), it
+      // would be silently mislabeled `ai` with no way to declare `human`.
+      const originValue = isServicePrincipal(ctx?.attributes?.authInfo)
+        ? ORIGIN_VALUE.AI
+        : ORIGIN_VALUE.HUMAN;
+      if (validateAsync(body)) {
         const prompts = Array.isArray(body.prompts) ? body.prompts : [];
         if (prompts.length === 0) {
           return createResponse(
@@ -587,20 +708,35 @@ function SerenityController(context, log, env) {
             400,
           );
         }
+        assertCreatePromptTagLimits(prompts);
         const job = await createAndEnqueueJob(ctx, {
           jobType: CLASSIFY_PROMPTS_JOB_TYPE,
           metadata: {
             mode: 'create',
             brandId: auth.brandUuid,
+            // Backwards-compatible: the flat worker create path already reads
+            // `semrushWorkspaceId` as the workspace to write to — in subworkspace
+            // mode `auth.workspaceId` IS the sub-workspace, so the same key names
+            // the correct upstream target for both modes.
             semrushWorkspaceId: auth.workspaceId,
+            // Explicit reconstruction fields (this PR): `authMode` selects the
+            // worker's create branch; `workspaceId` is the sub-workspace the live
+            // project listing (buildSliceProjectMap) is enumerated from;
+            // `parentWorkspaceId` is the org parent, carried for completeness.
+            authMode: auth.mode,
+            workspaceId: auth.workspaceId,
+            parentWorkspaceId: auth.parentWorkspaceId,
             prompts,
+            originValue,
             // Authorship (LLMO-6289): capture the caller id at enqueue time — from
             // the auth profile, never the forwarded upstream bearer — so the async
             // classify-on-create job stamps the submitter, not the job runner.
             callerId: resolveCallerId(ctx),
           },
         });
-        return accepted({ jobId: job.getId(), status: job.getStatus() });
+        return accepted({
+          jobId: job.getId(), jobType: 'classifyPrompts', status: job.getStatus(),
+        });
       }
       const transport = buildTransport(ctx, imsToken);
       const classifyPromptType = await buildPromptTypeClassifier(ctx, auth.brandUuid);
@@ -626,6 +762,7 @@ function SerenityController(context, log, env) {
             // SERENITY_QUOTA_ALERTS_ENABLED) — never required, a no-op when unset.
             orgId: ctx?.params?.spaceCatId,
             brandId: auth.brandUuid,
+            originValue,
           },
         )
         : await handleCreatePrompts(
@@ -639,7 +776,7 @@ function SerenityController(context, log, env) {
           ctx.env,
           writeDeadline,
           callerId,
-          { orgId: ctx?.params?.spaceCatId },
+          { orgId: ctx?.params?.spaceCatId, originValue },
         );
       return createResponse(result, 200);
     } catch (e) {
@@ -735,6 +872,47 @@ function SerenityController(context, log, env) {
     }
   };
 
+  const bulkTagPrompts = async (ctx) => {
+    let auth;
+    try {
+      const imsToken = await resolveSemrushImsToken(ctx);
+      auth = await authorize(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const transport = buildTransport(ctx, imsToken);
+      const callerId = resolveCallerId(ctx);
+      const idempotencyKey = headerValue(ctx?.pathInfo?.headers, 'idempotency-key');
+      const result = auth.mode === 'subworkspace'
+        ? await handleBulkTagsSubworkspace(
+          ctx,
+          transport,
+          /** @type {string} */ (auth.brandUuid),
+          /** @type {string} */ (ctx?.params?.spaceCatId),
+          /** @type {string} */ (auth.workspaceId),
+          ctx.data || {},
+          callerId,
+          idempotencyKey,
+          log,
+        )
+        : await handleBulkTags(
+          ctx,
+          transport,
+          ctx.dataAccess,
+          /** @type {string} */ (auth.brandUuid),
+          /** @type {string} */ (ctx?.params?.spaceCatId),
+          /** @type {string} */ (auth.workspaceId),
+          ctx.data || {},
+          callerId,
+          idempotencyKey,
+          log,
+        );
+      return createResponse(result.body, result.status);
+    } catch (e) {
+      return mapError(e, log, reqCtxOf(ctx, auth));
+    }
+  };
+
   const listMarkets = async (ctx) => {
     let auth;
     try {
@@ -800,6 +978,13 @@ function SerenityController(context, log, env) {
     }
   };
 
+  /**
+   * @typedef {{
+   *   geoTargetId: number, languageCode: string|null, workspaceId: string,
+   *   promptCount?: number,
+   * }} MarketCreateSuccessBody
+   */
+
   const createMarket = async (ctx) => {
     let auth;
     try {
@@ -848,28 +1033,34 @@ function SerenityController(context, log, env) {
       if (auth.mode === 'subworkspace') {
         const brand = await loadBrand(ctx, auth.brandUuid);
         // The subworkspace create handler has no Site access (narrowed dataAccess),
-        // so derive the Semrush project domain from the supplied siteId HERE when
-        // brandDomain is absent. A supplied-but-unresolvable siteId is a hard 400.
-        // `primaryUrl` is always DERIVED here, never taken from the request. It is
-        // not part of the documented create-market contract, and passing a caller's
-        // value straight through would put an unvalidated string on the Semrush
-        // project. Set unconditionally so a client that sends one is ignored rather
-        // than trusted.
-        let effectiveBody = {
+        // so derive the Semrush project domain HERE via the same shared rule the
+        // flat handler uses (resolveMarketIdentity, markets.js): a resolving siteId
+        // is authoritative over any brandDomain also sent; brandDomain is consulted
+        // only when no siteId was supplied; a supplied-but-unresolvable siteId is a
+        // hard 400 (see the pre-check above — suppliedSiteIdentity is already
+        // guaranteed non-null here whenever a siteId was supplied). Both branches go
+        // through the one function so this call site cannot silently diverge from
+        // the flat handler's. `primaryUrl` is always DERIVED here, never taken from
+        // the request — unlike the flat handler, which does trust a caller-supplied
+        // primaryUrl when deriving from brandDomain. That primaryUrl is not part of
+        // the documented create-market contract on this path, and passing a
+        // caller's value straight through would put an unvalidated string on the
+        // Semrush project, so it is deliberately omitted from the call below.
+        const identity = resolveMarketIdentity(
+          suppliedSiteIdentity,
+          !!suppliedSiteId,
+          requestBody.brandDomain,
+          undefined,
+        );
+        // Only `primaryUrl` can carry a subpath — `brandDomain` is a bare FQDN
+        // because a path there is rejected upstream. The two travel together —
+        // resolveMarketIdentity never resolves one without the other — so both
+        // are assigned the same way, with no separate null-coalescing on either.
+        const effectiveBody = {
           ...requestBody,
-          primaryUrl: siteIdentityFromUrlString(requestBody.brandDomain),
+          brandDomain: identity.domain,
+          primaryUrl: identity.primaryUrl,
         };
-        if (suppliedSiteIdentity && !hasText(requestBody.brandDomain)) {
-          // Both values from the read above, for the same reason the domain is
-          // derived here at all: the handler has no Site access. Only `primaryUrl`
-          // can carry a subpath — `brandDomain` is a bare FQDN because a path there
-          // is rejected upstream.
-          effectiveBody = {
-            ...effectiveBody,
-            brandDomain: suppliedSiteIdentity.domain,
-            primaryUrl: suppliedSiteIdentity.primaryUrl ?? undefined,
-          };
-        }
         // Brand aliases are brand-level but region-scoped: the create handler
         // clamps each to the new market's region before writing brand_names.
         const brandAliases = await getBrandAliases(
@@ -990,6 +1181,34 @@ function SerenityController(context, log, env) {
             // exactly the failure this whole path exists to have fixed.
             log?.warn?.('serenity create-market: 201 without a projectId — market left unlinked', {
               brandId: auth.brandUuid, siteId: linkedSiteId,
+            });
+          }
+          // Logged unconditionally on the outer `status === 201`, NOT nested inside
+          // `if (projectId)` — a malformed 201 body still deserves the create-market
+          // event (with `semrushProjectId: null`) so ops isn't blind to it, and it
+          // matches the flat handler's own unconditional log. The cast below is a
+          // type ASSERTION (not the `projectId` runtime guard above): TS accepts it
+          // directly off the `status === 201` narrowing without also needing the
+          // `'projectId' in` check, because that check exists for the DB link's
+          // runtime safety, not for this cast's type-checking.
+          {
+            const successBody = /** @type {MarketCreateSuccessBody} */ (result.body);
+            logMarketCreated(log, {
+              brandId: auth.brandUuid,
+              geoTargetId: successBody.geoTargetId,
+              languageCode: successBody.languageCode,
+              // The supplied/resolved siteId, not `linkedSiteId` — the brand_sites
+              // mirror write is best-effort and can fail independently of a valid
+              // siteId being supplied, which would otherwise log a null siteId for
+              // a market that in fact had one. Matches the flat handler's own
+              // telemetry, which reports the supplied siteId the same way.
+              siteId: suppliedSiteId ?? null,
+              brandDomain: effectiveBody.brandDomain,
+              primaryUrl: effectiveBody.primaryUrl,
+              semrushWorkspaceId: successBody.workspaceId,
+              semrushProjectId: projectId,
+              generatePrompts: genMarketTopics,
+              promptCount: successBody.promptCount,
             });
           }
         }
@@ -1201,6 +1420,89 @@ function SerenityController(context, log, env) {
     }
   };
 
+  /**
+   * DELETE /serenity/tags/:tagId — delete a category (or sub-category) and its
+   * whole subtree, preserving every carrying prompt (category-delete.md). The
+   * market slice travels as query params (`geoTargetId`, `languageCode`) since
+   * a DELETE has no body. Dispatches by workspace mode, mirroring updateTag.
+   */
+  const deleteTag = async (ctx) => {
+    let auth;
+    try {
+      const imsToken = await resolveSemrushImsToken(ctx);
+      const { tagId } = ctx?.params || {};
+      if (!hasText(tagId)) {
+        throw new ErrorWithStatusCode('Missing tagId', 400);
+      }
+      auth = await authorize(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const transport = buildTransport(ctx, imsToken);
+      const ifMatch = headerValue(ctx?.pathInfo?.headers, 'if-match');
+      if (auth.mode === 'subworkspace') {
+        await handleDeleteTagSubworkspace(
+          transport,
+          /** @type {string} */ (auth.workspaceId),
+          tagId,
+          parsedQuery(ctx),
+          log,
+          ifMatch,
+        );
+      } else {
+        await handleDeleteTag(
+          transport,
+          ctx.dataAccess,
+          /** @type {string} */ (auth.brandUuid),
+          /** @type {string} */ (auth.workspaceId),
+          tagId,
+          parsedQuery(ctx),
+          log,
+          ifMatch,
+        );
+      }
+      return noContent();
+    } catch (e) {
+      return mapError(e, log, reqCtxOf(ctx, auth));
+    }
+  };
+
+  const getTagImpact = async (ctx) => {
+    let auth;
+    try {
+      const imsToken = await resolveSemrushImsToken(ctx);
+      const { tagId } = ctx?.params || {};
+      if (!hasText(tagId)) {
+        throw new ErrorWithStatusCode('Missing tagId', 400);
+      }
+      auth = await authorize(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const transport = buildTransport(ctx, imsToken);
+      const result = auth.mode === 'subworkspace'
+        ? await handleTagImpactSubworkspace(
+          transport,
+          /** @type {string} */ (auth.workspaceId),
+          tagId,
+          parsedQuery(ctx),
+          log,
+        )
+        : await handleTagImpact(
+          transport,
+          ctx.dataAccess,
+          /** @type {string} */ (auth.brandUuid),
+          /** @type {string} */ (auth.workspaceId),
+          tagId,
+          parsedQuery(ctx),
+          log,
+        );
+      return createResponse(result.body, result.status, { ETag: result.body.revision });
+    } catch (e) {
+      return mapError(e, log, reqCtxOf(ctx, auth));
+    }
+  };
+
   const listModels = async (ctx) => {
     let auth;
     try {
@@ -1292,7 +1594,7 @@ function SerenityController(context, log, env) {
         return forbidden('User does not have access to this organization');
       }
       const transport = buildTransport(ctx, imsToken);
-      const result = await listLanguageCatalog(transport);
+      const result = await listLanguageCatalog(transport, log);
       return createResponse(result, 200);
     } catch (e) {
       // Org-level route: no authorize()/workspace resolution here.
@@ -1905,10 +2207,93 @@ function SerenityController(context, log, env) {
     }
   };
 
+  /**
+   * GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/jobs/:jobId —
+   * polls a serenity-classify-prompts async job (serenity-docs#33 Layer 1, the
+   * companion to createPrompts' 202 CSV-import path). No upstream Semrush call, so
+   * no IMS token is resolved here; access control reuses `authorize` (same
+   * org/brand access + serenity-active gate as every other serenity handler).
+   *
+   * Returns a STABLE, secret-free contract — exactly `{ jobId, status, result,
+   * error }`, camelCase, which the polling UI is built against. `status` is the
+   * AsyncJob state (IN_PROGRESS | COMPLETED | FAILED); `result` is
+   * `job.getResult()` (present when COMPLETED); `error` is `job.getError()`
+   * (present when FAILED, `{ code, message }`). The job's metadata (which carries
+   * the promise token and other internals) is NEVER returned.
+   *
+   * Ownership guard: a job whose metadata `brandId` does not match the addressed
+   * brand 404s exactly like a missing job — a caller must not be able to probe or
+   * read another brand's jobs by id.
+   */
+  const getPromptsJobStatus = async (ctx) => {
+    let auth;
+    try {
+      auth = await authorize(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const { jobId } = ctx?.params || {};
+      if (!isValidUUID(jobId)) {
+        return createResponse(
+          { error: 'invalidRequest', message: 'jobId must be a UUID' },
+          400,
+        );
+      }
+      const AsyncJob = ctx?.dataAccess?.AsyncJob;
+      if (!AsyncJob || typeof AsyncJob.findById !== 'function') {
+        return internalServerError('AsyncJob data-access not available');
+      }
+      const job = await AsyncJob.findById(jobId);
+      // A job that does not exist AND a job that belongs to another brand answer
+      // the same 404: whether the id is unknown or simply not yours is not the
+      // caller's business (mirrors authorize's brand-not-found contract).
+      const jobBrandId = job?.getMetadata?.()?.brandId;
+      if (!job || jobBrandId !== auth.brandUuid) {
+        return notFound(`Job not found: ${jobId}`);
+      }
+      const metadata = job.getMetadata?.() ?? {};
+      /** @type {'classifyPrompts' | 'bulkTags' | 'tagImpact'} */
+      let publicJobType = 'classifyPrompts';
+      if (metadata.jobType === BULK_TAGS_JOB_TYPE) {
+        publicJobType = BULK_TAGS_PUBLIC_JOB_TYPE;
+      } else if (metadata.jobType === 'serenity-tag-impact') {
+        publicJobType = 'tagImpact';
+      }
+      const query = parsedQuery(ctx);
+      const failureLimit = typeof query.failureLimit === 'number'
+        ? query.failureLimit
+        : undefined;
+      const status = job.getStatus();
+      const rawResult = status === 'COMPLETED' ? job.getResult?.() ?? null : null;
+      const result = publicJobType === BULK_TAGS_PUBLIC_JOB_TYPE && rawResult
+        ? pageBulkFailures(
+          rawResult,
+          typeof query.failureCursor === 'string' ? query.failureCursor : undefined,
+          failureLimit,
+        )
+        : rawResult;
+      const error = status === 'FAILED' ? publicJobError(job.getError?.()) : null;
+      return createResponse(
+        {
+          jobId: job.getId(),
+          jobType: publicJobType,
+          status,
+          result,
+          error,
+        },
+        200,
+      );
+    } catch (e) {
+      return mapError(e, log, reqCtxOf(ctx, auth));
+    }
+  };
+
   return {
     listPrompts,
     createPrompts,
+    getPromptsJobStatus,
     updatePrompt,
+    bulkTagPrompts,
     bulkDeletePrompts,
     listMarkets,
     getMarket,
@@ -1917,6 +2302,8 @@ function SerenityController(context, log, env) {
     listTags,
     createTag,
     updateTag,
+    getTagImpact,
+    deleteTag,
     listModels,
     listOrgModels,
     listOrgLanguages,

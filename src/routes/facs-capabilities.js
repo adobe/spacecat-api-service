@@ -155,8 +155,8 @@ const routeFacsCapabilities = {
     'POST /sites', // hasAdminAccess
     'DELETE /sites/:siteId', // restricted (always 403)
     'PATCH /sites/:siteId/:auditType', // hasAdminAccess (sites-audits-toggle)
-    'POST /sites/:siteId/site-enrollments', // hasAdminAccess
-    'POST /sites/:siteId/entitlements', // hasAdminAccess
+    'POST /sites/:siteId/site-enrollments', // hasEntitlementCreateAccess (admin || S2S cap)
+    'POST /sites/:siteId/entitlements', // hasEntitlementCreateAccess (admin || S2S cap)
     // Prompt-suggestion schedule (re-)provisioning — admin-or-S2S (dedicated
     // promptSuggestionSchedule:write capability); not a customer FACS surface.
     'POST /sites/:siteId/prompt-suggestion-schedules', // authorizeWrite (admin || S2S cap)
@@ -164,8 +164,8 @@ const routeFacsCapabilities = {
     'DELETE /projects/:projectId', // hasAdminAccess
     'POST /organizations', // hasAdminAccess
     'DELETE /organizations/:organizationId', // restricted (always 403)
-    'POST /organizations/:organizationId/entitlements', // hasAdminAccess
-    'PATCH /organizations/:organizationId/entitlements', // hasAdminAccess
+    'POST /organizations/:organizationId/entitlements', // hasEntitlementCreateAccess (admin || S2S cap)
+    'PATCH /organizations/:organizationId/entitlements', // hasS2SAdminAccess (S2S-admin only)
     'PUT /organizations/:organizationId/feature-flags/:product/:flagName', // hasAdminAccess
     'DELETE /organizations/:organizationId/feature-flags/:product/:flagName', // hasAdminAccess
     'POST /plg/records', // hasAdminAccess
@@ -177,6 +177,7 @@ const routeFacsCapabilities = {
     // Admin-only reads
     'GET /organizations', // admin OR S2S readAll
     'GET /organizations/by-product-code/:productCode', // admin OR S2S readAll
+    'GET /organizations/by-access-map-sheet/:productCode', // hasAdminReadAccess only
     'GET /sites', // admin OR S2S readAll
     'GET /sites.csv', // hasAdminReadAccess
     'GET /sites.xlsx', // hasAdminReadAccess
@@ -195,8 +196,7 @@ const routeFacsCapabilities = {
     'POST /hooks/site-detection/cdn/:hookSecret', // hookSecret in path
     'POST /hooks/site-detection/rum/:hookSecret', // hookSecret in path
     'POST /webhooks/github', // HMAC-signed webhook
-    'GET /slack/events', // Slack signature verification
-    'POST /slack/events', // Slack signature verification
+    'POST /slack/events', // Slack signature verification (slackSignatureWrapper)
     'POST /slack/channels/invite-by-user-id', // Slack-internal
     'GET /trigger', // internal scheduler
 
@@ -243,6 +243,14 @@ const routeFacsCapabilities = {
     'POST /consumers/register', // admin
   ],
 
+  /**
+   * Products with FACS enforcement live (consumed by `facsWrapper` — see its
+   * `FACS_ONBOARDED_PRODUCTS` docs for the fail-closed semantics). Any product with
+   * routes below MUST be listed here, or those routes silently bypass FACS —
+   * enforced by `test/routes/facs-capabilities.test.js`. Add one when its routes go live.
+   */
+  FACS_ONBOARDED_PRODUCTS: ['LLMO', 'ASO'],
+
   PRODUCTS_ROUTES: {
   // LLMO — first product to enrol in FACS.
   //
@@ -280,6 +288,7 @@ const routeFacsCapabilities = {
       // Site-level LLMO config
       'POST /sites/:siteId/llmo/config': 'llmo/can_configure',
       'PATCH /sites/:siteId/llmo/config': 'llmo/can_configure',
+      'POST /sites/:siteId/llmo/brand-claims/request': 'llmo/can_configure',
       // Site-level scraper config — a site write surfaced through the
       // generic /config namespace rather than under /llmo/, but
       // configuration nonetheless.
@@ -508,6 +517,7 @@ const routeFacsCapabilities = {
       'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/deploy': 'llmo/can_configure',
       'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/plan': 'llmo/can_configure',
       'GET /sites/:siteId/llmo/cdn-onboard/cloudfront/permissions': 'llmo/can_configure',
+      'GET /sites/:siteId/llmo/cdn-onboard/cloudfront/template': 'llmo/can_configure',
       'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/log-delivery': 'llmo/can_configure',
       'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/log-rescan': 'llmo/can_configure',
       'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/config': 'llmo/can_configure',
@@ -517,6 +527,7 @@ const routeFacsCapabilities = {
       'POST /sites/:siteId/llmo/cdn-onboard/cloudflare/routes': 'llmo/can_configure',
       'GET /sites/:siteId/llmo/cdn-onboard/akamai/config': 'llmo/can_configure',
       'GET /sites/:siteId/llmo/cdn-onboard/akamai/properties': 'llmo/can_configure',
+      'GET /sites/:siteId/llmo/cdn-onboard/akamai/versions': 'llmo/can_configure',
       'POST /sites/:siteId/llmo/cdn-onboard/akamai/plan': 'llmo/can_configure',
       'POST /sites/:siteId/llmo/cdn-onboard/akamai/deploy': 'llmo/can_configure',
       'POST /sites/:siteId/llmo/cdn-onboard/akamai/activate': 'llmo/can_configure',
@@ -660,12 +671,14 @@ const routeFacsCapabilities = {
       'POST /v2/orgs/:spaceCatId/topics': 'llmo/can_configure',
       // Serenity proxy writes — prompts / markets / models under brand
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts': 'llmo/can_configure',
+      'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/bulk-tags': 'llmo/can_configure',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/bulk-delete': 'llmo/can_configure',
       'PATCH /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/:semrushPromptId': 'llmo/can_configure',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets': 'llmo/can_configure',
       'DELETE /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode': 'llmo/can_configure',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags': 'llmo/can_configure',
       'PATCH /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags/:tagId': 'llmo/can_configure',
+      'DELETE /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags/:tagId': 'llmo/can_configure',
       'PUT /v2/orgs/:spaceCatId/brands/:brandId/serenity/models': 'llmo/can_configure',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/activate': 'llmo/can_configure',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/deactivate': 'llmo/can_configure',
@@ -754,6 +767,7 @@ const routeFacsCapabilities = {
       'GET /sites/:siteId/opportunities/:opportunityId/fixes/by-status/:status': 'llmo/can_view',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions': 'llmo/can_view',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': 'llmo/can_view',
+      'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/guidance-csv/:refKey': 'llmo/can_view',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/fixes': 'llmo/can_view',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status': 'llmo/can_view',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status/paged/:limit': 'llmo/can_view',
@@ -863,13 +877,16 @@ const routeFacsCapabilities = {
       'GET /trial-users/email-preferences': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId': 'llmo/can_view',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/markets': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/prompts/:promptId': 'llmo/can_view',
       // Serenity proxy (Semrush AIO replacement) — reads under brand
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts': 'llmo/can_view',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/jobs/:jobId': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags': 'llmo/can_view',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags/:tagId/impact': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/models': 'llmo/can_view',
       // Org-level Serenity catalog reads (no brandId).
       'GET /v2/orgs/:spaceCatId/serenity/models': 'llmo/can_view',
@@ -879,7 +896,13 @@ const routeFacsCapabilities = {
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/access': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/prompts': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/cited-domains': 'llmo/can_view',
+      // Brand Claims response feed. Sits under Brand Presence within the ABV product, and
+      // is a read of the brand's own answer corpus — same `can_view` gate as its siblings.
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/responses': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/sentiment-overview': 'llmo/can_view',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/subreddits': 'llmo/can_view',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/reddit-threads': 'llmo/can_view',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/youtube-videos': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/topics': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/topics/:topicId/prompts': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/owned-urls': 'llmo/can_view',
@@ -1074,6 +1097,7 @@ const routeFacsCapabilities = {
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status/paged/:limit': 'aso/can_view',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/by-status/:status/paged/:limit/:cursor': 'aso/can_view',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId': 'aso/can_view',
+      'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/guidance-csv/:refKey': 'aso/can_view',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/fixes': 'aso/can_view',
       'GET /sites/:siteId/edge-deployed-urls': 'aso/can_view',
       'GET /sites/:siteId/fixes': 'aso/can_view',
@@ -1272,6 +1296,35 @@ const routeFacsCapabilities = {
   },
 
   /**
+   * Per-product COMPOSITE primary resource (opt-in). When the PRIMARY resource resolves
+   * for a listed product, `facsWrapper` delegates the grant decision to the resolver named
+   * by `resolver` (registered in `compositeResolvers`, see
+   * `src/support/facs-composite-resolvers.js`) instead of the plain state-layer read — for a
+   * product whose primary resource is scoped by an extra qualifier.
+   *
+   * ASO: the `site` primary is scoped by an opportunity-type qualifier
+   * (`facs_access_mappings.composite_key_value_1`; 'all' = site-wide). `asoOpportunityComposite`
+   * enforces (site × opportunity-type): opportunity-item routes grant on 'all' OR the
+   * opportunity's own type; the opportunity list defers to the controller for result-filtering;
+   * every other ASO site route grants on any active site binding carrying the capability.
+   * See mysticat-architecture/platform/decisions/rebac-composite-resource-key.md.
+   */
+  PRODUCTS_FACS_COMPOSITE_RESOURCE: {
+    // `compositeKeySlots` is the DEFINITIVE, ordered list of composite scope
+    // dimensions a product owns. Index i maps 1:1 to DB columns
+    // composite_key_type_<i+1> / composite_key_value_<i+1>: slot 1 (ASO →
+    // 'opportunity') is fixed here, NOT client-chosen, so it can never be
+    // repurposed and a future slot 2 (a different entity) can't be cross-wired
+    // with it. The API anchors compositeKeyType<N> to these values on write.
+    // Products absent from this map accept no composite key (stored ('all','all')).
+    ASO: {
+      resourceType: 'site',
+      resolver: 'asoOpportunityComposite',
+      compositeKeySlots: ['opportunity'],
+    },
+  },
+
+  /**
    * Every `:param` from `src/routes/index.js` that no product currently
    * treats as a FACS resource. Together with the union of every product's
    * resource aliases above, this exhaustively classifies every `:param`
@@ -1316,12 +1369,15 @@ const routeFacsCapabilities = {
     // target / language / semrush prompt id / aio tag id), not SpaceCat
     // resources. The enclosing :brandId is the FACS resource for these routes.
     'semrushPromptId', 'geoTargetId', 'languageCode', 'tagId',
+    // gads guidance-CSV download selector (one of the four `*_ref` keys) — a
+    // label naming which stored CSV to presign, not a FACS resource.
+    'refKey',
     // Filter / pagination / format params (not entities):
     'base64PageUrl', 'base64Url', 'baseURL', 'channel', 'cursor',
     'dataSource', 'deliveryType', 'endDate', 'eventType',
-    'exportId', 'flagName', 'geo', 'handlerType', 'hookSecret', 'limit',
+    'exportId', 'failureCursor', 'failureLimit', 'flagName', 'geo', 'handlerType', 'hookSecret', 'limit',
     'metric', 'processingType', 'product', 'productCode', 'projectName',
-    'sheetType', 'source', 'startDate', 'status', 'tier', 'tokenType', 'type',
+    'sheetType', 'source', 'startDate', 'status', 'tagFilterMode', 'tagPath', 'tier', 'tokenType', 'type',
     'url', 'version', 'week',
     // Single-row id used by the state-layer management endpoints
     // (`/state/access-mappings/:id` — the binding row's own UUID, never a
