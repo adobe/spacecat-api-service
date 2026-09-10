@@ -56,6 +56,14 @@ export async function activateBrandWorkspaceJobHandler(context, job) {
   const { brandId, wasPending = false } = metadata;
 
   const brand = await dataAccess.Brand.findById(brandId);
+  if (!brand) {
+    // A concurrent hard-delete raced ahead of this chain — report it the same way a
+    // no-longer-active brand is reported above, rather than crashing on brand.getStatus().
+    log?.info?.('activate-brand-workspace-job: brand no longer exists by the time this chain ran; reporting deleted instead of throwing', {
+      brandId, wasPending,
+    });
+    return { status: 207, body: { brandId, status: 'deleted', markets: [] } };
+  }
   const currentStatus = brand.getStatus?.();
 
   if (currentStatus === 'active') {

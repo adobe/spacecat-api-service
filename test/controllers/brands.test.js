@@ -5382,7 +5382,7 @@ describe('Brands Controller', () => {
       });
 
       it('mints a provisioning attempt and enqueues the provision->create-market job chain, answering 202', async () => {
-        const upsertStub = sinon.stub().resolves({ id: 'forced-id', name: 'New Brand' });
+        const upsertStub = sinon.stub().resolves({ id: 'forced-id', name: 'New Brand', status: 'pending' });
         const beginStub = sinon.stub().resolves(true);
         const enqueueStub = sinon.stub().resolves({ getId: () => 'job-xyz' });
         const updateProvisioningJobIdStub = sinon.stub().resolves(true);
@@ -5403,6 +5403,9 @@ describe('Brands Controller', () => {
 
         expect(response.status).to.equal(202);
         const body = await response.json();
+        // LLMO-7418 external-review Medium finding: the 202 body's `status` must be the
+        // brand's REAL persisted status (same shape the sync 201 response returns), not a
+        // hardcoded literal that clobbers it via spread ordering.
         expect(body.status).to.equal('pending');
         expect(body.jobId).to.equal('job-xyz');
 
@@ -5787,7 +5790,10 @@ describe('Brands Controller', () => {
 
       it('Phase 4: bare create mints a provisioning attempt and enqueues provision-workspace-job with NO chained job when async: true', async () => {
         const bareStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-bare' });
-        const upsertStub = sinon.stub().resolves({ id: 'forced-id', name: 'New Brand' });
+        // A baseSiteId is supplied below, so upsertBrand's own hasAnchor invariant persists
+        // this brand as 'active' immediately — the async path only defers Semrush
+        // sub-workspace provisioning, not the brand's own lifecycle status.
+        const upsertStub = sinon.stub().resolves({ id: 'forced-id', name: 'New Brand', status: 'active' });
         const enqueueStub = sinon.stub().resolves({ getId: () => 'job-xyz' });
         const beginStub = sinon.stub().resolves(true);
         const updateProvisioningJobIdStub = sinon.stub().resolves(true);
@@ -5809,7 +5815,10 @@ describe('Brands Controller', () => {
 
         expect(response.status).to.equal(202);
         const body = await response.json();
-        expect(body.status).to.equal('pending');
+        // LLMO-7418 external-review Medium finding: the 202 body's `status` must be the
+        // brand's REAL persisted status (same shape the sync 201 response returns), not a
+        // hardcoded literal that clobbers it via spread ordering.
+        expect(body.status).to.equal('active');
         expect(body.jobId).to.equal('job-xyz');
         // The bare-sync provisioner never runs on the async path.
         expect(bareStub.called).to.equal(false);

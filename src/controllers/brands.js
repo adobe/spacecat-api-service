@@ -2142,7 +2142,7 @@ function BrandsController(ctx, log, env) {
             });
           });
           return createResponse(
-            { ...withSerenityState(created, serenityScopes), status: 'pending', jobId: job.getId() },
+            { ...withSerenityState(created, serenityScopes), jobId: job.getId() },
             202,
           );
         } catch (enqueueError) {
@@ -2228,7 +2228,7 @@ function BrandsController(ctx, log, env) {
             });
           });
           return createResponse(
-            { ...withSerenityState(created, serenityScopes), status: 'pending', jobId: job.getId() },
+            { ...withSerenityState(created, serenityScopes), jobId: job.getId() },
             202,
           );
         } catch (enqueueError) {
