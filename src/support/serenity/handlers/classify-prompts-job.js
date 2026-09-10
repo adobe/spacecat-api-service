@@ -22,6 +22,7 @@ import { invalidateTagCacheForProject } from './markets.js';
 import {
   normalizePromptInput,
   createOnePrompt,
+  buildUpdateMetadata,
   makePromptTagInjector,
   makeIntentInjector,
   mapLimit,
@@ -102,10 +103,15 @@ export async function buildPromptTypeClassifier(dataAccess, brandId) {
  *   carries the promise token and the current requeue depth).
  * @param {string} semrushWorkspaceId
  * @param {Array<{ projectId: string, promptId: string, text: string, tagIds: string[] }>} items
+ * @param {string} [callerId] - resolved caller id (see `resolveCallerId`), carried
+ *   forward from whichever mode enqueued this requeue so the eventual authorship
+ *   stamp on the reclassified prompts still reflects the original submitter, not
+ *   the job runner. Defaults to `'unknown'` in {@link reclassifyExisting}, never
+ *   here, so a caller that forgets to thread it fails loud in that one place.
  * @returns {Promise<string|null>} the new job's id, or `null` if there was
  *   nothing to requeue, or the depth cap was reached.
  */
-async function requeuePending(context, job, semrushWorkspaceId, items) {
+async function requeuePending(context, job, semrushWorkspaceId, items, callerId) {
   if (items.length === 0) {
     return null;
   }
@@ -120,7 +126,7 @@ async function requeuePending(context, job, semrushWorkspaceId, items) {
     promiseToken: currentMetadata.promiseToken,
     promisePair: currentMetadata.promisePair,
     metadata: {
-      mode: 'reclassify', semrushWorkspaceId, items, requeueDepth: currentDepth + 1,
+      mode: 'reclassify', semrushWorkspaceId, items, requeueDepth: currentDepth + 1, callerId,
     },
   });
   return newJob.getId();
@@ -294,7 +300,13 @@ async function createAndClassify(context, job, transport, metadata) {
     failed.push({ text: '', status: 502, message: `publish: ${pubErr.message}` });
   }
 
-  const requeuedJobId = await requeuePending(context, job, semrushWorkspaceId, pendingItems);
+  const requeuedJobId = await requeuePending(
+    context,
+    job,
+    semrushWorkspaceId,
+    pendingItems,
+    callerId,
+  );
 
   return {
     created,
@@ -327,7 +339,11 @@ async function createAndClassify(context, job, transport, metadata) {
  */
 async function reclassifyExisting(context, job, transport, metadata) {
   const { env, log } = context;
-  const { semrushWorkspaceId } = metadata;
+  // Authorship (LLMO-6289 follow-up): carried forward from the create-mode job
+  // that requeued this reclassify pass (see requeuePending) — this is the human/
+  // service that submitted the original prompts, not the job runner. Jobs
+  // requeued before this field existed default to 'unknown' rather than crashing.
+  const { semrushWorkspaceId, callerId = 'unknown' } = metadata;
   const items = Array.isArray(metadata.items) ? metadata.items : [];
 
   const intentByText = await classifyPromptIntentsUnbounded(
@@ -381,6 +397,25 @@ async function reclassifyExisting(context, job, transport, metadata) {
       affectedProjectIds.push(projectId);
     } catch (e) {
       failed.push({ projectId, status: e.status || 500, message: e.message });
+      return;
+    }
+    // Best-effort authorship stamp, same order-of-operations as the sync edit
+    // path's applyUpsertTagWrites: the tag write above is the point of the
+    // operation, so a failed stamp here is logged rather than fatal — it must
+    // never discard tags that were already successfully replaced.
+    try {
+      await transport.patchPromptsMetadataBatch(
+        semrushWorkspaceId,
+        projectId,
+        patchItems.map((item) => ({
+          promptId: item.id,
+          metadata: buildUpdateMetadata(callerId),
+        })),
+      );
+    } catch (e) {
+      log?.warn?.('serenity reclassify: tags replaced but the authorship stamp failed — Last modified is stale', {
+        projectId, count: patchItems.length, error: e?.message,
+      });
     }
   }));
 
@@ -399,7 +434,13 @@ async function reclassifyExisting(context, job, transport, metadata) {
     });
   }
 
-  const requeuedJobId = await requeuePending(context, job, semrushWorkspaceId, stillPending);
+  const requeuedJobId = await requeuePending(
+    context,
+    job,
+    semrushWorkspaceId,
+    stillPending,
+    callerId,
+  );
 
   return {
     patched,

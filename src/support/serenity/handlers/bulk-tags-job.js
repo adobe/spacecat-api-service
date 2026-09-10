@@ -21,6 +21,7 @@ import { readTagTreeSnapshot, incompatibleTaxonomyError } from '../tag-tree.js';
 import { createAndEnqueueJob, retryableJobError } from '../async-job-runner.js';
 import {
   assertPromptTagLimit,
+  buildUpdateMetadata,
   BULK_CREATE_CONCURRENCY,
   listAllProjectPrompts,
   mapLimit,
@@ -437,6 +438,11 @@ async function acceptParsedBulkTags({
         operation: parsed.operation,
         tagIds: parsed.tagIds,
         normalizedFilter,
+        // Authorship (LLMO-6289 follow-up): capture the caller id at enqueue time
+        // so the worker can stamp updated_by on every prompt it touches, instead
+        // of leaving the tag-only mutation attributed to whoever last edited the
+        // prompt through a different path.
+        callerId,
         ...(key ? {
           requestHash: hash,
           idempotencyExpiresAt: now + BULK_IDEMPOTENCY_TTL_SECONDS * 1000,
@@ -617,6 +623,10 @@ export async function handleBulkTagsSubworkspace(
  */
 export async function bulkTagsHandler(context, job, accessToken, injectedTransport) {
   const metadata = job.getMetadata() ?? {};
+  // Authorship (LLMO-6289 follow-up): the caller id captured at enqueue time —
+  // jobs enqueued before this field existed default to 'unknown' rather than
+  // crashing the worker.
+  const { callerId = 'unknown' } = metadata;
   const transport = injectedTransport
     ?? createSerenityTransport({ env: context.env, imsToken: accessToken });
   if (metadata.publishRecoveryPending === true) {
@@ -717,7 +727,7 @@ export async function bulkTagsHandler(context, job, accessToken, injectedTranspo
         references: next,
         replace: true,
       }]);
-      return { updated: true };
+      return { updated: true, semrushPromptId: promptId };
     } catch (error) {
       return {
         failure: {
@@ -734,11 +744,34 @@ export async function bulkTagsHandler(context, job, accessToken, injectedTranspo
     }
   });
   const failures = outcomes.filter((outcome) => outcome.failure).map((outcome) => outcome.failure);
-  const updatedCount = outcomes.filter((outcome) => outcome.updated).length;
+  const updated = outcomes.filter((outcome) => outcome.updated);
+  const updatedCount = updated.length;
   const unchangedCount = outcomes.filter((outcome) => outcome.unchanged).length;
 
   if (updatedCount > 0) {
     invalidateTagCacheForProject(metadata.workspaceId, metadata.projectId);
+    // Best-effort authorship stamp, same order-of-operations as the sync edit
+    // path's applyUpsertTagWrites: the tag write above is the point of the
+    // operation, so a failed stamp here is logged rather than fatal — it must
+    // never discard tag changes the caller already got a successful response
+    // for.
+    try {
+      await transport.patchPromptsMetadataBatch(
+        metadata.workspaceId,
+        metadata.projectId,
+        updated.map((outcome) => ({
+          promptId: outcome.semrushPromptId,
+          metadata: buildUpdateMetadata(callerId),
+        })),
+      );
+    } catch (e) {
+      context.log?.warn?.('serenity bulk tags: tags updated but the authorship stamp failed — Last modified is stale', {
+        workspaceId: metadata.workspaceId,
+        projectId: metadata.projectId,
+        count: updatedCount,
+        error: e?.message,
+      });
+    }
   }
   /** @type {{
    *   state: 'SKIPPED' | 'SUCCEEDED' | 'FAILED',

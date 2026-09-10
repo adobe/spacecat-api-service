@@ -58,6 +58,7 @@ function workerTransport(prompts, update = sinon.stub().resolves(), tree = {}) {
     })),
     listPromptsByTags: sinon.stub().resolves({ items: prompts }),
     updatePromptTagsByIds: update,
+    patchPromptsMetadataBatch: sinon.stub().resolves(),
     publishProject: sinon.stub().resolves(),
   };
 }
@@ -381,6 +382,56 @@ describe('bulkTagsHandler worker accounting', () => {
     expect(transport.updatePromptTagsByIds).to.have.been.calledOnce;
     expect(transport.publishProject).to.have.been.calledOnceWith('ws', 'project');
     expect(result.publish).to.deep.equal({ state: 'SUCCEEDED', error: null });
+  });
+
+  it('stamps authorship metadata on every prompt whose tags were actually updated', async () => {
+    const transport = workerTransport([
+      { id: 'one', tags: [] },
+      { id: 'two', tags: [{ id: 'family' }] },
+    ]);
+    const result = await bulkTagsHandler(
+      { env: {}, log: {} },
+      workerJob(['one', 'two'], { callerId: 'user@example.com' }),
+      'token',
+      transport,
+    );
+
+    expect(result).to.deep.include({ updatedCount: 1, unchangedCount: 1 });
+    expect(transport.patchPromptsMetadataBatch).to.have.been.calledOnce;
+    const [ws, project, items] = transport.patchPromptsMetadataBatch.firstCall.args;
+    expect(ws).to.equal('ws');
+    expect(project).to.equal('project');
+    expect(items).to.have.lengthOf(1);
+    expect(items[0].promptId).to.equal('one');
+    expect(items[0].metadata.updated_by).to.equal('user@example.com');
+  });
+
+  it('defaults the authorship stamp to unknown when the job predates callerId', async () => {
+    const transport = workerTransport([{ id: 'one', tags: [] }]);
+    await bulkTagsHandler({ env: {}, log: {} }, workerJob(['one']), 'token', transport);
+
+    const [, , items] = transport.patchPromptsMetadataBatch.firstCall.args;
+    expect(items[0].metadata.updated_by).to.equal('unknown');
+  });
+
+  it('does not stamp metadata when nothing was updated', async () => {
+    const transport = workerTransport([{ id: 'one', tags: [{ id: 'family' }] }]);
+    await bulkTagsHandler({ env: {}, log: {} }, workerJob(['one']), 'token', transport);
+
+    expect(transport.patchPromptsMetadataBatch).not.to.have.been.called;
+  });
+
+  it('reports success even when the best-effort authorship stamp fails', async () => {
+    const transport = workerTransport([{ id: 'one', tags: [] }]);
+    transport.patchPromptsMetadataBatch.rejects(new Error('upstream metadata write failed'));
+    const warn = sinon.stub();
+
+    const result = await bulkTagsHandler({ env: {}, log: { warn } }, workerJob(['one']), 'token', transport);
+
+    expect(result).to.deep.include({ outcome: 'SUCCEEDED', updatedCount: 1, failureCount: 0 });
+    expect(transport.updatePromptTagsByIds).to.have.been.calledOnce;
+    expect(warn).to.have.been.calledOnce;
+    expect(warn.firstCall.args[0]).to.include('authorship stamp failed');
   });
 
   it('applies the acceptance-normalized facet groups to the worker-time corpus', async () => {
