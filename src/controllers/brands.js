@@ -98,6 +98,7 @@ import {
   isSerenityActiveForBrand,
   isSerenityActiveForOrg,
   isSerenityUiActiveForOrg,
+  isAsyncProvisioningKillSwitched,
 } from '../support/serenity/serenity-active.js';
 import {
   buildReservedIdentities,
@@ -1870,6 +1871,18 @@ function BrandsController(ctx, log, env) {
           // is NOT permanent: the synchronous branch is the LLMO-7352 bug pattern itself, slated
           // for removal once every known caller has migrated to `async: true`.
           if (validateAsync(brandData)) {
+            // LLMO-7418 external-review Finding 15: server-side kill switch — lets ops disable
+            // the async path for this organization without a deploy if it misbehaves in
+            // production. The caller falls back to the synchronous path on its own retry.
+            if (await isAsyncProvisioningKillSwitched(context, spaceCatId, log)) {
+              return createResponse(
+                {
+                  error: 'asyncProvisioningDisabled',
+                  message: 'Async provisioning is temporarily disabled for this organization; retry without async: true',
+                },
+                503,
+              );
+            }
             // brandAliases/urls/competitors are NOT read here (unlike the sync branch below): the
             // brand row this section persists below (upsertBrand) writes them to storage, and the
             // async chain's orchestration reads them back from there — the same DB-backed source
@@ -1948,6 +1961,17 @@ function BrandsController(ctx, log, env) {
           // sub-workspace provisioning off to provision-workspace-job — no chained job, since a
           // bare create has no project to create once the workspace is ready.
           //
+          // LLMO-7418 external-review Finding 15: server-side kill switch — see the
+          // hasSemrushMarket branch above for rationale.
+          if (await isAsyncProvisioningKillSwitched(context, spaceCatId, log)) {
+            return createResponse(
+              {
+                error: 'asyncProvisioningDisabled',
+                message: 'Async provisioning is temporarily disabled for this organization; retry without async: true',
+              },
+              503,
+            );
+          }
           // Resolved and validated HERE, before any write — same rationale as the
           // hasSemrushMarket branch: a missing org workspace config must never leave a
           // persisted, permanently-inert brand row behind.

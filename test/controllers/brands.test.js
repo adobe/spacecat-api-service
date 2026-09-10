@@ -5319,6 +5319,9 @@ describe('Brands Controller', () => {
         createAndEnqueueJob = sinon.stub().resolves({ getId: () => 'job-abc' }),
         promoteProvisioningFailed = sinon.stub().resolves(true),
         updateProvisioningJobId = sinon.stub().resolves(true),
+        // LLMO-7418 external-review Finding 15: kill switch off by default (async available);
+        // specific tests override it to resolve(true) to exercise the 503 gate.
+        isAsyncProvisioningKillSwitched = sinon.stub().resolves(false),
       } = {}) {
         const Mocked = await esmock('../../src/controllers/brands.js', {
           '../../src/support/serenity/brand-provisioning.js': {
@@ -5328,7 +5331,10 @@ describe('Brands Controller', () => {
             provisionBrandSubworkspaceBare:
               provisionBrandSubworkspaceBare || sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-bare' }),
           },
-          '../../src/support/serenity/serenity-active.js': { isSerenityActiveForOrg },
+          '../../src/support/serenity/serenity-active.js': {
+            isSerenityActiveForOrg,
+            isAsyncProvisioningKillSwitched,
+          },
           '../../src/support/serenity/workspace-resolver.js': { resolveWorkspaceId },
           '../../src/support/serenity/async-job-runner.js': { createAndEnqueueJob },
           '../../src/support/serenity/handlers/provision-workspace-job.js': {
@@ -5516,6 +5522,28 @@ describe('Brands Controller', () => {
         });
 
         expect(response.status).to.equal(409);
+        expect(enqueueStub).to.not.have.been.called;
+      });
+
+      it('returns 503 without enqueuing when the async kill switch is on (LLMO-7418 external-review Finding 15)', async () => {
+        const beginStub = sinon.stub().resolves(true);
+        const enqueueStub = sinon.stub().resolves({ getId: () => 'job-xyz' });
+        const controller = await buildController({
+          beginProvisioningAttempt: beginStub,
+          createAndEnqueueJob: enqueueStub,
+          isAsyncProvisioningKillSwitched: sinon.stub().resolves(true),
+        });
+
+        const response = await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: { ...semrushData },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(503);
+        expect(beginStub).to.not.have.been.called;
         expect(enqueueStub).to.not.have.been.called;
       });
 
@@ -5860,6 +5888,28 @@ describe('Brands Controller', () => {
         });
 
         expect(response.status).to.equal(409);
+        expect(enqueueStub.called).to.equal(false);
+      });
+
+      it('Phase 4: bare create returns 503 without enqueuing when the async kill switch is on (LLMO-7418 external-review Finding 15)', async () => {
+        const beginStub = sinon.stub().resolves(true);
+        const enqueueStub = sinon.stub().resolves({ getId: () => 'job-xyz' });
+        const controller = await buildController({
+          beginProvisioningAttempt: beginStub,
+          createAndEnqueueJob: enqueueStub,
+          isAsyncProvisioningKillSwitched: sinon.stub().resolves(true),
+        });
+
+        const response = await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: { name: 'New Brand', baseSiteId: 'site-123', async: true },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(503);
+        expect(beginStub.called).to.equal(false);
         expect(enqueueStub.called).to.equal(false);
       });
 

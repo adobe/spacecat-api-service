@@ -92,7 +92,10 @@ import {
   handleTagImpactSubworkspace,
 } from '../support/serenity/handlers/tags.js';
 import { ensureSubworkspace, decommissionBrandWorkspace } from '../support/serenity/workspace-lifecycle.js';
-import { isSerenityActiveForBrand } from '../support/serenity/serenity-active.js';
+import {
+  isSerenityActiveForBrand,
+  isAsyncProvisioningKillSwitched,
+} from '../support/serenity/serenity-active.js';
 import { marketForGeoTargetId } from '../support/serenity/locations.js';
 import { brandNeedles, classifyBrandedTag } from '../support/serenity/branded-classifier.js';
 import { computeWriteDeadline } from '../support/serenity/intent-classification.js';
@@ -1046,6 +1049,18 @@ function SerenityController(context, log, env) {
         // synchronous branch is the LLMO-7352 bug pattern itself, not a valid alternative, and
         // is slated for removal once every known caller has migrated to `async: true`.
         if (validateAsync(requestBody)) {
+          // LLMO-7418 external-review Finding 15: server-side kill switch — lets ops disable
+          // the async path for this organization without a deploy if it misbehaves in
+          // production. The caller falls back to the synchronous path on its own retry.
+          if (await isAsyncProvisioningKillSwitched(ctx, ctx?.params?.spaceCatId, log)) {
+            return createResponse(
+              {
+                error: 'asyncProvisioningDisabled',
+                message: 'Async provisioning is temporarily disabled for this organization; retry without async: true',
+              },
+              503,
+            );
+          }
           // The worker's existing-pointer fast path (provision-workspace-job.js) polls THIS
           // brand's already-canonical workspace rather than provisioning a new one — every
           // brand reaching this branch already has one (`auth.mode === 'subworkspace'` IS that
@@ -1680,6 +1695,17 @@ function SerenityController(context, log, env) {
         // `provision-workspace-job` ->
         // `serenity-activate-brand-workspace` job chain instead.
         if (validateAsync(body)) {
+          // LLMO-7418 external-review Finding 15: server-side kill switch — see createMarket's
+          // async branch for the full rationale.
+          if (await isAsyncProvisioningKillSwitched(ctx, ctx?.params?.spaceCatId, log)) {
+            return createResponse(
+              {
+                error: 'asyncProvisioningDisabled',
+                message: 'Async provisioning is temporarily disabled for this organization; retry without async: true',
+              },
+              503,
+            );
+          }
           // LLMO-7418 external-review Finding 9: see createMarket's async branch for the full
           // rationale — reconcile a stale in-flight attempt (reusing the sync guard's own logic)
           // before minting a new one, since beginProvisioningAttempt's own CAS has no staleness
@@ -1818,6 +1844,17 @@ function SerenityController(context, log, env) {
         // activate-brand-workspace-job.js's save-divergence handling matches this branch's own
         // 207-not-502 contract.
         if (validateAsync(body)) {
+          // LLMO-7418 external-review Finding 15: server-side kill switch — see createMarket's
+          // async branch for the full rationale.
+          if (await isAsyncProvisioningKillSwitched(ctx, ctx?.params?.spaceCatId, log)) {
+            return createResponse(
+              {
+                error: 'asyncProvisioningDisabled',
+                message: 'Async provisioning is temporarily disabled for this organization; retry without async: true',
+              },
+              503,
+            );
+          }
           // LLMO-7418 external-review Finding 9: see createMarket's async branch (and the
           // wasPending branch above) for the full rationale.
           await guardAgainstConcurrentProvisioning(
@@ -1944,6 +1981,17 @@ function SerenityController(context, log, env) {
       // in-request settle-poll + project-create/publish sequence), slated for removal once every
       // known caller has migrated to `async: true`.
       if (validateAsync(body)) {
+        // LLMO-7418 external-review Finding 15: server-side kill switch — see createMarket's
+        // async branch for the full rationale.
+        if (await isAsyncProvisioningKillSwitched(ctx, ctx?.params?.spaceCatId, log)) {
+          return createResponse(
+            {
+              error: 'asyncProvisioningDisabled',
+              message: 'Async provisioning is temporarily disabled for this organization; retry without async: true',
+            },
+            503,
+          );
+        }
         // LLMO-7418 external-review Finding 9: see the createMarket async branch above for the
         // full rationale — reconcile a stale in-flight attempt before minting a new one, since
         // beginProvisioningAttempt's own CAS has no staleness awareness.

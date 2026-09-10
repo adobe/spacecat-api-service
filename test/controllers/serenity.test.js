@@ -199,6 +199,7 @@ describe('SerenityController', () => {
   let resolveWorkspaceIdStub;
   let resolveBrandWorkspaceStub;
   let isSerenityActiveStub;
+  let isAsyncProvisioningKillSwitchedStub;
   let createTransportStub;
   let resolveBrandUuidStub;
   let getBrandAliasesStub;
@@ -238,6 +239,9 @@ describe('SerenityController', () => {
     // existing assertion that drives a brand-level route reaches its handler.
     // The "serenity inactive" describe overrides this to false.
     isSerenityActiveStub = sinon.stub().resolves(true);
+    // LLMO-7418 external-review Finding 15: kill switch off by default (async provisioning
+    // available); specific tests override it to resolve(true) to exercise the 503 gate.
+    isAsyncProvisioningKillSwitchedStub = sinon.stub().resolves(false);
     decommissionStub = sinon.stub().resolves();
     ensureSubworkspaceStub = sinon.stub().resolves(SUBWS);
     clearBrandWorkspaceCacheStub = sinon.stub();
@@ -355,6 +359,7 @@ describe('SerenityController', () => {
       },
       '../../src/support/serenity/serenity-active.js': {
         isSerenityActiveForBrand: isSerenityActiveStub,
+        isAsyncProvisioningKillSwitched: isAsyncProvisioningKillSwitchedStub,
       },
       '../../src/support/access-control-util.js': MockAccessControlUtil,
       '../../src/support/prompts-storage.js': {
@@ -1751,6 +1756,20 @@ describe('SerenityController', () => {
       expect(createAndEnqueueJobStub).to.not.have.been.called;
     });
 
+    it('createMarket answers 503 without enqueuing anything when the async kill switch is on (LLMO-7418 external-review Finding 15)', async () => {
+      isAsyncProvisioningKillSwitchedStub.resolves(true);
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.createMarket(fakeContext({
+        data: {
+          market: 'us', languageCode: 'en', brandDomain: 'x.com', brandNames: ['X'], async: true,
+        },
+      }));
+      expect(response.status).to.equal(503);
+      expect(guardAgainstConcurrentProvisioningStub).to.not.have.been.called;
+      expect(beginProvisioningAttemptStub).to.not.have.been.called;
+      expect(createAndEnqueueJobStub).to.not.have.been.called;
+    });
+
     it('createMarket runs the SAME synchronous orchestration it always has when async is absent (regression: default behavior unchanged)', async () => {
       orchestrateCreateMarketSubworkspaceStub.resolves({
         status: 201, body: { brandId: BRAND, geoTargetId: 2840, languageCode: 'en' },
@@ -2306,6 +2325,21 @@ describe('SerenityController', () => {
       expect(createAndEnqueueJobStub).to.not.have.been.called;
     });
 
+    it('activate answers 503 without enqueuing when async: true and the async kill switch is on (LLMO-7418 external-review Finding 15)', async () => {
+      isAsyncProvisioningKillSwitchedStub.resolves(true);
+      const brand = makeBrandModel({ getStatus: () => 'active' });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.activate(fakeContext({
+        brand,
+        data: {
+          brandDomain: 'x.com', brandNames: ['X'], markets: [{ market: 'us', languageCode: 'en' }], async: true,
+        },
+      }));
+      expect(response.status).to.equal(503);
+      expect(beginProvisioningAttemptStub).to.not.have.been.called;
+      expect(createAndEnqueueJobStub).to.not.have.been.called;
+    });
+
     it('activate 400s when async is present but not a boolean', async () => {
       const brand = makeBrandModel({ getStatus: () => 'active' });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
@@ -2506,6 +2540,19 @@ describe('SerenityController', () => {
       expect(createAndEnqueueJobStub).to.not.have.been.called;
     });
 
+    it('Phase 4: pending→active activation answers 503 without enqueuing when the async kill switch is on (LLMO-7418 external-review Finding 15)', async () => {
+      getBrandBaseSiteIdStub.resolves('primary-site');
+      isAsyncProvisioningKillSwitchedStub.resolves(true);
+      const brand = makeBrandModel({});
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.activate(fakeContext({
+        brand, data: { brandNames: ['X'], async: true },
+      }));
+      expect(response.status).to.equal(503);
+      expect(beginProvisioningAttemptStub).to.not.have.been.called;
+      expect(createAndEnqueueJobStub).to.not.have.been.called;
+    });
+
     it('Phase 4: pending→active activation 400s when async is present but not a boolean', async () => {
       getBrandBaseSiteIdStub.resolves('primary-site');
       const brand = makeBrandModel({});
@@ -2570,6 +2617,18 @@ describe('SerenityController', () => {
         brand, data: { brandNames: ['X'], async: true },
       }));
       expect(response.status).to.equal(409);
+      expect(createAndEnqueueJobStub).to.not.have.been.called;
+    });
+
+    it('Phase 4: bare reactivation answers 503 without enqueuing when the async kill switch is on (LLMO-7418 external-review Finding 15)', async () => {
+      isAsyncProvisioningKillSwitchedStub.resolves(true);
+      const brand = makeBrandModel({ getStatus: () => 'active' });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.activate(fakeContext({
+        brand, data: { brandNames: ['X'], async: true },
+      }));
+      expect(response.status).to.equal(503);
+      expect(beginProvisioningAttemptStub).to.not.have.been.called;
       expect(createAndEnqueueJobStub).to.not.have.been.called;
     });
 

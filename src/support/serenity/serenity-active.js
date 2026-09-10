@@ -48,6 +48,17 @@ export const SERENITY_FEATURE_FLAG_NAME = 'serenity';
 export const SERENITY_UI_FEATURE_FLAG_NAME = 'serenity_ui';
 
 /**
+ * Server-side kill switch for the opt-in `async: true` provisioning path (LLMO-7418
+ * external-review Finding 15). Unlike `SERENITY_FEATURE_FLAG_NAME` above (an opt-IN
+ * rollout switch, off by default), this is an opt-OUT switch: the async path stays
+ * available by default, and an explicit `true` row disables it org-wide. Lets ops
+ * flip async provisioning off for one organization without a deploy, if it
+ * misbehaves in production — there was previously no way to do this short of a
+ * code change reverting every `async: true` call site at once.
+ */
+export const ASYNC_PROVISIONING_KILL_SWITCH_FLAG_NAME = 'serenity_async_provisioning_disabled';
+
+/**
  * Module-scoped TTL+size-bounded cache, mirroring the workspace-resolver cache
  * (warm Lambda containers reuse module state, so a Map here amortises the
  * PostgREST flag read over the container's lifetime).
@@ -237,5 +248,36 @@ export async function isSerenityActiveForBrand(ctx, spaceCatId, brandUuid, log) 
  */
 export async function isSerenityUiActiveForOrg(ctx, spaceCatId, log) {
   const scopes = await readCachedFlagScopes(ctx, spaceCatId, SERENITY_UI_FEATURE_FLAG_NAME, log);
+  return scopes?.orgRow?.flag_value === true;
+}
+
+/**
+ * LLMO-7418 external-review Finding 15: server-side kill switch for the opt-in
+ * `async: true` provisioning path. Reads the org-wide
+ * `LLMO/serenity_async_provisioning_disabled` feature flag (cached, same
+ * machinery as every other flag in this file).
+ *
+ * Deliberately reuses the SAME "absent/unreadable resolves to `false`"
+ * fail-safe shape as every other predicate here — it happens to be the safe
+ * default in both directions: for a rollout flag, `false` means "stay off";
+ * for this kill switch, `false` means "stay on" (async provisioning
+ * available). A transient PostgREST read failure must never silently disable
+ * async provisioning org-wide, so this is NOT inverted to fail closed.
+ *
+ * @param {object} ctx - Request context (uses
+ *   `ctx.dataAccess.services.postgrestClient`).
+ * @param {string} spaceCatId - SpaceCat organization UUID.
+ * @param {object} [log] - Optional logger (used to surface a missing client /
+ *   a read error without throwing on this hot path).
+ * @returns {Promise<boolean>} `true` only when the flag is explicitly on
+ *   (async provisioning is disabled for this organization).
+ */
+export async function isAsyncProvisioningKillSwitched(ctx, spaceCatId, log) {
+  const scopes = await readCachedFlagScopes(
+    ctx,
+    spaceCatId,
+    ASYNC_PROVISIONING_KILL_SWITCH_FLAG_NAME,
+    log,
+  );
   return scopes?.orgRow?.flag_value === true;
 }
