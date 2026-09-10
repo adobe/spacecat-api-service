@@ -48,6 +48,17 @@ export default class AccessControlUtil {
     return new AccessControlUtil(context);
   }
 
+  /**
+   * Whether the current request was authenticated as an S2S consumer (`is_s2s_consumer`
+   * JWT claim) - a lightweight, context-only check usable before/without constructing a
+   * full `AccessControlUtil` instance (e.g. to decide whether to skip IMS token resolution).
+   * @param {object} context - Request context.
+   * @returns {boolean}
+   */
+  static isS2SConsumer(context) {
+    return context?.attributes?.authInfo?.isS2SConsumer?.() ?? false;
+  }
+
   constructor(context) {
     const { log, pathInfo, attributes } = context;
     const endpoint = `${pathInfo?.method?.toUpperCase()} ${pathInfo?.suffix}`;

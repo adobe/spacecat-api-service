@@ -554,6 +554,7 @@ const routeFacsCapabilities = {
 
       // Site LLMO surfaces — read side
       'GET /sites/:siteId/llmo/brand-claims': 'llmo/can_view',
+      'GET /sites/:siteId/llmo/brand-claims/weeks': 'llmo/can_view',
       'GET /sites/:siteId/llmo/config': 'llmo/can_view',
       'GET /sites/:siteId/llmo/customer-intent': 'llmo/can_view',
       'GET /sites/:siteId/llmo/data': 'llmo/can_view',
@@ -675,6 +676,7 @@ const routeFacsCapabilities = {
       'POST /v2/orgs/:spaceCatId/topics': 'llmo/can_configure',
       // Serenity proxy writes — prompts / markets / models under brand
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts': 'llmo/can_configure',
+      'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/bulk-tags': 'llmo/can_configure',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/bulk-delete': 'llmo/can_configure',
       'PATCH /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/:semrushPromptId': 'llmo/can_configure',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets': 'llmo/can_configure',
@@ -889,6 +891,7 @@ const routeFacsCapabilities = {
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags': 'llmo/can_view',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags/:tagId/impact': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/models': 'llmo/can_view',
       // Org-level Serenity catalog reads (no brandId).
       'GET /v2/orgs/:spaceCatId/serenity/models': 'llmo/can_view',
@@ -1377,9 +1380,9 @@ const routeFacsCapabilities = {
     // Filter / pagination / format params (not entities):
     'base64PageUrl', 'base64Url', 'baseURL', 'channel', 'cursor',
     'dataSource', 'deliveryType', 'endDate', 'eventType',
-    'exportId', 'flagName', 'geo', 'handlerType', 'hookSecret', 'limit',
+    'exportId', 'failureCursor', 'failureLimit', 'flagName', 'geo', 'handlerType', 'hookSecret', 'limit',
     'metric', 'processingType', 'product', 'productCode', 'projectName',
-    'sheetType', 'source', 'startDate', 'status', 'tier', 'tokenType', 'type',
+    'sheetType', 'source', 'startDate', 'status', 'tagFilterMode', 'tagPath', 'tier', 'tokenType', 'type',
     'url', 'version', 'week',
     // Single-row id used by the state-layer management endpoints
     // (`/state/access-mappings/:id` — the binding row's own UUID, never a
