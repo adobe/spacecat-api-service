@@ -533,18 +533,24 @@ describe('handlers/provision-workspace-job.js (LLMO-7352 / LLMO-7418)', () => {
         expect(createAndEnqueueJobStub).to.not.have.been.called;
       });
 
-      it('does NOT throw and does NOT re-fail the (already ready) brand when the chain enqueue itself fails after all retries (LLMO-7418 external-review Finding 12)', async () => {
+      it('THROWS (so the job goes FAILED) without defacing or cleaning up the already-ready brand when the chain enqueue fails after all retries (LLMO-7418 external-review Finding 12)', async () => {
         transport.getWorkspaceStatus.resolves({ status: 'active' });
         createAndEnqueueJobStub.rejects(new Error('sqs down'));
         const { provisionWorkspaceHandler } = await loadHandler();
         const job = makeJob(makeMetadata({ chainedJobType: 'serenity-create-market' }));
 
-        const result = await provisionWorkspaceHandler(context, job, 'token');
+        // A configured chain that can't be enqueued is a real failure of the requested operation
+        // (a market was never created) — it must NOT poll back as a green success. Throwing sends
+        // the job to FAILED so the caller learns the chained work did not run.
+        await expect(
+          provisionWorkspaceHandler(context, job, 'token'),
+        ).to.be.rejectedWith('chained provisioning job could not be enqueued after retries');
 
-        expect(result).to.deep.equal({ provisioningStatus: 'ready' });
+        // The workspace was already promoted to canonical — never fail the ready brand, and never
+        // empty its now-live workspace.
         expect(promoteProvisioningFailedStub).to.not.have.been.called;
-        // Retried the full bounded count before giving up — one transient blip alone must not
-        // strand the brand (LLMO-7418 external-review Finding 12).
+        expect(emptyWorkspaceBestEffortStub).to.not.have.been.called;
+        // Retried the full bounded count before giving up.
         expect(createAndEnqueueJobStub.callCount).to.equal(3);
       });
 
