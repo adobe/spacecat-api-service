@@ -345,6 +345,65 @@ describe('acceptBulkTags idempotency', () => {
   });
 });
 
+describe('acceptBulkTags taxonomy freshness', () => {
+  it('bypasses a cached snapshot when validating a newly created mutation tag', async () => {
+    let familyExists = false;
+    const transport = {
+      listProjectTags: sinon.stub().callsFake((_, __, options = {}) => {
+        let items = [{ id: 'tag-root', name: 'tag', children_count: familyExists ? 1 : 0 }];
+        if (options.parentId === 'tag-root') {
+          items = familyExists ? [{
+            id: 'family',
+            name: 'Family',
+            parent_id: 'tag-root',
+            children_count: 0,
+            path: [{ id: 'tag-root', name: 'tag' }],
+          }] : [];
+        }
+        return Promise.resolve({ items });
+      }),
+    };
+    await readTagTreeSnapshot(transport, 'ws', 'project', {});
+    familyExists = true;
+
+    const job = {
+      getId: () => 'bulk-job',
+      getStatus: () => 'IN_PROGRESS',
+    };
+    const create = sinon.stub().resolves(job);
+    const sendMessage = sinon.stub().resolves();
+    const response = await acceptBulkTags({
+      context: {
+        dataAccess: { AsyncJob: { create } },
+        sqs: { sendMessage },
+        env: { SERENITY_JOB_RUNNER_QUEUE_URL: 'queue-url' },
+        log: { error: sinon.stub(), warn: sinon.stub() },
+      },
+      transport,
+      brandId: 'brand',
+      orgId: 'org',
+      workspaceId: 'ws',
+      projectId: 'project',
+      body: {
+        geoTargetId: 1,
+        languageCode: 'en',
+        operation: 'assign',
+        tagIds: ['family'],
+        filter: { tagFilterMode: 'faceted-v1' },
+      },
+      callerId: 'caller',
+      log: {},
+      promiseToken: FORWARDED_PROMISE_TOKEN,
+      promisePair: SEMRUSH_PROMISE_PAIR,
+    });
+
+    expect(response.status).to.equal(202);
+    expect(transport.listProjectTags).to.have.callCount(3);
+    expect(create).to.have.been.calledOnce;
+    expect(sendMessage).to.have.been.calledOnce;
+  });
+});
+
 describe('bulk tags promise credential forwarding', () => {
   const body = {
     geoTargetId: 1,
