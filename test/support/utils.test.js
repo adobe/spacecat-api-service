@@ -2146,6 +2146,49 @@ describe('utils', () => {
     });
   });
 
+  describe('exchangePromiseTokenResponse', () => {
+    it('returns the complete IMS rotation response while exchangePromiseToken preserves its access-token return type', async () => {
+      const exchangeToken = sinon.stub().resolves({
+        access_token: 'access-token',
+        promise_token: 'rotated-token',
+        promise_token_expires_in: 14399,
+        token_type: 'bearer',
+      });
+      const createFrom = sinon.stub().returns({ exchangeToken });
+      const {
+        exchangePromiseToken,
+        exchangePromiseTokenResponse,
+      } = await esmock('../../src/support/utils.js', {
+        '@adobe/spacecat-shared-ims-client': {
+          ImsPromiseClient: {
+            createFrom,
+            CLIENT_TYPE: { CONSUMER: 'consumer', EMITTER: 'emitter' },
+          },
+        },
+      });
+      const context = { env: {} };
+
+      const result = await exchangePromiseTokenResponse(context, 'raw-token', 'SEMRUSH');
+      const accessToken = await exchangePromiseToken(context, 'next-raw-token', 'SEMRUSH');
+
+      expect(result).to.deep.equal({
+        access_token: 'access-token',
+        promise_token: 'rotated-token',
+        promise_token_expires_in: 14399,
+        token_type: 'bearer',
+      });
+      expect(accessToken).to.equal('access-token');
+      expect(createFrom).to.have.been.calledTwice;
+      expect(createFrom).to.have.been.calledWith(
+        context,
+        'consumer',
+        { pair: 'SEMRUSH' },
+      );
+      expect(exchangeToken).to.have.been.calledWith('raw-token', false);
+      expect(exchangeToken).to.have.been.calledWith('next-raw-token', false);
+    });
+  });
+
   describe('resolveSemrushImsToken audience selection', () => {
     let resolveSemrushImsToken;
     let createFromStub;

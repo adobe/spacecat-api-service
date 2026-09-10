@@ -102,6 +102,7 @@ import {
   resolvePromisePair,
   getRawPromiseToken,
   getSemrushPair,
+  exchangePromiseTokenResponse,
 } from '../support/utils.js';
 import {
   ensureMarketSite,
@@ -912,11 +913,41 @@ function SerenityController(context, log, env) {
   const bulkTagPrompts = async (ctx) => {
     let auth;
     try {
-      const imsToken = await resolveSemrushImsToken(ctx);
       auth = await authorize(ctx);
       if (auth.error) {
         return auth.error;
       }
+      // Bulk tags need an access token during acceptance to validate the
+      // taxonomy/filter, and the worker needs the rotated token produced by
+      // that same exchange. Do not let the generic enqueue path mint a new
+      // emitter token from the Spacecat session.
+      const rawPromiseToken = getRawPromiseToken(ctx);
+      if (!rawPromiseToken) {
+        return createResponse(
+          { error: 'invalidRequest', message: `Bulk tag operations require a promise token; send the ${X_PROMISE_TOKEN_HEADER} header` },
+          400,
+        );
+      }
+      const promisePair = resolvePromisePair(ctx);
+      if (promisePair !== getSemrushPair()) {
+        return createResponse(
+          { error: 'invalidRequest', message: 'Bulk tag operations require the x-promise-audience: semrush header' },
+          400,
+        );
+      }
+      let exchangeResult;
+      try {
+        exchangeResult = await exchangePromiseTokenResponse(ctx, rawPromiseToken, promisePair);
+      } catch (error) {
+        log.error('serenity bulk tags: promise token exchange failed', { error: error?.message });
+        throw new ErrorWithStatusCode('Invalid or expired promise token', 401);
+      }
+      const imsToken = exchangeResult.access_token;
+      const rotatedPromiseToken = {
+        promise_token: exchangeResult.promise_token,
+        expires_in: exchangeResult.promise_token_expires_in,
+        ...(exchangeResult.token_type ? { token_type: exchangeResult.token_type } : {}),
+      };
       const transport = buildTransport(ctx, imsToken);
       const callerId = resolveCallerId(ctx);
       const idempotencyKey = headerValue(ctx?.pathInfo?.headers, 'idempotency-key');
@@ -931,6 +962,8 @@ function SerenityController(context, log, env) {
           callerId,
           idempotencyKey,
           log,
+          rotatedPromiseToken,
+          /** @type {string} */ (promisePair),
         )
         : await handleBulkTags(
           ctx,
@@ -943,6 +976,8 @@ function SerenityController(context, log, env) {
           callerId,
           idempotencyKey,
           log,
+          rotatedPromiseToken,
+          /** @type {string} */ (promisePair),
         );
       return createResponse(result.body, result.status);
     } catch (e) {

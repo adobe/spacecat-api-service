@@ -970,16 +970,21 @@ export async function getIMSPromiseToken(context, pair) {
 }
 
 /**
- * Exchange a promise token for an IMS access token.
+ * Exchanges a promise token and returns IMS's complete rotation response. Use
+ * this when the caller needs both the immediate access token and the rotated
+ * promise token for a deferred follow-up operation.
  * @param {object} context - The context of the request.
- * @param {string} promiseToken - The promise token to exchange (e.g. from request payload).
- * @param {string} [pair] - Optional IMS promise-pair selector (see
- *   {@link resolvePromisePair}). Omitted => the default pair. MUST match the pair
- *   that minted the token, or IMS rejects the exchange.
- * @returns {Promise<{ access_token: string }>} The access token response.
+ * @param {string} promiseToken - The promise token to exchange.
+ * @param {string} [pair] - Optional IMS promise-pair selector.
+ * @returns {Promise<{
+ *   access_token: string,
+ *   promise_token: string,
+ *   promise_token_expires_in: number,
+ *   token_type?: string,
+ * }>} The access token and rotated promise token response.
  * @throws {ErrorWithStatusCode} - If the promise token is missing.
  */
-export async function exchangePromiseToken(context, promiseToken, pair) {
+export async function exchangePromiseTokenResponse(context, promiseToken, pair) {
   if (!promiseToken) {
     throw new ErrorWithStatusCode('Missing promise token', STATUS_BAD_REQUEST);
   }
@@ -990,11 +995,25 @@ export async function exchangePromiseToken(context, promiseToken, pair) {
     { pair },
   );
 
-  const accessToken = (await imsClient.exchangeToken(
+  return imsClient.exchangeToken(
     promiseToken,
     !!context.env?.AUTOFIX_CRYPT_SECRET && !!context.env?.AUTOFIX_CRYPT_SALT,
-  )).access_token;
-  return accessToken;
+  );
+}
+
+/**
+ * Exchange a promise token for an IMS access token.
+ * @param {object} context - The context of the request.
+ * @param {string} promiseToken - The promise token to exchange (e.g. from request payload).
+ * @param {string} [pair] - Optional IMS promise-pair selector (see
+ *   {@link resolvePromisePair}). Omitted => the default pair. MUST match the pair
+ *   that minted the token, or IMS rejects the exchange.
+ * @returns {Promise<{ access_token: string }>} The access token response.
+ * @throws {ErrorWithStatusCode} - If the promise token is missing.
+ */
+export async function exchangePromiseToken(context, promiseToken, pair) {
+  const result = await exchangePromiseTokenResponse(context, promiseToken, pair);
+  return result.access_token;
 }
 
 /**

@@ -197,6 +197,7 @@ describe('SerenityController', () => {
   let unlinkMarketSiteIfOrphanedStub;
   let getBrandBaseSiteIdStub;
   let exchangePromiseTokenStub;
+  let exchangePromiseTokenResponseStub;
   let linkSiteToLiveRowsStub;
   let linkSiteToRowStub;
   let tombstoneAllForBrandStub;
@@ -236,6 +237,12 @@ describe('SerenityController', () => {
     unlinkMarketSiteIfOrphanedStub = sinon.stub().resolves(true);
     getBrandBaseSiteIdStub = sinon.stub().resolves(null);
     exchangePromiseTokenStub = sinon.stub().resolves('exchanged-ims-token');
+    exchangePromiseTokenResponseStub = sinon.stub().resolves({
+      access_token: 'bulk-tags-ims-token',
+      promise_token: 'rotated-promise-token',
+      promise_token_expires_in: 14399,
+      token_type: 'bearer',
+    });
     linkSiteToLiveRowsStub = sinon.stub().resolves();
     linkSiteToRowStub = sinon.stub().resolves();
     tombstoneAllForBrandStub = sinon.stub().resolves();
@@ -339,6 +346,29 @@ describe('SerenityController', () => {
         resolveSemrushImsToken: makeResolveSemrushImsTokenStub(
           (...args) => exchangePromiseTokenStub(...args),
         ),
+        getRawPromiseToken: (ctx) => {
+          const token = ctx?.pathInfo?.headers?.['x-promise-token'];
+          if (!token) {
+            return undefined;
+          }
+          try {
+            return decodeURIComponent(token);
+          } catch {
+            return token;
+          }
+        },
+        resolvePromisePair: (ctx) => {
+          const audience = ctx?.pathInfo?.headers?.['x-promise-audience'];
+          if (!audience) {
+            return undefined;
+          }
+          if (audience.trim().toLowerCase() === 'semrush') {
+            return getSemrushPair();
+          }
+          throw new ErrorWithStatusCode(`Unknown promise audience: ${audience}`, 400);
+        },
+        getSemrushPair,
+        exchangePromiseTokenResponse: exchangePromiseTokenResponseStub,
       },
       '../../src/support/serenity/mapping-rows.js': {
         linkSiteToLiveRows: linkSiteToLiveRowsStub,
@@ -1325,7 +1355,7 @@ describe('SerenityController', () => {
       expect(options.callerId).to.equal('unknown');
     });
 
-    it('bulkTagPrompts dispatches flat arguments and reads Idempotency-Key case-insensitively', async () => {
+    it('bulkTagPrompts exchanges once and forwards the rotated token and SEMRUSH pair in flat mode', async () => {
       const data = {
         geoTargetId: 2840,
         languageCode: 'en',
@@ -1342,6 +1372,8 @@ describe('SerenityController', () => {
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const ctx = fakeContext({
         data,
+        promiseToken: 'raw-promise-token',
+        promiseAudience: 'semrush',
         headers: { 'iDeMpOtEnCy-KeY': 'flat-key' },
       });
 
@@ -1359,8 +1391,61 @@ describe('SerenityController', () => {
         'unknown',
         'flat-key',
         sinon.match.object,
+        {
+          promise_token: 'rotated-promise-token',
+          expires_in: 14399,
+          token_type: 'bearer',
+        },
+        getSemrushPair(),
       );
       expect(handlers.handleBulkTagsSubworkspace).not.to.have.been.called;
+      expect(exchangePromiseTokenResponseStub).to.have.been.calledOnceWithExactly(
+        ctx,
+        'raw-promise-token',
+        getSemrushPair(),
+      );
+      expect(exchangePromiseTokenStub).not.to.have.been.called;
+    });
+
+    it('bulkTagPrompts 400s without a promise token and does not exchange or dispatch', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+
+      const response = await controller.bulkTagPrompts(fakeContext({ data: {} }));
+
+      expect(response.status).to.equal(400);
+      expect((await readBody(response)).message).to.match(/require a promise token/i);
+      expect(exchangePromiseTokenResponseStub).not.to.have.been.called;
+      expect(handlers.handleBulkTags).not.to.have.been.called;
+      expect(handlers.handleBulkTagsSubworkspace).not.to.have.been.called;
+    });
+
+    it('bulkTagPrompts 400s without the SEMRUSH promise audience and does not dispatch', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+
+      const response = await controller.bulkTagPrompts(fakeContext({
+        data: {},
+        promiseToken: 'raw-promise-token',
+      }));
+
+      expect(response.status).to.equal(400);
+      expect((await readBody(response)).message).to.match(/x-promise-audience: semrush/);
+      expect(exchangePromiseTokenResponseStub).not.to.have.been.called;
+      expect(handlers.handleBulkTags).not.to.have.been.called;
+    });
+
+    it('bulkTagPrompts 400s for an invalid promise audience without exchange or dispatch', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+
+      const response = await controller.bulkTagPrompts(fakeContext({
+        data: {},
+        promiseToken: 'raw-promise-token',
+        promiseAudience: 'other',
+      }));
+
+      expect(response.status).to.equal(400);
+      expect((await readBody(response)).message).to.match(/Unknown promise audience/);
+      expect(exchangePromiseTokenResponseStub).not.to.have.been.called;
+      expect(handlers.handleBulkTags).not.to.have.been.called;
     });
 
     it('createTag routes to the flat handler in flat mode and returns its status', async () => {
@@ -2161,7 +2246,7 @@ describe('SerenityController', () => {
       expect(options.callerId).to.equal('unknown');
     });
 
-    it('bulkTagPrompts reads Idempotency-Key from Headers-like objects in subworkspace mode', async () => {
+    it('bulkTagPrompts forwards the rotated token in subworkspace mode', async () => {
       const data = {
         geoTargetId: 2840,
         languageCode: 'en',
@@ -2181,7 +2266,12 @@ describe('SerenityController', () => {
           name.toLowerCase() === 'idempotency-key' ? 'headers-key' : null
         )),
       };
-      const ctx = fakeContext({ data, headers });
+      const ctx = fakeContext({
+        data,
+        headers,
+        promiseToken: 'raw-subworkspace-promise-token',
+        promiseAudience: 'semrush',
+      });
 
       const response = await controller.bulkTagPrompts(ctx);
 
@@ -2196,8 +2286,20 @@ describe('SerenityController', () => {
         'unknown',
         'headers-key',
         sinon.match.object,
+        {
+          promise_token: 'rotated-promise-token',
+          expires_in: 14399,
+          token_type: 'bearer',
+        },
+        getSemrushPair(),
       );
       expect(handlers.handleBulkTags).not.to.have.been.called;
+      expect(exchangePromiseTokenResponseStub).to.have.been.calledOnceWithExactly(
+        ctx,
+        'raw-subworkspace-promise-token',
+        getSemrushPair(),
+      );
+      expect(exchangePromiseTokenStub).not.to.have.been.called;
     });
 
     it('listTags routes to the subworkspace handler in subworkspace mode', async () => {

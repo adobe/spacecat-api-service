@@ -335,6 +335,8 @@ export function parseBulkTagsBody(body) {
  * @param {string} options.callerId
  * @param {string | null} [options.idempotencyKey]
  * @param {object} [options.log]
+ * @param {{ promise_token: string, expires_in?: number, token_type?: string }} options.promiseToken
+ * @param {string} options.promisePair
  * @returns {Promise<{ status: number, body: object }>}
  */
 async function acceptParsedBulkTags({
@@ -348,6 +350,8 @@ async function acceptParsedBulkTags({
   callerId,
   idempotencyKey,
   log,
+  promiseToken,
+  promisePair,
 }) {
   const hash = canonicalHash(parsed);
   const key = idempotencyKey == null ? null : String(idempotencyKey).trim();
@@ -424,9 +428,18 @@ async function acceptParsedBulkTags({
 
   let job;
   try {
+    if (!promiseToken?.promise_token || !promisePair) {
+      throw codedError(
+        'Bulk tag operations require caller promise credentials',
+        400,
+        ERROR_CODES.INVALID_REQUEST,
+      );
+    }
     job = await createAndEnqueueJob(context, {
       jobType: BULK_TAGS_JOB_TYPE,
       jobId: deterministicJobId,
+      promiseToken,
+      promisePair,
       metadata: {
         brandId,
         orgId,
@@ -476,6 +489,8 @@ async function acceptParsedBulkTags({
  * @param {string} options.callerId
  * @param {string | null} [options.idempotencyKey]
  * @param {object} [options.log]
+ * @param {{ promise_token: string, expires_in?: number, token_type?: string }} options.promiseToken
+ * @param {string} options.promisePair
  * @returns {Promise<{ status: number, body: object }>}
  */
 export async function acceptBulkTags({
@@ -489,6 +504,8 @@ export async function acceptBulkTags({
   callerId,
   idempotencyKey,
   log,
+  promiseToken,
+  promisePair,
 }) {
   const parsed = parseBulkTagsBody(body);
   return acceptParsedBulkTags({
@@ -502,6 +519,8 @@ export async function acceptBulkTags({
     callerId,
     idempotencyKey,
     log,
+    promiseToken,
+    promisePair,
   });
 }
 
@@ -514,8 +533,10 @@ export async function acceptBulkTags({
  * @param {string} workspaceId
  * @param {any} body
  * @param {string} callerId
- * @param {string | null} [idempotencyKey]
- * @param {object} [log]
+ * @param {string | null} idempotencyKey
+ * @param {object} log
+ * @param {{ promise_token: string, expires_in?: number, token_type?: string }} promiseToken
+ * @param {string} promisePair
  * @returns {Promise<{ status: number, body: object }>}
  */
 export async function handleBulkTags(
@@ -529,6 +550,8 @@ export async function handleBulkTags(
   callerId,
   idempotencyKey,
   log,
+  promiseToken,
+  promisePair,
 ) {
   const parsed = parseBulkTagsBody(body);
   const row = await dataAccess.BrandSemrushProject.findBySlice(
@@ -550,6 +573,8 @@ export async function handleBulkTags(
     callerId,
     idempotencyKey,
     log,
+    promiseToken,
+    promisePair,
   });
 }
 
@@ -561,8 +586,10 @@ export async function handleBulkTags(
  * @param {string} workspaceId
  * @param {any} body
  * @param {string} callerId
- * @param {string | null} [idempotencyKey]
- * @param {object} [log]
+ * @param {string | null} idempotencyKey
+ * @param {object} log
+ * @param {{ promise_token: string, expires_in?: number, token_type?: string }} promiseToken
+ * @param {string} promisePair
  * @returns {Promise<{ status: number, body: object }>}
  */
 export async function handleBulkTagsSubworkspace(
@@ -575,6 +602,8 @@ export async function handleBulkTagsSubworkspace(
   callerId,
   idempotencyKey,
   log,
+  promiseToken,
+  promisePair,
 ) {
   const parsed = parseBulkTagsBody(body);
   const project = await resolveProject(
@@ -598,6 +627,8 @@ export async function handleBulkTagsSubworkspace(
     callerId,
     idempotencyKey,
     log,
+    promiseToken,
+    promisePair,
   });
 }
 

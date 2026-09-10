@@ -13,6 +13,7 @@
 import { expect } from 'chai';
 import { createHash } from 'node:crypto';
 import sinon from 'sinon';
+import esmock from 'esmock';
 import {
   acceptBulkTags,
   applyBulkTagOperation,
@@ -329,6 +330,90 @@ describe('acceptBulkTags idempotency', () => {
       idempotencyKey: 'same-key',
       log: {},
     })).to.be.rejected.then((error) => expect(error.code).to.equal('idempotencyConflict'));
+  });
+});
+
+describe('bulk tags promise credential forwarding', () => {
+  const body = {
+    geoTargetId: 1,
+    languageCode: 'en',
+    operation: 'assign',
+    tagIds: ['family'],
+    filter: { tagFilterMode: 'faceted-v1' },
+  };
+
+  it('forwards the pre-exchanged rotated token and SEMRUSH pair without emitter minting', async () => {
+    const createAndEnqueueJob = sinon.stub().resolves({
+      getId: () => 'bulk-job',
+      getStatus: () => 'IN_PROGRESS',
+    });
+    const { handleBulkTags: handleBulkTagsWithStubbedEnqueue } = await esmock(
+      '../../../../src/support/serenity/handlers/bulk-tags-job.js',
+      {
+        '../../../../src/support/serenity/async-job-runner.js': { createAndEnqueueJob },
+      },
+    );
+    const context = { dataAccess: { AsyncJob: {} } };
+    const dataAccess = {
+      BrandSemrushProject: {
+        findBySlice: sinon.stub().resolves({ getSemrushProjectId: () => 'project' }),
+      },
+    };
+
+    const response = await handleBulkTagsWithStubbedEnqueue(
+      context,
+      workerTransport([]),
+      dataAccess,
+      'brand',
+      'org',
+      'ws',
+      body,
+      'caller',
+      null,
+      {},
+      { promise_token: 'rotated-token', expires_in: 14399, token_type: 'bearer' },
+      'SEMRUSH',
+    );
+
+    expect(response.status).to.equal(202);
+    expect(createAndEnqueueJob).to.have.been.calledOnceWith(
+      context,
+      sinon.match({
+        jobType: 'serenity-bulk-tags',
+        promiseToken: {
+          promise_token: 'rotated-token',
+          expires_in: 14399,
+          token_type: 'bearer',
+        },
+        promisePair: 'SEMRUSH',
+      }),
+    );
+  });
+
+  it('rejects absent forwarded credentials instead of falling back to an emitter token', async () => {
+    const createAndEnqueueJob = sinon.stub();
+    const { acceptBulkTags: acceptBulkTagsWithStubbedEnqueue } = await esmock(
+      '../../../../src/support/serenity/handlers/bulk-tags-job.js',
+      {
+        '../../../../src/support/serenity/async-job-runner.js': { createAndEnqueueJob },
+      },
+    );
+
+    await expect(acceptBulkTagsWithStubbedEnqueue({
+      context: { dataAccess: { AsyncJob: {} } },
+      transport: workerTransport([]),
+      brandId: 'brand',
+      orgId: 'org',
+      workspaceId: 'ws',
+      projectId: 'project',
+      body,
+      callerId: 'caller',
+      log: {},
+    })).to.be.rejected.then((error) => {
+      expect(error.status).to.equal(400);
+      expect(error.code).to.equal('invalidRequest');
+    });
+    expect(createAndEnqueueJob).not.to.have.been.called;
   });
 });
 
