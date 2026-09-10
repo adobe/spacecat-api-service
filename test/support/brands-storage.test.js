@@ -412,6 +412,34 @@ describe('brands-storage', () => {
       expect(flatResult.pendingSemrushProvisioning).to.equal(null);
     });
 
+    it('maps semrush_provisioning_status/error to semrushProvisioningStatus/Error, null when absent (LLMO-7352/LLMO-7418)', async () => {
+      const failedRow = makeBrandRow({
+        semrush_provisioning_status: 'failed',
+        semrush_provisioning_error: 'Semrush sub-workspace provisioning failed and cannot be recovered automatically.',
+      });
+      const failedQuery = createChainableQuery({ data: failedRow, error: null });
+      const failedResult = await getBrandById(
+        ORG_ID,
+        BRAND_ID,
+        { from: sinon.stub().returns(failedQuery) },
+      );
+      expect(failedResult.semrushProvisioningStatus).to.equal('failed');
+      expect(failedResult.semrushProvisioningError).to.equal(
+        'Semrush sub-workspace provisioning failed and cannot be recovered automatically.',
+      );
+
+      // A brand that has never gone through an async provisioning attempt (every brand
+      // created before these columns existed, and every synchronous create/activate).
+      const flatQuery = createChainableQuery({ data: makeBrandRow(), error: null });
+      const flatResult = await getBrandById(
+        ORG_ID,
+        BRAND_ID,
+        { from: sinon.stub().returns(flatQuery) },
+      );
+      expect(flatResult.semrushProvisioningStatus).to.equal(null);
+      expect(flatResult.semrushProvisioningError).to.equal(null);
+    });
+
     it('defaults to empty regions when competitor regions is missing', async () => {
       const dbRow = makeBrandRow({
         competitors: [{ name: 'Rival', url: null }], // no regions key — triggers || []
