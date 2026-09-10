@@ -22,7 +22,7 @@
  * a mention or markup. Per Slack guidance, only &, <, > need escaping. Apply only
  * to text OUTSIDE backtick code spans (inside code spans Slack renders literally).
  */
-function escapeSlack(text) {
+export function escapeSlack(text) {
   return String(text)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
