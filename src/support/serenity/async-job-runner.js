@@ -41,12 +41,46 @@ import { getIMSPromiseToken, resolvePromisePair } from '../utils.js';
  *   invalidatePromiseToken: (promiseToken: string, enableEncryption: boolean) => Promise<void>,
  * }} createFrom
  * @property {{ EMITTER: string, CONSUMER: string }} CLIENT_TYPE
+ * @property {{ SEMRUSH: string }} PROMISE_PAIR
  */
 const { ImsPromiseClient } = /** @type {{ ImsPromiseClient: TypedImsPromiseClient }} */ (
   /** @type {unknown} */ (imsClientPkg)
 );
 
+/**
+ * The Semrush promise-pair selector, hard-coded so a token-bearing Semrush-**write**
+ * job type binds to it server-side rather than trusting the caller's optional
+ * `x-promise-audience` header (Gap 1). The runtime value is `'SEMRUSH'`; the `??`
+ * fallback keeps this resolvable even if a test double stubs `ImsPromiseClient`
+ * without the frozen `PROMISE_PAIR` map.
+ */
+export const PROMISE_PAIR_SEMRUSH = ImsPromiseClient?.PROMISE_PAIR?.SEMRUSH ?? 'SEMRUSH';
+
 export const NEEDS_REAUTH_ERROR_CODE = 'NEEDS_REAUTH';
+
+/**
+ * The persisted promise-token contract (Gap 2): every token carried on a job
+ * record is the typed `{ promise_token, ... }` object `getIMSPromiseToken`
+ * returns — never the bare header string. A bare string silently leaves
+ * `promiseToken?.promise_token` undefined and strands the job in the exchange
+ * (→ DLQ), so both the enqueue and the worker exchange assert the shape up front
+ * and fail loudly instead.
+ *
+ * @param {unknown} token
+ * @returns {asserts token is { promise_token: string, token_type?: string, expires_in?: number }}
+ * @throws {Error} code `INVALID_PROMISE_TOKEN` when the shape is wrong.
+ */
+export function assertTypedPromiseToken(token) {
+  const t = /** @type {{ promise_token?: unknown } | null} */ (token);
+  if (!t || typeof t !== 'object' || Array.isArray(t)
+    || typeof t.promise_token !== 'string' || t.promise_token.length === 0) {
+    const error = new Error(
+      'Promise token must be a typed { promise_token, ... } object, not a bare string',
+    );
+    /** @type {any} */ (error).code = 'INVALID_PROMISE_TOKEN';
+    throw error;
+  }
+}
 
 /**
  * Thrown when a promise token can no longer be exchanged for an access token because
@@ -109,24 +143,53 @@ const REAUTH_STATUS_PATTERN = /status: (401|403)\b/;
  *   same pair.
  * @param {string} [params.jobId] - Optional deterministic UUID used by callers
  *   that require durable idempotency across Lambda containers.
+ * @param {string} [params.requirePair] - When set, the resolved promise pair MUST
+ *   equal this value or the enqueue **fails** before any token is minted (Gap 1).
+ *   A token-bearing Semrush-write job type passes {@link PROMISE_PAIR_SEMRUSH} here
+ *   so it can never silently run on the default IMS pair when `x-promise-audience`
+ *   is absent (which current callers never send).
+ * @param {string} [params.queueUrl] - SQS queue to enqueue onto. Defaults to
+ *   `env.SERENITY_JOB_RUNNER_QUEUE_URL` (the shared classify/bulk-tags queue).
+ *   A token-bearing Semrush-write job passes its own dedicated queue
+ *   (`env.SERENITY_MARKET_JOBS_QUEUE_URL`, spacecat-infrastructure#780) whose DLQ
+ *   is deliberately NOT auto-redriven — recovery is the lease-aware runbook.
  * @returns {Promise<object>} The created job (an AsyncJob instance).
- * @throws On SQS send failure, after rolling back the created job record.
+ * @throws On SQS send failure, after rolling back the created job record; on an
+ *   unresolvable required pair (`PROMISE_PAIR_REQUIRED`); on a non-typed token
+ *   (`INVALID_PROMISE_TOKEN`).
  */
 export async function createAndEnqueueJob(
   context,
   {
-    jobType, metadata = {}, promiseToken, promisePair, jobId,
+    jobType, metadata = {}, promiseToken, promisePair, jobId, requirePair, queueUrl,
   },
 ) {
   const {
     dataAccess, sqs, env, log,
   } = context;
+  const targetQueueUrl = queueUrl ?? env.SERENITY_JOB_RUNNER_QUEUE_URL;
 
   // When a pre-minted token is supplied (worker self-requeue), the pair must come
   // from the explicit promisePair only — never re-derived from the request context,
   // which could diverge from the pair that actually minted that token.
   const pair = promisePair ?? (promiseToken ? undefined : resolvePromisePair(context));
+
+  // Fail-closed pair binding (Gap 1): a Semrush-write job type must resolve to the
+  // Semrush pair. Reject the enqueue rather than mint on — and later write to
+  // Semrush with — the wrong delegated credential. This runs BEFORE the token is
+  // minted, so a rejected job never touches IMS.
+  if (requirePair && pair !== requirePair) {
+    const error = new Error(
+      `Job type '${jobType}' requires promise pair '${requirePair}' but resolved `
+      + `'${pair ?? 'default'}'; refusing to enqueue on the wrong pair`,
+    );
+    /** @type {any} */ (error).code = 'PROMISE_PAIR_REQUIRED';
+    throw error;
+  }
+
   const promiseTokenResponse = promiseToken ?? await getIMSPromiseToken(context, pair);
+  // Reject a bare-string token before it is persisted (Gap 2).
+  assertTypedPromiseToken(promiseTokenResponse);
 
   const job = await dataAccess.AsyncJob.create({
     ...(jobId ? { id: jobId } : {}),
@@ -140,7 +203,7 @@ export async function createAndEnqueueJob(
   });
 
   try {
-    await sqs.sendMessage(env.SERENITY_JOB_RUNNER_QUEUE_URL, {
+    await sqs.sendMessage(targetQueueUrl, {
       jobId: job.getId(),
       type: jobType,
     });
@@ -179,6 +242,10 @@ export async function createAndEnqueueJob(
 export async function exchangeAndPersistPromiseToken(context, job) {
   const metadata = job.getMetadata() ?? {};
   const { promiseToken, promisePair } = metadata;
+  // The persisted token must be the typed object shape (Gap 2). A bare string
+  // here would fail opaquely at `promiseToken?.promise_token` below; assert it
+  // up front so the failure names the real cause.
+  assertTypedPromiseToken(promiseToken);
   const enableEncryption = !!context.env?.AUTOFIX_CRYPT_SECRET
     && !!context.env?.AUTOFIX_CRYPT_SALT;
 

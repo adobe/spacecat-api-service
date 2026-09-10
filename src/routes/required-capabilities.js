@@ -327,6 +327,8 @@ const routeRequiredCapabilities = {
   'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets': 'organization:write',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode': 'organization:read',
   'DELETE /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode': 'organization:write',
+  'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/generation/jobs/:jobId': 'organization:read',
+  'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/generation/jobs/:jobId/reauth': 'organization:write',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags': 'organization:read',
   'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags': 'organization:write',
   'PATCH /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags/:tagId': 'organization:write',

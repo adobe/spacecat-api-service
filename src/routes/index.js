@@ -248,6 +248,8 @@ export default function getRouteHandlers(
     'PATCH /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/:semrushPromptId': serenityController.updatePrompt,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets': serenityController.listMarkets,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets': serenityController.createMarket,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/generation/jobs/:jobId': serenityController.getSemrushMarketGenerationJobStatus,
+    'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/generation/jobs/:jobId/reauth': serenityController.reauthSemrushMarketGenerationJob,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode': serenityController.getMarket,
     'DELETE /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode': serenityController.deleteMarket,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags': serenityController.listTags,

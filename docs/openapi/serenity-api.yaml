@@ -473,6 +473,125 @@ v2-serenity-prompts-job-by-id:
         description: Organization, brand, or job not found, serenity is not active for the brand, or the job belongs to a different brand.
       '500': { $ref: './responses.yaml#/500' }
 
+# ─── Async Semrush-market prompt generation (jobs) ────────────────────────────
+
+v2-serenity-market-generation-job-by-id:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID-only on the /serenity/* surface)
+      schema:
+        type: string
+        format: uuid
+    - name: jobId
+      in: path
+      required: true
+      description: >-
+        Async job id returned as `promptGeneration.jobId` by a create-market /
+        activate / create-brand response when async prompt generation is enabled.
+      schema:
+        type: string
+        format: uuid
+  get:
+    tags: [serenity]
+    summary: Poll an async Semrush-market prompt-generation job
+    description: |
+      Returns the status and, on completion, the result of an async
+      `serenity-generate-semrush-market` job (serenity-docs#443). Onboarding a
+      market/site with "include Semrush prompts" generates real monitoring prompts
+      from the Semrush topic catalogue via a synchronous DRS call, then writes them
+      to the market. This endpoint is guarded by the shared job-scoping primitive
+      (jobType allowlist + site/brand ownership); a job that does not belong to the
+      addressed brand 404s exactly like a missing job. The response is secret-free —
+      only `{ jobId, jobType, status, result, error }`, and NEVER a promise token.
+
+      On `FAILED` with `error.needsReauth = true`, the caller's Semrush promise
+      token was rejected by IMS; re-authenticate via the `/reauth` sibling.
+    operationId: getSerenityMarketGenerationJobStatus
+    security:
+      - session_token: []
+    responses:
+      '200':
+        description: Job status (result when COMPLETED / error when FAILED).
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityMarketGenerationJobStatus' }
+      '400': { $ref: './responses.yaml#/400' }
+      '404':
+        description: Organization, brand, or job not found, serenity is not active for the brand, or the job belongs to a different brand.
+      '500': { $ref: './responses.yaml#/500' }
+
+v2-serenity-market-generation-job-reauth:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID-only on the /serenity/* surface)
+      schema:
+        type: string
+        format: uuid
+    - name: jobId
+      in: path
+      required: true
+      description: The generation job id awaiting re-authentication.
+      schema:
+        type: string
+        format: uuid
+  post:
+    tags: [serenity]
+    summary: Re-authenticate a generation job whose Semrush token expired
+    description: |
+      Re-authorizes a `serenity-generate-semrush-market` job that failed with
+      `NEEDS_REAUTH` (its delegated Semrush promise token was rejected by IMS).
+      STRICT, fail-closed authorization: the caller must be the SAME IMS user that
+      originally enqueued the job (single stable `user_id` claim). A replacement
+      token is accepted ONLY on the explicit Semrush promise pair
+      (`x-promise-audience: semrush`); the job record is updated atomically and the
+      SAME job id is re-enqueued. Returns 202 with the job handle.
+    operationId: reauthSerenityMarketGenerationJob
+    security:
+      - session_token: []
+    parameters:
+      - name: x-promise-audience
+        in: header
+        required: true
+        description: Must be `semrush`.
+        schema: { type: string, enum: [semrush] }
+      - name: x-promise-token
+        in: header
+        required: false
+        description: The re-minted Semrush promise token (when the client forwards one).
+        schema: { type: string }
+    responses:
+      '202':
+        description: Re-authentication accepted; the job was re-enqueued.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityMarketGenerationJobAccepted' }
+      '400': { $ref: './responses.yaml#/400' }
+      '403':
+        description: The caller is not the original requester (fail-closed identity check).
+      '404':
+        description: Organization, brand, or job not found, or the job belongs to a different brand.
+      '409':
+        description: The job is not awaiting re-authentication.
+      '500': { $ref: './responses.yaml#/500' }
+
 # ─── Markets ──────────────────────────────────────────────────────────────────
 
 v2-serenity-markets:

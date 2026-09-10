@@ -12259,6 +12259,72 @@ SerenityPromptsJobStatus:
             retryable: { type: boolean }
         - { type: 'null' }
 
+SerenityMarketGenerationJobStatus:
+  type: object
+  description: |
+    Poll response for an async Semrush-market prompt-generation job
+    (serenity-docs#443). Secret-free by design — the job's internal metadata
+    (the delegated Semrush promise token) is never exposed.
+  required: [jobId, jobType, status, result, error]
+  properties:
+    jobId:
+      type: string
+      format: uuid
+    jobType:
+      type: string
+      enum: [generateSemrushMarket]
+    status:
+      type: string
+      enum: [IN_PROGRESS, COMPLETED, FAILED]
+    result:
+      description: The job result once COMPLETED; null otherwise.
+      oneOf:
+        - type: object
+          additionalProperties: false
+          properties:
+            promptCount: { type: integer }
+            projectId: { type: string }
+            published: { type: boolean }
+            verdict: { type: string, enum: [ship] }
+        - { type: 'null' }
+    error:
+      description: The sanitized public failure envelope once FAILED; null otherwise.
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [code, message, retryable, needsReauth]
+          properties:
+            code: { type: string }
+            message: { type: string }
+            retryable: { type: boolean }
+            needsReauth:
+              type: boolean
+              description: True when the job stalled on an expired Semrush token; use the /reauth endpoint.
+        - { type: 'null' }
+    createdAt:
+      type: string
+      format: date-time
+      description: When the job was created.
+    updatedAt:
+      type: string
+      format: date-time
+      description: When the job record was last updated.
+
+SerenityMarketGenerationJobAccepted:
+  type: object
+  description: The 202 acknowledgement returned when a generation job is (re-)enqueued.
+  required: [jobId, jobType, status]
+  properties:
+    jobId:
+      type: string
+      format: uuid
+    jobType:
+      type: string
+      enum: [generateSemrushMarket]
+    status:
+      type: string
+      enum: [IN_PROGRESS]
+
 SerenityUpdatePromptRequest:
   type: object
   description: |
