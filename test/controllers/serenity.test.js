@@ -213,6 +213,7 @@ describe('SerenityController', () => {
   let getBrandBaseSiteIdStub;
   let guardAgainstConcurrentProvisioningStub;
   let beginProvisioningAttemptStub;
+  let updateProvisioningJobIdStub;
   let orchestrateCreateMarketSubworkspaceStub;
   let orchestrateActivateMarketsStub;
   let exchangePromiseTokenStub;
@@ -264,6 +265,8 @@ describe('SerenityController', () => {
     // flight (mirrors beginProvisioningAttempt's real CAS succeeding); specific tests override
     // it to resolve(false) to exercise the 409 "already in progress" branch.
     beginProvisioningAttemptStub = sinon.stub().resolves(true);
+    // LLMO-7418 external-review Finding 17: records the first-hop job id, best-effort.
+    updateProvisioningJobIdStub = sinon.stub().resolves(true);
     // PR-C: `async: true` opts into the job-chain branch above; absent/false runs this
     // (unchanged) synchronous orchestration call — the default, no-flag behavior every
     // existing caller gets.
@@ -369,6 +372,7 @@ describe('SerenityController', () => {
         cancelProvisioningAttempt: cancelProvisioningAttemptStub,
         guardAgainstConcurrentProvisioning: guardAgainstConcurrentProvisioningStub,
         beginProvisioningAttempt: beginProvisioningAttemptStub,
+        updateProvisioningJobId: updateProvisioningJobIdStub,
       },
       '../../src/support/serenity/handlers/create-market-orchestration.js': {
         orchestrateCreateMarketSubworkspace: orchestrateCreateMarketSubworkspaceStub,
@@ -1666,6 +1670,14 @@ describe('SerenityController', () => {
         brandId: BRAND, updatedBy: 'serenity-create-market',
       });
       expect(createAndEnqueueJobStub).to.have.been.calledOnce;
+      // LLMO-7418 external-review Finding 17: the first hop's job id is recorded, not left
+      // permanently NULL — only the worker's own self-requeue path used to write this.
+      expect(updateProvisioningJobIdStub).to.have.been.calledOnceWith({
+        brandId: BRAND,
+        attemptId: beginProvisioningAttemptStub.firstCall.args[0].attemptId,
+        jobId: 'job-abc',
+        postgrestClient: sinon.match.any,
+      });
       const [enqueueCtx, enqueueArgs] = createAndEnqueueJobStub.firstCall.args;
       expect(enqueueCtx).to.equal(ctx);
       expect(enqueueArgs.jobType).to.equal('serenity-provision-workspace');
@@ -2223,6 +2235,14 @@ describe('SerenityController', () => {
       expect(enqueueArgs.metadata.chainedJobType).to.equal('serenity-activate-markets');
       expect(enqueueArgs.metadata.chainedJobMetadata.brandId).to.equal(BRAND);
       expect(enqueueArgs.metadata.chainedJobMetadata.orgId).to.equal(ORG);
+      // LLMO-7418 external-review Finding 17: the first hop's job id is recorded, not left
+      // permanently NULL — only the worker's own self-requeue path used to write this.
+      expect(updateProvisioningJobIdStub).to.have.been.calledOnceWith({
+        brandId: BRAND,
+        attemptId: beginProvisioningAttemptStub.firstCall.args[0].attemptId,
+        jobId: 'job-abc',
+        postgrestClient: sinon.match.any,
+      });
     });
 
     it('activate answers 409 without enqueuing when async: true and a provisioning attempt is already in flight', async () => {
