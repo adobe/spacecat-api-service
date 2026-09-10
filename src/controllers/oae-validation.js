@@ -17,8 +17,6 @@ import {
 import {
   accepted, badRequest, internalServerError, notFound, ok,
 } from '@adobe/spacecat-shared-http-utils';
-import { ValidatorRegistry } from '@adobe/spacecat-shared-tokowaka-client';
-
 // Dispatch type import-worker's HANDLERS map routes on -- always this constant, regardless of
 // which validator (`validationType`) the job actually runs. Kept as a plain string (not a shared
 // import) since spacecat-api-service does not depend on spacecat-import-worker's source.
@@ -52,8 +50,6 @@ function OaeValidationController(ctx, log, env) {
     throw new Error('Environment object required');
   }
 
-  const validatorRegistry = new ValidatorRegistry(log);
-
   /**
    * Validates the request data for job creation.
    * @param {Object} data - The request data object
@@ -68,9 +64,6 @@ function OaeValidationController(ctx, log, env) {
     }
     if (!hasText(data.type)) {
       throw new Error('Invalid request: type is required');
-    }
-    if (!validatorRegistry.getSupportedTypes().includes(data.type)) {
-      throw new Error(`Invalid request: type must be one of ${validatorRegistry.getSupportedTypes().join(', ')}`);
     }
     if (!isNonEmptyArray(data.suggestionIds)) {
       throw new Error('Invalid request: suggestionIds must be a non-empty array');

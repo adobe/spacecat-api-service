@@ -96,13 +96,6 @@ describe('OaeValidation Controller', () => {
       expect(response.status).to.equal(400);
     });
 
-    it('returns 400 when type is not a registered validator type', async () => {
-      const response = await controller.createValidationJob({
-        data: { siteId, type: 'not-a-real-type', suggestionIds: [suggestionId1] },
-      });
-      expect(response.status).to.equal(400);
-    });
-
     it('returns 400 when suggestionIds is missing', async () => {
       const response = await controller.createValidationJob({
         data: { siteId, type: 'routing' },
