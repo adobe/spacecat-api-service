@@ -2200,7 +2200,6 @@ function BrandsController(ctx, log, env) {
           return createResponse(
             {
               ...withSerenityState(created, serenityScopes),
-              status: 'pending',
               jobId: job.getId(),
               jobType: PROVISION_WORKSPACE_JOB_TYPE,
             },
@@ -2289,7 +2288,7 @@ function BrandsController(ctx, log, env) {
             });
           });
           return createResponse(
-            { ...withSerenityState(created, serenityScopes), status: 'pending', jobId: job.getId() },
+            { ...withSerenityState(created, serenityScopes), jobId: job.getId() },
             202,
           );
         } catch (enqueueError) {
