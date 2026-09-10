@@ -187,6 +187,64 @@ const FIXTURES = {
       getMetadata: () => ({ brandId: BRAND }),
     },
   },
+  getSerenityMarketGenerationJobStatus: {
+    expectedStatus: 200,
+    controllerMethod: 'getSemrushMarketGenerationJobStatus',
+    // No handler: the controller loads the AsyncJob via loadJobScopedToCaller and
+    // projects the token-safe DTO. Pin a COMPLETED, brand-owned, SITELESS generation
+    // job so the documented { jobId, jobType, status, result, error } shape (ship
+    // verdict) is exercised. metadata.jobType MUST be in the endpoint's allowlist and
+    // metadata.brandId MUST match auth.brandUuid (BRAND) or the controller 404s.
+    params: { jobId: '00000000-0000-4000-8000-000000000001' },
+    asyncJob: {
+      getId: () => '00000000-0000-4000-8000-000000000001',
+      getStatus: () => 'COMPLETED',
+      getResult: () => ({
+        promptCount: 12,
+        projectId: 'proj-1',
+        published: true,
+        verdict: 'ship',
+      }),
+      getError: () => null,
+      getCreatedAt: () => '2026-09-10T00:00:00.000Z',
+      getUpdatedAt: () => '2026-09-10T00:05:00.000Z',
+      getMetadata: () => ({
+        jobType: 'serenity-generate-semrush-market',
+        brandId: BRAND,
+      }),
+    },
+  },
+  reauthSerenityMarketGenerationJob: {
+    expectedStatus: 202,
+    controllerMethod: 'reauthSemrushMarketGenerationJob',
+    // Drives the full 202 happy path. loadJobScopedToCaller admits the job by its
+    // metadata.jobType; the STRICT identity check requires the caller's stable
+    // user_id claim to equal metadata.imsUserId (both pinned to 'ims-user-1' via the
+    // reauth wiring below). resolvePromisePair/getIMSPromiseToken/claimJobForReauth
+    // are stubbed in the shared esmock block (inert for every other fixture — only
+    // this reauth method calls them). The job flips FAILED+NEEDS_REAUTH → IN_PROGRESS
+    // so the documented { jobId, jobType, status: IN_PROGRESS } accepted shape is
+    // returned.
+    reauth: true,
+    params: { jobId: '00000000-0000-4000-8000-000000000002' },
+    asyncJob: (() => {
+      let status = 'FAILED';
+      return {
+        getId: () => '00000000-0000-4000-8000-000000000002',
+        getStatus: () => status,
+        setStatus: (s) => { status = s; },
+        getError: () => ({ code: 'NEEDS_REAUTH', message: 'token expired', retryable: true }),
+        setError: () => {},
+        getMetadata: () => ({
+          jobType: 'serenity-generate-semrush-market',
+          brandId: BRAND,
+          imsUserId: 'ims-user-1',
+        }),
+        setMetadata: () => {},
+        save: () => Promise.resolve(),
+      };
+    })(),
+  },
   updateSerenityPrompt: {
     expectedStatus: 200,
     controllerMethod: 'updatePrompt',
@@ -1084,6 +1142,19 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
           '../../src/support/serenity/site-linkage.js': {
             ensureMarketSite: () => Promise.resolve('00000000-0000-4000-8000-000000000000'),
           },
+          // Reauth-only dependencies (inert for every other fixture — only
+          // reauthSemrushMarketGenerationJob calls these; the rest resolve their
+          // Semrush token through resolveSemrushImsToken, which stays real). esmock
+          // passes through the unlisted exports of each module.
+          '../../src/support/utils.js': {
+            // Must equal PROMISE_PAIR_SEMRUSH (ImsPromiseClient.PROMISE_PAIR.SEMRUSH,
+            // 'SEMRUSH') or the reauth handler 400s on the promise-pair guard.
+            resolvePromisePair: () => 'SEMRUSH',
+            getIMSPromiseToken: () => Promise.resolve({ token: 'fresh-promise-token' }),
+          },
+          '../../src/support/serenity/job-lease.js': {
+            claimJobForReauth: () => Promise.resolve(true),
+          },
         },
       )).default;
 
@@ -1095,6 +1166,14 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
       // Ops that read an AsyncJob directly (no handler) get their job pinned here.
       if (fx.asyncJob) {
         ctx.dataAccess.AsyncJob = { findById: sinon.stub().resolves(fx.asyncJob) };
+      }
+      // Reauth drives the token-bearing 202 path: the STRICT identity check reads the
+      // caller's stable user_id claim (must equal the job's metadata.imsUserId), and
+      // the success path re-enqueues onto the dedicated market-jobs queue.
+      if (fx.reauth) {
+        ctx.attributes.authInfo.getProfile = () => ({ user_id: 'ims-user-1' });
+        ctx.sqs = { sendMessage: sinon.stub().resolves() };
+        ctx.env = { ...ctx.env, SERENITY_MARKET_JOBS_QUEUE_URL: 'https://sqs.example/market-jobs' };
       }
 
       const controller = SerenityController(ctx, fakeLog());
