@@ -68,6 +68,7 @@ import {
   withSerenityState,
   beginProvisioningAttempt,
   guardAgainstConcurrentProvisioning,
+  updateProvisioningJobId,
   promoteProvisioningFailed,
   recordFreshBrandProvisioningStartFailure,
 } from '../support/brands-storage.js';
@@ -2184,6 +2185,18 @@ function BrandsController(ctx, log, env) {
               },
             },
           });
+          // LLMO-7418 external-review Finding 17: records the first-hop job id, best-effort,
+          // so it isn't left permanently NULL until the worker's own self-requeue hop writes it.
+          await updateProvisioningJobId({
+            brandId: asyncBrandId,
+            attemptId,
+            jobId: job.getId(),
+            postgrestClient,
+          }).catch((updateError) => {
+            log.error('brands: failed to record the first-hop job id (best-effort)', {
+              brandId: asyncBrandId, attemptId, jobId: job.getId(), error: updateError?.message,
+            });
+          });
           return createResponse(
             {
               ...withSerenityState(created, serenityScopes),
@@ -2262,6 +2275,18 @@ function BrandsController(ctx, log, env) {
               parentWorkspaceId,
               title: brandData.name,
             },
+          });
+          // LLMO-7418 external-review Finding 17: records the first-hop job id, best-effort,
+          // so it isn't left permanently NULL until the worker's own self-requeue hop writes it.
+          await updateProvisioningJobId({
+            brandId: asyncBrandId,
+            attemptId,
+            jobId: job.getId(),
+            postgrestClient,
+          }).catch((updateError) => {
+            log.error('brands: failed to record the first-hop job id (best-effort)', {
+              brandId: asyncBrandId, attemptId, jobId: job.getId(), error: updateError?.message,
+            });
           });
           return createResponse(
             { ...withSerenityState(created, serenityScopes), status: 'pending', jobId: job.getId() },
