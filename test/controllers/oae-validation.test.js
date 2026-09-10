@@ -15,6 +15,7 @@ import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
 
 import OaeValidationController from '../../src/controllers/oae-validation.js';
+import AccessControlUtil from '../../src/support/access-control-util.js';
 
 use(sinonChai);
 
@@ -24,6 +25,8 @@ describe('OaeValidation Controller', () => {
   const suggestionId1 = '223e4567-e89b-12d3-a456-426614174001';
   const suggestionId2 = '323e4567-e89b-12d3-a456-426614174002';
   const jobId = '423e4567-e89b-12d3-a456-426614174003';
+
+  const opportunityId = '523e4567-e89b-12d3-a456-426614174004';
 
   let log;
   let sqs;
@@ -47,9 +50,14 @@ describe('OaeValidation Controller', () => {
     dataAccess = {
       Configuration: { findLatest: sandbox.stub().resolves(configuration) },
       OaeValidation: { allByJobId: sandbox.stub() },
+      Suggestion: { findById: sandbox.stub() },
+      Opportunity: { findById: sandbox.stub() },
+      Site: { findById: sandbox.stub() },
     };
 
     ctx = { dataAccess, sqs };
+
+    sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
 
     controller = OaeValidationController(ctx, log, { AWS_ENV: 'dev' });
   });
@@ -92,6 +100,13 @@ describe('OaeValidation Controller', () => {
     it('returns 400 when type is missing', async () => {
       const response = await controller.createValidationJob({
         data: { siteId, suggestionIds: [suggestionId1] },
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when type is not a recognized validation type', async () => {
+      const response = await controller.createValidationJob({
+        data: { siteId, type: 'bogus-type', suggestionIds: [suggestionId1] },
       });
       expect(response.status).to.equal(400);
     });
@@ -158,7 +173,12 @@ describe('OaeValidation Controller', () => {
     it('returns 404 when no rows exist for the job', async () => {
       dataAccess.OaeValidation.allByJobId.resolves([]);
 
-      const response = await controller.getValidationJob({ params: { jobId } });
+      const response = await controller.getValidationJob({
+        params: { jobId },
+        dataAccess,
+        attributes: { authInfo: { type: 'jwt' } },
+        pathInfo: { headers: {} },
+      });
 
       expect(response.status).to.equal(404);
     });
@@ -179,8 +199,16 @@ describe('OaeValidation Controller', () => {
         getMetadata: () => null,
       };
       dataAccess.OaeValidation.allByJobId.resolves([row1, row2]);
+      dataAccess.Suggestion.findById.resolves({ getOpportunityId: () => opportunityId });
+      dataAccess.Opportunity.findById.resolves({ getSiteId: () => siteId });
+      dataAccess.Site.findById.resolves({ getId: () => siteId });
 
-      const response = await controller.getValidationJob({ params: { jobId } });
+      const response = await controller.getValidationJob({
+        params: { jobId },
+        dataAccess,
+        attributes: { authInfo: { type: 'jwt' } },
+        pathInfo: { headers: {} },
+      });
 
       expect(response.status).to.equal(200);
       const body = await response.json();
@@ -195,12 +223,109 @@ describe('OaeValidation Controller', () => {
           },
         ],
       });
+      expect(dataAccess.Suggestion.findById).to.have.been.calledOnceWith(suggestionId1);
+      expect(dataAccess.Opportunity.findById).to.have.been.calledOnceWith(opportunityId);
+      expect(dataAccess.Site.findById).to.have.been.calledOnceWith(siteId);
+    });
+
+    it('returns 404 when the job\'s owning suggestion can no longer be found', async () => {
+      dataAccess.OaeValidation.allByJobId.resolves([{
+        getSuggestionId: () => suggestionId1,
+        getStatus: () => 'COMPLETE',
+        getOutcome: () => 'true',
+        getCompletedAt: () => '2026-01-01T00:00:00.000Z',
+        getMetadata: () => ({}),
+      }]);
+      dataAccess.Suggestion.findById.resolves(undefined);
+
+      const response = await controller.getValidationJob({
+        params: { jobId },
+        dataAccess,
+        attributes: { authInfo: { type: 'jwt' } },
+        pathInfo: { headers: {} },
+      });
+
+      expect(response.status).to.equal(404);
+      expect(dataAccess.Opportunity.findById).to.not.have.been.called;
+    });
+
+    it('returns 404 when the suggestion\'s opportunity can no longer be found', async () => {
+      dataAccess.OaeValidation.allByJobId.resolves([{
+        getSuggestionId: () => suggestionId1,
+        getStatus: () => 'COMPLETE',
+        getOutcome: () => 'true',
+        getCompletedAt: () => '2026-01-01T00:00:00.000Z',
+        getMetadata: () => ({}),
+      }]);
+      dataAccess.Suggestion.findById.resolves({ getOpportunityId: () => opportunityId });
+      dataAccess.Opportunity.findById.resolves(undefined);
+
+      const response = await controller.getValidationJob({
+        params: { jobId },
+        dataAccess,
+        attributes: { authInfo: { type: 'jwt' } },
+        pathInfo: { headers: {} },
+      });
+
+      expect(response.status).to.equal(404);
+      expect(dataAccess.Site.findById).to.not.have.been.called;
+    });
+
+    it('returns 404 when the opportunity\'s site can no longer be found', async () => {
+      dataAccess.OaeValidation.allByJobId.resolves([{
+        getSuggestionId: () => suggestionId1,
+        getStatus: () => 'COMPLETE',
+        getOutcome: () => 'true',
+        getCompletedAt: () => '2026-01-01T00:00:00.000Z',
+        getMetadata: () => ({}),
+      }]);
+      dataAccess.Suggestion.findById.resolves({ getOpportunityId: () => opportunityId });
+      dataAccess.Opportunity.findById.resolves({ getSiteId: () => siteId });
+      dataAccess.Site.findById.resolves(undefined);
+
+      const response = await controller.getValidationJob({
+        params: { jobId },
+        dataAccess,
+        attributes: { authInfo: { type: 'jwt' } },
+        pathInfo: { headers: {} },
+      });
+
+      expect(response.status).to.equal(404);
+      expect(AccessControlUtil.prototype.hasAccess).to.not.have.been.called;
+    });
+
+    it('returns 404 when the caller does not have access to the job\'s site', async () => {
+      dataAccess.OaeValidation.allByJobId.resolves([{
+        getSuggestionId: () => suggestionId1,
+        getStatus: () => 'COMPLETE',
+        getOutcome: () => 'true',
+        getCompletedAt: () => '2026-01-01T00:00:00.000Z',
+        getMetadata: () => ({}),
+      }]);
+      dataAccess.Suggestion.findById.resolves({ getOpportunityId: () => opportunityId });
+      dataAccess.Opportunity.findById.resolves({ getSiteId: () => siteId });
+      dataAccess.Site.findById.resolves({ getId: () => siteId });
+      AccessControlUtil.prototype.hasAccess.resolves(false);
+
+      const response = await controller.getValidationJob({
+        params: { jobId },
+        dataAccess,
+        attributes: { authInfo: { type: 'jwt' } },
+        pathInfo: { headers: {} },
+      });
+
+      expect(response.status).to.equal(404);
     });
 
     it('returns 500 when the query fails', async () => {
       dataAccess.OaeValidation.allByJobId.rejects(new Error('DB unavailable'));
 
-      const response = await controller.getValidationJob({ params: { jobId } });
+      const response = await controller.getValidationJob({
+        params: { jobId },
+        dataAccess,
+        attributes: { authInfo: { type: 'jwt' } },
+        pathInfo: { headers: {} },
+      });
 
       expect(response.status).to.equal(500);
     });

@@ -16,7 +16,10 @@ import {
 import {
   accepted, badRequest, internalServerError, notFound, ok,
 } from '@adobe/spacecat-shared-http-utils';
-import { OaeValidationJobs } from '@adobe/spacecat-shared-tokowaka-client';
+import { OaeValidationJobs, ROUTING_VALIDATOR_TYPE } from '@adobe/spacecat-shared-tokowaka-client';
+import AccessControlUtil from '../support/access-control-util.js';
+
+const VALID_VALIDATION_TYPES = [ROUTING_VALIDATOR_TYPE];
 
 /**
  * Creates an OAE validation controller instance.
@@ -63,6 +66,9 @@ function OaeValidationController(ctx, log, env) {
     if (!hasText(data.type)) {
       throw new Error('Invalid request: type is required');
     }
+    if (!VALID_VALIDATION_TYPES.includes(data.type)) {
+      throw new Error(`Invalid request: type must be one of ${VALID_VALIDATION_TYPES.join(', ')}`);
+    }
     if (!isNonEmptyArray(data.suggestionIds)) {
       throw new Error('Invalid request: suggestionIds must be a non-empty array');
     }
@@ -99,11 +105,11 @@ function OaeValidationController(ctx, log, env) {
       ({ jobId } = await createJob(data));
     } catch (error) {
       if (error.message.startsWith('Invalid request')) {
-        log.error(`Invalid request data: ${error.message}`);
+        log.warn(`Invalid request data: ${error.message}`);
         return badRequest(error.message);
       }
       log.error(`Failed to queue OAE validation job: ${error.message}`);
-      return internalServerError(error.message);
+      return internalServerError('Failed to create OAE validation job');
     }
     return accepted({ jobId });
   };
@@ -118,7 +124,7 @@ function OaeValidationController(ctx, log, env) {
     const jobId = context.params?.jobId;
 
     if (!isValidUUID(jobId)) {
-      log.error(`Invalid jobId: ${jobId}`);
+      log.warn(`Invalid jobId: ${jobId}`);
       return badRequest('Invalid jobId');
     }
 
@@ -129,10 +135,25 @@ function OaeValidationController(ctx, log, env) {
         return notFound('Job not found');
       }
 
+      // Resource-level scoping: OaeValidation rows carry no siteId of their own, so the
+      // owning site is resolved via one of the job's suggestions -> its opportunity -> its
+      // site. Fail closed (404, no existence disclosure) if any hop can't be resolved -- same
+      // philosophy as loadJobScopedToCaller (support/async-job-access.js).
+      const { Suggestion, Opportunity, Site } = dataAccess;
+      const [firstResult] = job.suggestions;
+      const suggestion = firstResult && await Suggestion.findById(firstResult.suggestionId);
+      const opportunity = suggestion && await Opportunity.findById(suggestion.getOpportunityId());
+      const site = opportunity && await Site.findById(opportunity.getSiteId());
+
+      const accessControlUtil = AccessControlUtil.fromContext(context);
+      if (!site || !await accessControlUtil.hasAccess(site)) {
+        return notFound('Job not found');
+      }
+
       return ok(job);
     } catch (error) {
       log.error(`Failed to get OAE validation job: ${error.message}`);
-      return internalServerError(error.message);
+      return internalServerError('Failed to get OAE validation job');
     }
   };
 
