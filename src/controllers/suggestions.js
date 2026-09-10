@@ -3219,15 +3219,27 @@ function SuggestionsController(ctx, sqs, env) {
       return badRequest('Request body must contain a non-empty array of suggestionIds');
     }
 
-    // The AEM Content MCP (and the pageId resolve) authenticate with the caller's IMS
-    // user access token. That is distinct from the SpaceCat session token this service
-    // uses for its own caller-auth (the `Authorization` header). The UI passes the IMS
-    // token in the request body (not a custom header) so it needs no CORS-preflight
-    // allowlisting — a new header would be blocked by the edge CORS policy.
-    if (!hasText(imsToken)) {
-      return badRequest('Missing imsToken in request body (IMS user access token required for the AEM MCP)');
+    // AEM auth for the MCP is an IMS *user* access token (distinct from the SpaceCat
+    // session token in the `Authorization` header). Preferred path — OBO: the UI sends
+    // a promise token (`x-promise-token` / `promiseToken` cookie) which we exchange,
+    // on-behalf-of the user, for an AEM-scoped IMS token via the promise-pair consumer
+    // credential (same mechanism as the REST apply path + fixes.js). This is what
+    // removes the hand-supplied token: the standalone ABV session has no AEM scopes.
+    // Fallback — a body-supplied `imsToken` (manual/demo) when no promise token is sent,
+    // so the existing demo flow keeps working during the OBO rollout.
+    let authorization;
+    try {
+      const imsUserToken = await getImsTokenFromPromiseToken(context);
+      authorization = `Bearer ${imsUserToken}`;
+    } catch (tokenErr) {
+      if (hasText(imsToken)) {
+        authorization = imsToken.startsWith('Bearer ') ? imsToken : `Bearer ${imsToken}`;
+      } else {
+        return tokenErr?.status === 401
+          ? forbidden('IMS promise-token exchange failed (OBO)')
+          : badRequest('Provide an x-promise-token (OBO) or imsToken for AEM authentication');
+      }
     }
-    const authorization = imsToken.startsWith('Bearer ') ? imsToken : `Bearer ${imsToken}`;
 
     const deliveryConfig = site.getDeliveryConfig();
     const configuredAuthorURL = deliveryConfig?.authorURL;
