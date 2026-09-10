@@ -13,13 +13,53 @@
 import {
   badRequest, notFound, accepted, internalServerError, createResponse,
 } from '@adobe/spacecat-shared-http-utils';
+import { hasText } from '@adobe/spacecat-shared-utils';
 import { HeadObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
 import { cachedOk } from '../../support/cached-response.js';
 import { dateToIsoWeek } from '../../support/elements/week-utils.js';
+import { isValidLocale } from '../../utils/validations.js';
 import { postSlackMessage } from '../../utils/slack/base.js';
 
 const CLAIMS_PREFIX = 'brand_claims/llmo';
 const WEEK_RE = /^\d{4}-W\d{2}$/;
+
+// Default and hard cap for the `weeks` listing endpoint. The UI shows the most
+// recent runs, so the default is small; the cap bounds an unbounded caller-
+// supplied `limit` (a year of weekly runs) without ever paging past one S3 list.
+const DEFAULT_WEEKS_LIMIT = 15;
+const MAX_WEEKS_LIMIT = 52;
+
+/**
+ * List the ISO-week (`YYYY-Www`) run folders under a site's brand-claims prefix,
+ * newest first. Zero-padded `YYYY-Www` sorts lexicographically, so a descending
+ * string sort orders the weeks chronologically. Non-week folders (e.g. a legacy
+ * flat file's sibling) are ignored. Throws on an S3 failure — callers decide
+ * whether to fall back or surface the error.
+ *
+ * @returns {Promise<{ weeks: string[], prefix: string }>} descending week segments.
+ */
+async function listWeekFolders(s3, bucketName, siteId, log) {
+  const prefix = `${CLAIMS_PREFIX}/${siteId}/`;
+  const res = await s3.s3Client.send(new ListObjectsV2Command({
+    Bucket: bucketName,
+    Prefix: prefix,
+    Delimiter: '/',
+  }));
+  // One folder per ISO week keeps this well under the 1000-prefix page limit
+  // (~19 years), so pagination is intentionally omitted; warn if that changes.
+  if (res.IsTruncated) {
+    log.warn(`Brand claims week listing truncated for site ${siteId}; week resolution may be incomplete`);
+  }
+  const weeks = [];
+  for (const cp of res.CommonPrefixes || []) {
+    const seg = cp.Prefix.slice(prefix.length).replace(/\/$/, '');
+    if (WEEK_RE.test(seg)) {
+      weeks.push(seg);
+    }
+  }
+  weeks.sort((a, b) => (a < b ? 1 : -1)); // newest first
+  return { weeks, prefix };
+}
 
 // Audit type + 7-day cooldown for on-demand Brand Claims runs (LLMO-7263). Trial
 // customers may request a fresh run at most once per week; the UI shows the same
@@ -31,6 +71,10 @@ const BRAND_CLAIMS_REQUEST_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
 // dots, hyphens, underscores — no `/` — to prevent using HeadObject as an
 // object-existence probe across arbitrary key paths.
 const MODEL_RE = /^[\w.-]+$/;
+// `locale` is interpolated into the S3 key too, so it is validated with the shared
+// `isValidLocale` (strict `xx_yy` shape) before it can reach a key — one definition of
+// "valid locale" across the service, and it blocks `..`, slashes, and arbitrary path
+// segments (S3 key injection) just like MODEL_RE.
 
 /**
  * Latest run key for a site: the lexically-greatest `YYYY-Www` folder under the
@@ -38,28 +82,9 @@ const MODEL_RE = /^[\w.-]+$/;
  * the legacy flat key).
  */
 async function latestWeekKey(s3, bucketName, siteId, log) {
-  const prefix = `${CLAIMS_PREFIX}/${siteId}/`;
   try {
-    const res = await s3.s3Client.send(new ListObjectsV2Command({
-      Bucket: bucketName,
-      Prefix: prefix,
-      Delimiter: '/',
-    }));
-    // One folder per ISO week keeps this well under the 1000-prefix page limit
-    // (~19 years), so pagination is intentionally omitted; warn if that changes.
-    if (res.IsTruncated) {
-      log.warn(`Brand claims week listing truncated for site ${siteId}; latest-week resolution may be incomplete`);
-    }
-    // Zero-padded YYYY-Www sorts lexicographically, so the latest week is the
-    // string max — a linear scan, not a full sort.
-    let latest = null;
-    for (const cp of res.CommonPrefixes || []) {
-      const seg = cp.Prefix.slice(prefix.length).replace(/\/$/, '');
-      if (WEEK_RE.test(seg) && (latest === null || seg > latest)) {
-        latest = seg;
-      }
-    }
-    return latest ? `${prefix}${latest}/data.json.gz` : null;
+    const { weeks, prefix } = await listWeekFolders(s3, bucketName, siteId, log);
+    return weeks.length ? `${prefix}${weeks[0]}/data.json.gz` : null;
   } catch (err) {
     // Best-effort: a listing failure falls back to the legacy flat key rather
     // than failing the request (a genuinely missing object still 404s at HEAD).
@@ -74,10 +99,11 @@ async function latestWeekKey(s3, bucketName, siteId, log) {
  * so this endpoint returns a presigned URL rather than the data directly.
  *
  * Runs are stored per ISO week (`{siteId}/{YYYY-Www}/data.json.gz`). With no
- * `date`, the latest week is served (falling back to the legacy flat
- * `{siteId}/data.json.gz` for sites not yet migrated); with `date`, the run for
- * that date's ISO week is served. A `model` selects a legacy flat
- * `{model}.json.gz` file, unchanged.
+ * selector, the latest week is served (falling back to the legacy flat
+ * `{siteId}/data.json.gz` for sites not yet migrated). A `week` (`YYYY-Www`, as
+ * returned by the weeks-listing endpoint) keys that week directly; a `date`
+ * (`YYYY-MM-DD`) resolves to its ISO week; `week` wins if both are set. A
+ * `model` selects a legacy flat `{model}.json.gz` file, unchanged.
  *
  * @param {object} context - The request context containing log, s3, env, and params
  * @returns {Promise<Response>} The brand claims presigned URL response
@@ -85,7 +111,9 @@ async function latestWeekKey(s3, bucketName, siteId, log) {
 export async function handleBrandClaims(context) {
   const { log, s3 } = context;
   const { siteId } = context.params;
-  const { model, date } = context.data;
+  const {
+    model, date, week, locale,
+  } = context.data;
 
   if (!s3 || !s3.s3Client) {
     return badRequest('S3 storage is not configured for this environment');
@@ -100,13 +128,31 @@ export async function handleBrandClaims(context) {
     return badRequest('Invalid model parameter');
   }
 
+  // `locale` selects a localized sibling of the default `data.json.gz`
+  // (`data.<locale>.json.gz`). It applies ONLY to the default `data` family, so
+  // it is ignored when `model` is set (model files are not localized) — model
+  // wins, keeping the two selectors from interacting. Validate strictly here,
+  // before it can reach an S3 key (trust boundary).
+  const useLocale = !model && hasText(locale);
+  if (useLocale && !isValidLocale(locale)) {
+    return badRequest('Invalid locale parameter: expected e.g. ja_jp');
+  }
+
   // Model files are managed flat (not week-partitioned) and take precedence;
-  // `date` resolves directly to its week (validated only here, where it is
-  // actually used); otherwise default to the legacy flat key and upgrade it to
-  // the latest week (via a list) inside the try below.
+  // `week` (a `YYYY-Www` returned by the weeks-listing endpoint) keys its folder
+  // directly; `date` resolves to its ISO week; otherwise default to the legacy
+  // flat key and upgrade it to the latest week (via a list) inside the try below.
+  // `week` and `date` are two spellings of the same selector — `week` wins when
+  // both are set (it needs no date→week conversion). Each is validated only in
+  // the branch that uses it.
   let s3Key;
   if (model) {
     s3Key = `${CLAIMS_PREFIX}/${siteId}/${model}.json.gz`;
+  } else if (week) {
+    if (!WEEK_RE.test(week)) {
+      return badRequest('Invalid week parameter: expected YYYY-Www format');
+    }
+    s3Key = `${CLAIMS_PREFIX}/${siteId}/${week}/data.json.gz`;
   } else if (date) {
     // Round-trip parse (UTC): rejects unparseable dates AND ones JS silently
     // rolls over (e.g. 2026-02-30 -> Mar 2), which would key the wrong week.
@@ -119,24 +165,64 @@ export async function handleBrandClaims(context) {
     s3Key = `${CLAIMS_PREFIX}/${siteId}/data.json.gz`;
   }
 
-  log.info(`Getting brand claims for site ${siteId}, model: ${model || 'default'}${date ? `, date: ${date}` : ''}`);
+  let selectorLog = '';
+  if (week) {
+    selectorLog = `, week: ${week}`;
+  } else if (date) {
+    selectorLog = `, date: ${date}`;
+  }
+  log.info(`Getting brand claims for site ${siteId}, model: ${model || 'default'}${selectorLog}`);
 
   try {
     const { getSignedUrl, GetObjectCommand } = s3;
 
-    if (!model && !date) {
+    if (!model && !week && !date) {
       const latest = await latestWeekKey(s3, bucketName, siteId, log);
       if (latest) {
         s3Key = latest;
       }
     }
 
+    // Localization: when a valid `locale` is requested, prefer the localized
+    // sibling that mystique writes next to the resolved English file
+    // (`data.json.gz` -> `data.<locale>.json.gz`, in the same week/flat folder),
+    // and transparently fall back to English when that sibling does not exist.
+    // getSignedUrl never checks existence, so an explicit HeadObject is the only
+    // way to detect a missing localized file. `servedLocale` reports which one
+    // the caller actually got so the UI can tell whether it fell back.
+    let servedLocale = 'default';
+    let verified = false;
+    const localizedKey = useLocale ? s3Key.replace(/data\.json\.gz$/, `data.${locale}.json.gz`) : s3Key;
+    // The regex-replace only produces a distinct key when the resolved English key ends
+    // in `data.json.gz` (true for every default-family branch today). Guard on
+    // `localizedKey !== s3Key` so that if a future key shape ever breaks that invariant,
+    // the replace no-op can't make us HEAD the English object and then report
+    // `servedLocale = locale` for an English file — a silent misreport.
+    if (useLocale && localizedKey !== s3Key) {
+      try {
+        await s3.s3Client.send(new HeadObjectCommand({ Bucket: bucketName, Key: localizedKey }));
+        s3Key = localizedKey;
+        servedLocale = locale;
+        verified = true; // localized object confirmed present; no second HEAD needed
+      } catch (localeError) {
+        if (localeError.name === 'NotFound' || localeError.$metadata?.httpStatusCode === 404) {
+          log.info(`Localized brand claims not found for site ${siteId} locale ${locale}; falling back to English`);
+        } else {
+          throw localeError; // NoSuchBucket / transient faults -> shared handler below
+        }
+      }
+    }
+
     // Presigning a GetObject URL is an offline operation and never checks that
     // the object exists, so without this HeadObject the endpoint would happily
     // hand out a URL that 404s on fetch. Verify existence first and return a
-    // clean 404 otherwise (mirrors getFanoutReport). This also lets callers use
-    // the endpoint as a cheap availability probe (e.g. an "all brands" view).
-    await s3.s3Client.send(new HeadObjectCommand({ Bucket: bucketName, Key: s3Key }));
+    // clean 404 otherwise (mirrors getFanoutReport). Skipped only when the
+    // localized HEAD above already confirmed this exact key. This also lets
+    // callers use the endpoint as a cheap availability probe (e.g. an "all
+    // brands" view).
+    if (!verified) {
+      await s3.s3Client.send(new HeadObjectCommand({ Bucket: bucketName, Key: s3Key }));
+    }
 
     const command = new GetObjectCommand({
       Bucket: bucketName,
@@ -149,6 +235,8 @@ export async function handleBrandClaims(context) {
     return cachedOk({
       siteId,
       model: model || 'default',
+      requestedLocale: useLocale ? locale : null,
+      servedLocale,
       presignedUrl: url,
       expiresAt: new Date(Date.now() + expiresIn * 1000).toISOString(),
     });
@@ -159,11 +247,109 @@ export async function handleBrandClaims(context) {
     }
     if (s3Error.name === 'NoSuchBucket') {
       log.error(`S3 bucket ${bucketName} not found`);
-      return badRequest(`Storage bucket not found: ${bucketName}`);
+      return badRequest('S3 storage is not properly configured for this environment');
     }
 
+    // Keep the raw AWS error (message, bucket, key layout) in the log only — echoing it
+    // to the client leaks recon primitives (e.g. an AccessDenied surfaces account/role/
+    // bucket), and trial users can reach this endpoint. Return generic text + a 5xx, so a
+    // real S3 fault isn't mislabelled a 400 (mirrors handleBrandClaimsWeeks).
     log.error(`S3 error retrieving brand claims for site ${siteId}: ${s3Error.message}`);
-    return badRequest(`Error retrieving brand claims: ${s3Error.message}`);
+    return internalServerError('Unable to retrieve brand claims');
+  }
+}
+
+/**
+ * Lists the ISO weeks (`YYYY-Www`) for which a brand-claims run exists for a
+ * site, newest first, capped at `limit` (default 15, max 52). The UI uses this
+ * to offer a week picker instead of only ever showing the latest run; a listed
+ * week is fetched directly via `GET .../brand-claims?week=<YYYY-Www>` (or the
+ * `?date=<any-date-in-that-week>` alternative). Returns an empty list (not a
+ * 404) when no week-partitioned runs exist, so the caller can distinguish
+ * "no history yet" from a hard failure.
+ *
+ * @param {object} context - The request context containing log, s3, and params.
+ * @returns {Promise<Response>} `{ siteId, weeks, count }`.
+ */
+export async function handleBrandClaimsWeeks(context) {
+  const { log, s3 } = context;
+  const { siteId } = context.params;
+
+  if (!s3 || !s3.s3Client) {
+    return badRequest('S3 storage is not configured for this environment');
+  }
+
+  const bucketName = s3.s3Bucket;
+  if (!bucketName) {
+    return badRequest('S3 bucket is not configured for this environment');
+  }
+
+  // Optional `limit`: parsed leniently, then clamped to [1, MAX_WEEKS_LIMIT];
+  // a missing or non-numeric value falls back to the default rather than 400ing.
+  const rawLimit = Number.parseInt(context.data?.limit, 10);
+  const limit = Number.isFinite(rawLimit)
+    ? Math.min(Math.max(rawLimit, 1), MAX_WEEKS_LIMIT)
+    : DEFAULT_WEEKS_LIMIT;
+
+  log.info(`Listing brand claims weeks for site ${siteId} (limit ${limit})`);
+
+  try {
+    const { weeks } = await listWeekFolders(s3, bucketName, siteId, log);
+    const limited = weeks.slice(0, limit);
+    return cachedOk({ siteId, weeks: limited, count: limited.length });
+  } catch (s3Error) {
+    // Keep infra details (bucket name, SDK message) in the log only; never echo
+    // them to external callers. A missing bucket is a misconfiguration (400);
+    // any other S3 fault is server-side, so 5xx it so outages show up as 5xx
+    // spikes rather than masquerading as client errors.
+    if (s3Error.name === 'NoSuchBucket') {
+      log.error(`S3 bucket ${bucketName} not found`);
+      return badRequest('S3 storage is not properly configured for this environment');
+    }
+    log.error(`S3 error listing brand claims weeks for site ${siteId}: ${s3Error.message}`);
+    return internalServerError('Unable to list brand claims weeks');
+  }
+}
+
+// Adobe corporate and test email domains (plus their subdomains) that mark a
+// requester as internal; every other domain is treated as an external customer.
+const INTERNAL_EMAIL_DOMAINS = ['adobe.com', 'adobetest.com'];
+
+/**
+ * Classifies the caller who triggered the request as an internal (Adobe) user or an
+ * external (customer) user, for the Slack alert, so operators can tell an internal or
+ * test run apart from a real customer request (LLMO-7263).
+ *
+ * The email is resolved the same way as the rest of the codebase (trial_email, then
+ * preferred_username, then profile.email — which may be an IMS GUID rather than an
+ * address) and classified purely by domain: an Adobe corporate/test domain
+ * (see INTERNAL_EMAIL_DOMAINS, incl. subdomains) is internal, any other domain is
+ * external. Returns null when no classifiable email is available (the alert then omits
+ * the "by ..." clause).
+ *
+ * @param {object} context - Request context (attributes.authInfo).
+ * @returns {'internal'|'external'|null}
+ */
+function getRequesterAudience(context) {
+  try {
+    const authInfo = context?.attributes?.authInfo;
+    const profile = authInfo?.getProfile?.() ?? authInfo?.profile ?? {};
+    const email = [profile.trial_email, profile.preferred_username, profile.email]
+      .find((v) => hasText(v));
+    // Domain is the part after the last '@'; a value without one (e.g. an IMS GUID)
+    // yields no domain and stays unclassified rather than being mislabelled.
+    const at = hasText(email) ? email.lastIndexOf('@') : -1;
+    const domain = at >= 0 ? email.slice(at + 1).toLowerCase().trim() : '';
+    if (!hasText(domain)) {
+      return null;
+    }
+    const isInternal = INTERNAL_EMAIL_DOMAINS
+      .some((d) => domain === d || domain.endsWith(`.${d}`));
+    return isInternal ? 'internal' : 'external';
+  } catch {
+    // Best-effort classification only — never let requester lookup throw into the
+    // (already queued) run or the Slack alert.
+    return null;
   }
 }
 
@@ -200,8 +386,12 @@ export async function handleRequestBrandClaims(context, site) {
   // audit row both pass this check and both enqueue. The per-brand redelivery dedup
   // (blackboard fact freshness in mystique) makes the duplicate a cheap no-op, so a
   // best-effort check here is deliberate rather than a hard once-only lock.
+  // A prior audit that clears the cooldown means this request is a re-run rather than
+  // a first-ever run; the Slack alert below tags it so operators can tell them apart.
+  let isRerun = false;
   try {
     const latestAudit = await site.getLatestAuditByAuditType(BRAND_CLAIMS_AUDIT_TYPE);
+    isRerun = Boolean(latestAudit);
     const ranAtMs = typeof latestAudit?.getAuditedAt === 'function'
       ? Date.parse(latestAudit.getAuditedAt())
       : NaN;
@@ -247,9 +437,12 @@ export async function handleRequestBrandClaims(context, site) {
   const slackToken = env?.SLACK_BOT_TOKEN;
   if (slackChannel && slackToken) {
     try {
+      const audience = getRequesterAudience(context);
+      const requestedBy = audience ? ` by an ${audience} user` : '';
+      const rerunTag = isRerun ? ' (re-run)' : '';
       await postSlackMessage(
         slackChannel,
-        `:rocket: On-demand Brand Claims requested for *${site.getBaseURL()}* (${site.getId()}).`,
+        `:rocket: On-demand Brand Claims requested${rerunTag} for *${site.getBaseURL()}* (${site.getId()})${requestedBy}.`,
         slackToken,
       );
     } catch (slackError) {

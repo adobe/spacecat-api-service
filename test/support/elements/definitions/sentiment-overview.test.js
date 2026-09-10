@@ -16,6 +16,15 @@ import {
   transformSentimentOverviewResponse,
   SENTIMENT_COLORS,
 } from '../../../../src/support/elements/definitions/sentiment-overview.js';
+import {
+  RAW_SENTIMENT_WEEK,
+  SENTIMENT_MENTIONS_TOTAL,
+  SENTIMENT_PROMPTS_TOTAL,
+  SENTIMENT_MENTIONS_PCT,
+  SENTIMENT_PROMPTS_PCT,
+  SENTIMENT_MENTION_COUNTS,
+  SENTIMENT_PROMPT_COUNTS,
+} from '../fixtures/sentiment-overview.js';
 
 // Locates the CBF_project value inside the advanced filter tree (it sits in its own
 // `or` block, like the CBF_model block), or returns undefined if absent (including when
@@ -145,11 +154,94 @@ describe('sentiment-overview definitions', () => {
         .find((f) => f.col === 'CBF_tags');
       expect(tagFilter).to.deep.include({ op: 'eq', val: 'category__travel', col: 'CBF_tags' });
     });
+
+    // Brand scoping (LLMO-7456). The sub-workspace alone does NOT scope to the brand — it
+    // also holds the brand's tracked competitors — so without CBF_brand the element blends
+    // them into the sentiment counts. Verified live: brand "au", week 2026-08-23, 319/345/16
+    // with the filter vs 507/585/66 without it.
+    describe('brand scoping (CBF_brand)', () => {
+      const findBrandFilter = (payload) => (payload.filters.advanced?.filters ?? [])
+        .find((f) => f.col === 'CBF_brand');
+
+      it('sends CBF_brand as a bare eq when brandName is provided', () => {
+        const payload = buildSentimentOverviewPayload({ brandName: 'au' });
+        expect(findBrandFilter(payload)).to.deep.equal({ op: 'eq', val: 'au', col: 'CBF_brand' });
+      });
+
+      it('uses CBF_brand, not CBF_ws_brand', () => {
+        const payload = buildSentimentOverviewPayload({ brandName: 'au' });
+        expect(payload.filters.advanced.filters.some((f) => f.col === 'CBF_ws_brand')).to.equal(false);
+      });
+
+      it('omits CBF_brand when brandName is not provided', () => {
+        expect(findBrandFilter(buildSentimentOverviewPayload({ projectId: 'proj-1' }))).to.be.undefined;
+      });
+
+      // A whitespace-only name must NOT be forwarded: `CBF_brand: "   "` matches no brand
+      // and silently zeroes the counts, which is indistinguishable from a real "no
+      // sentiment". Note `hasText` does not trim, so it would not catch this.
+      it('treats a blank or whitespace-only brandName as absent', () => {
+        expect(findBrandFilter(buildSentimentOverviewPayload({ brandName: '', projectId: 'p' }))).to.be.undefined;
+        expect(findBrandFilter(buildSentimentOverviewPayload({ brandName: '   ', projectId: 'p' }))).to.be.undefined;
+      });
+
+      it('ignores a non-string brandName', () => {
+        expect(findBrandFilter(buildSentimentOverviewPayload({ brandName: 42, projectId: 'p' }))).to.be.undefined;
+      });
+
+      it('trims a padded brandName before sending it', () => {
+        const payload = buildSentimentOverviewPayload({ brandName: '  au  ' });
+        expect(findBrandFilter(payload)).to.deep.equal({ op: 'eq', val: 'au', col: 'CBF_brand' });
+      });
+
+      // Guards the documented empty-AND → HTTP 422 behaviour: a whitespace-only brand must
+      // not be the thing that keeps an otherwise-empty advanced block alive.
+      it('still omits the advanced block when a whitespace brandName is the only input', () => {
+        expect(buildSentimentOverviewPayload({ brandName: '   ' }).filters).to.not.have.property('advanced');
+      });
+
+      it('emits the advanced block when brandName is the only filter', () => {
+        const payload = buildSentimentOverviewPayload({ brandName: 'au' });
+        expect(payload.filters.advanced).to.deep.equal({
+          op: 'and',
+          filters: [{ op: 'eq', val: 'au', col: 'CBF_brand' }],
+        });
+      });
+
+      it('coexists with the model, project and category filters', () => {
+        const payload = buildSentimentOverviewPayload({
+          model: 'openai',
+          brandName: 'au',
+          projectId: 'proj-1',
+          category: 'category__Paint',
+        });
+        expect(payload.filters.advanced.filters).to.deep.equal([
+          { op: 'or', filters: [{ op: 'eq', val: 'chatgpt-paid', col: 'CBF_model' }] },
+          { op: 'eq', val: 'au', col: 'CBF_brand' },
+          { op: 'or', filters: [{ op: 'eq', val: 'proj-1', col: 'CBF_project' }] },
+          { op: 'eq', val: 'category__Paint', col: 'CBF_tags' },
+        ]);
+      });
+
+      // Guards the merge of LLMO-7456 (brandName) with the faceted-tag work, which added
+      // tagPaths to this same signature: both must survive and be emitted together.
+      it('coexists with faceted tagPaths', () => {
+        const payload = buildSentimentOverviewPayload({
+          brandName: 'au',
+          tagPaths: ['category__Paint', 'type__branded'],
+        });
+        expect(findBrandFilter(payload)).to.deep.equal({ op: 'eq', val: 'au', col: 'CBF_brand' });
+        expect(payload.filters.advanced.filters).to.deep.include.members([
+          { op: 'or', filters: [{ op: 'eq', val: 'category__Paint', col: 'CBF_tags' }] },
+          { op: 'or', filters: [{ op: 'eq', val: 'type__branded', col: 'CBF_tags' }] },
+        ]);
+      });
+    });
   });
 
   describe('transformSentimentOverviewResponse', () => {
     it('returns an empty weeklyTrends for a missing/empty response', () => {
-      const empty = { weeklyTrends: [] };
+      const empty = { metric: 'prompts', weeklyTrends: [] };
       expect(transformSentimentOverviewResponse(undefined)).to.deep.equal(empty);
       expect(transformSentimentOverviewResponse({ blocks: {} })).to.deep.equal(empty);
     });
@@ -266,6 +358,149 @@ describe('sentiment-overview definitions', () => {
       expect(weeklyTrends).to.have.length(1);
       expect(weeklyTrends[0].week).to.equal('2026-W11');
       expect(weeklyTrends.some((w) => /NaN/.test(w.week))).to.be.false;
+    });
+
+    // The `metric` switch (LLMO-7457). The fixture below is a REAL bucket captured from
+    // the live element (brand "au", week starting 2026-08-16), whose numbers the Semrush
+    // MFE tooltip rendered as Negative 1% / 7, Neutral 56% / 571, Positive 43% / 443.
+    describe('metric switch (prompts vs mentions)', () => {
+      const rawWeek = RAW_SENTIMENT_WEEK;
+      const pctOf = (wk) => Object.fromEntries(wk.sentiment.map((s) => [s.name, s.value]));
+
+      it('defaults to prompts when no metric is given (unchanged behaviour)', () => {
+        const res = transformSentimentOverviewResponse(rawWeek);
+        expect(res.metric).to.equal('prompts');
+        expect(pctOf(res.weeklyTrends[0])).to.deep.equal(SENTIMENT_PROMPTS_PCT);
+        expect(res.weeklyTrends[0].sentimentTotal).to.equal(SENTIMENT_PROMPTS_TOTAL);
+      });
+
+      it('reproduces the live MFE tooltip percentages when metric is mentions', () => {
+        const res = transformSentimentOverviewResponse(rawWeek, { metric: 'mentions' });
+        expect(res.metric).to.equal('mentions');
+        // Exactly what the MFE showed for this bucket.
+        expect(pctOf(res.weeklyTrends[0])).to.deep.equal(SENTIMENT_MENTIONS_PCT);
+        expect(res.weeklyTrends[0].sentimentTotal).to.equal(SENTIMENT_MENTIONS_TOTAL);
+      });
+
+      it('normalises a padded/upper-case metric (shared with the controller)', () => {
+        const res = transformSentimentOverviewResponse(rawWeek, { metric: '  MENTIONS  ' });
+        expect(res.metric).to.equal('mentions');
+        expect(res.weeklyTrends[0].sentimentTotal).to.equal(SENTIMENT_MENTIONS_TOTAL);
+      });
+
+      it('falls back to prompts for an unrecognised or blank metric', () => {
+        for (const metric of ['bogus', '', null, undefined, 42]) {
+          const res = transformSentimentOverviewResponse(rawWeek, { metric });
+          expect(res.metric, `metric=${metric}`).to.equal('prompts');
+          expect(res.weeklyTrends[0].sentimentTotal, `metric=${metric}`)
+            .to.equal(SENTIMENT_PROMPTS_TOTAL);
+        }
+      });
+
+      it('returns BOTH count sets regardless of the selected metric', () => {
+        for (const metric of ['prompts', 'mentions']) {
+          const [wk] = transformSentimentOverviewResponse(rawWeek, { metric }).weeklyTrends;
+          expect(wk.mentionCounts, `metric=${metric}`).to.deep.equal(SENTIMENT_MENTION_COUNTS);
+          expect(wk.promptCounts, `metric=${metric}`).to.deep.equal(SENTIMENT_PROMPT_COUNTS);
+        }
+      });
+
+      // These two must not change meaning when the metric flips, or existing consumers
+      // would silently start reading a different quantity under the same field name.
+      it('keeps promptsWithSentiment and totalPrompts prompt-based under either metric', () => {
+        for (const metric of ['prompts', 'mentions']) {
+          const [wk] = transformSentimentOverviewResponse(rawWeek, { metric }).weeklyTrends;
+          expect(wk.promptsWithSentiment, `metric=${metric}`).to.equal(SENTIMENT_PROMPTS_TOTAL);
+          expect(wk.totalPrompts, `metric=${metric}`).to.equal(275);
+        }
+      });
+
+      it('still emits percentages summing to 100 under mentions', () => {
+        const [wk] = transformSentimentOverviewResponse(rawWeek, { metric: 'mentions' }).weeklyTrends;
+        const total = wk.sentiment.reduce((sum, s) => sum + s.value, 0);
+        expect(total).to.equal(100);
+      });
+
+      it('zeroes percentages for a week with no sentiment under either metric', () => {
+        const emptyWeek = { blocks: { data: [], line: [{ bar: '2026-08-16', value: 0 }] } };
+        for (const metric of ['prompts', 'mentions']) {
+          const [wk] = transformSentimentOverviewResponse(emptyWeek, { metric }).weeklyTrends;
+          expect(pctOf(wk), `metric=${metric}`)
+            .to.deep.equal({ Positive: 0, Neutral: 0, Negative: 0 });
+          expect(wk.sentimentTotal, `metric=${metric}`).to.equal(0);
+        }
+      });
+
+      // The zero case above has BOTH sets empty. This is the asymmetric shape: the
+      // SELECTED basis is zero while the other is not — what an upstream `value`
+      // regression would look like, and what the controller's warn log keys on.
+      it('zeroes percentages when only the selected basis is empty', () => {
+        const mentionsMissing = {
+          blocks: {
+            data: [
+              {
+                bar: '2026-08-16', legend: 'Positive', value: 0, value__prompts: 165,
+              },
+              {
+                bar: '2026-08-16', legend: 'Neutral', value: 0, value__prompts: 208,
+              },
+            ],
+            line: [{ bar: '2026-08-16', value: 275 }],
+          },
+        };
+        const [asMentions] = transformSentimentOverviewResponse(mentionsMissing, { metric: 'mentions' }).weeklyTrends;
+        expect(pctOf(asMentions)).to.deep.equal({ Positive: 0, Neutral: 0, Negative: 0 });
+        expect(asMentions.sentimentTotal).to.equal(0);
+        // The other set is intact, which is exactly what makes this diagnosable.
+        expect(asMentions.promptCounts).to.deep.equal({ positive: 165, neutral: 208, negative: 0 });
+
+        const [asPrompts] = transformSentimentOverviewResponse(mentionsMissing, { metric: 'prompts' }).weeklyTrends;
+        expect(asPrompts.sentimentTotal).to.equal(373);
+      });
+
+      it('coerces a non-numeric mention value to 0 rather than NaN', () => {
+        const dirty = {
+          blocks: {
+            data: [
+              {
+                bar: '2026-08-16', legend: 'Positive', value: 'N/A', value__prompts: 10,
+              },
+              {
+                bar: '2026-08-16', legend: 'Neutral', value: 30, value__prompts: 10,
+              },
+            ],
+            line: [{ bar: '2026-08-16', value: 20 }],
+          },
+        };
+        const [wk] = transformSentimentOverviewResponse(dirty, { metric: 'mentions' }).weeklyTrends;
+        expect(wk.mentionCounts).to.deep.equal({ positive: 0, neutral: 30, negative: 0 });
+        expect(wk.sentimentTotal).to.equal(30);
+        expect(pctOf(wk)).to.deep.equal({ Positive: 0, Neutral: 100, Negative: 0 });
+      });
+
+      // The absorb branch: independent rounding of positive and negative can sum to
+      // 101, which would make the neutral remainder negative. Exercised on the
+      // mention path, which previously had no case for it.
+      it('clamps neutral to 0 on the mention path when rounding overflows to 101', () => {
+        const split = {
+          blocks: {
+            data: [
+              {
+                bar: '2026-08-16', legend: 'Positive', value: 101, value__prompts: 1,
+              },
+              {
+                bar: '2026-08-16', legend: 'Negative', value: 99, value__prompts: 1,
+              },
+            ],
+            line: [{ bar: '2026-08-16', value: 200 }],
+          },
+        };
+        const [wk] = transformSentimentOverviewResponse(split, { metric: 'mentions' }).weeklyTrends;
+        const pct = pctOf(wk);
+        expect(pct.Neutral).to.equal(0);
+        expect(pct.Positive + pct.Neutral + pct.Negative).to.equal(100);
+        expect(pct.Positive).to.be.at.least(pct.Negative);
+      });
     });
   });
 });

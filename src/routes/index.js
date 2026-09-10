@@ -242,6 +242,7 @@ export default function getRouteHandlers(
     'POST /v2/orgs/:spaceCatId/brands/:brandId/activate': brandsController.activateBrandForOrg,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts': serenityController.listPrompts,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts': serenityController.createPrompts,
+    'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/bulk-tags': serenityController.bulkTagPrompts,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/bulk-delete': serenityController.bulkDeletePrompts,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/jobs/:jobId': serenityController.getPromptsJobStatus,
     'PATCH /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/:semrushPromptId': serenityController.updatePrompt,
@@ -252,6 +253,7 @@ export default function getRouteHandlers(
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags': serenityController.listTags,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags': serenityController.createTag,
     'PATCH /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags/:tagId': serenityController.updateTag,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags/:tagId/impact': serenityController.getTagImpact,
     'DELETE /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags/:tagId': serenityController.deleteTag,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/models': serenityController.listModels,
     'PUT /v2/orgs/:spaceCatId/brands/:brandId/serenity/models': serenityController.updateModels,
@@ -503,7 +505,9 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/top-pages/:source/:geo': sitesController.getTopPages,
     'POST /sites/:siteId/graph': sitesController.getGraph,
 
-    'GET /slack/events': slackController.handleEvent,
+    // NOTE: there is deliberately no `GET /slack/events`. Slack only ever POSTs events and
+    // interactive payloads, and a GET carries no body to sign, so it could never satisfy the
+    // signature check in slackSignatureWrapper (VULN-39365).
     'POST /slack/events': slackController.handleEvent,
     'POST /slack/channels/invite-by-user-id': slackController.inviteUserToChannel,
     'GET /trigger': triggerHandler,
@@ -599,6 +603,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/llmo/global-sheet-data/:configName': llmoController.getLlmoGlobalSheetData,
     'GET /sites/:siteId/llmo/rationale': llmoController.getLlmoRationale,
     'GET /sites/:siteId/llmo/brand-claims': llmoController.getBrandClaims,
+    'GET /sites/:siteId/llmo/brand-claims/weeks': llmoController.getBrandClaimsWeeks,
     'POST /sites/:siteId/llmo/brand-claims/request': llmoController.requestBrandClaims,
     'GET /sites/:siteId/llmo/strategy/demo/brand-presence': llmoController.getDemoBrandPresence,
     'GET /sites/:siteId/llmo/strategy/demo/recommendations': llmoController.getDemoRecommendations,

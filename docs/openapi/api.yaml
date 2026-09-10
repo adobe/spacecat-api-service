@@ -166,6 +166,8 @@ paths:
     $ref: './serenity-api.yaml#/v2-serenity-prompt-by-id'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/prompts/bulk-delete:
     $ref: './serenity-api.yaml#/v2-serenity-prompts-bulk-delete'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/prompts/bulk-tags:
+    $ref: './serenity-api.yaml#/v2-serenity-prompts-bulk-tags'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/prompts/jobs/{jobId}:
     $ref: './serenity-api.yaml#/v2-serenity-prompts-job-by-id'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/markets:
@@ -176,6 +178,8 @@ paths:
     $ref: './serenity-api.yaml#/v2-serenity-tags'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/tags/{tagId}:
     $ref: './serenity-api.yaml#/v2-serenity-tag-by-id'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/tags/{tagId}/impact:
+    $ref: './serenity-api.yaml#/v2-serenity-tag-impact'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/models:
     $ref: './serenity-api.yaml#/v2-serenity-models'
   /v2/orgs/{spaceCatId}/serenity/models:
@@ -730,6 +734,8 @@ paths:
     $ref: './llmo-api.yaml#/llmo-opportunities-reviewed'
   /sites/{siteId}/llmo/brand-claims:
     $ref: './llmo-api.yaml#/llmo-brand-claims'
+  /sites/{siteId}/llmo/brand-claims/weeks:
+    $ref: './llmo-api.yaml#/llmo-brand-claims-weeks'
   /sites/{siteId}/llmo/brand-claims/request:
     $ref: './llmo-api.yaml#/llmo-brand-claims-request'
   /sites/{siteId}/llmo/strategy/demo/brand-presence:

@@ -35,6 +35,7 @@ import {
 
 import { ErrorWithStatusCode, getImsUserToken, resolveSemrushImsToken } from '../support/utils.js';
 import { hostnameFromUrlString } from '../support/url-utils.js';
+import { BRAND_GUIDANCE_MAX_LENGTH, codePointLength } from '../support/brand-guidance.js';
 import {
   STATUS_BAD_REQUEST,
 } from '../utils/constants.js';
@@ -119,7 +120,6 @@ import {
 } from '../support/topics-storage.js';
 
 const HEADER_ERROR = 'x-error';
-const BRAND_GUIDANCE_MAX_LENGTH = 4000;
 const BRAND_GUIDANCE_FIELDS = ['brandContext', 'mentionSentimentGuidance'];
 
 /**
@@ -400,9 +400,11 @@ function BrandsController(ctx, log, env) {
         if (typeof value !== 'string') {
           return badRequest(`${field} must be a string or null`);
         }
-        // Validate the trimmed length: storage trims before persisting, so this
-        // mirrors what is actually stored (and the schema's maxLength).
-        if (value.trim().length > BRAND_GUIDANCE_MAX_LENGTH) {
+        // Validate the trimmed length in code points: storage trims before persisting,
+        // so this mirrors what is actually stored, and code-point counting matches the
+        // storage backstop (codePointLength) so both layers agree on "4000 characters"
+        // for non-BMP input (e.g. emoji count as one, not two UTF-16 units).
+        if (codePointLength(value.trim()) > BRAND_GUIDANCE_MAX_LENGTH) {
           return badRequest(`${field} must be at most ${BRAND_GUIDANCE_MAX_LENGTH} characters`);
         }
       }
@@ -2378,6 +2380,7 @@ function BrandsController(ctx, log, env) {
         updates,
         postgrestClient,
         updatedBy,
+        log,
       });
 
       if (!updatedRow) {
@@ -2771,6 +2774,7 @@ function BrandsController(ctx, log, env) {
         updates: { status: 'active', baseSiteId },
         postgrestClient,
         updatedBy,
+        log,
       });
       if (!updated) {
         return notFound(`Brand not found: ${brandId}`);
