@@ -2396,6 +2396,29 @@ describe('SerenityController', () => {
       expect(createAndEnqueueJobStub).to.not.have.been.called;
     });
 
+    it('activate runs the SYNCHRONOUS market batch when the global async switch is off, even with async: true (LLMO-7418 master switch)', async () => {
+      // Mirrors createMarket's master-switch test, for activate's project-activation branch.
+      // The switch is DEFAULT OFF in production, so `async: true` must fall through to the
+      // synchronous orchestration rather than error — that is what lets the stack merge inert.
+      orchestrateActivateMarketsStub.resolves({
+        status: 200, body: { brandId: BRAND, status: 'active', markets: [] },
+      });
+      const brand = makeBrandModel({ getStatus: () => 'active' });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.activate(fakeContext({
+        brand,
+        env: {}, // switch absent => off
+        data: {
+          brandDomain: 'x.com', brandNames: ['X'], markets: [{ market: 'us', languageCode: 'en' }], async: true,
+        },
+      }));
+
+      expect(response.status).to.equal(200);
+      expect(orchestrateActivateMarketsStub).to.have.been.calledOnce;
+      expect(beginProvisioningAttemptStub).to.not.have.been.called;
+      expect(createAndEnqueueJobStub).to.not.have.been.called;
+    });
+
     it('activate 400s when generatePrompts is true but there is no primary URL (nothing to generate into)', async () => {
       const brand = makeBrandModel({ getStatus: () => 'active' });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
@@ -2603,6 +2626,23 @@ describe('SerenityController', () => {
       expect(createAndEnqueueJobStub).to.not.have.been.called;
     });
 
+    it('Phase 4: pending→active activation runs the SYNCHRONOUS flip when the global async switch is off, even with async: true (LLMO-7418 master switch)', async () => {
+      getBrandBaseSiteIdStub.resolves('primary-site');
+      handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: {} });
+      const brand = makeBrandModel({});
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.activate(fakeContext({
+        brand,
+        env: {}, // switch absent => off
+        data: { brandNames: ['X'], async: true },
+      }));
+
+      expect(response.status).to.equal(200);
+      expect(ensureSubworkspaceStub).to.have.been.calledOnce;
+      expect(beginProvisioningAttemptStub).to.not.have.been.called;
+      expect(createAndEnqueueJobStub).to.not.have.been.called;
+    });
+
     it('Phase 4: bare reactivation mints a provisioning attempt and enqueues the provision->activate-brand-workspace job chain when async: true', async () => {
       const brand = makeBrandModel({ getStatus: () => 'active' });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
@@ -2676,6 +2716,21 @@ describe('SerenityController', () => {
       expect(response.status).to.equal(200);
       expect(guardAgainstConcurrentProvisioningStub).to.have.been.calledOnce;
       expect(ensureSubworkspaceStub).to.have.been.calledOnce;
+      expect(createAndEnqueueJobStub).to.not.have.been.called;
+    });
+
+    it('Phase 4: bare reactivation runs the SYNCHRONOUS flip when the global async switch is off, even with async: true (LLMO-7418 master switch)', async () => {
+      const brand = makeBrandModel({ getStatus: () => 'active' });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.activate(fakeContext({
+        brand,
+        env: {}, // switch absent => off
+        data: { brandNames: ['X'], async: true },
+      }));
+
+      expect(response.status).to.equal(200);
+      expect(ensureSubworkspaceStub).to.have.been.calledOnce;
+      expect(beginProvisioningAttemptStub).to.not.have.been.called;
       expect(createAndEnqueueJobStub).to.not.have.been.called;
     });
 

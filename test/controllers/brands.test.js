@@ -5392,6 +5392,38 @@ describe('Brands Controller', () => {
         expect(enqueueStub).to.not.have.been.called;
       });
 
+      it('runs the SYNCHRONOUS provisionBrandSubworkspace call when the global async switch is off, even with async: true (LLMO-7418 master switch)', async () => {
+        // The master switch is DEFAULT OFF in production. An `async: true` create must then fall
+        // through to the synchronous branch — NOT error — so this whole stack merges inert and
+        // async is turned on deliberately. `env: {}` on the context wins over mockEnv's `'true'`.
+        const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
+        const upsertStub = sinon.stub().resolves({ id: 'forced-id', name: 'New Brand' });
+        const beginStub = sinon.stub().resolves(true);
+        const enqueueStub = sinon.stub().resolves({ getId: () => 'job-xyz' });
+        const controller = await buildController({
+          provisionBrandSubworkspace: provisionStub,
+          upsertBrand: upsertStub,
+          beginProvisioningAttempt: beginStub,
+          createAndEnqueueJob: enqueueStub,
+        });
+
+        const response = await controller.createBrandForOrg({
+          ...context,
+          env: {}, // switch absent => off
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: { ...semrushData },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+        });
+
+        // Synchronous path: a 201 with the workspace already bound, not a 202 with a job id.
+        expect(response.status).to.equal(201);
+        expect(provisionStub.calledOnce).to.equal(true);
+        expect(upsertStub.firstCall.args[0].semrushSubWorkspaceId).to.equal('ws-1');
+        expect(beginStub).to.not.have.been.called;
+        expect(enqueueStub).to.not.have.been.called;
+      });
+
       it('mints a provisioning attempt and enqueues the provision->create-market job chain, answering 202', async () => {
         const upsertStub = sinon.stub().resolves({ id: 'forced-id', name: 'New Brand', status: 'pending' });
         const beginStub = sinon.stub().resolves(true);
@@ -5872,6 +5904,34 @@ describe('Brands Controller', () => {
           jobId: 'job-xyz',
           postgrestClient: sinon.match.any,
         });
+      });
+
+      it('Phase 4: bare create runs the SYNCHRONOUS provisionBrandSubworkspaceBare call when the global async switch is off, even with async: true (LLMO-7418 master switch)', async () => {
+        const bareStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-bare' });
+        const upsertStub = sinon.stub().resolves({ id: 'forced-id', name: 'New Brand' });
+        const beginStub = sinon.stub().resolves(true);
+        const enqueueStub = sinon.stub().resolves({ getId: () => 'job-xyz' });
+        const controller = await buildController({
+          provisionBrandSubworkspaceBare: bareStub,
+          upsertBrand: upsertStub,
+          beginProvisioningAttempt: beginStub,
+          createAndEnqueueJob: enqueueStub,
+        });
+
+        const response = await controller.createBrandForOrg({
+          ...context,
+          env: {}, // switch absent => off
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: { name: 'New Brand', baseSiteId: 'site-123', async: true },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(201);
+        expect(bareStub.called).to.equal(true);
+        expect(upsertStub.firstCall.args[0].semrushSubWorkspaceId).to.equal('ws-bare');
+        expect(beginStub).to.not.have.been.called;
+        expect(enqueueStub).to.not.have.been.called;
       });
 
       it('Phase 4: bare create returns 409 without enqueuing when a provisioning attempt is already in flight', async () => {
