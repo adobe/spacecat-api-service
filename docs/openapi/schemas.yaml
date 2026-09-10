@@ -8101,17 +8101,21 @@ V2BrandInput:
       type: boolean
       default: false
       description: >
-        PR-C (LLMO-7352/LLMO-7418). Only meaningful when `semrushMarket` is
-        supplied. When true, the brand row is persisted first (visible,
-        non-active — "Setting up"), then the sub-workspace ready-check and the
-        initial market's project create/publish are enqueued to a background
-        job chain instead of running inline, and the endpoint returns 202 with
-        a job id to poll via `GET .../serenity/jobs/{jobId}`. Omitted/false
-        processes synchronously as today (still 201) — this is opt-in only and
-        not yet the default. Unlike `SerenityCreatePromptsRequest`'s `async`
+        PR-C (LLMO-7352/LLMO-7418), extended by Phase 4 (LLMO-6405 "B"). Meaningful on
+        either of this endpoint's two Semrush-provisioning creates: with `semrushMarket`
+        supplied (sub-workspace ready-check + initial market's project create/publish,
+        enqueued as a job chain), or without it, for a sub-workspace-only active create
+        anchored by `baseSiteId` (sub-workspace create/adopt only, no project). In both
+        cases, true persists the brand row first (visible, non-active — "Setting up")
+        and returns 202 with a job id to poll via `GET .../serenity/jobs/{jobId}`.
+        Ignored (no error, brand created synchronously) when the organization is not
+        serenity-active (a flat/brandalf org) or the brand is created `pending` (a
+        pending brand always defers ALL Semrush provisioning regardless of this flag).
+        Omitted/false processes synchronously as today (still 201) — this is opt-in
+        only and not yet the default. Unlike `SerenityCreatePromptsRequest`'s `async`
         flag, this one is not intended to be a permanent dual-mode feature: the
-        synchronous path is the LLMO-7352 bug pattern itself, and is expected
-        to be retired once known callers have migrated to `async: true`.
+        synchronous path is the LLMO-7352 bug pattern itself, and is expected to be
+        retired once known callers have migrated to `async: true`.
 
 V2BrandUpdateInput:
   type: object
@@ -12676,12 +12680,15 @@ SerenityActivateRequest:
       type: boolean
       default: false
       description: >
-        PR-C (LLMO-7352/LLMO-7418). Only meaningful on the already-active-brand,
-        markets-supplied path — a pending or bare-reactivation activation always
-        stays synchronous regardless of this flag. When true, the sub-workspace
-        ready-check and the per-market project create/publish + site-link + active
-        flip are enqueued to a background job chain instead of running inline, and
-        the endpoint returns 202 with a job id to poll via
+        PR-C (LLMO-7352/LLMO-7418), extended by Phase 4. Meaningful on all three
+        activation shapes this endpoint supports: the already-active-brand,
+        markets-supplied path (sub-workspace ready-check + per-market project
+        create/publish + site-link + active flip, enqueued as a job chain); the
+        pending→active activation (sub-workspace create/adopt only, enqueued as
+        `provision-workspace-job` -> `activate-brand-workspace-job`); and bare
+        reactivation of an already-active, pointer-less brand (same chain). In
+        every case, true enqueues the work to a background job chain instead of
+        running inline, and the endpoint returns 202 with a job id to poll via
         `GET .../serenity/jobs/{jobId}`. Omitted/false processes synchronously as
         today — this is opt-in only and not yet the default.
 
@@ -12818,12 +12825,15 @@ SerenityCreateMarketRequest:
       type: boolean
       default: false
       description: >
-        PR-C (LLMO-7352/LLMO-7418). When true (sub-workspace-mode brands only),
-        the sub-workspace-ready check and the project create/publish are
+        PR-C (LLMO-7352/LLMO-7418). When true, and only for a sub-workspace-mode
+        brand, the sub-workspace-ready check and the project create/publish are
         enqueued to a background job chain instead of running inline, and the
         endpoint returns 202 with a job id to poll via
-        `GET .../serenity/jobs/{jobId}`. Omitted/false processes synchronously
-        as today — this is opt-in only and not yet the default. Unlike
+        `GET .../serenity/jobs/{jobId}`. Ignored (no error, market created
+        synchronously) for a flat-mode brand — flat mode has no sub-workspace
+        readiness to await, so there is nothing to defer. Omitted/false
+        processes synchronously as today — this is opt-in only and not yet the
+        default. Unlike
         `SerenityCreatePromptsRequest`'s `async` flag, this one is not intended
         to be a permanent dual-mode feature: the synchronous path is the
         LLMO-7352 bug pattern itself, and is expected to be retired once known

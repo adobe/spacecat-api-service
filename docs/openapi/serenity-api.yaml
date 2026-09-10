@@ -612,7 +612,14 @@ v2-serenity-markets:
       '404':
         description: Organization has no workspace, or serenity is not active for the organization.
       '409':
-        description: A market already exists for this (brandId, geoTargetId, languageCode) slice, or (async only) a provisioning attempt is already in flight for this brand.
+        description: >-
+          One of three conflicts, distinguished by the `error` token: (a) a market already exists
+          for this (brandId, geoTargetId, languageCode) slice; (b) `semrushProvisioningInProgress`
+          (`async: true` only) — a provisioning attempt is already in flight for this brand, so
+          retry shortly; or (c) `semrushProvisioningIncomplete` — the brand's Semrush sub-workspace
+          is pending or has failed to provision, so it has no workspace of its own to add a market
+          in. (b) converges on retry; (c) does not, and needs the brand's provisioning to complete
+          first.
       '502':
         description: Upstream returned a non-2xx response.
         content:
@@ -1203,12 +1210,12 @@ v2-serenity-activate:
       intact; retry converges idempotently). An already-active brand re-supplying
       markets is never downgraded (a partial failure is reported as 207).
 
-      PR-C (LLMO-7352/LLMO-7418): when a primary URL/domain and markets are
-      present (the branch described above — NOT the sub-workspace-only pending
-      or bare-reactivation paths, which always stay synchronous), the caller may
-      set `async: true` to enqueue the whole batch to a background job chain
-      instead of running it inline; see the `202` response. Absent/false runs
-      synchronously as described above — this is opt-in only and not yet the
+      LLMO-7352/LLMO-7418: the caller may set `async: true` on ANY of the 3
+      branches — project activation (PR-C), the sub-workspace-only
+      pending→active flip, and bare reactivation (both Phase 4) — to enqueue
+      that branch's work to a background job chain instead of running it
+      inline; see the `202` response. Absent/false runs synchronously as
+      described above on every branch — this is opt-in only and not yet the
       default.
     operationId: activateSerenityBrand
     security:
@@ -1226,17 +1233,20 @@ v2-serenity-activate:
             schema: { $ref: './schemas.yaml#/SerenityActivateResponse' }
       '202':
         description: |
-          PR-C (LLMO-7352/LLMO-7418): the request set `async: true` on the
-          project-activation branch (primary URL + markets present). The whole
-          batch (sub-workspace ready-check, every market's project create/
-          publish, the site link, and the active flip) is enqueued to a
-          background job chain instead of running inline. Poll the returned
-          `jobId` at `GET .../serenity/jobs/{jobId}` for status + result — the
-          polling endpoint transparently follows the job chain to its
-          EFFECTIVE terminal hop, so `status` only reports `COMPLETED` once
-          the actual batch has run, not merely once the sub-workspace became
-          ready; on COMPLETED, `result` is the same body a synchronous
-          `200`/`207` would have returned.
+          The request set `async: true`. On the project-activation branch
+          (primary URL + markets present — PR-C), the whole batch
+          (sub-workspace ready-check, every market's project create/publish,
+          the site link, and the active flip) is enqueued to a background job
+          chain. On the sub-workspace-only pending→active or bare-reactivation
+          branches (Phase 4), only the sub-workspace ready-check + the status
+          flip are enqueued — there is no project/market work on those
+          branches. Either way, poll the returned `jobId` at
+          `GET .../serenity/jobs/{jobId}` for status + result — the polling
+          endpoint transparently follows the job chain to its EFFECTIVE
+          terminal hop, so `status` only reports `COMPLETED` once the actual
+          batch (or status flip) has run, not merely once the sub-workspace
+          became ready; on COMPLETED, `result` is the same body the branch's
+          own synchronous `200`/`207`/`502` would have returned.
         content:
           application/json:
             schema: { $ref: './schemas.yaml#/SerenityPromptsJobAccepted' }
@@ -1258,8 +1268,9 @@ v2-serenity-activate:
           outcomes — the operator must choose a different primary URL; (b)
           misconfiguration: the brand's sub-workspace equals the organization parent
           workspace (refused to avoid acting on the shared parent pool); or (c)
-          (PR-C, `async: true` only) a provisioning attempt is already in flight for
-          this brand (`error: semrush_provisioning_in_progress`) — retry shortly.
+          (`async: true` only, any branch) a provisioning attempt is already in
+          flight for this brand (`error: semrushProvisioningInProgress`) —
+          retry shortly.
         content:
           application/json:
             schema:

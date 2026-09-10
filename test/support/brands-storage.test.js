@@ -4949,7 +4949,7 @@ describe('brands-storage', () => {
 
         expect(caught).to.exist;
         expect(caught.status).to.equal(409);
-        expect(caught.code).to.equal('semrush_provisioning_in_progress');
+        expect(caught.code).to.equal('semrushProvisioningInProgress');
       });
 
       it('reconciles a STALE attempt to failed and returns without throwing', async () => {

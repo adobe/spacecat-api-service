@@ -67,6 +67,7 @@ import {
   readSerenityFlagScopes,
   withSerenityState,
   beginProvisioningAttempt,
+  updateProvisioningJobId,
   promoteProvisioningFailed,
   recordFreshBrandProvisioningStartFailure,
 } from '../support/brands-storage.js';
@@ -87,7 +88,9 @@ import {
 } from '../support/serenity/mapping-rows.js';
 import { propagateSiteUrlToSemrush } from '../support/serenity/site-url-propagation.js';
 import { createSerenityTransport } from '../support/serenity/rest-transport.js';
-import { isSemrushTransportError, unwrapTransportCause } from '../support/serenity/errors.js';
+import {
+  ERROR_CODES, isSemrushTransportError, unwrapTransportCause,
+} from '../support/serenity/errors.js';
 import { logUpstreamError } from '../support/serenity/upstream-log.js';
 import { buildBrandMarketsResponse } from '../support/serenity/brand-markets.js';
 import { syncBrandUrlsAcrossMarkets } from '../support/serenity/brand-urls.js';
@@ -97,6 +100,8 @@ import {
   isSerenityActiveForBrand,
   isSerenityActiveForOrg,
   isSerenityUiActiveForOrg,
+  isAsyncProvisioningKillSwitched,
+  isAsyncProvisioningEnabled,
 } from '../support/serenity/serenity-active.js';
 import {
   buildReservedIdentities,
@@ -1729,6 +1734,12 @@ function BrandsController(ctx, log, env) {
     // hoisted so the catch can mark that persisted-but-not-yet-provisioning row visibly failed if
     // starting the attempt itself throws (see the catch's compensation).
     let asyncMarketProvisioning = null;
+    // Phase 4 (LLMO-7352/LLMO-7418): the bare-create (no semrushMarket) sibling of
+    // asyncMarketProvisioning above — same "non-null after the row is persisted means start an
+    // attempt" contract, just with no chained job (a bare sub-workspace has no project to create
+    // afterward). Mutually exclusive with asyncMarketProvisioning (they're set in sibling
+    // if/else branches of the same hasSemrushMarket check).
+    let asyncBareProvisioning = null;
 
     try {
       if (!hasText(spaceCatId)) {
@@ -1862,7 +1873,19 @@ function BrandsController(ctx, log, env) {
           // job chain, the same shared path Add Market uses. Unlike createPrompts's flag, this one
           // is NOT permanent: the synchronous branch is the LLMO-7352 bug pattern itself, slated
           // for removal once every known caller has migrated to `async: true`.
-          if (validateAsync(brandData)) {
+          if (validateAsync(brandData) && isAsyncProvisioningEnabled(context.env || env)) {
+            // LLMO-7418 external-review Finding 15: server-side kill switch — lets ops disable
+            // the async path for this organization without a deploy if it misbehaves in
+            // production. The caller falls back to the synchronous path on its own retry.
+            if (await isAsyncProvisioningKillSwitched(context, spaceCatId, log)) {
+              return createResponse(
+                {
+                  error: 'asyncProvisioningDisabled',
+                  message: 'Async provisioning is temporarily disabled for this organization; retry without async: true',
+                },
+                503,
+              );
+            }
             // brandAliases/urls/competitors are NOT read here (unlike the sync branch below): the
             // brand row this section persists below (upsertBrand) writes them to storage, and the
             // async chain's orchestration reads them back from there — the same DB-backed source
@@ -1928,6 +1951,39 @@ function BrandsController(ctx, log, env) {
               languageCode: provisioned.languageCode,
             };
           }
+        } else if (validateAsync(brandData) && isAsyncProvisioningEnabled(context.env || env)) {
+          // B (LLMO-6405): sub-workspace-only active create — no market supplied, so
+          // no project is provisioned. Markets are added afterwards from the Markets
+          // tab. The brand is anchored by its primary site (baseSiteId, persisted by
+          // upsertBrand below) AND by its Semrush sub-workspace.
+          //
+          // Phase 4 (LLMO-7352/LLMO-7418): opt-in only (mirrors the hasSemrushMarket branch's own
+          // `async` flag above). Absent/false runs the EXACT bespoke synchronous
+          // provisionBrandSubworkspaceBare call this branch has always run. `async: true` persists
+          // the brand row FIRST (visible, active, no workspace pointer yet), then hands the bare
+          // sub-workspace provisioning off to provision-workspace-job — no chained job, since a
+          // bare create has no project to create once the workspace is ready.
+          //
+          // LLMO-7418 external-review Finding 15: server-side kill switch — see the
+          // hasSemrushMarket branch above for rationale.
+          if (await isAsyncProvisioningKillSwitched(context, spaceCatId, log)) {
+            return createResponse(
+              {
+                error: 'asyncProvisioningDisabled',
+                message: 'Async provisioning is temporarily disabled for this organization; retry without async: true',
+              },
+              503,
+            );
+          }
+          // Resolved and validated HERE, before any write — same rationale as the
+          // hasSemrushMarket branch: a missing org workspace config must never leave a
+          // persisted, permanently-inert brand row behind.
+          const parentWorkspaceId = await resolveWorkspaceId(context, spaceCatId);
+          if (!parentWorkspaceId || !hasText(parentWorkspaceId)) {
+            return badRequest('Organization has no Semrush workspace configured');
+          }
+          provisionedBrandId = randomUUID();
+          asyncBareProvisioning = { parentWorkspaceId };
         } else {
           // B (LLMO-6405): sub-workspace-only active create — no market supplied, so
           // no project is provisioned. Markets are added afterwards from the Markets
@@ -2067,7 +2123,7 @@ function BrandsController(ctx, log, env) {
         if (!began) {
           return createResponse(
             {
-              error: 'semrushProvisioningInProgress',
+              error: ERROR_CODES.SEMRUSH_PROVISIONING_IN_PROGRESS,
               message: 'Unable to start Semrush provisioning for the new brand',
             },
             409,
@@ -2100,8 +2156,20 @@ function BrandsController(ctx, log, env) {
               },
             },
           });
+          // LLMO-7418 external-review Finding 17: records the first-hop job id, best-effort,
+          // so it isn't left permanently NULL until the worker's own self-requeue hop writes it.
+          await updateProvisioningJobId({
+            brandId: asyncBrandId,
+            attemptId,
+            jobId: job.getId(),
+            postgrestClient,
+          }).catch((updateError) => {
+            log.error('brands: failed to record the first-hop job id (best-effort)', {
+              brandId: asyncBrandId, attemptId, jobId: job.getId(), error: updateError?.message,
+            });
+          });
           return createResponse(
-            { ...withSerenityState(created, serenityScopes), status: 'pending', jobId: job.getId() },
+            { ...withSerenityState(created, serenityScopes), jobId: job.getId() },
             202,
           );
         } catch (enqueueError) {
@@ -2109,6 +2177,88 @@ function BrandsController(ctx, log, env) {
           // started for it — mark it visibly failed rather than leaving a silently-inert row
           // nothing will ever revisit (the reconciliation sweep only looks for STUCK `pending`
           // attempts, and this row never reached `pending` for one to find).
+          log.error('brands: failed to start async Semrush provisioning after brand row was persisted', {
+            brandId: asyncBrandId, error: enqueueError?.message,
+          });
+          await promoteProvisioningFailed({
+            brandId: asyncBrandId,
+            attemptId,
+            error: 'Failed to start Semrush provisioning',
+            postgrestClient,
+          }).catch((failError) => {
+            log.error('brands: failed to record the provisioning-start failure itself', {
+              brandId: asyncBrandId, error: failError?.message,
+            });
+          });
+          throw enqueueError;
+        }
+      }
+
+      // Phase 4 (LLMO-7352/LLMO-7418): bare-create's async sibling of the block above — same
+      // shape, no chained job (no project to create once the workspace is ready).
+      if (asyncBareProvisioning) {
+        const asyncBrandId = /** @type {string} */ (provisionedBrandId);
+        const { parentWorkspaceId } = asyncBareProvisioning;
+        const attemptId = randomUUID();
+        let began;
+        try {
+          began = await beginProvisioningAttempt({
+            brandId: asyncBrandId,
+            attemptId,
+            postgrestClient,
+            updatedBy,
+          });
+        } catch (beginError) {
+          log.error('brands: failed to begin the provisioning attempt after brand row was persisted', {
+            brandId: asyncBrandId, error: beginError?.message,
+          });
+          await recordFreshBrandProvisioningStartFailure({
+            brandId: asyncBrandId,
+            error: 'Failed to start Semrush provisioning',
+            postgrestClient,
+          }).catch((failError) => {
+            log.error('brands: failed to record the provisioning-start failure itself', {
+              brandId: asyncBrandId, error: failError?.message,
+            });
+          });
+          throw beginError;
+        }
+        if (!began) {
+          return createResponse(
+            {
+              error: ERROR_CODES.SEMRUSH_PROVISIONING_IN_PROGRESS,
+              message: 'Unable to start Semrush provisioning for the new brand',
+            },
+            409,
+          );
+        }
+        try {
+          const job = await createAndEnqueueJob(context, {
+            jobType: PROVISION_WORKSPACE_JOB_TYPE,
+            metadata: {
+              brandId: asyncBrandId,
+              attemptId,
+              parentWorkspaceId,
+              title: brandData.name,
+            },
+          });
+          // LLMO-7418 external-review Finding 17: records the first-hop job id, best-effort,
+          // so it isn't left permanently NULL until the worker's own self-requeue hop writes it.
+          await updateProvisioningJobId({
+            brandId: asyncBrandId,
+            attemptId,
+            jobId: job.getId(),
+            postgrestClient,
+          }).catch((updateError) => {
+            log.error('brands: failed to record the first-hop job id (best-effort)', {
+              brandId: asyncBrandId, attemptId, jobId: job.getId(), error: updateError?.message,
+            });
+          });
+          return createResponse(
+            { ...withSerenityState(created, serenityScopes), jobId: job.getId() },
+            202,
+          );
+        } catch (enqueueError) {
           log.error('brands: failed to start async Semrush provisioning after brand row was persisted', {
             brandId: asyncBrandId, error: enqueueError?.message,
           });

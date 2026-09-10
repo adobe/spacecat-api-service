@@ -38,6 +38,23 @@ import {
  */
 export const PROVISION_WORKSPACE_JOB_TYPE = 'serenity-provision-workspace';
 
+// LLMO-7418 external-review Finding 14: retry classification for a status-poll failure.
+// `SerenityTransportError` always carries a numeric `.status` (the upstream HTTP status);
+// a raw network-level failure (fetch itself throwing — DNS, connection reset, timeout) has
+// none. Only these are treated as transient and routed through the existing bounded
+// self-requeue ladder below; everything else (a permanent 4xx like an expired/invalid IMS
+// token, or an unexpected non-transport error) keeps today's fail-fast behavior via the
+// outer catch.
+const RETRYABLE_TRANSPORT_STATUSES = new Set([429, 500, 502, 503, 504]);
+function isRetryableWorkspaceStatusError(error) {
+  const { status } = error ?? {};
+  if (typeof status !== 'number') {
+    // No upstream status at all — a network-level failure, not an application error.
+    return true;
+  }
+  return RETRYABLE_TRANSPORT_STATUSES.has(status);
+}
+
 /**
  * Hard cap on self-requeue depth. Live-verified settle time for a SUCCESSFUL create is
  * seconds, not minutes (LLMO-7352 incident data: ~10s); this ladder exists for the
@@ -403,7 +420,25 @@ export async function provisionWorkspaceHandler(context, job, accessToken) {
       }
     }
 
-    const statusResult = await transport.getWorkspaceStatus(candidate.workspaceId);
+    let statusResult;
+    try {
+      statusResult = await transport.getWorkspaceStatus(candidate.workspaceId);
+    } catch (error) {
+      if (!isRetryableWorkspaceStatusError(error)) {
+        throw error;
+      }
+      // Transient upstream/network failure — leave `statusResult` undefined so `status`
+      // below is `undefined`, which is neither ready nor terminal-failure, and this hop
+      // falls straight into the existing "still settling" self-requeue branch below (same
+      // bounded backoff/depth cap already used for an actual `not ready` poll result).
+      log?.warn?.('provision-workspace-job: transient error polling workspace status; treating as not-ready and self-requeuing', {
+        brandId,
+        attemptId,
+        semrushWorkspaceId: candidate.workspaceId,
+        error: error?.message,
+        status: error?.status,
+      });
+    }
     const status = statusResult?.status;
 
     if (isWorkspaceReady(status)) {

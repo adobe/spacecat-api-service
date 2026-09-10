@@ -763,6 +763,103 @@ describe('handlers/provision-workspace-job.js (LLMO-7352 / LLMO-7418)', () => {
     });
   });
 
+  describe('poll result: transient error retry classification (LLMO-7418 external-review Finding 14)', () => {
+    it('treats a 503 SerenityTransportError as transient and self-requeues instead of failing the attempt', async () => {
+      const err = new Error('Semrush GET .../status failed: 503');
+      err.status = 503;
+      transport.getWorkspaceStatus.rejects(err);
+      const { provisionWorkspaceHandler } = await loadHandler();
+      const job = makeJob(makeMetadata({ requeueDepth: 0 }));
+
+      const result = await provisionWorkspaceHandler(context, job, 'token');
+
+      expect(createAndEnqueueJobStub).to.have.been.calledOnce;
+      expect(promoteProvisioningFailedStub).to.not.have.been.called;
+      expect(result).to.deep.equal({ requeuedJobId: 'job-followup' });
+    });
+
+    it('retries 429/500/502/504 the same way', async () => {
+      for (const status of [429, 500, 502, 504]) {
+        const err = new Error(`upstream ${status}`);
+        err.status = status;
+        transport.getWorkspaceStatus.reset();
+        transport.getWorkspaceStatus.rejects(err);
+        createAndEnqueueJobStub.resetHistory();
+        promoteProvisioningFailedStub.resetHistory();
+        // eslint-disable-next-line no-await-in-loop
+        const { provisionWorkspaceHandler } = await loadHandler();
+        const job = makeJob(makeMetadata({ requeueDepth: 0 }));
+
+        // eslint-disable-next-line no-await-in-loop
+        const result = await provisionWorkspaceHandler(context, job, 'token');
+
+        expect(createAndEnqueueJobStub, `status ${status}`).to.have.been.calledOnce;
+        expect(promoteProvisioningFailedStub, `status ${status}`).to.not.have.been.called;
+        expect(result, `status ${status}`).to.deep.equal({ requeuedJobId: 'job-followup' });
+      }
+    });
+
+    it('treats a raw network failure (no .status) as transient and self-requeues', async () => {
+      transport.getWorkspaceStatus.rejects(new TypeError('fetch failed'));
+      const { provisionWorkspaceHandler } = await loadHandler();
+      const job = makeJob(makeMetadata({ requeueDepth: 0 }));
+
+      const result = await provisionWorkspaceHandler(context, job, 'token');
+
+      expect(createAndEnqueueJobStub).to.have.been.calledOnce;
+      expect(result).to.deep.equal({ requeuedJobId: 'job-followup' });
+    });
+
+    it('still fails fast on a permanent 401 (expired/invalid IMS token), never self-requeuing it', async () => {
+      const err = new Error('Semrush GET .../status failed: 401');
+      err.status = 401;
+      transport.getWorkspaceStatus.rejects(err);
+      const { provisionWorkspaceHandler } = await loadHandler();
+      const job = makeJob(makeMetadata());
+
+      await expect(provisionWorkspaceHandler(context, job, 'token')).to.be.rejectedWith('401');
+
+      expect(createAndEnqueueJobStub).to.not.have.been.called;
+      expect(promoteProvisioningFailedStub).to.have.been.calledOnceWith({
+        brandId: BRAND_ID,
+        attemptId: ATTEMPT_ID,
+        error: UNEXPECTED_ERROR_MESSAGE,
+        postgrestClient,
+      });
+    });
+
+    it('still fails fast on a permanent 400, never self-requeuing it', async () => {
+      const err = new Error('Semrush GET .../status failed: 400');
+      err.status = 400;
+      transport.getWorkspaceStatus.rejects(err);
+      const { provisionWorkspaceHandler } = await loadHandler();
+      const job = makeJob(makeMetadata());
+
+      await expect(provisionWorkspaceHandler(context, job, 'token')).to.be.rejectedWith('400');
+
+      expect(createAndEnqueueJobStub).to.not.have.been.called;
+    });
+
+    it('still respects the requeue depth cap for a transient error at the cap (fails, does not loop forever)', async () => {
+      const err = new Error('upstream 503');
+      err.status = 503;
+      transport.getWorkspaceStatus.rejects(err);
+      const { provisionWorkspaceHandler } = await loadHandler();
+      const job = makeJob(makeMetadata({ requeueDepth: MAX_PROVISION_REQUEUE_DEPTH }));
+
+      const result = await provisionWorkspaceHandler(context, job, 'token');
+
+      expect(createAndEnqueueJobStub).to.not.have.been.called;
+      expect(promoteProvisioningFailedStub).to.have.been.calledOnceWith({
+        brandId: BRAND_ID,
+        attemptId: ATTEMPT_ID,
+        error: REQUEUE_EXHAUSTED_MESSAGE,
+        postgrestClient,
+      });
+      expect(result).to.deep.equal({ provisioningStatus: 'failed' });
+    });
+  });
+
   describe('unexpected errors reaching the outer catch clean up an owned candidate (LLMO-7418 external-review Finding 16)', () => {
     it('cleans up a freshly-created candidate when an unexpected error is thrown BEFORE any self-requeue is enqueued', async () => {
       getBrandProvisioningStateStub.rejects(new Error('db read blip'));
