@@ -12,6 +12,7 @@
 
 import { Blocks, Message } from 'slack-block-builder';
 import { assertSiteOrgReassignmentSafe } from '../../site-org-reassignment.js';
+import { escapeSlack } from '../observability-messages.js';
 
 function extractOrg(text) {
   const regex = /IMS org ID `([^`]+)`.*<([^|>]+)/;
@@ -56,7 +57,7 @@ export default function approveOrg(lambdaContext) {
         if (!site || !org) {
           await respond({
             replace_original: false,
-            text: `:x: Cannot approve: ${!site ? `no site found for ${baseURL}` : `no org found for ${imsOrgId}`}.`,
+            text: `:x: Cannot approve: ${!site ? `no site found for ${escapeSlack(baseURL)}` : `no org found for ${escapeSlack(imsOrgId)}`}.`,
           });
           return;
         }
@@ -95,7 +96,7 @@ export default function approveOrg(lambdaContext) {
       // re-thrown below with a Slack error that lacks its .code/.status.
       if (typeof e?.code === 'string' && e.code.startsWith('site_org_reassignment')) {
         try {
-          await respond({ replace_original: false, text: `:x: ${e.message}` });
+          await respond({ replace_original: false, text: `:x: ${escapeSlack(e.message)}` });
         } catch (slackErr) {
           log.warn('Failed to deliver reassignment-blocked notice to Slack', slackErr);
         }

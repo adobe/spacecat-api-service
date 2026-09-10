@@ -121,6 +121,19 @@ describe('approveOrg', () => {
     expect(texts.some((t) => t.includes('no site found'))).to.be.true;
   });
 
+  it('escapes mrkdwn-special characters from the base URL in the "no site found" message', async () => {
+    body.message.blocks[0].text.text = 'IMS org ID `ABC@AdobeOrg` was detected for <https://spacecat.com/a&b|spacecat.com/a&b>';
+    context.dataAccess.Organization.findByImsOrgId.resolves(org);
+    context.dataAccess.Site.findByBaseURL.resolves(null);
+
+    const approveOrgAction = approveOrg(context);
+    await approveOrgAction({ ack: ackMock, body, respond: respondMock });
+
+    const texts = respondMock.getCalls().map((c) => c.args[0]?.text ?? '');
+    expect(texts.some((t) => t.includes('a&amp;b'))).to.be.true;
+    expect(texts.some((t) => t.includes('a&b'))).to.be.false;
+  });
+
   it('responds actionably (no throw, no move) when the org cannot be resolved', async () => {
     context.dataAccess.Organization.findByImsOrgId.resolves(null);
     context.dataAccess.Site.findByBaseURL.resolves(site);
