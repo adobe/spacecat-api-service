@@ -1919,7 +1919,18 @@ function SerenityController(context, log, env) {
           error: cancelError?.message,
         });
       }
-      const subworkspaceId = brand.getSemrushSubWorkspaceId?.();
+      // LLMO-7418 external-review (adversarial): `brand` was loaded BEFORE the cancel above, so
+      // its in-memory pointer is a pre-cancel snapshot. A worker hop whose promoteProvisioningReady
+      // committed in the loadBrand→cancel window has since written a canonical pointer this object
+      // cannot see — and acting on the stale `null` would skip decommission entirely, leaving that
+      // workspace live (and its projects intact) behind a "successful" deactivate. Re-read the
+      // pointer after the cancel and prefer the fresh value; fall back to the snapshot when the
+      // reloader cannot read (best-effort by contract: it returns null on missing data-access).
+      const snapshotSubworkspaceId = brand.getSemrushSubWorkspaceId?.();
+      const freshSubworkspaceId = await brandPointerReloader(ctx, auth.brandUuid)();
+      const subworkspaceId = hasText(freshSubworkspaceId)
+        ? freshSubworkspaceId
+        : snapshotSubworkspaceId;
       if (hasText(subworkspaceId)) {
         await decommissionBrandWorkspace(
           transport,

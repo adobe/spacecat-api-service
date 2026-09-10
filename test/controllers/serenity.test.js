@@ -2506,6 +2506,30 @@ describe('SerenityController', () => {
       expect(brand.setStatus).to.have.been.calledWith('pending');
     });
 
+    it('deactivate re-reads the pointer after cancelling, so a promote that landed mid-flight is still decommissioned (LLMO-7418 external-review, adversarial)', async () => {
+      // The brand is loaded BEFORE cancelProvisioningAttempt, so its in-memory pointer is a
+      // pre-cancel snapshot. A worker hop whose promoteProvisioningReady committed in the
+      // loadBrand -> cancel window has since written a canonical pointer this object cannot see.
+      // Acting on the stale null would skip decommission entirely and leave that workspace live
+      // behind a "successful" deactivate.
+      const snapshot = makeBrandModel({ getSemrushSubWorkspaceId: () => null });
+      const promoted = makeBrandModel({ getSemrushSubWorkspaceId: () => 'ws-late-promote' });
+      const ctx = fakeContext({ brand: snapshot });
+      // 1st read = loadBrand (stale), 2nd = brandPointerReloader after the cancel (fresh).
+      ctx.dataAccess.Brand.findById = sinon.stub();
+      ctx.dataAccess.Brand.findById.onFirstCall().resolves(snapshot);
+      ctx.dataAccess.Brand.findById.resolves(promoted);
+
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.deactivate(ctx);
+
+      expect(response.status).to.equal(200);
+      // The freshly-promoted workspace is decommissioned, not silently skipped.
+      expect(decommissionStub).to.have.been.calledOnce;
+      expect(decommissionStub.firstCall.args[1]).to.equal('ws-late-promote');
+      expect(snapshot.setStatus).to.have.been.calledWith('pending');
+    });
+
     it('deactivate clears the resolver cache and logs a greppable divergence token when the brand save fails', async () => {
       // The upstream is already emptied by decommission; a failed save must not
       // leave the resolver routing to the emptied sub-workspace for the TTL, and
