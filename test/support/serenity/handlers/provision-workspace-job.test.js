@@ -328,6 +328,36 @@ describe('handlers/provision-workspace-job.js (LLMO-7352 / LLMO-7418)', () => {
 
       expect(emptyWorkspaceBestEffortStub).to.not.have.been.called;
     });
+
+    it('does NOT clean up the candidate on a redelivery of a hop whose OWN attempt already reached ready (LLMO-7418 external-review Blocker 2)', async () => {
+      // Same attemptId, same candidate — but provisioningStatus is now 'ready', meaning THIS
+      // attempt already succeeded (a prior/concurrent delivery of this exact message already
+      // promoted it). This is a duplicate SQS delivery, not a supersession by a different
+      // attempt — the candidate is the brand's now-CANONICAL, LIVE workspace, which may already
+      // hold a real market project a chained job created. Emptying it here would be data loss.
+      getBrandProvisioningStateStub.resolves(pendingState({ provisioningStatus: 'ready' }));
+      const { provisionWorkspaceHandler } = await loadHandler();
+      const job = makeJob(makeMetadata({
+        requeueDepth: 1, candidateWorkspaceId: CANDIDATE_WS, freshlyCreated: true,
+      }));
+
+      const result = await provisionWorkspaceHandler(context, job, 'token');
+
+      expect(result).to.deep.equal({ provisioningStatus: 'superseded' });
+      expect(emptyWorkspaceBestEffortStub).to.not.have.been.called;
+    });
+
+    it('does NOT clean up the candidate on a redelivery of a hop whose OWN attempt already reached failed', async () => {
+      getBrandProvisioningStateStub.resolves(pendingState({ provisioningStatus: 'failed' }));
+      const { provisionWorkspaceHandler } = await loadHandler();
+      const job = makeJob(makeMetadata({
+        requeueDepth: 1, candidateWorkspaceId: CANDIDATE_WS, freshlyCreated: true,
+      }));
+
+      await provisionWorkspaceHandler(context, job, 'token');
+
+      expect(emptyWorkspaceBestEffortStub).to.not.have.been.called;
+    });
   });
 
   describe('poll result: ready', () => {
