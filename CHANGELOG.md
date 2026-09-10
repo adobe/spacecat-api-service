@@ -1,3 +1,10 @@
+# [1.803.0](https://github.com/adobe/spacecat-api-service/compare/v1.802.0...v1.803.0) (2026-09-10)
+
+
+### Features
+
+* **llmo:** add locale param to Brand Claims serve endpoint (LLMO-7304) ([#3247](https://github.com/adobe/spacecat-api-service/issues/3247)) ([4ce81cf](https://github.com/adobe/spacecat-api-service/commit/4ce81cfb756677e29d17774b699663caa548090a))
+
 # [1.802.0](https://github.com/adobe/spacecat-api-service/compare/v1.801.0...v1.802.0) (2026-09-09)
 
 
