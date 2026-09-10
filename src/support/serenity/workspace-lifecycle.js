@@ -38,13 +38,49 @@ import { clearBrandWorkspaceCache } from './workspace-resolver.js';
 // tests run without real delays.
 const DEFAULT_POLL_ATTEMPTS = 30;
 const DEFAULT_POLL_INTERVAL_MS = 1000;
-const TERMINAL_WORKSPACE_STATUSES = new Set([
-  'creation failed',
-  'invalid subscription',
-]);
 const defaultSleep = (ms) => new Promise((resolve) => {
   setTimeout(resolve, ms);
 });
+
+// LLMO-7352: the User Manager gateway settles a workspace to more than one string per outcome,
+// and reports the SAME set on both `/status` and the `/family` listing (verified against
+// mysticat-data-service/scripts/serenity_migration/semrush_write.py:104-118, the already-shipped
+// classification this is ported from — not re-derived). Matching the full superset here, rather
+// than just the single `created` / `creation failed` strings the poller used to check, is a
+// correctness fix: a workspace that legitimately settles to `active`/`ready` is ready, and one
+// that settles to any of the terminal-failure strings is dead and must not be waited on.
+//
+// `creation_failed`/`creation failed` are live-verified (they are exactly what the CUHK/IFC/etc.
+// stuck prod brands return today); `failed`/`error` are carried from the Python reference and not
+// independently observed here, but kept defensively — an unobserved string is inert, and catching
+// one if it ever appears is strictly safer than timing out on it.
+//
+// One terminal set, deliberately: the Python source splits `creation_failed` (explicitly safe to
+// delete-and-re-create through the proxy) from plain `failed`/`error` (not) because ITS reaper
+// acts on the difference. Phase 1 has no reaper and treats every terminal status identically, so a
+// split here would be inert complexity. When a later phase's reaper needs the distinction, it
+// re-introduces the split alongside the consumer that uses it.
+// `invalid subscription` (#3241) folded in alongside our own live-verified/defensive set.
+const WORKSPACE_READY_STATUSES = new Set(['created', 'active', 'ready']);
+const WORKSPACE_TERMINAL_FAILURE_STATUSES = new Set([
+  'creation_failed', 'creation failed', 'failed', 'error', 'invalid subscription',
+]);
+
+// The gateway is not contractually case- or whitespace-stable, and the Python reference this port
+// follows normalizes (`str(status or '').lower()`) before every comparison. Mirror that here so a
+// `'Creation_Failed'` / `' created '` variant can never slip past the Set checks and fall back to
+// the full poll-then-timeout it was the whole point of this change to avoid. A non-string (missing
+// status) passes through unchanged and matches nothing, exactly like the Python `or ''` guard.
+const normalizeWorkspaceStatus = (status) => (typeof status === 'string' ? status.trim().toLowerCase() : status);
+
+// Shared status classification — the single source of truth for "is this workspace usable" and
+// "is this workspace terminally dead", used by BOTH the settle poll (`pollUntilCreated`) and the
+// family-adoption filter (`findAdoptableFamilyMatch`) so the two can never disagree about what a
+// given upstream status string means.
+const isWorkspaceReady = (status) => WORKSPACE_READY_STATUSES.has(normalizeWorkspaceStatus(status));
+const isWorkspaceTerminalFailure = (status) => (
+  WORKSPACE_TERMINAL_FAILURE_STATUSES.has(normalizeWorkspaceStatus(status))
+);
 
 // A brand's sub-workspace must never coincide with the org's shared parent
 // workspace — a sub-workspace op against the parent (notably decommission, which deletes every
@@ -86,53 +122,89 @@ function subworkspaceTitle(brand) {
   return name;
 }
 
+// #3241's stable public error contract (502/`subworkspaceCreationFailed`,
+// 504/`subworkspaceCreationTimeout`) — kept as the one terminal/timeout contract rather than
+// introducing a second, redundant token; this ticket's own contribution is the broader
+// terminal/ready status detection below (isWorkspaceTerminalFailure/isWorkspaceReady), not a
+// competing error shape.
 function subworkspaceCreationFailedError() {
-  const error = new ErrorWithStatusCode('Subworkspace creation failed', 502);
+  const error = new ErrorWithStatusCode(
+    'Semrush sub-workspace provisioning failed and cannot be recovered by waiting; it must be re-created',
+    502,
+  );
   error.code = ERROR_CODES.SUBWORKSPACE_CREATION_FAILED;
   return error;
 }
 
 function subworkspaceCreationTimeoutError() {
-  const error = new ErrorWithStatusCode('Subworkspace creation timed out', 504);
+  const error = new ErrorWithStatusCode(
+    "Semrush sub-workspace did not settle to 'created' in time",
+    504,
+  );
   error.code = ERROR_CODES.SUBWORKSPACE_CREATION_TIMEOUT;
   return error;
 }
 
 /**
+ * Polls a sub-workspace's status until it settles, terminally, one way or the other.
+ *
+ * LLMO-7352: a workspace that settles to a terminal failure status never becomes `created` — it
+ * will never become `created` no matter how long this waits. Before this fix, the loop below
+ * could not tell that apart from a merely-slow `not ready` and would burn the full `attempts`
+ * budget polling a shell that was already dead on the FIRST read, then throw the same generic
+ * timeout either way. Detecting the terminal status immediately turns a silent multi-attempt
+ * stall into an immediate, actionable error — and, critically, means the caller (the
+ * "existing pointer" branch in {@link ensureSubworkspace}, reached on every retry against an
+ * already-failed brand) fails fast on every subsequent call too, instead of re-running the full
+ * poll budget each time.
+ *
+ * Neither failure path embeds the Semrush workspace id in its thrown message: that message flows
+ * through `mapError` → `safeError`, which header-sanitizes and length-caps but does NOT redact
+ * ids, so a raw workspace UUID would reach the customer. The id is the diagnostic triage actually
+ * needs, so it is logged HERE (matching {@link findAdoptableFamilyMatch}'s AMBIGUOUS_WORKSPACE
+ * precedent) rather than surfaced in the response — which is why this takes a `log`.
+ *
  * @param {SerenityTransport} transport
- * @param {string} workspaceId
- * @param {{ attempts: number, intervalMs: number, sleep: function }} timing
- * @param {object} log
+ * @param {string} workspaceId - the sub-workspace to poll.
+ * @param {object} timing
+ * @param {number} timing.attempts - max status reads before giving up.
+ * @param {number} timing.intervalMs - delay between reads.
+ * @param {(ms: number) => Promise<void>} timing.sleep - injectable delay (tests pass a no-op).
+ * @param {object} [log] - structured logger; the failing workspace id is logged through it. Left
+ *   optional so a direct/test caller can omit it (the log calls are `?.`-guarded).
+ * @returns {Promise<void>} resolves once the workspace is ready; throws on terminal failure (502,
+ *   `subworkspaceCreationFailed`) or timeout (504, `subworkspaceCreationTimeout`).
  */
 export async function pollUntilCreated(
   transport,
   workspaceId,
   { attempts, intervalMs, sleep },
-  log,
+  log = undefined,
 ) {
-  let lastObservedStatus;
   for (let i = 0; i < attempts; i += 1) {
     // eslint-disable-next-line no-await-in-loop
-    const status = await transport.getWorkspaceStatus(workspaceId);
-    const observedStatus = status?.status;
-    lastObservedStatus = observedStatus;
-    if (observedStatus === 'created') {
+    const result = await transport.getWorkspaceStatus(workspaceId);
+    const status = result?.status;
+    if (isWorkspaceReady(status)) {
       return;
     }
-    if (TERMINAL_WORKSPACE_STATUSES.has(observedStatus)) {
-      log.error('pollUntilCreated: SUBWORKSPACE_CREATION_FAILED: terminal status observed', {
-        workspaceId,
-        status: observedStatus,
+    if (isWorkspaceTerminalFailure(status)) {
+      // Log the id here (kept out of the thrown message, see the fn doc); include the raw
+      // upstream status so a new/unexpected terminal string is visible in triage.
+      log?.error?.('pollUntilCreated: sub-workspace settled to a terminal failure status', {
+        semrushWorkspaceId: workspaceId, status,
       });
       throw subworkspaceCreationFailedError();
     }
     // eslint-disable-next-line no-await-in-loop
     await sleep(intervalMs);
   }
-  log.error(
-    'pollUntilCreated: SUBWORKSPACE_CREATION_TIMEOUT: readiness attempts exhausted',
-    { workspaceId, status: lastObservedStatus },
-  );
+  // Timeout: the workspace is still provisioning (`not ready`) or reported an unclassified status.
+  // Log the id (previously embedded in the thrown message, which leaked the UUID to the caller via
+  // mapError — LLMO-7352) and keep the client-facing message id-free.
+  log?.error?.('pollUntilCreated: sub-workspace did not settle to a ready status in time', {
+    semrushWorkspaceId: workspaceId,
+  });
   throw subworkspaceCreationTimeoutError();
 }
 
@@ -181,7 +253,7 @@ async function claimedBrandId(brandCollection, workspaceId) {
  * listing. A candidate claimed by THIS brand stays adoptable — that is a concurrent
  * request for the same brand, which the caller's `reloadPointer` guard settles.
  *
- * The claim lookup is mandatory whenever there is at least one same-title `created`
+ * The claim lookup is mandatory whenever there is at least one same-title ready
  * candidate: without it the title is the only key left, which is exactly the
  * mis-adoption this filter exists to prevent. A create with no candidates has nothing
  * to mis-adopt, so it does not need one.
@@ -192,9 +264,9 @@ async function claimedBrandId(brandCollection, workspaceId) {
  * zombie also has `projectCount 0`, so a title+empty-only match would (a) adopt
  * it as the brand's workspace (then immediately re-time-out at pollUntilCreated)
  * and (b) once ≥2 accumulate, inflate the multiple-match `409` and wedge the
- * brand. Considering ONLY `status === 'created'` entries makes accumulated
- * zombies invisible to the matcher, breaking that snowball. The live family
- * endpoint always returns a status, so the strict equality is safe.
+ * brand. Considering ONLY ready-status entries (created/active/ready — see
+ * {@link isWorkspaceReady}) makes accumulated zombies invisible to the matcher,
+ * breaking that snowball. The live family endpoint always returns a status.
  *
  * Shared by both adoption paths so the match/ambiguity/empty rules live in one
  * place: the proactive create-or-adopt check (returns the match to reuse, or
@@ -221,7 +293,11 @@ async function findAdoptableFamilyMatch(transport, parentWorkspaceId, title, log
   // enforceLinkedGuard's mirror-image filter below): keep ID-less entries so the
   // existing missing-ID guard further down fails safely instead of silently dropping them.
   const children = familyItems(family).filter((w) => w?.id !== parentWorkspaceId);
-  const sameTitle = children.filter((w) => w?.title === title && w?.status === 'created');
+  // Ready = any of the READY superset (created/active/ready), not just literal `created`: the
+  // `/family` listing reports the same multi-string status set as `/status` (LLMO-7352), so a
+  // healthy candidate that settled to `active`/`ready` must be adoptable here too — otherwise it
+  // is misread as a zombie stub and a duplicate sub-workspace is created for the same title.
+  const sameTitle = children.filter((w) => w?.title === title && isWorkspaceReady(w?.status));
 
   if (sameTitle.length > 0
     && typeof brandCollection?.findBySemrushSubWorkspaceId !== 'function') {
@@ -248,10 +324,10 @@ async function findAdoptableFamilyMatch(transport, parentWorkspaceId, title, log
   }
 
   if (matches.length === 0) {
-    // Surface filtered-out non-`created` same-title stubs (Semrush ack-then-fail
+    // Surface filtered-out non-ready same-title stubs (Semrush ack-then-fail
     // zombies) so their accumulation is visible in logs without a manual family
     // query — they are the exact failure mode this status filter absorbs (#2718).
-    const ignored = children.filter((w) => w?.title === title && w?.status !== 'created');
+    const ignored = children.filter((w) => w?.title === title && !isWorkspaceReady(w?.status));
     if (ignored.length > 0) {
       log?.info?.('ensureSubworkspace: ignoring non-created same-title family stub(s)', {
         parentWorkspaceId,
