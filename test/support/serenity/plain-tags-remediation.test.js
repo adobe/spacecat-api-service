@@ -48,6 +48,12 @@ use(sinonChai);
 const WS = 'workspace-1';
 const PROJECT = 'project-1';
 const BRAND = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+const ROTATED_PROMISE_TOKEN = {
+  promise_token: 'rotated-bulk-tags-token',
+  expires_in: 14399,
+  token_type: 'bearer',
+};
+const SEMRUSH_PROMISE_PAIR = 'SEMRUSH';
 
 function fakeLog() {
   return {
@@ -188,6 +194,8 @@ describe('remaining plain-tags regression coverage', () => {
         body: bulkBody(),
         callerId: 'caller',
         log: fakeLog(),
+        promiseToken: ROTATED_PROMISE_TOKEN,
+        promisePair: SEMRUSH_PROMISE_PAIR,
       });
 
       expect(result).to.deep.equal({
@@ -204,6 +212,10 @@ describe('remaining plain-tags regression coverage', () => {
         .to.deep.equal(['', 'tag-root']);
       expect(transport.listPromptsByTags).not.to.have.been.called;
       expect(createAndEnqueueJob).to.have.been.calledOnce;
+      expect(createAndEnqueueJob.firstCall.args[1]).to.include({
+        promiseToken: ROTATED_PROMISE_TOKEN,
+        promisePair: SEMRUSH_PROMISE_PAIR,
+      });
       expect(createAndEnqueueJob.firstCall.args[1].metadata).to.deep.include({
         normalizedFilter: {
           groups: [['family']],
@@ -240,6 +252,8 @@ describe('remaining plain-tags regression coverage', () => {
         body,
         callerId: 'caller',
         log: fakeLog(),
+        promiseToken: ROTATED_PROMISE_TOKEN,
+        promisePair: SEMRUSH_PROMISE_PAIR,
       });
 
       expect(result.status).to.equal(202);
@@ -288,6 +302,8 @@ describe('remaining plain-tags regression coverage', () => {
         callerId: 'caller',
         idempotencyKey: 'race-key',
         log: fakeLog(),
+        promiseToken: ROTATED_PROMISE_TOKEN,
+        promisePair: SEMRUSH_PROMISE_PAIR,
       });
 
       expect(result).to.deep.equal({
@@ -336,6 +352,8 @@ describe('remaining plain-tags regression coverage', () => {
         callerId: 'caller',
         idempotencyKey: 'race-key',
         log: fakeLog(),
+        promiseToken: ROTATED_PROMISE_TOKEN,
+        promisePair: SEMRUSH_PROMISE_PAIR,
       })).to.be.rejected.then((error) => {
         expect(error.status).to.equal(409);
         expect(error.code).to.equal('idempotencyConflict');
