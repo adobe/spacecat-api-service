@@ -181,7 +181,7 @@ export function setImsOrgModal(lambdaContext) {
         } catch (slackErr) {
           log.warn('Failed to deliver reassignment-blocked notice to Slack', slackErr);
         }
-        return;
+        throw guardError;
       }
 
       // if not found, try retrieving from IMS, then create a new spacecat org
