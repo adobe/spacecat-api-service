@@ -2232,6 +2232,10 @@ describe('SerenityController', () => {
       expect(createAndEnqueueJobStub).to.have.been.calledOnce;
       const [, enqueueArgs] = createAndEnqueueJobStub.firstCall.args;
       expect(enqueueArgs.jobType).to.equal('serenity-provision-workspace');
+      // LLMO-7418 external-review Finding N2: the brand's name is passed as the sub-workspace
+      // title, so a flat-mode active brand reaching the worker's create path yields a titled,
+      // adoptable workspace instead of the no-title fail-fast.
+      expect(enqueueArgs.metadata.title).to.equal('Test Brand');
       expect(enqueueArgs.metadata.chainedJobType).to.equal('serenity-activate-markets');
       expect(enqueueArgs.metadata.chainedJobMetadata.brandId).to.equal(BRAND);
       expect(enqueueArgs.metadata.chainedJobMetadata.orgId).to.equal(ORG);
@@ -3077,6 +3081,7 @@ describe('SerenityController', () => {
             [JOB]: makeAsyncJob({
               id: JOB,
               status: 'COMPLETED',
+              jobType: 'serenity-provision-workspace',
               result: { provisioningStatus: 'ready', chainedJobId: CHAINED_JOB },
             }),
             [CHAINED_JOB]: makeAsyncJob({
@@ -3097,7 +3102,7 @@ describe('SerenityController', () => {
           const controller = SerenityController({ env: {} }, fakeLog(), {});
           const ctx = ctxWithChain({
             [JOB]: makeAsyncJob({
-              id: JOB, status: 'COMPLETED', result: { requeuedJobId: CHAINED_JOB },
+              id: JOB, status: 'COMPLETED', jobType: 'serenity-provision-workspace', result: { requeuedJobId: CHAINED_JOB },
             }),
             [CHAINED_JOB]: makeAsyncJob({ id: CHAINED_JOB, status: 'IN_PROGRESS', result: null }),
           });
@@ -3115,7 +3120,7 @@ describe('SerenityController', () => {
           const finalResult = { status: 201, body: {} };
           const ctx = ctxWithChain({
             [JOB]: makeAsyncJob({
-              id: JOB, status: 'COMPLETED', result: { requeuedJobId: CHAINED_JOB },
+              id: JOB, status: 'COMPLETED', jobType: 'serenity-provision-workspace', result: { requeuedJobId: CHAINED_JOB },
             }),
             [CHAINED_JOB]: makeAsyncJob({
               id: CHAINED_JOB,
@@ -3136,7 +3141,7 @@ describe('SerenityController', () => {
           const controller = SerenityController({ env: {} }, fakeLog(), {});
           const ctx = ctxWithChain({
             [JOB]: makeAsyncJob({
-              id: JOB, status: 'COMPLETED', result: { chainedJobId: 'does-not-exist' },
+              id: JOB, status: 'COMPLETED', jobType: 'serenity-provision-workspace', result: { chainedJobId: 'does-not-exist' },
             }),
           });
 
@@ -3167,7 +3172,9 @@ describe('SerenityController', () => {
           const jobA = 'cccccccc-1111-2222-3333-444444444444';
           const jobB = 'dddddddd-1111-2222-3333-444444444444';
           const ctx = ctxWithChain({
-            [JOB]: makeAsyncJob({ id: JOB, status: 'COMPLETED', result: { chainedJobId: jobA } }),
+            [JOB]: makeAsyncJob({
+              id: JOB, status: 'COMPLETED', jobType: 'serenity-provision-workspace', result: { chainedJobId: jobA },
+            }),
             [jobA]: makeAsyncJob({ id: jobA, status: 'COMPLETED', result: { chainedJobId: jobB } }),
             [jobB]: makeAsyncJob({ id: jobB, status: 'COMPLETED', result: { chainedJobId: jobA } }),
           });
@@ -3176,6 +3183,47 @@ describe('SerenityController', () => {
 
           // Must resolve (not hang) and still answer 200 with SOME terminal status.
           expect(response.status).to.equal(200);
+        });
+
+        it('labels a provisioning job as provisionWorkspace, not the classifyPrompts default (LLMO-7418 external-review N4)', async () => {
+          const controller = SerenityController({ env: {} }, fakeLog(), {});
+          const ctx = ctxWithChain({
+            [JOB]: makeAsyncJob({
+              id: JOB,
+              status: 'COMPLETED',
+              jobType: 'serenity-provision-workspace',
+              result: { provisioningStatus: 'ready' },
+            }),
+          });
+
+          const body = await readBody(await controller.getPromptsJobStatus(ctx));
+
+          expect(body.jobType).to.equal('provisionWorkspace');
+        });
+
+        it('does NOT follow a classifyPrompts requeue chain — restores the pre-stack polling contract (LLMO-7418 external-review N5)', async () => {
+          const controller = SerenityController({ env: {} }, fakeLog(), {});
+          // A classify job self-requeues and returns requeuedJobId, but its shipped contract
+          // returns the FIRST hop's result. The chain-follow must NOT reach into hop 2.
+          const hopOneResult = { requeuedJobId: CHAINED_JOB, created: 3, skipped: 1 };
+          const ctx = ctxWithChain({
+            [JOB]: makeAsyncJob({
+              id: JOB,
+              status: 'COMPLETED',
+              jobType: 'serenity-classify-prompts',
+              result: hopOneResult,
+            }),
+            [CHAINED_JOB]: makeAsyncJob({
+              id: CHAINED_JOB, status: 'IN_PROGRESS', result: null,
+            }),
+          });
+
+          const body = await readBody(await controller.getPromptsJobStatus(ctx));
+
+          // Reports the classify job's OWN first-hop COMPLETED + result, not the requeued hop's.
+          expect(body.jobType).to.equal('classifyPrompts');
+          expect(body.status).to.equal('COMPLETED');
+          expect(body.result).to.deep.equal(hopOneResult);
         });
       });
     });
