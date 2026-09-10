@@ -55,6 +55,8 @@ describe('createElementsService#getResponseFeed', () => {
       ELEMENT_IDS.BRAND_CLAIMS_RESPONSES,
       sinon.match({ project_id: 'project-1' }),
       sinon.match({
+        timeoutMs: 20_000,
+        maxRetries: 0,
         maxResponseBytes: 8 * 1024 * 1024,
         redactWorkspaceInErrors: true,
       }),
@@ -74,6 +76,8 @@ describe('createElementsService#getResponseFeed', () => {
       maxUpstreamBytes: 1234,
     });
     expect(transport.fetchElement.firstCall.args[3]).to.include({
+      timeoutMs: 20_000,
+      maxRetries: 0,
       maxResponseBytes: 1234,
       redactWorkspaceInErrors: true,
     });

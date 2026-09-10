@@ -98,6 +98,13 @@ const SOURCE_VISIBILITY_CALL_MAX_RETRIES = 1;
 // spawn an unbounded number of parallel Semrush requests.
 const STATS_TRENDS_WEEK_CONCURRENCY = 4;
 const BRAND_CLAIMS_UPSTREAM_MAX_BYTES = 8 * 1024 * 1024;
+// One-model/500-row live probes completed in 4.6-7.3s under concurrency 4; the prior measured
+// maximum was 10.9s. A 20s end-to-end upstream budget leaves material headroom while still
+// expiring before API Gateway's ~29-30s integration ceiling. Disable transport-level 429 retries
+// for this synchronous route: a retry plus Retry-After can outlive the client request, and Mystique
+// retries the failed page as a separate bounded request.
+const BRAND_CLAIMS_TIMEOUT_MS = 20_000;
+const BRAND_CLAIMS_MAX_RETRIES = 0;
 
 /**
  * Creates the Elements service that composes transport calls with per-element
@@ -322,6 +329,8 @@ export function createElementsService(transport, log) {
           projectId, date, offset, pageSize,
         }),
         {
+          timeoutMs: BRAND_CLAIMS_TIMEOUT_MS,
+          maxRetries: BRAND_CLAIMS_MAX_RETRIES,
           maxResponseBytes: maxUpstreamBytes,
           redactWorkspaceInErrors: true,
         },

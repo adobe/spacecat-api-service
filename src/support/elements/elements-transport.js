@@ -120,6 +120,11 @@ async function readBoundedText(response, maxResponseBytes, requestInfo) {
     : undefined;
   const contentLength = Number(response.headers?.get('content-length'));
   if (limit && Number.isFinite(contentLength) && contentLength > limit) {
+    try {
+      await response.body?.cancel?.();
+    } catch {
+      // Preserve the deterministic typed size error even if Undici cannot cancel the stream.
+    }
     throw new ElementsTransportError(
       502,
       `Elements API response exceeds configured ${limit}-byte limit`,
@@ -140,8 +145,12 @@ async function readBoundedText(response, maxResponseBytes, requestInfo) {
       }
       total += value.byteLength;
       if (total > limit) {
-        // eslint-disable-next-line no-await-in-loop
-        await reader.cancel();
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          await reader.cancel();
+        } catch {
+          // Preserve the deterministic typed size error if stream cancellation fails.
+        }
         throw new ElementsTransportError(
           502,
           `Elements API response exceeds configured ${limit}-byte limit`,
@@ -292,6 +301,7 @@ async function request(url, headers, body, {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     let response;
+    let parsed;
     try {
       // eslint-disable-next-line no-await-in-loop
       response = await fetch(url, {
@@ -300,6 +310,11 @@ async function request(url, headers, body, {
         signal: controller.signal,
         body: jsonBody,
       });
+      // Keep the same abort budget active while consuming/decompressing the body. Fetch resolves
+      // when response headers arrive, so clearing the timer before this read would leave a stalled
+      // or slow body unbounded even though callers supplied timeoutMs.
+      // eslint-disable-next-line no-await-in-loop
+      parsed = await parseBody(response, maxResponseBytes, requestInfo);
     } catch (e) {
       if (e?.name === 'AbortError') {
         throw new ElementsTransportError(504, `Elements API POST ${errorUrl} timed out after ${timeoutMs}ms`, undefined, requestInfo());
@@ -309,8 +324,6 @@ async function request(url, headers, body, {
       clearTimeout(timer);
     }
 
-    // eslint-disable-next-line no-await-in-loop
-    const parsed = await parseBody(response, maxResponseBytes, requestInfo);
     if (response.ok) {
       return parsed;
     }

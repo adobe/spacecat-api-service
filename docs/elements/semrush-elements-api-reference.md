@@ -141,7 +141,8 @@ Single method: `fetchElement(workspaceId, elementId, payload)`.
 - Reads base URL from `env.SEMRUSH_PROJECTS_BASE_URL` (same secret used by the Serenity transport)
 - Enforces HTTPS — throws `ErrorWithStatusCode(503)` if misconfigured
 - Authenticates with the caller's IMS bearer token forwarded unchanged
-- `AbortController` timeout at 15 seconds — throws `ElementsTransportError(504)` on timeout
+- `AbortController` timeout defaults to 30 seconds and covers response headers plus complete body consumption — throws `ElementsTransportError(504)` on timeout
+- Brand Claims overrides this to 20 seconds with no in-request 429 retry, keeping the synchronous route below API Gateway's integration ceiling; the consumer retries a failed page as a separate bounded request
 - Parses response body as JSON (falls back to raw text)
 - Throws `ElementsTransportError(status, message, body)` for non-2xx responses
 

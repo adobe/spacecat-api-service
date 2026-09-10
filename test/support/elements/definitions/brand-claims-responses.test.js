@@ -58,9 +58,12 @@ describe('brand-claims-responses definition', () => {
     });
   });
 
-  it('normalizes the combined row and rowCount without changing source order', () => {
+  it('normalizes the combined row, UTC-midnight date, and rowCount without changing source order', () => {
     const result = transformBrandClaimsResponsesResponse(raw([
-      row({ sources: ['https://example.com/b', 'https://example.com/a'] }),
+      row({
+        date: '2026-09-07T00:00:00Z',
+        sources: ['https://example.com/b', 'https://example.com/a'],
+      }),
     ], 7));
     expect(result).to.deep.equal({
       rowCount: 7,
@@ -84,6 +87,8 @@ describe('brand-claims-responses definition', () => {
     ['blank response', raw([row({ response: '   ' })])],
     ['wrong sources type', raw([row({ sources: 'https://example.com' })])],
     ['wrong tags item type', raw([row({ tags: [7] })])],
+    ['non-midnight date', raw([row({ date: '2026-09-07T12:00:00Z' })])],
+    ['impossible date', raw([row({ date: '2026-02-30' })])],
     ['missing required field', raw([row({ prompt: undefined })])],
   ]) {
     it(`rejects schema drift: ${name}`, () => {

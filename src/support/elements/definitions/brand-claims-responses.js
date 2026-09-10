@@ -77,6 +77,17 @@ function stringArray(row, field, index) {
   return [...row[field]];
 }
 
+function executionDate(row, index) {
+  const value = requiredText(row, 'date', index);
+  // Live 55e89619 rows use UTC-midnight timestamps while the public contract and request use
+  // YYYY-MM-DD. Accept only those equivalent wire shapes and normalize to the requested form.
+  const match = /^(\d{4}-\d{2}-\d{2})(?:T00:00:00(?:\.000)?Z)?$/.exec(value);
+  if (!match || new Date(`${match[1]}T00:00:00Z`).toISOString().slice(0, 10) !== match[1]) {
+    throw invalidResponse(`blocks.data[${index}].date`);
+  }
+  return match[1];
+}
+
 /**
  * Strictly normalizes the combined element response. Missing fields and wrong types are
  * upstream schema drift, not an empty corpus. Raw customer data is never attached to errors.
@@ -105,7 +116,7 @@ export function transformBrandClaimsResponsesResponse(raw) {
       projectId: requiredText(row, 'project_id', index),
       prompt: requiredText(row, 'prompt', index),
       response: requiredText(row, 'response', index),
-      date: requiredText(row, 'date', index),
+      date: executionDate(row, index),
       model: requiredText(row, 'model', index),
       responses: row.responses,
       sources: stringArray(row, 'sources', index),
