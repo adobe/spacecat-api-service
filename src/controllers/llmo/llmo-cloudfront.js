@@ -1158,6 +1158,25 @@ function LlmoCloudFrontController(ctx) {
   };
 
   /**
+   * Richer, plain-language "why" text for the permissions UI, keyed by the template's group
+   * `name` (Metadata.AdobeLLMOptimizerPermissions.groups[].name — see
+   * customer-bootstrap-role.yaml).
+   * The template's own `summary` field stays the single source of truth for *which* permissions
+   * exist (edited there when the IAM policy itself changes); this map only overrides the wording
+   * shown to the customer, so it can ship without touching the S3-hosted template. A group name
+   * not listed here falls back to the template's own `summary` — never a hard failure.
+   */
+  const RICHER_PERMISSION_SUMMARY_BY_GROUP_NAME = {
+    CloudFront: 'Reads your distribution\'s current configuration (ListDistributions, GetDistribution, '
+      + 'GetDistributionConfig) and adds the Edge Optimize origin-routing CloudFront Function and cache '
+      + 'policy that serve AI-optimized HTML to LLM crawlers. The read calls are account-wide (CloudFront '
+      + 'has no per-distribution scoping for them); the write calls only touch resources Adobe creates.',
+    IAM: 'Creates the one execution role the Edge Optimize Lambda@Edge function assumes. Scoped to a '
+      + 'single role name (edgeoptimize-lambda-exec) — cannot pass or create any other IAM role, which is '
+      + 'what keeps this from being a privilege-escalation path.',
+  };
+
+  /**
    * GET /sites/{siteId}/llmo/cdn-onboard/cloudfront/permissions
    * Powers the wizard's "View Permissions" panel. Returns a curated, human-friendly manifest of the
    * AWS permissions the connector role grants (read from a static JSON object in the template S3
@@ -1205,12 +1224,16 @@ function LlmoCloudFrontController(ctx) {
       if (!Array.isArray(perms?.groups) || perms.groups.length === 0) {
         throw new Error('connector template has no AdobeLLMOptimizerPermissions metadata');
       }
-      // Map the template's {name, scope, summary} groups to the UI's {name, items[]} shape.
+      // Map the template's {name, scope, summary} groups to the UI's {name, items[]} shape,
+      // preferring the richer wording above where available (see comment on the map itself).
       const manifest = {
         appName: perms.appName || 'Adobe LLM Optimizer',
         groups: perms.groups.map((g) => ({
           name: g.name,
-          items: [g.scope ? `Scoped to ${g.scope}` : null, g.summary].filter(Boolean),
+          items: [
+            g.scope ? `Scoped to ${g.scope}` : null,
+            RICHER_PERMISSION_SUMMARY_BY_GROUP_NAME[g.name] || g.summary,
+          ].filter(Boolean),
         })),
       };
 
