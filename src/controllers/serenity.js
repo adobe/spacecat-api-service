@@ -101,6 +101,7 @@ import {
   getBrandAliases, getBrandBaseSiteId,
   cancelProvisioningAttempt,
   guardAgainstConcurrentProvisioning, beginProvisioningAttempt, updateProvisioningJobId,
+  getBrandProvisioningState,
 } from '../support/brands-storage.js';
 import { ErrorWithStatusCode, resolveSemrushImsToken as resolveImsTokenViaPromise } from '../support/utils.js';
 import {
@@ -1149,6 +1150,36 @@ function SerenityController(context, log, env) {
           callerId: resolveCallerId(ctx),
         });
         return createResponse(result.body, result.status);
+      }
+      // LLMO-7418 external-review (adversarial B1): a brand whose sub-workspace pointer is not yet
+      // written resolves to `mode: 'flat'` with `workspaceId = the ORG'S SHARED PARENT`
+      // (workspace-resolver.js: `if (hasText(subworkspaceId)) … else return { mode: 'flat',
+      // workspaceId: parentWorkspaceId }`). That is correct for a genuinely flat brand, and WRONG
+      // for a Semrush brand that is merely mid-provisioning: async creation persists the brand
+      // before Semrush confirms the workspace, so for the whole provisioning window this brand
+      // looks flat. Falling through here would create and publish a project in the shared org
+      // workspace — consuming the org's shared allocation, bound in the DB to this brand — and the
+      // moment the real pointer lands the brand flips to sub-workspace mode and that market
+      // becomes invisible: an orphaned upstream project plus a stale mapping row.
+      //
+      // A tracked provisioning attempt is the signal that this brand is NOT flat, it is a
+      // sub-workspace brand whose workspace does not exist yet. Refuse rather than silently
+      // writing to the parent. `pending` = in flight; `failed` = provisioning did not complete, so
+      // the brand still has no workspace of its own to create a market in. A genuinely flat brand
+      // (non-Serenity org) has no provisioning row at all and is unaffected.
+      const flatProvisioningState = await getBrandProvisioningState(
+        /** @type {string} */ (auth.brandUuid),
+        ctx.dataAccess.services.postgrestClient,
+      ).catch(() => null); // never fail an otherwise-valid flat create on a state-read blip
+      if (flatProvisioningState?.provisioningStatus === 'pending'
+        || flatProvisioningState?.provisioningStatus === 'failed') {
+        const err = new ErrorWithStatusCode(
+          'This brand\'s Semrush sub-workspace is still being set up; adding a market is not '
+          + 'available until provisioning completes.',
+          409,
+        );
+        err.code = 'semrush_provisioning_incomplete';
+        throw err;
       }
       // Flat handler self-derives brandDomain from siteId (it has Site access).
       const result = await handleCreateMarket(

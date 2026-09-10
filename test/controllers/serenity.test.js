@@ -214,6 +214,7 @@ describe('SerenityController', () => {
   let guardAgainstConcurrentProvisioningStub;
   let beginProvisioningAttemptStub;
   let updateProvisioningJobIdStub;
+  let getBrandProvisioningStateStub;
   let orchestrateCreateMarketSubworkspaceStub;
   let orchestrateActivateMarketsStub;
   let exchangePromiseTokenStub;
@@ -267,6 +268,8 @@ describe('SerenityController', () => {
     beginProvisioningAttemptStub = sinon.stub().resolves(true);
     // LLMO-7418 external-review Finding 17: records the first-hop job id, best-effort.
     updateProvisioningJobIdStub = sinon.stub().resolves(true);
+    // Default: no provisioning attempt tracked (a genuinely flat brand).
+    getBrandProvisioningStateStub = sinon.stub().resolves(null);
     // PR-C: `async: true` opts into the job-chain branch above; absent/false runs this
     // (unchanged) synchronous orchestration call — the default, no-flag behavior every
     // existing caller gets.
@@ -373,6 +376,7 @@ describe('SerenityController', () => {
         guardAgainstConcurrentProvisioning: guardAgainstConcurrentProvisioningStub,
         beginProvisioningAttempt: beginProvisioningAttemptStub,
         updateProvisioningJobId: updateProvisioningJobIdStub,
+        getBrandProvisioningState: getBrandProvisioningStateStub,
       },
       '../../src/support/serenity/handlers/create-market-orchestration.js': {
         orchestrateCreateMarketSubworkspace: orchestrateCreateMarketSubworkspaceStub,
@@ -1303,6 +1307,42 @@ describe('SerenityController', () => {
       const body = await readBody(response);
       expect(body.error).to.equal('internalServerError');
       expect(log.error).to.have.been.calledWithMatch('Serenity controller error');
+    });
+
+    it('createMarket REFUSES rather than writing to the org parent workspace when the brand is mid-provisioning (LLMO-7418 external-review B1)', async () => {
+      // A brand whose sub-workspace pointer is not yet written resolves to mode 'flat' with
+      // workspaceId = THE ORG'S SHARED PARENT. For a genuinely flat brand that is correct; for a
+      // Semrush brand that is merely mid-provisioning it is not — falling through would create and
+      // publish a project in the shared org workspace, bound to this brand, which becomes an
+      // orphan the moment the real pointer lands. Async creation makes this window reachable.
+      handlers.handleCreateMarket.resolves({ status: 201, body: { brandId: BRAND } });
+      getBrandProvisioningStateStub.resolves({ provisioningStatus: 'pending' });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+
+      const response = await controller.createMarket(fakeContext({
+        data: {
+          market: 'us', languageCode: 'en', brandDomain: 'x.com', brandNames: ['X'],
+        },
+      }));
+
+      expect(response.status).to.equal(409);
+      // The load-bearing assertion: nothing was written to the parent workspace.
+      expect(handlers.handleCreateMarket).to.not.have.been.called;
+    });
+
+    it('createMarket refuses a mid-provisioning brand whose attempt FAILED (no workspace of its own yet)', async () => {
+      handlers.handleCreateMarket.resolves({ status: 201, body: { brandId: BRAND } });
+      getBrandProvisioningStateStub.resolves({ provisioningStatus: 'failed' });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+
+      const response = await controller.createMarket(fakeContext({
+        data: {
+          market: 'us', languageCode: 'en', brandDomain: 'x.com', brandNames: ['X'],
+        },
+      }));
+
+      expect(response.status).to.equal(409);
+      expect(handlers.handleCreateMarket).to.not.have.been.called;
     });
 
     it('createMarket routes to the flat handler in flat mode', async () => {
