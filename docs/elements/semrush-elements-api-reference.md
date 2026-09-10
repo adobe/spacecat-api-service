@@ -358,7 +358,7 @@ Follow these steps in order. Steps 1–4 are contained within `src/support/eleme
    export function buildMyNewElementPayload({ ...params }) {
      return { /* Semrush payload shape */ };
    }
-   
+
    export function transformMyNewElementResponse(raw) {
      return (raw?.blocks?.data ?? []).map(item => ({ /* typed fields */ }));
    }
@@ -464,6 +464,8 @@ Upstream error bodies are **never forwarded to clients** — they are logged ser
 | `SEMRUSH_PROJECTS_BASE_URL` | Vault `dx_mysticat/<env>/api-service` | `elements-transport.js` `baseUrl()` — the Elements API base host (e.g. `https://www.semrush.com`) for regular (IMS-authenticated) callers |
 | `SEO_API_BASE_URL` | Vault `dx_mysticat/<env>/api-service` | `elements-transport.js` `s2sBaseUrl()` — the v4-raw external-api host (`https://api.semrush.com`) used for S2S-consumer calls |
 | `SEMRUSH_ADMIN_ELEMENT_API_KEY` | Vault `dx_mysticat/<env>/api-service` | `elements-transport.js` `buildS2SHeaders()` — the `Apikey` credential used to authenticate S2S-consumer calls to the Elements API |
+| `BRAND_CLAIMS_MAX_UPSTREAM_BYTES` | Optional environment override; default 8 MiB | Maximum decompressed `55e89619` response body read before the transport cancels and fails with 502 |
+| `BRAND_CLAIMS_MAX_OUTBOUND_BYTES` | Optional environment override; default 5 MiB | Maximum serialized Brand Claims API envelope before the controller fails with 502 |
 
 The Elements transport reuses the same `SEMRUSH_PROJECTS_BASE_URL` already configured for the Serenity (prompts/markets) transport for regular callers. S2S consumers (see [S2S Elements Access](#s2s-elements-access) below) use a different upstream gateway and credential entirely.
 

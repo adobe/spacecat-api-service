@@ -42,6 +42,31 @@ function makeResponse(status, body, headers = {}) {
   };
 }
 
+function makeStreamingResponse(status, chunks) {
+  const encoded = chunks.map((chunk) => new TextEncoder().encode(chunk));
+  let index = 0;
+  const cancel = sinon.stub().resolves();
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    headers: { get: () => null },
+    body: {
+      getReader: () => ({
+        read: async () => {
+          if (index >= encoded.length) {
+            return { done: true, value: undefined };
+          }
+          const value = encoded[index];
+          index += 1;
+          return { done: false, value };
+        },
+        cancel,
+      }),
+    },
+    cancel,
+  };
+}
+
 describe('createElementsTransport', () => {
   let fetchStub;
   let originalFetch;
@@ -148,6 +173,44 @@ describe('createElementsTransport', () => {
       const transport = createElementsTransport({ env: ENV, imsToken: IMS_TOKEN });
       const result = await transport.fetchElement(WORKSPACE_ID, ELEMENT_ID, {});
       expect(result).to.deep.equal(responseBody);
+    });
+
+    it('accepts a response exactly at the per-call decompressed byte ceiling', async () => {
+      const body = JSON.stringify({ ok: true });
+      fetchStub.resolves(makeStreamingResponse(200, [body]));
+      const transport = createElementsTransport({ env: ENV, imsToken: IMS_TOKEN });
+      const result = await transport.fetchElement(WORKSPACE_ID, ELEMENT_ID, {}, {
+        maxResponseBytes: new TextEncoder().encode(body).byteLength,
+      });
+      expect(result).to.deep.equal({ ok: true });
+    });
+
+    it('cancels and rejects a streamed response above the decompressed byte ceiling', async () => {
+      const response = makeStreamingResponse(200, ['1234', '5678']);
+      fetchStub.resolves(response);
+      const transport = createElementsTransport({ env: ENV, imsToken: IMS_TOKEN });
+      await expect(transport.fetchElement(WORKSPACE_ID, ELEMENT_ID, {}, {
+        maxResponseBytes: 7,
+      })).to.be.rejectedWith(ElementsTransportError, /exceeds configured 7-byte limit/);
+      expect(response.cancel).to.have.been.calledOnce;
+    });
+
+    it('redacts the workspace from endpoint-specific error descriptors', async () => {
+      fetchStub.resolves(makeResponse(500, { error: 'failed' }));
+      const transport = createElementsTransport({ env: ENV, imsToken: IMS_TOKEN });
+      let error;
+      try {
+        await transport.fetchElement(WORKSPACE_ID, ELEMENT_ID, {}, {
+          redactWorkspaceInErrors: true,
+        });
+      } catch (e) {
+        error = e;
+      }
+      expect(error.workspaceId).to.equal(undefined);
+      expect(error.endpoint).to.include('/workspaces/[redacted]/');
+      expect(error.endpoint).to.not.include(WORKSPACE_ID);
+      expect(error.message).to.include('/workspaces/[redacted]/');
+      expect(error.message).to.not.include(WORKSPACE_ID);
     });
 
     it('URL-encodes workspaceId in the path', async () => {
