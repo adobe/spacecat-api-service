@@ -183,8 +183,11 @@ export async function provisionWorkspaceHandler(context, job, accessToken) {
     // rather than doing pointless — or actively harmful — Semrush work for an attempt nothing
     // is waiting on anymore.
     const state = await getBrandProvisioningState(brandId, postgrestClient);
-    if (!state || state.provisioningAttemptId !== attemptId || state.provisioningStatus !== 'pending') {
-      log?.info?.('provision-workspace-job: attempt no longer current; standing down', {
+    // LLMO-7418 external-review Blocker 2: a DIFFERENT attempt now owning the brand (or the
+    // brand no longer existing) is a genuine supersession — our OWN candidate, if any, is a
+    // stale leftover nothing needs, so clean it up if we own it.
+    if (!state || state.provisioningAttemptId !== attemptId) {
+      log?.info?.('provision-workspace-job: attempt no longer current (a different attempt owns the brand); standing down', {
         brandId,
         attemptId,
         currentAttemptId: state?.provisioningAttemptId,
@@ -196,6 +199,21 @@ export async function provisionWorkspaceHandler(context, job, accessToken) {
       if (candidate) {
         await cleanupIfOwned(transport, candidate, parentWorkspaceId, log, 'provision-worker-superseded-stand-down');
       }
+      return { provisioningStatus: 'superseded' };
+    }
+    // Our OWN attempt already reached a terminal state (`ready` or `failed`) — this is NOT a
+    // supersession, it is an at-least-once SQS redelivery of a message whose EARLIER delivery
+    // already finished this exact job (a duplicate concurrent delivery, or one that arrived
+    // after the visibility timeout expired mid-processing). `candidate` here can be the
+    // brand's now-CANONICAL, LIVE workspace — including a real market project a chained job
+    // may have already created in it — so cleaning it up would delete live customer data, not
+    // an orphan. Stand down as a true no-op: never call cleanupIfOwned on this path.
+    if (state.provisioningStatus !== 'pending') {
+      log?.info?.('provision-workspace-job: this attempt already reached a terminal state (redelivery); standing down without cleanup', {
+        brandId,
+        attemptId,
+        currentStatus: state.provisioningStatus,
+      });
       return { provisioningStatus: 'superseded' };
     }
 
