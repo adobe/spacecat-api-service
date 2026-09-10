@@ -2166,32 +2166,12 @@ describe('LlmoCloudFrontController', () => {
       '      RoleName: !Ref RoleName',
     ].join('\n');
 
-    // The endpoint maps the template's {name, scope, summary} groups to the UI's {name, items[]},
-    // preferring the controller's richer per-group wording
-    // (RICHER_PERMISSION_SUMMARY_BY_GROUP_NAME) over the template's own terse `summary` for group
-    // names it recognizes.
+    // The endpoint maps the template's {name, scope, summary} groups to the UI's {name, items[]}.
     const expectedManifest = {
       appName: 'Adobe LLM Optimizer Deployer',
       groups: [
-        {
-          name: 'CloudFront',
-          items: [
-            'Scoped to All distributions',
-            'Reads your distribution\'s current configuration (ListDistributions, GetDistribution, '
-              + 'GetDistributionConfig) and adds the Edge Optimize origin-routing CloudFront Function and cache '
-              + 'policy that serve AI-optimized HTML to LLM crawlers. The read calls are account-wide (CloudFront '
-              + 'has no per-distribution scoping for them); the write calls only touch resources Adobe creates.',
-          ],
-        },
-        {
-          name: 'IAM',
-          items: [
-            'Scoped to role/edgeoptimize-* only',
-            'Creates the one execution role the Edge Optimize Lambda@Edge function assumes. Scoped to a '
-              + 'single role name (edgeoptimize-lambda-exec) — cannot pass or create any other IAM role, which is '
-              + 'what keeps this from being a privilege-escalation path.',
-          ],
-        },
+        { name: 'CloudFront', items: ['Scoped to All distributions', 'Add the Edge Optimize origin and routing function.'] },
+        { name: 'IAM', items: ['Scoped to role/edgeoptimize-* only', 'Create the execution role.'] },
       ],
     };
 
@@ -2226,33 +2206,6 @@ describe('LlmoCloudFrontController', () => {
       const [cmd] = s3SendStub.firstCall.args;
       expect(cmd.Key).to.equal('customer-bootstrap-role.yaml');
       expect(cmd.Bucket).to.equal('llmo-edgeoptimize-cf-template');
-    });
-
-    it('falls back to the template\'s own summary for an unrecognized group name', async () => {
-      const templateWithUnknownGroup = [
-        "AWSTemplateFormatVersion: '2010-09-09'",
-        'Metadata:',
-        '  AdobeLLMOptimizerPermissions:',
-        '    appName: Adobe LLM Optimizer Deployer',
-        '    groups:',
-        '      - name: Logs',
-        '        scope: Account-wide',
-        '        summary: Set up CloudWatch log delivery.',
-        'Resources:',
-        '  ConnectorRole:',
-        '    Type: AWS::IAM::Role',
-        '    Properties:',
-        '      RoleName: !Ref RoleName',
-      ].join('\n');
-      s3SendStub.resolves({ Body: { transformToString: async () => templateWithUnknownGroup } });
-
-      const result = await controller.getPermissions(permissionsContext);
-
-      expect(result.status).to.equal(200);
-      const body = await result.json();
-      expect(body.manifest.groups).to.deep.equal([
-        { name: 'Logs', items: ['Scoped to Account-wide', 'Set up CloudWatch log delivery.'] },
-      ]);
     });
 
     it('uses env-configured bucket + trusted principal when set', async () => {
