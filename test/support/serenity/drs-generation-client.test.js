@@ -57,8 +57,12 @@ const baseRequest = {
   imsOrgId: 'org-1',
 };
 
+// A full cross-account ARN — the ONLY shape the invoke guard accepts (a bare name
+// resolves in the caller account and fails; see isFullLambdaArn).
+const DRS_FN_ARN = 'arn:aws:lambda:us-east-1:489975610310:function:drs-v2-PromptGenerationSemrushMarket-dev';
+
 function ctx(env = {}) {
-  return { env: { [DRS_GENERATION_TARGET_ENV]: 'drs-fn', ...env }, log: { info: sinon.stub() } };
+  return { env: { [DRS_GENERATION_TARGET_ENV]: DRS_FN_ARN, ...env }, log: { info: sinon.stub() } };
 }
 
 describe('drs-generation-client', () => {
@@ -74,7 +78,7 @@ describe('drs-generation-client', () => {
     expect(result.prompts).to.have.length(2);
     expect(result.shipSummary.verdict).to.equal('ship');
     // The invoker receives the canonical snake_case wire payload, not the semantic request.
-    expect(invoke).to.have.been.calledOnceWith('drs-fn', toDrsRequestPayload(baseRequest));
+    expect(invoke).to.have.been.calledOnceWith(DRS_FN_ARN, toDrsRequestPayload(baseRequest));
   });
 
   it('does NOT pass a promise/IMS token to DRS (security invariant)', async () => {
@@ -94,6 +98,43 @@ describe('drs-generation-client', () => {
     const unconfigured = ctx({ [DRS_GENERATION_TARGET_ENV]: undefined });
     await expect(invokeDrsGeneration(unconfigured, baseRequest, { invoke }))
       .to.be.rejectedWith(DrsGenerationTerminalError);
+    expect(invoke).to.not.have.been.called;
+  });
+
+  it('invokes when the target is a full cross-account ARN', async () => {
+    const invoke = sinon.stub().resolves({ prompts: [{ prompt: 'p' }], ship_summary: { verdict: 'ship' } });
+    await invokeDrsGeneration(ctx(), baseRequest, { invoke });
+    expect(invoke).to.have.been.calledOnceWith(DRS_FN_ARN);
+  });
+
+  it('fails terminally with DRS_INVALID_TARGET on a bare function name (would misroute to caller account)', async () => {
+    const invoke = sinon.stub();
+    const warn = sinon.stub();
+    const bareCtx = {
+      env: { [DRS_GENERATION_TARGET_ENV]: 'drs-v2-dev-prompt-generation' },
+      log: { info: sinon.stub(), warn },
+    };
+    const err = await invokeDrsGeneration(bareCtx, baseRequest, { invoke }).catch((e) => e);
+    expect(err).to.be.instanceOf(DrsGenerationTerminalError);
+    expect(err.code).to.equal('DRS_INVALID_TARGET');
+    // Never invoked (fail-fast, before the Lambda call).
+    expect(invoke).to.not.have.been.called;
+    // Logs the value SHAPE for ops, never the full value.
+    expect(warn).to.have.been.calledOnce;
+    const [, meta] = warn.firstCall.args;
+    expect(meta.shape).to.include({ startsWithArn: false });
+    expect(JSON.stringify(meta)).to.not.contain('drs-v2-dev-prompt-generation');
+  });
+
+  it('fails terminally with DRS_INVALID_TARGET on a malformed ARN (missing 12-digit account)', async () => {
+    const invoke = sinon.stub();
+    const badArn = {
+      env: { [DRS_GENERATION_TARGET_ENV]: 'arn:aws:lambda:us-east-1::function:drs-v2-x-dev' },
+      log: { info: sinon.stub(), warn: sinon.stub() },
+    };
+    const err = await invokeDrsGeneration(badArn, baseRequest, { invoke }).catch((e) => e);
+    expect(err).to.be.instanceOf(DrsGenerationTerminalError);
+    expect(err.code).to.equal('DRS_INVALID_TARGET');
     expect(invoke).to.not.have.been.called;
   });
 
@@ -238,7 +279,7 @@ describe('drs-generation-client — canonical contract fixture (DRS #3194)', () 
   it('parses the canonical wire response (category deferred to empty in v1)', async () => {
     const invoke = sinon.stub().resolves(CONTRACT.response);
     const result = await invokeDrsGeneration(
-      { env: { [DRS_GENERATION_TARGET_ENV]: 'drs-fn' }, log: { info: sinon.stub() } },
+      { env: { [DRS_GENERATION_TARGET_ENV]: DRS_FN_ARN }, log: { info: sinon.stub() } },
       semanticFromFixture(CONTRACT.request),
       { invoke },
     );
@@ -284,7 +325,7 @@ describe('drs-generation-client — model allowlist guard (DRS priced set)', () 
     const warn = sinon.stub();
     const invoke = sinon.stub().resolves({ prompts: [{ prompt: 'p' }], ship_summary: { verdict: 'ship' } });
     await invokeDrsGeneration(
-      { env: { [DRS_GENERATION_TARGET_ENV]: 'drs-fn', [DRS_MODEL_ENV]: 'bogus' }, log: { info: sinon.stub(), warn } },
+      { env: { [DRS_GENERATION_TARGET_ENV]: DRS_FN_ARN, [DRS_MODEL_ENV]: 'bogus' }, log: { info: sinon.stub(), warn } },
       { ...base, seeds: [], count: 1 },
       { invoke },
     );

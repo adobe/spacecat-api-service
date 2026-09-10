@@ -32,11 +32,54 @@ import { emitMetric, resolveEnvironment } from '../metrics-emf.js';
  */
 
 /**
- * Env/config key carrying the DRS generation Lambda's function name or ARN. Made a
+ * Env/config key carrying the DRS generation Lambda's FULL cross-account ARN. Made a
  * config value (env/context) because the actual cross-account `lambda:InvokeFunction`
  * wiring lands in spacecat-infrastructure#780 — this repo must not hard-code an ARN.
+ *
+ * MUST be the DRS Lambda's full ARN
+ * (`arn:aws:lambda:<region>:<drs-account-id>:function:drs-v2-PromptGenerationSemrushMarket-<env>`),
+ * NOT a bare function name: the worker invokes with a region-only `LambdaClient` and
+ * no cross-account creds (cross-account invoke works via the IAM grant + DRS resource
+ * policy), so a bare name resolves in the CALLER's own account (spacecat) and fails
+ * `ResourceNotFound`. This value must equal infra#780's `drs_generation_lambda_arn`
+ * (the same Lambda, referenced from both sides). {@link isFullLambdaArn} fail-fast
+ * guards it at the invoke seam.
  */
 export const DRS_GENERATION_TARGET_ENV = 'DRS_PROMPT_GENERATION_FUNCTION';
+
+/**
+ * Matches a full Lambda ARN: `arn:aws:lambda:<region>:<12-digit-account>:function:<name>`
+ * with an optional `:<version|alias>` suffix. A bare function name (or any value
+ * lacking the `arn:aws:lambda:` prefix and 12-digit account segment) fails, because
+ * the cross-account invoke path requires the ARN — see {@link DRS_GENERATION_TARGET_ENV}.
+ */
+const FULL_LAMBDA_ARN_RE = /^arn:aws:lambda:[a-z0-9-]+:\d{12}:function:[a-zA-Z0-9-_]+(:[a-zA-Z0-9-_$]+)?$/;
+
+/**
+ * True when `value` is a full Lambda ARN (cross-account-invocable), false for a bare
+ * name or a malformed value.
+ * @param {string} value
+ * @returns {boolean}
+ */
+export function isFullLambdaArn(value) {
+  return typeof value === 'string' && FULL_LAMBDA_ARN_RE.test(value);
+}
+
+/**
+ * Describes the SHAPE of a misconfigured target for an ops log WITHOUT echoing the
+ * full value (it may carry an account id) — enough to diagnose "bare name vs
+ * malformed ARN" at a glance.
+ * @param {string} value
+ * @returns {{ startsWithArn: boolean, colonSegments: number, length: number }}
+ */
+function describeTargetShape(value) {
+  const str = typeof value === 'string' ? value : '';
+  return {
+    startsWithArn: str.startsWith('arn:aws:lambda:'),
+    colonSegments: str.split(':').length,
+    length: str.length,
+  };
+}
 
 /**
  * CloudWatch namespace the worker's DRS-invoke metrics land in — the alarms in
@@ -180,6 +223,8 @@ export class DrsGenerationTerminalError extends Error {
  *   - `PROMPT_GENERATION_GATE_ERROR` — DRS terminal `gate_error` → UI "failed".
  *   - `PROMPT_GENERATION_EMPTY`    — DRS shipped zero prompts → UI "failed".
  *   - `DRS_GENERATION_TERMINAL`    — a config/contract failure (target unset) → UI "failed".
+ *   - `DRS_INVALID_TARGET`         — the target is set but not a full cross-account
+ *     ARN (would misroute to the caller account) → UI "failed"; ops must fix config.
  * (`NEEDS_REAUTH` is separate — the runner sets it, and the DTO flags `needsReauth: true`.)
  */
 export const GENERATION_ERROR_CODE = Object.freeze({
@@ -187,13 +232,17 @@ export const GENERATION_ERROR_CODE = Object.freeze({
   GATE_ERROR: 'PROMPT_GENERATION_GATE_ERROR',
   EMPTY: 'PROMPT_GENERATION_EMPTY',
   TERMINAL: 'DRS_GENERATION_TERMINAL',
+  INVALID_TARGET: 'DRS_INVALID_TARGET',
 });
 
 /**
  * Default AWS-SDK-backed invoker: constructs a `LambdaClient` for the worker's
  * region and issues a synchronous (`RequestResponse`) invoke. Region comes from
  * `context.runtime.region` (populated by helix-universal), matching the
- * `s3ClientWrapper` / `sqsWrapper` convention.
+ * `s3ClientWrapper` / `sqsWrapper` convention. `functionName` is the DRS Lambda's
+ * FULL cross-account ARN (validated by {@link isFullLambdaArn} before this is
+ * reached) — the region-only client carries no cross-account creds, so a bare name
+ * would resolve in the caller account and fail `ResourceNotFound`.
  *
  * @param {object} context
  * @returns {(functionName: string, payload: object) => Promise<object>} parsed JSON body.
@@ -293,6 +342,24 @@ export async function invokeDrsGeneration(context, request, { invoke } = {}) {
     // never retry a permanent misconfiguration forever.
     throw new DrsGenerationTerminalError(
       `DRS generation target not configured (${DRS_GENERATION_TARGET_ENV} unset)`,
+    );
+  }
+  if (!isFullLambdaArn(functionName)) {
+    // The target is set but is NOT a full cross-account ARN. The worker invokes with a
+    // region-only client and no cross-account creds, so a bare name resolves in the
+    // caller's OWN account (spacecat) and fails with a confusing AWS `ResourceNotFound`
+    // mid-invoke — almost certainly a misconfiguration for this cross-account path
+    // (see DRS_GENERATION_TARGET_ENV). Fail fast, terminally, with a clear code; log
+    // the value's SHAPE (never the full value — it may carry an account id) for ops.
+    log?.warn?.('[drs-generation] invalid DRS target: not a full cross-account Lambda ARN', {
+      env: DRS_GENERATION_TARGET_ENV,
+      shape: describeTargetShape(functionName),
+    });
+    throw new DrsGenerationTerminalError(
+      `DRS generation target is not a full Lambda ARN (${DRS_GENERATION_TARGET_ENV} must be `
+      + 'arn:aws:lambda:<region>:<drs-account-id>:function:<name>; a bare name resolves in '
+      + 'the caller account and fails)',
+      { code: GENERATION_ERROR_CODE.INVALID_TARGET },
     );
   }
 
