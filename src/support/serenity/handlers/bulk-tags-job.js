@@ -382,7 +382,15 @@ async function acceptParsedBulkTags({
       await existing.remove();
     }
   }
-  const snapshot = await readTagTreeSnapshot(transport, workspaceId, projectId, log);
+  // A create-tag request may have landed on another Lambda container moments
+  // earlier. Never validate a mutation against this container's cached taxonomy.
+  const snapshot = await readTagTreeSnapshot(
+    transport,
+    workspaceId,
+    projectId,
+    log,
+    { forceRefresh: true },
+  );
   /** @type {TagTreeItem[]} */
   const selected = [];
   for (const id of parsed.tagIds) {
