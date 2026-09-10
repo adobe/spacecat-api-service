@@ -612,7 +612,14 @@ v2-serenity-markets:
       '404':
         description: Organization has no workspace, or serenity is not active for the organization.
       '409':
-        description: A market already exists for this (brandId, geoTargetId, languageCode) slice, or (async only) a provisioning attempt is already in flight for this brand.
+        description: >-
+          One of three conflicts, distinguished by the `error` token: (a) a market already exists
+          for this (brandId, geoTargetId, languageCode) slice; (b) `semrushProvisioningInProgress`
+          (`async: true` only) — a provisioning attempt is already in flight for this brand, so
+          retry shortly; or (c) `semrushProvisioningIncomplete` — the brand's Semrush sub-workspace
+          is pending or has failed to provision, so it has no workspace of its own to add a market
+          in. (b) converges on retry; (c) does not, and needs the brand's provisioning to complete
+          first.
       '502':
         description: Upstream returned a non-2xx response.
         content:
@@ -1262,7 +1269,7 @@ v2-serenity-activate:
           misconfiguration: the brand's sub-workspace equals the organization parent
           workspace (refused to avoid acting on the shared parent pool); or (c)
           (`async: true` only, any branch) a provisioning attempt is already in
-          flight for this brand (`error: semrush_provisioning_in_progress`) —
+          flight for this brand (`error: semrushProvisioningInProgress`) —
           retry shortly.
         content:
           application/json:

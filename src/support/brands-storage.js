@@ -20,6 +20,7 @@ import {
   sanitizeGuidanceText,
 } from './brand-guidance.js';
 import { readFeatureFlagScopes, resolveFlagRowForBrand } from './feature-flags-storage.js';
+import { ERROR_CODES } from './serenity/errors.js';
 import {
   SERENITY_FEATURE_FLAG_NAME,
   SERENITY_FEATURE_FLAG_PRODUCT,
@@ -2338,9 +2339,9 @@ export const PROVISIONING_STALE_THRESHOLD_MS = 10 * 60 * 1000;
  * @param {object} postgrestClient
  * @param {object} [log]
  * @throws when a fresh attempt is genuinely in flight (`err.status = 409`,
- *   `err.code = 'semrush_provisioning_in_progress'`), or when the provisioning-state read itself
- *   fails for a reason OTHER than the columns not existing yet (see below) — an unreadable state
- *   must never be silently treated as an empty one.
+ *   `err.code = ERROR_CODES.SEMRUSH_PROVISIONING_IN_PROGRESS`), or when the provisioning-state
+ *   read itself fails for a reason OTHER than the columns not existing yet (see below) — an
+ *   unreadable state must never be silently treated as an empty one.
  */
 export async function guardAgainstConcurrentProvisioning(brandId, postgrestClient, log) {
   // POSTGRES_UNDEFINED_COLUMN (LLMO-7418 external-review Finding 1): this guard defends against
@@ -2383,7 +2384,7 @@ export async function guardAgainstConcurrentProvisioning(brandId, postgrestClien
       'A Semrush sub-workspace provisioning attempt is already in progress for this brand; please retry shortly.',
       409,
     );
-    err.code = 'semrush_provisioning_in_progress';
+    err.code = ERROR_CODES.SEMRUSH_PROVISIONING_IN_PROGRESS;
     throw err;
   }
 

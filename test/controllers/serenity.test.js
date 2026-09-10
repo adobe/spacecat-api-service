@@ -1828,7 +1828,7 @@ describe('SerenityController', () => {
         'A Semrush sub-workspace provisioning attempt is already in progress for this brand; please retry shortly.',
         409,
       );
-      conflictErr.code = 'semrush_provisioning_in_progress';
+      conflictErr.code = 'semrushProvisioningInProgress';
       guardAgainstConcurrentProvisioningStub.rejects(conflictErr);
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const response = await controller.createMarket(fakeContext({
@@ -2511,7 +2511,7 @@ describe('SerenityController', () => {
         'A Semrush sub-workspace provisioning attempt is already in progress for this brand; please retry shortly.',
         409,
       );
-      conflictErr.code = 'semrush_provisioning_in_progress';
+      conflictErr.code = 'semrushProvisioningInProgress';
       guardAgainstConcurrentProvisioningStub.rejects(conflictErr);
       getBrandBaseSiteIdStub.resolves('primary-site');
       const brand = makeBrandModel({});
@@ -2519,7 +2519,7 @@ describe('SerenityController', () => {
       const response = await controller.activate(fakeContext({ brand, data: { brandNames: ['X'] } }));
       expect(response.status).to.equal(409);
       const { error } = await readBody(response);
-      expect(error).to.equal('semrush_provisioning_in_progress');
+      expect(error).to.equal('semrushProvisioningInProgress');
       expect(ensureSubworkspaceStub).to.not.have.been.called;
       expect(brand.setStatus).to.not.have.been.called;
     });
@@ -2529,7 +2529,7 @@ describe('SerenityController', () => {
         'A Semrush sub-workspace provisioning attempt is already in progress for this brand; please retry shortly.',
         409,
       );
-      conflictErr.code = 'semrush_provisioning_in_progress';
+      conflictErr.code = 'semrushProvisioningInProgress';
       guardAgainstConcurrentProvisioningStub.rejects(conflictErr);
       const brand = makeBrandModel({ getStatus: () => 'active' });
       const controller = SerenityController({ env: {} }, fakeLog(), {});

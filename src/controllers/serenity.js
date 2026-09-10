@@ -1092,7 +1092,7 @@ function SerenityController(context, log, env) {
               + 'brand; please retry shortly.',
               409,
             );
-            err.code = 'semrush_provisioning_in_progress';
+            err.code = ERROR_CODES.SEMRUSH_PROVISIONING_IN_PROGRESS;
             throw err;
           }
           // N2 note: no `title` is passed here deliberately. This branch runs only in
@@ -1195,7 +1195,7 @@ function SerenityController(context, log, env) {
           + 'available until provisioning completes.',
           409,
         );
-        err.code = 'semrush_provisioning_incomplete';
+        err.code = ERROR_CODES.SEMRUSH_PROVISIONING_INCOMPLETE;
         throw err;
       }
       // Flat handler self-derives brandDomain from siteId (it has Site access).
@@ -1729,7 +1729,7 @@ function SerenityController(context, log, env) {
               + 'brand; please retry shortly.',
               409,
             );
-            err.code = 'semrush_provisioning_in_progress';
+            err.code = ERROR_CODES.SEMRUSH_PROVISIONING_IN_PROGRESS;
             throw err;
           }
           const job = await createAndEnqueueJob(ctx, {
@@ -1876,7 +1876,7 @@ function SerenityController(context, log, env) {
               + 'brand; please retry shortly.',
               409,
             );
-            err.code = 'semrush_provisioning_in_progress';
+            err.code = ERROR_CODES.SEMRUSH_PROVISIONING_IN_PROGRESS;
             throw err;
           }
           const job = await createAndEnqueueJob(ctx, {
@@ -2014,7 +2014,7 @@ function SerenityController(context, log, env) {
             + 'brand; please retry shortly.',
             409,
           );
-          err.code = 'semrush_provisioning_in_progress';
+          err.code = ERROR_CODES.SEMRUSH_PROVISIONING_IN_PROGRESS;
           throw err;
         }
         const job = await createAndEnqueueJob(ctx, {

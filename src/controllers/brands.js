@@ -88,7 +88,9 @@ import {
 } from '../support/serenity/mapping-rows.js';
 import { propagateSiteUrlToSemrush } from '../support/serenity/site-url-propagation.js';
 import { createSerenityTransport } from '../support/serenity/rest-transport.js';
-import { isSemrushTransportError, unwrapTransportCause } from '../support/serenity/errors.js';
+import {
+  ERROR_CODES, isSemrushTransportError, unwrapTransportCause,
+} from '../support/serenity/errors.js';
 import { logUpstreamError } from '../support/serenity/upstream-log.js';
 import { buildBrandMarketsResponse } from '../support/serenity/brand-markets.js';
 import { syncBrandUrlsAcrossMarkets } from '../support/serenity/brand-urls.js';
@@ -2121,7 +2123,7 @@ function BrandsController(ctx, log, env) {
         if (!began) {
           return createResponse(
             {
-              error: 'semrushProvisioningInProgress',
+              error: ERROR_CODES.SEMRUSH_PROVISIONING_IN_PROGRESS,
               message: 'Unable to start Semrush provisioning for the new brand',
             },
             409,
@@ -2224,7 +2226,7 @@ function BrandsController(ctx, log, env) {
         if (!began) {
           return createResponse(
             {
-              error: 'semrushProvisioningInProgress',
+              error: ERROR_CODES.SEMRUSH_PROVISIONING_IN_PROGRESS,
               message: 'Unable to start Semrush provisioning for the new brand',
             },
             409,
