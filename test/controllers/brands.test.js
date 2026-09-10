@@ -5318,6 +5318,7 @@ describe('Brands Controller', () => {
         beginProvisioningAttempt = sinon.stub().resolves(true),
         createAndEnqueueJob = sinon.stub().resolves({ getId: () => 'job-abc' }),
         promoteProvisioningFailed = sinon.stub().resolves(true),
+        updateProvisioningJobId = sinon.stub().resolves(true),
       } = {}) {
         const Mocked = await esmock('../../src/controllers/brands.js', {
           '../../src/support/serenity/brand-provisioning.js': {
@@ -5340,6 +5341,7 @@ describe('Brands Controller', () => {
             ...(upsertBrand ? { upsertBrand } : {}),
             beginProvisioningAttempt,
             promoteProvisioningFailed,
+            updateProvisioningJobId,
           },
         });
         return Mocked.default(context, loggerStub, mockEnv);
@@ -5383,10 +5385,12 @@ describe('Brands Controller', () => {
         const upsertStub = sinon.stub().resolves({ id: 'forced-id', name: 'New Brand' });
         const beginStub = sinon.stub().resolves(true);
         const enqueueStub = sinon.stub().resolves({ getId: () => 'job-xyz' });
+        const updateProvisioningJobIdStub = sinon.stub().resolves(true);
         const controller = await buildController({
           upsertBrand: upsertStub,
           beginProvisioningAttempt: beginStub,
           createAndEnqueueJob: enqueueStub,
+          updateProvisioningJobId: updateProvisioningJobIdStub,
         });
 
         const response = await controller.createBrandForOrg({
@@ -5414,6 +5418,14 @@ describe('Brands Controller', () => {
 
         expect(enqueueStub.calledOnce).to.equal(true);
         expect(enqueueStub.calledAfter(beginStub)).to.equal(true);
+        // LLMO-7418 external-review Finding 17: the first hop's job id is recorded, not left
+        // permanently NULL — only the worker's own self-requeue path used to write this.
+        expect(updateProvisioningJobIdStub).to.have.been.calledOnceWith({
+          brandId: upsertArgs.forceBrandId,
+          attemptId: beginStub.firstCall.args[0].attemptId,
+          jobId: 'job-xyz',
+          postgrestClient: sinon.match.any,
+        });
         const [, enqueueArgs] = enqueueStub.firstCall.args;
         expect(enqueueArgs.jobType).to.equal('serenity-provision-workspace');
         expect(enqueueArgs.metadata.brandId).to.equal(upsertArgs.forceBrandId);
@@ -5777,10 +5789,14 @@ describe('Brands Controller', () => {
         const bareStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-bare' });
         const upsertStub = sinon.stub().resolves({ id: 'forced-id', name: 'New Brand' });
         const enqueueStub = sinon.stub().resolves({ getId: () => 'job-xyz' });
+        const beginStub = sinon.stub().resolves(true);
+        const updateProvisioningJobIdStub = sinon.stub().resolves(true);
         const controller = await buildController({
           provisionBrandSubworkspaceBare: bareStub,
           upsertBrand: upsertStub,
           createAndEnqueueJob: enqueueStub,
+          beginProvisioningAttempt: beginStub,
+          updateProvisioningJobId: updateProvisioningJobIdStub,
         });
 
         const response = await controller.createBrandForOrg({
@@ -5806,6 +5822,14 @@ describe('Brands Controller', () => {
         // The row is persisted with no workspace pointer yet.
         const upsertArgs = upsertStub.firstCall.args[0];
         expect(upsertArgs.semrushSubWorkspaceId).to.equal(null);
+        // LLMO-7418 external-review Finding 17: the first hop's job id is recorded, not left
+        // permanently NULL — only the worker's own self-requeue path used to write this.
+        expect(updateProvisioningJobIdStub).to.have.been.calledOnceWith({
+          brandId: upsertArgs.forceBrandId,
+          attemptId: beginStub.firstCall.args[0].attemptId,
+          jobId: 'job-xyz',
+          postgrestClient: sinon.match.any,
+        });
       });
 
       it('Phase 4: bare create returns 409 without enqueuing when a provisioning attempt is already in flight', async () => {

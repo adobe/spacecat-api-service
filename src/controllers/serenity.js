@@ -1721,6 +1721,18 @@ function SerenityController(context, log, env) {
               chainedJobMetadata: { brandId: brandUuid, wasPending: true },
             },
           });
+          // LLMO-7418 external-review Finding 17: records the first-hop job id, best-effort,
+          // so it isn't left permanently NULL until the worker's own self-requeue hop writes it.
+          await updateProvisioningJobId({
+            brandId: brandUuid,
+            attemptId,
+            jobId: job.getId(),
+            postgrestClient: ctx.dataAccess.services.postgrestClient,
+          }).catch((updateError) => {
+            log.error('activate: failed to record the first-hop job id (best-effort)', {
+              brandId: brandUuid, attemptId, jobId: job.getId(), error: updateError?.message,
+            });
+          });
           return accepted({ jobId: job.getId(), status: job.getStatus() });
         }
         // PR-C guard (LLMO-7352/LLMO-7418): this branch stays synchronous, but a market-creating
@@ -1845,6 +1857,18 @@ function SerenityController(context, log, env) {
               chainedJobType: ACTIVATE_BRAND_WORKSPACE_JOB_TYPE,
               chainedJobMetadata: { brandId: brandUuid, wasPending: false },
             },
+          });
+          // LLMO-7418 external-review Finding 17: records the first-hop job id, best-effort,
+          // so it isn't left permanently NULL until the worker's own self-requeue hop writes it.
+          await updateProvisioningJobId({
+            brandId: brandUuid,
+            attemptId,
+            jobId: job.getId(),
+            postgrestClient: ctx.dataAccess.services.postgrestClient,
+          }).catch((updateError) => {
+            log.error('activate: failed to record the first-hop job id (best-effort)', {
+              brandId: brandUuid, attemptId, jobId: job.getId(), error: updateError?.message,
+            });
           });
           return accepted({ jobId: job.getId(), status: job.getStatus() });
         }

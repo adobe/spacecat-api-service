@@ -2484,6 +2484,14 @@ describe('SerenityController', () => {
       // worker always takes the create path here — omitting title would create an untitled
       // sub-workspace on every single async pending->active activation.
       expect(enqueueArgs.metadata.title).to.equal('Test Brand');
+      // LLMO-7418 external-review Finding 17: the first hop's job id is recorded, not left
+      // permanently NULL — only the worker's own self-requeue path used to write this.
+      expect(updateProvisioningJobIdStub).to.have.been.calledOnceWith({
+        brandId: BRAND,
+        attemptId: beginProvisioningAttemptStub.firstCall.args[0].attemptId,
+        jobId: 'job-abc',
+        postgrestClient: sinon.match.any,
+      });
     });
 
     it('Phase 4: pending→active activation answers 409 without enqueuing when async: true and a provisioning attempt is already in flight', async () => {
@@ -2544,6 +2552,14 @@ describe('SerenityController', () => {
       // handles a pointer-less brand via ensureSubworkspace, so the async path needs a real
       // title too rather than assuming a pointer always exists.
       expect(enqueueArgs.metadata.title).to.equal('Test Brand');
+      // LLMO-7418 external-review Finding 17: the first hop's job id is recorded, not left
+      // permanently NULL — only the worker's own self-requeue path used to write this.
+      expect(updateProvisioningJobIdStub).to.have.been.calledOnceWith({
+        brandId: BRAND,
+        attemptId: beginProvisioningAttemptStub.firstCall.args[0].attemptId,
+        jobId: 'job-abc',
+        postgrestClient: sinon.match.any,
+      });
     });
 
     it('Phase 4: bare reactivation answers 409 without enqueuing when async: true and a provisioning attempt is already in flight', async () => {
