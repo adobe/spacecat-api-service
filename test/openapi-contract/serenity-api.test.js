@@ -427,7 +427,7 @@ const FIXTURES = {
     controllerMethod: 'listOrgLanguages',
     handlerName: 'listLanguageCatalog',
     handlerResult: {
-      items: [{ id: 'lang-en', name: 'English' }],
+      items: [{ id: 'lang-en', name: 'English', code: 'en' }],
     },
   },
   // Unlike the rest of this file's fixtures, this operation is served by
@@ -527,8 +527,16 @@ const FIXTURES = {
     serviceMethod: 'getSentimentOverview',
     // startDate/endDate are required + validated by the controller before the
     // service is called (see listSentimentOverview) — supply them via query.
-    query: { startDate: '2026-06-01', endDate: '2026-07-16' },
+    query: { startDate: '2026-06-01', endDate: '2026-07-16', metric: 'mentions' },
+    // Pins the controller->service half of the `metric` seam (LLMO-7457). The
+    // service->transform half is covered in elements-service.test.js, but nothing
+    // otherwise asserts the controller WRITES the key it reads: `metric:` at
+    // elements.js:1321 is inside a `c8 ignore` block, so renaming it or dropping
+    // the line would leave `?metric=mentions` a permanent silent no-op with green
+    // CI — the failure this PR's production A/B depends on not having.
+    expectServiceParams: { metric: 'mentions' },
     handlerResult: {
+      metric: 'prompts',
       weeklyTrends: [{
         week: '2026-W24',
         weekNumber: 24,
@@ -538,6 +546,9 @@ const FIXTURES = {
           { name: 'Neutral', value: 39, color: '#4B5563' },
           { name: 'Negative', value: 8, color: '#B91C1C' },
         ],
+        mentionCounts: { positive: 12043, neutral: 8871, negative: 1819 },
+        promptCounts: { positive: 4866, neutral: 3581, negative: 734 },
+        sentimentTotal: 9181,
         totalPrompts: 5261,
         promptsWithSentiment: 9181,
         mentions: 0,
@@ -871,6 +882,12 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
       expect(op, `operation ${operationId} not found in spec`).to.exist;
 
       if (fx.usesElementsController) {
+        // Hoisted so a fixture can assert on what the controller actually handed
+        // the service. The controller->service param seam is otherwise untested:
+        // handlers like listSentimentOverview sit inside `c8 ignore` blocks, so a
+        // renamed key (e.g. `sentimentMetric:` instead of `metric:`) would ship
+        // green as a silent no-op. See `expectServiceParams` below.
+        const serviceMethodStub = sinon.stub().resolves(fx.handlerResult);
         const ElementsController = (await esmock(
           '../../src/controllers/elements.js',
           {
@@ -889,7 +906,10 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
               isSerenityActiveForBrand: () => Promise.resolve(true),
             },
             '../../src/support/access-control-util.js': {
-              default: { fromContext: () => ({ hasAccess: () => Promise.resolve(true) }) },
+              default: {
+                fromContext: () => ({ hasAccess: () => Promise.resolve(true) }),
+                isS2SConsumer: () => false,
+              },
             },
             // authorizeBrandSubWorkspace (used by listTopicPrompts) resolves the brand
             // UUID via prompts-storage before resolving the sub-workspace.
@@ -898,7 +918,7 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
             },
             '../../src/support/elements/elements-service.js': {
               createElementsService: () => ({
-                [fx.serviceMethod]: sinon.stub().resolves(fx.handlerResult),
+                [fx.serviceMethod]: serviceMethodStub,
                 resolveRegionProjectId: sinon.stub().resolves(null),
                 // Only consumed by getUrlInspectorStats's aggregate (no-region)
                 // path — without at least one project, it 404s before ever
@@ -929,6 +949,18 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
         const response = await controller[fx.controllerMethod](ctx);
 
         expect(response.status).to.equal(fx.expectedStatus);
+
+        // Optional per-fixture assertion on the params the controller built and
+        // passed to the service — the only place that seam is exercised, since
+        // the handlers themselves are coverage-ignored.
+        if (fx.expectServiceParams) {
+          expect(serviceMethodStub, `${operationId}: service was not called`).to.have.been.called;
+          const [, actualParams] = serviceMethodStub.firstCall.args;
+          Object.entries(fx.expectServiceParams).forEach(([key, value]) => {
+            expect(actualParams, `${operationId}: params.${key}`)
+              .to.have.property(key, value);
+          });
+        }
 
         const responseSchema = op.responseSchema(fx.expectedStatus);
         expect(responseSchema, `no ${fx.expectedStatus} schema for ${operationId}`).to.exist;

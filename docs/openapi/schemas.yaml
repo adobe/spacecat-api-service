@@ -3952,8 +3952,8 @@ Brand:
         live for THIS brand: the brand's own LLMO/serenity override if it has
         one, otherwise its organization's value. Independent of
         semrushSubWorkspaceId, which is set when the brand is provisioned — a
-        brand can be bound to a sub-workspace for some time before it is
-        released. An organization migrating in waves has both answers among its
+        brand remains bound to a sub-workspace until deactivation clears the
+        pointer. An organization migrating in waves has both answers among its
         brands, so consumers must read this per brand rather than deriving one
         answer for the organization.
       type: boolean
@@ -12658,9 +12658,9 @@ SerenityDeactivateResponse:
   type: object
   description: |
     Result of decommissioning a brand's sub-workspace: every project is
-    deleted and the allocation released back to the parent pool, but the
-    workspace and its `semrush_workspace_id` pointer are KEPT for reuse
-    (never-delete). The brand status is set to `pending`.
+    deleted with no allocation transfer. The workspace shell remains upstream,
+    the brand's `semrush_sub_workspace_id` pointer is cleared, and the brand
+    status is set to `pending`.
   required: [brandId, status]
   properties:
     brandId:
@@ -12846,14 +12846,17 @@ SerenityModelListResponse:
 
 SerenityLanguage:
   type: object
-  required: [name]
+  required: [id, name, code]
   properties:
     id:
-      type: [string, 'null']
-      description: Semrush language catalog id (null when the catalog omits it).
+      type: string
+      description: Semrush language catalog id. An entry the upstream catalog returned without a usable id is dropped from this list entirely (LLMO-7420) — it could never resolve at createProject time, so it is never offered as an option.
     name:
       type: string
-      description: English language name as Semrush spells it (the match key).
+      description: English language name as Semrush spells it. Metadata/fallback text only — not a resolution key (LLMO-7420).
+    code:
+      type: string
+      description: BCP-47 language code (e.g. zh-Hans, zh-Hant, fil) — the stable identifier a client persists and later sends back as languageCode (LLMO-7420). Matching is case-insensitive (RFC 5646); store and send it as returned here, exact casing is not significant.
 
 SerenityLanguageListResponse:
   type: object
@@ -12928,8 +12931,20 @@ SerenityBrandPresenceSentimentOverview:
     verbatim so the existing chart consumes it drop-in — the absolute values
     differ from the Postgres-backed legacy endpoint (Semrush metrics), but the
     shape, `sentiment[]` ordering, and colors are identical.
-  required: [weeklyTrends]
+  required: [metric, weeklyTrends]
   properties:
+    metric:
+      type: string
+      enum: [prompts, mentions]
+      description: |
+        The resolved `metric` the `sentiment[]` percentages were computed over —
+        echoed back so a caller can confirm which definition it received.
+
+        Temporary (LLMO-7457). The `metric` REQUEST parameter is removed once the
+        UI has migrated to `mentions`, but this response field is not simply
+        dropped: at that point the enum must NARROW to `[mentions]`, so a client
+        that switches on it keeps working. `mentionCounts` and `sentimentTotal`
+        are permanent; `promptCounts` goes with the `prompts` branch.
     weeklyTrends:
       type: array
       description: One entry per ISO week in the requested range, ordered oldest-first.
@@ -12940,6 +12955,9 @@ SerenityBrandPresenceSentimentOverview:
           - weekNumber
           - year
           - sentiment
+          - mentionCounts
+          - promptCounts
+          - sentimentTotal
           - totalPrompts
           - promptsWithSentiment
         properties:
@@ -12963,10 +12981,43 @@ SerenityBrandPresenceSentimentOverview:
                   enum: [Positive, Neutral, Negative]
                 value:
                   type: integer
-                  description: Percentage of prompts-with-sentiment in this bucket (0-100).
+                  description: |
+                    Percentage of the selected `metric`'s total in this bucket
+                    (0-100). The denominator is the sum of the three buckets
+                    (`sentimentTotal`), matching how the Semrush MFE normalises.
                 color:
                   type: string
                   description: Legacy sentiment swatch hex.
+          mentionCounts:
+            type: object
+            description: |
+              Raw per-sentiment MENTION counts for the week (the element's
+              `value`). Returned regardless of `metric`, so a caller can render
+              true counts alongside the percentages as the Semrush MFE does.
+            required: [positive, neutral, negative]
+            properties:
+              positive: { type: integer, example: 443 }
+              neutral: { type: integer, example: 571 }
+              negative: { type: integer, example: 7 }
+          promptCounts:
+            type: object
+            description: |
+              Raw per-sentiment PROMPT counts for the week (the element's
+              `value__prompts`). Returned regardless of `metric`.
+
+              Temporary (LLMO-7457): removed alongside the `prompts` branch once
+              the UI has migrated to `mentions`.
+            required: [positive, neutral, negative]
+            properties:
+              positive: { type: integer, example: 165 }
+              neutral: { type: integer, example: 208 }
+              negative: { type: integer, example: 7 }
+          sentimentTotal:
+            type: integer
+            description: |
+              The denominator used for `sentiment[]` — the sum of the three
+              buckets of whichever count set `metric` selected.
+            example: 1021
           totalPrompts:
             type: integer
             description: |
@@ -12974,13 +13025,20 @@ SerenityBrandPresenceSentimentOverview:
           promptsWithSentiment:
             type: integer
             description: |
-              Positive + Neutral + Negative prompt counts. NOTE: the three
-              sentiment buckets are overlapping sets (a prompt with mixed-sentiment
-              mentions counts in each), so this can exceed `totalPrompts`; do not
-              derive a coverage ratio from the two.
+              Positive + Neutral + Negative PROMPT counts. Always prompt-based,
+              whatever `metric` is set to, so this field never changes meaning.
+              NOTE: the three sentiment buckets are overlapping sets (a prompt
+              with mixed-sentiment mentions counts in each), so this can exceed
+              `totalPrompts`; do not derive a coverage ratio from the two. This
+              overlap is not a defect — the Semrush MFE normalises over the same
+              sum-of-three.
           mentions:
             type: integer
-            description: Stubbed 0 (parity with the legacy contract).
+            description: |
+              Stubbed 0 (parity with the legacy contract). This is NOT a mention
+              count — it has always been a hardcoded 0 on this endpoint. For real
+              per-sentiment mention data, read `mentionCounts` above; a 0 here
+              does not mean the brand has no mentions.
           citations:
             type: integer
             description: Stubbed 0 (parity with the legacy contract).
