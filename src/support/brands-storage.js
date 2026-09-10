@@ -1904,9 +1904,17 @@ const PROVISIONING_SELECT = 'id, semrush_provisioning_status, semrush_provisioni
 
 /**
  * Reads a brand's current async-provisioning state. Plain read, no compare-and-set — used by the
- * worker at the START of each invocation to decide whether to resume an already-persisted
- * candidate (skip create-or-adopt) or run it for the first time, and to confirm the attempt id it
- * was dispatched with is still the brand's current one before doing any Semrush work at all.
+ * worker at the START of each invocation to confirm the attempt id it was dispatched with is
+ * still the brand's current one, and that the attempt is still `pending`, before doing any Semrush
+ * work at all. It also supplies `semrushSubWorkspaceId` (the existing-pointer fast path) and
+ * `siteId` (the ready-promotion's site anchor).
+ *
+ * It does NOT resolve the in-flight candidate workspace: that is threaded hop-to-hop through the
+ * self-requeue metadata, never read back from the DB — see PROVISIONING_SELECT above (LLMO-7418
+ * external-review Finding 7), which deliberately omits the candidate column. An earlier version
+ * of this doc claimed a "resume an already-persisted candidate" read that the code does not and
+ * should not do; the no-duplicate-per-hop guarantee comes from the metadata threading plus
+ * persistProvisioningCandidate's own `.is(..., null)` double-delivery mutex.
  *
  * @param {string} brandId
  * @param {object} postgrestClient
