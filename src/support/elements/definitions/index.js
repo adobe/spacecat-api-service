@@ -33,6 +33,24 @@ export {
 export {
   buildCitedDomainsPayload, transformCitedDomainsResponse, transformCitedDomainsResponses,
 } from './cited-domains.js';
+export {
+  buildPromptResponsesPayload,
+  transformPromptResponsesResponse,
+  clampLimit,
+  DEFAULT_RESPONSE_PAGE_SIZE,
+  MAX_RESPONSE_PAGE_SIZE,
+} from './prompt-responses.js';
+export {
+  buildResponseSourcesPayload, transformResponseSourcesResponse,
+} from './response-sources.js';
+export { joinResponsesToSources, diffDayExecutions } from './response-feed.js';
+export {
+  buildBrandClaimsResponsesPayload,
+  transformBrandClaimsResponsesResponse,
+  DEFAULT_BRAND_CLAIMS_PAGE_SIZE,
+  MAX_BRAND_CLAIMS_PAGE_SIZE,
+  BRAND_CLAIMS_MODEL,
+} from './brand-claims-responses.js';
 export { buildSubredditsPayload, transformSubredditsResponse } from './subreddits.js';
 export { buildRedditThreadsPayload, transformRedditThreadsResponse } from './reddit-threads.js';
 export { buildYoutubeVideosPayload, transformYoutubeVideosResponse } from './youtube-videos.js';
@@ -41,6 +59,8 @@ export { aggregateTopicsFromPrompts } from './topics-insights.js';
 export {
   buildSentimentOverviewPayload,
   transformSentimentOverviewResponse,
+  normalizeSentimentMetric,
+  SENTIMENT_METRICS,
 } from './sentiment-overview.js';
 export {
   buildOwnedUrlsStatsPayload,

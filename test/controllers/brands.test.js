@@ -5207,6 +5207,7 @@ describe('Brands Controller', () => {
           neq: sandbox.stub().returnsThis(),
           in: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           upsert: sandbox.stub().returnsThis(),
           delete: sandbox.stub().returnsThis(),
           single: sandbox.stub().resolves({
@@ -5363,6 +5364,32 @@ describe('Brands Controller', () => {
         const upsertArgs = upsertStub.firstCall.args[0];
         expect(upsertArgs.forceBrandId).to.equal(provisionArgs.brandId);
         expect(upsertArgs.semrushSubWorkspaceId).to.equal('ws-1');
+      });
+
+      it('surfaces a duplicate-active-brand rejection as a 409 with its code (LLMO-7284 AC13)', async () => {
+        // End-to-end seam the missing IT would otherwise cover: a typed 409 thrown by
+        // upsertBrand must reach the client as a 409 body carrying brand_duplicate_active_name.
+        const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
+        const dupErr = Object.assign(
+          new Error('An active brand named "Acme Inc" already exists in this organization'),
+          { status: 409, code: 'brand_duplicate_active_name' },
+        );
+        const upsertStub = sinon.stub().rejects(dupErr);
+        const controller = await buildController({
+          provisionBrandSubworkspace: provisionStub, upsertBrand: upsertStub,
+        });
+
+        const response = await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: { ...semrushData },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(409);
+        const body = await response.json();
+        expect(body.code).to.equal('brand_duplicate_active_name');
       });
 
       it('writes the mapping row for the initial market after the brand row is persisted', async () => {
@@ -6080,6 +6107,28 @@ describe('Brands Controller', () => {
         attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
       });
       expect(response.status).to.equal(201);
+    });
+
+    it('counts guidance length in code points, so 4000 emoji (8000 UTF-16 units) is accepted', async () => {
+      // Code-point counting matches the storage backstop; UTF-16 length would wrongly reject.
+      const response = await brandsController.createBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        data: { name: 'New Brand', brandContext: '🚀'.repeat(4000) },
+        dataAccess: mockDataAccess,
+        attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+      });
+      expect(response.status).to.equal(201);
+    });
+
+    it('rejects brand guidance longer than 4000 code points (4001 emoji)', async () => {
+      const response = await brandsController.createBrandForOrg({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID },
+        data: { name: 'New Brand', brandContext: '🚀'.repeat(4001) },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
     });
 
     it('returns 400 when params is undefined', async () => {
@@ -8173,8 +8222,11 @@ describe('Brands Controller', () => {
         data: { id: BRAND_UUID },
         error: null,
       });
-      // Second call: updateBrand returns null (brand update returns no data)
+      // Second call: LLMO-7284 pre-read of the current row for the rename (null → no
+      // dup scan; this brand is being treated as absent).
       maybeSingleStub.onSecondCall().resolves({ data: null, error: null });
+      // Third call: updateBrand's UPDATE returns null (brand update returns no data)
+      maybeSingleStub.onThirdCall().resolves({ data: null, error: null });
 
       mockDataAccess.services.postgrestClient = {
         from: sandbox.stub().callsFake(() => ({
@@ -8182,6 +8234,7 @@ describe('Brands Controller', () => {
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           update: sandbox.stub().returnsThis(),
           ilike: sandbox.stub().returnsThis(),
           maybeSingle: maybeSingleStub,
@@ -8944,11 +8997,52 @@ describe('Brands Controller', () => {
       expect(submitArg.siteId).to.equal(SITE_ID);
       expect(submitArg.imsOrgId).to.equal(IMS_ORG_ID);
 
-      // createBrandPresenceSchedule must be called with correct ids
+      // createBrandPresenceSchedule must be called with correct ids, and tier:
+      // 'FREE_TRIAL' (this route has no paid gate on activation itself — LLMO-6634 —
+      // so the tier must be resolved from the org's real LLMO entitlement rather than
+      // hardcoded; isPayingLlmoSiteStub defaults to resolving false).
       expect(scheduleStub).to.have.been.calledOnceWith({
         siteId: SITE_ID,
         brandId: BRAND_UUID,
         orgId: ORGANIZATION_ID,
+        tier: 'FREE_TRIAL',
+      });
+    });
+
+    it('passes tier: PAID through to createBrandPresenceSchedule for a paying site', async () => {
+      // Regression test for LLMO-7366 x LLMO-6634: activation has no paid gate, so a
+      // hardcoded tier: 'PAID' would wrongly restrict a genuinely paying org, and a
+      // hardcoded tier: 'FREE_TRIAL' would wrongly restrict a genuinely paying org too.
+      // The tier must track the real per-org LLMO entitlement either way.
+      const scheduleStub = sinon.stub().resolves({ scheduleId: 'sch-paid' });
+      const fakeDrs = {
+        isConfigured: () => true,
+        listJobs: sinon.stub().resolves([]),
+        submitPromptGenerationJob: sinon.stub().resolves({ job_id: 'pg-1' }),
+        createBrandPresenceSchedule: scheduleStub,
+      };
+      const { controller } = await buildActivateController({
+        getBrandByIdResult: {
+          id: BRAND_UUID,
+          name: 'Acme',
+          baseSiteId: SITE_ID,
+          baseUrl: 'https://site1.com',
+          region: ['us'],
+          status: 'pending',
+          urls: [],
+        },
+        updateBrandResult: { id: BRAND_UUID },
+        fakeDrsClient: fakeDrs,
+        isPayingLlmoSiteStub: sinon.stub().resolves(true),
+      });
+
+      await controller.activateBrandForOrg(buildActivateRequest({ generatePrompts: true }));
+
+      expect(scheduleStub).to.have.been.calledOnceWith({
+        siteId: SITE_ID,
+        brandId: BRAND_UUID,
+        orgId: ORGANIZATION_ID,
+        tier: 'PAID',
       });
     });
 
@@ -9744,6 +9838,7 @@ describe('Brands Controller', () => {
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           update: sandbox.stub().returnsThis(),
           ilike: sandbox.stub().returnsThis(),
           maybeSingle: maybeSingleStub,
@@ -9946,8 +10041,12 @@ describe('Brands Controller', () => {
       const maybeSingleStub = sandbox.stub();
       // resolveBrandUuid succeeds...
       maybeSingleStub.onFirstCall().resolves({ data: { id: BRAND_UUID }, error: null });
-      // ...but the status update is filtered out by .neq('status','deleted') → no row.
+      // LLMO-7284 pre-transition read (status→active): the soft-deleted brand is
+      // excluded by .neq('status','deleted'), so it reads back as null and the
+      // duplicate-active check is skipped.
       maybeSingleStub.onSecondCall().resolves({ data: null, error: null });
+      // ...then the status update is filtered out by .neq('status','deleted') → no row.
+      maybeSingleStub.onThirdCall().resolves({ data: null, error: null });
 
       mockDataAccess.services.postgrestClient = {
         from: sandbox.stub().callsFake(() => ({
@@ -9955,6 +10054,7 @@ describe('Brands Controller', () => {
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           update: sandbox.stub().returnsThis(),
           ilike: sandbox.stub().returnsThis(),
           maybeSingle: maybeSingleStub,
@@ -10000,8 +10100,11 @@ describe('Brands Controller', () => {
       const maybeSingleStub = sandbox.stub();
       // resolveBrandUuid resolves the UUID...
       maybeSingleStub.onFirstCall().resolves({ data: { id: BRAND_UUID }, error: null });
+      // LLMO-7284 pre-transition read (status→active): a pending brand with a
+      // unique name, so the duplicate-active check passes and the write proceeds.
+      maybeSingleStub.onSecondCall().resolves({ data: { name: 'Test Brand', status: 'pending' }, error: null });
       // ...then setBrandStatus hits the DB constraint on the update.
-      maybeSingleStub.onSecondCall().resolves({
+      maybeSingleStub.onThirdCall().resolves({
         data: null,
         error: {
           code: '23514',
@@ -10015,6 +10118,7 @@ describe('Brands Controller', () => {
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           update: sandbox.stub().returnsThis(),
           ilike: sandbox.stub().returnsThis(),
           maybeSingle: maybeSingleStub,

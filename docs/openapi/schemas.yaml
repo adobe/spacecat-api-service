@@ -3952,8 +3952,8 @@ Brand:
         live for THIS brand: the brand's own LLMO/serenity override if it has
         one, otherwise its organization's value. Independent of
         semrushSubWorkspaceId, which is set when the brand is provisioned — a
-        brand can be bound to a sub-workspace for some time before it is
-        released. An organization migrating in waves has both answers among its
+        brand remains bound to a sub-workspace until deactivation clears the
+        pointer. An organization migrating in waves has both answers among its
         brands, so consumers must read this per brand rather than deriving one
         answer for the organization.
       type: boolean
@@ -8011,7 +8011,13 @@ V2BrandInput:
   properties:
     name:
       type: string
-      description: Brand name (unique per organization, used as upsert key)
+      description: >-
+        Brand name (unique per organization, used as upsert key). An active
+        brand's name is additionally checked case- and whitespace-insensitively
+        against every other active brand in the organization (trim, collapse
+        internal whitespace, lowercase) — "Acme Inc" and "acme  inc" collide
+        even though they differ in exact spelling. A collision is rejected with
+        409 `brand_duplicate_active_name`.
     status:
       type: string
       enum: [active, pending]
@@ -8075,6 +8081,13 @@ V2BrandUpdateInput:
   properties:
     name:
       type: string
+      description: >-
+        Brand name. A rename that leaves the brand active, or a promotion to
+        active, is checked case- and whitespace-insensitively against every
+        other active brand in the organization (trim, collapse internal
+        whitespace, lowercase) — "Acme Inc" and "acme  inc" collide even
+        though they differ in exact spelling. A collision is rejected with
+        409 `brand_duplicate_active_name`.
     status:
       type: string
       enum: [active, pending]
@@ -11950,6 +11963,12 @@ SerenityPrompt:
         own name — bearing in mind that `path[0].name` is the root's UPSTREAM
         name, which for the intent dimension is `$abv_tags$intent` and for the
         other four is the dimension key itself.
+
+        On a plain prompt list, the service does not read the complete project
+        taxonomy, so otherwise-valid embedded tags carry
+        `compatibility.state: unverified` with reason `taxonomyNotLoaded`.
+        `tagFilterMode=faceted-v1` reads the complete taxonomy and returns
+        authoritative compatibility.
     tagIds:
       type: array
       items: { type: string }
@@ -12000,7 +12019,7 @@ SerenityPromptTag:
     dimension root and its own `name` names its dimension upstream. Names are
     passed through exactly as upstream holds them, so the intent root reads
     `$abv_tags$intent`. The dimension is `intent`.
-  required: [id, name]
+  required: [id, name, compatibility]
   properties:
     id:
       type: string
@@ -12023,6 +12042,8 @@ SerenityPromptTag:
         properties:
           id: { type: string }
           name: { type: string }
+    compatibility:
+      $ref: '#/SerenityTagCompatibility'
   example:
     id: "uuid-1"
     name: "Trail"
@@ -12037,10 +12058,26 @@ SerenityPromptListResponse:
   properties:
     items:
       type: array
-      items: { $ref: '#/SerenityPrompt' }
+      items: { $ref: '#/SerenityEditablePrompt' }
     total: { type: integer }
     page: { type: integer }
     limit: { type: integer }
+
+SerenityEditablePrompt:
+  allOf:
+    - { $ref: '#/SerenityPrompt' }
+    - type: object
+      required: [tags]
+      properties:
+        tags:
+          type: array
+          items: { $ref: '#/SerenityEditablePromptTag' }
+
+SerenityEditablePromptTag:
+  allOf:
+    - { $ref: '#/SerenityPromptTag' }
+    - type: object
+      required: [parentId, path, compatibility]
 
 SerenityPromptInput:
   type: object
@@ -12056,6 +12093,7 @@ SerenityPromptInput:
       type: array
       items: { type: string }
       minItems: 1
+      maxItems: 50
       description: Upstream tag ids to attach to this prompt.
     geoTargetId:
       type: integer
@@ -12099,10 +12137,29 @@ SerenityCreatePromptsRequest:
 
 SerenityCreatePromptsResponse:
   type: object
+  additionalProperties: false
   required: [created, skipped, failed, published]
   properties:
     created:
       type: array
+      description: Prompts that did not previously exist in the project and were created.
+      items: { $ref: '#/SerenityPrompt' }
+    updated:
+      type: array
+      description: >
+        Prompts whose text ALREADY existed in the project: rather than being
+        created again, their tags were REPLACED with the ones this request
+        supplied (plus the server-computed `type` and `intent`, and the prompt's
+        stored `source`, which is a creation fact and is never re-derived on an
+        edit). This is what makes a repeated CSV import an update rather than an
+        additive write — the upstream create folds a repeated text into
+        `existing_count` but still attaches the tag ids it is given, which would
+        otherwise leave the prompt carrying several categories at once.
+
+        Always present on a live response. NOT in `required` because an async
+        job's stored `result` may have been persisted before this field existed
+        (`GET .../serenity/prompts/jobs/{jobId}` replays that stored payload
+        verbatim); treat an absent value as an empty list.
       items: { $ref: '#/SerenityPrompt' }
     skipped:
       type: array
@@ -12130,6 +12187,12 @@ SerenityCreatePromptsResponse:
         unless the request set `deferPublish: true`, in which case the prompts
         were written as drafts and the caller must publish separately
         (serenity-docs#32).
+    pendingClassificationCount:
+      type: integer
+      minimum: 0
+    requeuedJobId:
+      type: [string, 'null']
+      format: uuid
 
 SerenityPromptsJobAccepted:
   type: object
@@ -12137,11 +12200,14 @@ SerenityPromptsJobAccepted:
     202 body for an async prompt-create (`async: true`). The write runs
     asynchronously on the job runner; poll `jobId` at
     `GET .../serenity/prompts/jobs/{jobId}`.
-  required: [jobId, status]
+  required: [jobId, jobType, status]
   properties:
     jobId:
       type: string
       format: uuid
+    jobType:
+      type: string
+      enum: [classifyPrompts]
     status:
       type: string
       description: The job's initial state (IN_PROGRESS at enqueue time).
@@ -12150,13 +12216,18 @@ SerenityPromptsJobAccepted:
 SerenityPromptsJobStatus:
   type: object
   description: |
-    Poll response for an async `serenity-classify-prompts` job. Secret-free by
-    design — the job's internal metadata (promise token etc.) is never exposed.
-  required: [jobId, status]
+    Poll response for an async Serenity job. Secret-free by design — the job's
+    internal metadata (promise token etc.) is never exposed. `COMPLETED` means
+    processing is terminal, not necessarily full business success: a bulk-tags
+    caller must inspect `result.outcome`, `failureCount`, and `publish.state`.
+  required: [jobId, jobType, status, result, error]
   properties:
     jobId:
       type: string
       format: uuid
+    jobType:
+      type: string
+      enum: [classifyPrompts, bulkTags, tagImpact]
     status:
       type: string
       enum: [IN_PROGRESS, COMPLETED, FAILED]
@@ -12168,14 +12239,24 @@ SerenityPromptsJobStatus:
         FAILED.
       oneOf:
         - { $ref: '#/SerenityCreatePromptsResponse' }
+        - { $ref: '#/SerenityBulkTagsResult' }
+        - { $ref: '#/SerenityTagImpact' }
         - { type: 'null' }
     error:
-      description: The failure envelope once FAILED; null otherwise.
+      description: |
+        The sanitized public failure envelope once FAILED; null otherwise.
+        `promptCorpusIncomplete` is retryable and means the worker reached the
+        observable 20,000-prompt ceiling without proving the cohort complete.
       oneOf:
         - type: object
+          additionalProperties: false
+          required: [code, message, retryable]
           properties:
-            code: { type: string }
+            code:
+              type: string
+              enum: [invalidRequest, promptNotFound, serenityUpstreamError, tagLimitExceeded, incompatibleTagTaxonomy, promptCorpusIncomplete, jobFailed]
             message: { type: string }
+            retryable: { type: boolean }
         - { type: 'null' }
 
 SerenityUpdatePromptRequest:
@@ -12201,6 +12282,7 @@ SerenityUpdatePromptRequest:
       type: array
       items: { type: string }
       minItems: 1
+      maxItems: 50
       description: Upstream tag ids the prompt carries after the edit (full replacement set).
 
 SerenityBulkDeletePromptsRequest:
@@ -12236,6 +12318,104 @@ SerenityBulkDeletePromptsResponse:
           languageCode: { type: string }
           status: { type: integer }
           message: { type: string }
+
+SerenityBulkTagsRequest:
+  type: object
+  additionalProperties: false
+  required: [geoTargetId, languageCode, operation, tagIds, filter]
+  properties:
+    geoTargetId: { type: integer, minimum: 1 }
+    languageCode: { type: string, pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$' }
+    operation: { type: string, enum: [assign, remove] }
+    tagIds:
+      type: array
+      minItems: 1
+      maxItems: 50
+      uniqueItems: true
+      items: { type: string, maxLength: 128 }
+    filter:
+      type: object
+      additionalProperties: false
+      required: [tagFilterMode]
+      properties:
+        search: { type: string, maxLength: 500 }
+        tagIds:
+          type: array
+          maxItems: 50
+          uniqueItems: true
+          items: { type: string, maxLength: 128 }
+        tagFilterMode: { type: string, enum: [faceted-v1] }
+
+SerenityBulkTagsAccepted:
+  type: object
+  description: |
+    Acceptance/replay envelope. Matching is worker-owned, so a newly accepted
+    response does not claim a prompt count. A replay of a terminal completed job
+    may echo its business `outcome`.
+  required: [jobId, jobType, status, replayed]
+  properties:
+    jobId: { type: string, format: uuid }
+    jobType: { type: string, enum: [bulkTags] }
+    status: { type: string, enum: [IN_PROGRESS, COMPLETED, FAILED] }
+    replayed: { type: boolean }
+    outcome: { type: string, enum: [SUCCEEDED, PARTIAL_FAILURE] }
+
+SerenityBulkTagsResult:
+  type: object
+  additionalProperties: false
+  required:
+    [outcome, matchedCount, updatedCount, unchangedCount, failureCount, failuresPage, publish]
+  properties:
+    outcome:
+      type: string
+      enum: [SUCCEEDED, PARTIAL_FAILURE]
+      description: |
+        Explicit business outcome. `PARTIAL_FAILURE` means at least one prompt
+        failed or the final project publish failed even though the AsyncJob
+        status is `COMPLETED`.
+    matchedCount:
+      type: integer
+      minimum: 0
+      description: Prompts matched by the frozen normalized filter during the worker-time corpus scan.
+    updatedCount: { type: integer, minimum: 0 }
+    unchangedCount: { type: integer, minimum: 0 }
+    failureCount: { type: integer, minimum: 0 }
+    failuresPage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          maxItems: 100
+          items:
+            type: object
+            required: [semrushPromptId, code, message, retryable]
+            properties:
+              semrushPromptId: { type: string }
+              code: { type: string }
+              message: { type: string }
+              retryable: { type: boolean }
+        nextCursor: { type: [string, 'null'] }
+    publish:
+      type: object
+      required: [state, error]
+      properties:
+        state:
+          type: string
+          enum: [SUCCEEDED, FAILED, SKIPPED]
+          description: |
+            `SKIPPED` means no prompt update landed. A publish-only retry reports
+            `SUCCEEDED` or `FAILED` without reapplying prompt mutations.
+        error:
+          oneOf:
+            - type: object
+              required: [code, message, retryable]
+              properties:
+                code: { type: string }
+                message: { type: string }
+                retryable: { type: boolean }
+                details: { type: object }
+            - { type: 'null' }
 
 SerenityMarketStatus:
   type: string
@@ -12491,9 +12671,9 @@ SerenityDeactivateResponse:
   type: object
   description: |
     Result of decommissioning a brand's sub-workspace: every project is
-    deleted and the allocation released back to the parent pool, but the
-    workspace and its `semrush_workspace_id` pointer are KEPT for reuse
-    (never-delete). The brand status is set to `pending`.
+    deleted with no allocation transfer. The workspace shell remains upstream,
+    the brand's `semrush_sub_workspace_id` pointer is cleared, and the brand
+    status is set to `pending`.
   required: [brandId, status]
   properties:
     brandId:
@@ -12595,6 +12775,31 @@ SerenityTag:
         properties:
           id: { type: string }
           name: { type: string }
+    compatibility:
+      $ref: '#/SerenityTagCompatibility'
+
+SerenityTagCompatibility:
+  type: object
+  required: [state, reason]
+  properties:
+    state:
+      type: string
+      enum: [canonical, readOnly, unverified]
+      description: |
+        `canonical` and `readOnly` are authoritative only when derived from a
+        complete project taxonomy. Plain prompt lists avoid that expensive tree
+        read and return `unverified` for tags not locally provable as read-only.
+    reason:
+      type: [string, 'null']
+      enum: [unsupportedDepth, caseVariantRoot, ambiguousPath, separatorInName, taxonomyNotLoaded, null]
+
+SerenityTagConstraints:
+  type: object
+  required: [maxPromptTagIds, maxTagFilterValues, bulkIdempotencyTtlSeconds]
+  properties:
+    maxPromptTagIds: { type: integer, example: 50 }
+    maxTagFilterValues: { type: integer, example: 50 }
+    bulkIdempotencyTtlSeconds: { type: integer, example: 86400 }
 
 SerenityTagListResponse:
   type: object
@@ -12603,6 +12808,33 @@ SerenityTagListResponse:
     items:
       type: array
       items: { $ref: '#/SerenityTag' }
+    page: { type: integer, minimum: 1 }
+    limit: { type: integer, minimum: 0, maximum: 100 }
+    total: { type: integer, minimum: 0 }
+    complete: { type: boolean }
+    constraints: { $ref: '#/SerenityTagConstraints' }
+
+SerenityTagImpact:
+  type: object
+  additionalProperties: false
+  required: [tagId, name, path, descendantCount, affectedPromptCount, complete, revision]
+  properties:
+    tagId: { type: string }
+    name: { type: string }
+    path:
+      type: array
+      items:
+        type: object
+        required: [id, name]
+        properties:
+          id: { type: string }
+          name: { type: string }
+    descendantCount: { type: integer, minimum: 0 }
+    affectedPromptCount: { type: integer, minimum: 0 }
+    complete: { type: boolean, enum: [true] }
+    revision:
+      type: string
+      description: Quoted HTTP entity tag for this exact impact snapshot.
 
 SerenityModel:
   type: object
@@ -12627,14 +12859,17 @@ SerenityModelListResponse:
 
 SerenityLanguage:
   type: object
-  required: [name]
+  required: [id, name, code]
   properties:
     id:
-      type: [string, 'null']
-      description: Semrush language catalog id (null when the catalog omits it).
+      type: string
+      description: Semrush language catalog id. An entry the upstream catalog returned without a usable id is dropped from this list entirely (LLMO-7420) — it could never resolve at createProject time, so it is never offered as an option.
     name:
       type: string
-      description: English language name as Semrush spells it (the match key).
+      description: English language name as Semrush spells it. Metadata/fallback text only — not a resolution key (LLMO-7420).
+    code:
+      type: string
+      description: BCP-47 language code (e.g. zh-Hans, zh-Hant, fil) — the stable identifier a client persists and later sends back as languageCode (LLMO-7420). Matching is case-insensitive (RFC 5646); store and send it as returned here, exact casing is not significant.
 
 SerenityLanguageListResponse:
   type: object
@@ -12670,13 +12905,18 @@ SerenityErrorResponse:
   description: |
     Unified error envelope for the /serenity/* surface. `error` is a stable
     machine-readable token (`invalidRequest`, `serenityUpstreamError`,
-    `sliceExists`, etc.); `message` is a sanitized human-readable summary.
+    `promptCorpusIncomplete`, `sliceExists`, etc.); `message` is a sanitized
+    human-readable summary.
     Provider-specific detail (upstream HTTP status, raw body) is deliberately
     NOT exposed — it is logged server-side instead.
   required: [error, message]
   properties:
     error: { type: string }
     message: { type: string }
+    requestId: { type: string }
+    retryable: { type: boolean }
+    fieldErrors: { type: object }
+    details: { type: object }
 
 SerenityWorkspaceAccess:
   type: object
@@ -12704,8 +12944,20 @@ SerenityBrandPresenceSentimentOverview:
     verbatim so the existing chart consumes it drop-in — the absolute values
     differ from the Postgres-backed legacy endpoint (Semrush metrics), but the
     shape, `sentiment[]` ordering, and colors are identical.
-  required: [weeklyTrends]
+  required: [metric, weeklyTrends]
   properties:
+    metric:
+      type: string
+      enum: [prompts, mentions]
+      description: |
+        The resolved `metric` the `sentiment[]` percentages were computed over —
+        echoed back so a caller can confirm which definition it received.
+
+        Temporary (LLMO-7457). The `metric` REQUEST parameter is removed once the
+        UI has migrated to `mentions`, but this response field is not simply
+        dropped: at that point the enum must NARROW to `[mentions]`, so a client
+        that switches on it keeps working. `mentionCounts` and `sentimentTotal`
+        are permanent; `promptCounts` goes with the `prompts` branch.
     weeklyTrends:
       type: array
       description: One entry per ISO week in the requested range, ordered oldest-first.
@@ -12716,6 +12968,9 @@ SerenityBrandPresenceSentimentOverview:
           - weekNumber
           - year
           - sentiment
+          - mentionCounts
+          - promptCounts
+          - sentimentTotal
           - totalPrompts
           - promptsWithSentiment
         properties:
@@ -12739,10 +12994,43 @@ SerenityBrandPresenceSentimentOverview:
                   enum: [Positive, Neutral, Negative]
                 value:
                   type: integer
-                  description: Percentage of prompts-with-sentiment in this bucket (0-100).
+                  description: |
+                    Percentage of the selected `metric`'s total in this bucket
+                    (0-100). The denominator is the sum of the three buckets
+                    (`sentimentTotal`), matching how the Semrush MFE normalises.
                 color:
                   type: string
                   description: Legacy sentiment swatch hex.
+          mentionCounts:
+            type: object
+            description: |
+              Raw per-sentiment MENTION counts for the week (the element's
+              `value`). Returned regardless of `metric`, so a caller can render
+              true counts alongside the percentages as the Semrush MFE does.
+            required: [positive, neutral, negative]
+            properties:
+              positive: { type: integer, example: 443 }
+              neutral: { type: integer, example: 571 }
+              negative: { type: integer, example: 7 }
+          promptCounts:
+            type: object
+            description: |
+              Raw per-sentiment PROMPT counts for the week (the element's
+              `value__prompts`). Returned regardless of `metric`.
+
+              Temporary (LLMO-7457): removed alongside the `prompts` branch once
+              the UI has migrated to `mentions`.
+            required: [positive, neutral, negative]
+            properties:
+              positive: { type: integer, example: 165 }
+              neutral: { type: integer, example: 208 }
+              negative: { type: integer, example: 7 }
+          sentimentTotal:
+            type: integer
+            description: |
+              The denominator used for `sentiment[]` — the sum of the three
+              buckets of whichever count set `metric` selected.
+            example: 1021
           totalPrompts:
             type: integer
             description: |
@@ -12750,13 +13038,20 @@ SerenityBrandPresenceSentimentOverview:
           promptsWithSentiment:
             type: integer
             description: |
-              Positive + Neutral + Negative prompt counts. NOTE: the three
-              sentiment buckets are overlapping sets (a prompt with mixed-sentiment
-              mentions counts in each), so this can exceed `totalPrompts`; do not
-              derive a coverage ratio from the two.
+              Positive + Neutral + Negative PROMPT counts. Always prompt-based,
+              whatever `metric` is set to, so this field never changes meaning.
+              NOTE: the three sentiment buckets are overlapping sets (a prompt
+              with mixed-sentiment mentions counts in each), so this can exceed
+              `totalPrompts`; do not derive a coverage ratio from the two. This
+              overlap is not a defect — the Semrush MFE normalises over the same
+              sum-of-three.
           mentions:
             type: integer
-            description: Stubbed 0 (parity with the legacy contract).
+            description: |
+              Stubbed 0 (parity with the legacy contract). This is NOT a mention
+              count — it has always been a hardcoded 0 on this endpoint. For real
+              per-sentiment mention data, read `mentionCounts` above; a 0 here
+              does not mean the brand has no mentions.
           citations:
             type: integer
             description: Stubbed 0 (parity with the legacy contract).
@@ -12808,6 +13103,69 @@ SerenityBrandPresenceSubredditRow:
       format: uuid
       description: Semrush project the row belongs to.
       example: 'cb4f6443-e01f-4075-a586-85511f136e31'
+
+SerenityBrandPresenceResponseFeedRecord:
+  type: object
+  additionalProperties: false
+  required: [projectId, prompt, response, date, model, responses, sources, tags]
+  properties:
+    projectId:
+      type: string
+      description: Server-resolved Semrush project for the selected market.
+    prompt: { type: string, minLength: 1 }
+    response: { type: string, minLength: 1 }
+    date: { type: string, format: date }
+    model:
+      type: string
+      enum: [search-gpt]
+    responses:
+      type: integer
+      minimum: 0
+    sources:
+      type: array
+      description: |
+        Per-execution source URLs in upstream order. Order is load-bearing because current
+        Claims numeric citations resolve by source-array index; never sort or deduplicate.
+      items: { type: string }
+    tags:
+      type: array
+      items: { type: string }
+
+SerenityBrandPresenceResponseFeedPage:
+  type: object
+  additionalProperties: false
+  required: [offset, pageSize, returned, rowCount, nextOffset]
+  properties:
+    offset: { type: integer, minimum: 0 }
+    pageSize: { type: integer, minimum: 1, maximum: 500 }
+    returned: { type: integer, minimum: 0, maximum: 500 }
+    rowCount: { type: integer, minimum: 0 }
+    nextOffset:
+      type: [integer, 'null']
+      minimum: 0
+
+SerenityBrandPresenceResponseFeedSlice:
+  type: object
+  additionalProperties: false
+  required: [geoTargetId, languageCode, date, model]
+  properties:
+    geoTargetId: { type: integer, minimum: 1 }
+    languageCode: { type: string, minLength: 1 }
+    date: { type: string, format: date }
+    model:
+      type: string
+      enum: [search-gpt]
+
+SerenityBrandPresenceResponseFeed:
+  type: object
+  additionalProperties: false
+  required: [data, page, slice]
+  properties:
+    data:
+      type: array
+      items: { $ref: '#/SerenityBrandPresenceResponseFeedRecord' }
+    page: { $ref: '#/SerenityBrandPresenceResponseFeedPage' }
+    slice: { $ref: '#/SerenityBrandPresenceResponseFeedSlice' }
 
 SerenityBrandPresenceSubreddits:
   type: object
@@ -13022,6 +13380,7 @@ SerenityBrandPresenceTopicPromptRow:
     - citations
     - visibility
     - volume
+    - executions
   properties:
     prompt:
       type: string
@@ -13037,10 +13396,19 @@ SerenityBrandPresenceTopicPromptRow:
       description: Semrush project title for the prompt's market (e.g. `US-en`).
     mentions:
       type: integer
-      description: Brand mentions for this prompt.
+      description: >-
+        Executions where the brand was mentioned for this prompt (a subset of
+        `executions`, so `mentions <= executions`). Not the total run count.
+        CONTRACT VERIFIED live 2026-09-07 (Lovesac, one topic, 30-day window, 10
+        models = 100 rows): 0 violations of `mentions <= days <= window`.
     citations:
       type: integer
-      description: Citations for this prompt.
+      description: >-
+        Per-execution citation count for this prompt. Not bounded by `mentions`
+        (`citations > mentions` occurs — a prompt can be cited more often than the
+        brand is named), and may even exceed `executions` when a single response
+        cites multiple owned sources — so clamp `citations / executions` to 1 when
+        presenting it as a percentage (the consumer does).
     visibility:
       type: number
       description: Visibility score (0-100).
@@ -13055,6 +13423,17 @@ SerenityBrandPresenceTopicPromptRow:
     volume:
       type: integer
       description: Search volume for the prompt.
+    executions:
+      type: integer
+      description: >-
+        Number of executions (Semrush runs) for this prompt in the window —
+        the denominator for a per-execution citation rate (`citations / executions`).
+        Semrush runs a prompt at most once per model/date/project, so this equals
+        the count of days the prompt ran (days-with-data). Scoped to this element's
+        single model (default `search-gpt`), topic, and any requested project(s)
+        (`CBF_project`) — it is NOT an all-model aggregate and is not comparable to
+        `stats.total_executions` (which OMITS `CBF_model` on the default view, so it
+        is an all-model figure — see `buildModelFilter`, LLMO-7093).
 
 SerenityFilterDimensionItem:
   type: object

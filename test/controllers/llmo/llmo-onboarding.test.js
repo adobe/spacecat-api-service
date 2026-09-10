@@ -1387,6 +1387,7 @@ describe('LLMO Onboarding Functions', () => {
       });
 
       const mockSite = {
+        getId: sinon.stub().returns('site-id-1'),
         getOrganizationId: sinon.stub().returns('old-org-123'),
         setOrganizationId: sinon.stub(),
         getSiteEnrollments: sinon.stub().resolves([]),
@@ -1424,6 +1425,7 @@ describe('LLMO Onboarding Functions', () => {
 
       const mockSite = {
         getOrganizationId: sinon.stub().returns('other-org-789'),
+        getBaseURL: sinon.stub().returns('https://example.com'),
         setOrganizationId: sinon.stub(),
         getSiteEnrollments: sinon.stub().resolves([{ getId: () => 'enroll-1' }]),
         save: sinon.stub().resolves(),
@@ -1433,9 +1435,13 @@ describe('LLMO Onboarding Functions', () => {
 
       const context = { dataAccess: mockDataAccess };
 
+      // LLMO-7284: createOrFindSite now delegates to assertSiteOrgReassignmentSafe, so the
+      // thrown message comes from that shared guard (also `.status=409`,
+      // `.code=site_org_reassignment_blocked`, not asserted here — this test only covers the
+      // message text createOrFindSite's own callers rely on).
       await expect(
         createOrFindSite('https://example.com', 'new-org-456', context),
-      ).to.be.rejectedWith('belongs to org other-org-789 with active enrollments and cannot be moved to org new-org-456');
+      ).to.be.rejectedWith('still has 1 enrollment(s) under org other-org-789; reassigning it to new-org-456 would orphan them as foreign enrollments');
 
       expect(mockSite.setOrganizationId).to.not.have.been.called;
       expect(mockSite.save).to.not.have.been.called;
@@ -1456,6 +1462,7 @@ describe('LLMO Onboarding Functions', () => {
 
       const mockSite = {
         getOrganizationId: sinon.stub().returns('other-org-789'),
+        getBaseURL: sinon.stub().returns('https://example.com'),
         setOrganizationId: sinon.stub(),
         getSiteEnrollments: sinon.stub().resolves(null),
         save: sinon.stub().resolves(),
@@ -6430,7 +6437,10 @@ describe('LLMO Onboarding Functions', () => {
       ]);
     });
 
-    it('defaults to one-time runs (trial) and WARNs when the tier cannot be read', async () => {
+    it('defaults to one-time runs (trial) and ERRORs when the tier cannot be read', async () => {
+      // .error, not .warn (LLMO-7366): a thrown lookup failure is a real operational
+      // problem, distinct from "no entitlement found" below, and this result also
+      // decides a customer-visible schedule's tier param elsewhere -- must be alertable.
       const mockDrsClient = createMockDrsClient(sandbox);
       // TierClient whose entitlement lookup throws → tier indeterminate.
       const failingTierClient = {
@@ -6453,8 +6463,8 @@ describe('LLMO Onboarding Functions', () => {
       // Fail-safe: no recurring schedule for a site of unknown paying status.
       expect(instance.createSchedule).to.not.have.been.called;
       expect(instance.submitJob.callCount).to.equal(4); // Brandalf + 3 one-shots
-      const warnLogs = context.log.warn.getCalls().map((c) => c.args[0]);
-      expect(warnLogs.some((m) => m.includes('Failed to read LLMO tier for site site-123'))).to.be.true;
+      const errorLogs = context.log.error.getCalls().map((c) => c.args[0]);
+      expect(errorLogs.some((m) => m.includes('Failed to read LLMO tier for site site-123'))).to.be.true;
     });
 
     it('defaults to one-time runs (trial) and WARNs when no entitlement exists', async () => {

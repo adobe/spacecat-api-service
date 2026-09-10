@@ -91,7 +91,7 @@ import {
 import { updateModifiedByDetails } from './llmo-config-metadata.js';
 import { notifyOptInIfNeeded } from './cdn-opt-in-notification.js';
 import { handleLlmoRationale } from './llmo-rationale.js';
-import { handleBrandClaims, handleRequestBrandClaims } from './brand-claims.js';
+import { handleBrandClaims, handleBrandClaimsWeeks, handleRequestBrandClaims } from './brand-claims.js';
 import { handleDemoBrandPresence, handleDemoRecommendations } from './opportunity-workspace-demo.js';
 import { notifyStrategyChanges } from '../../support/opportunity-workspace-notifications.js';
 
@@ -1415,6 +1415,25 @@ function LlmoController(ctx) {
     }
   };
 
+  // Lists the ISO weeks with an available brand claims run (newest first)
+  const getBrandClaimsWeeks = async (context) => {
+    const { log } = context;
+    const { siteId } = context.params;
+    try {
+      // Validate site and LLMO access
+      const siteValidation = await getSiteAndValidateLlmo(context);
+      if (siteValidation.status) {
+        return siteValidation;
+      }
+
+      // Delegate to the brand claims weeks handler for the actual processing
+      return await handleBrandClaimsWeeks(context);
+    } catch (error) {
+      log.error(`Error listing brand claims weeks for site ${siteId}: ${error.message}`);
+      return badRequest(cleanupHeaderValue(error.message));
+    }
+  };
+
   // Handles on-demand Brand Claims trigger requests (LLMO-7263, trial customers)
   const requestBrandClaims = async (context) => {
     const { log } = context;
@@ -2299,6 +2318,7 @@ function LlmoController(ctx) {
     patchLlmoDataRow,
     getLlmoRationale,
     getBrandClaims,
+    getBrandClaimsWeeks,
     requestBrandClaims,
     getDemoBrandPresence,
     getDemoRecommendations,

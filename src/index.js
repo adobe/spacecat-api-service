@@ -122,6 +122,7 @@ import ElementsController from './controllers/elements.js';
 import ProxyController from './controllers/proxy.js';
 import OnboardingController from './controllers/onboarding.js';
 import GitHubWebhookHmacHandler from './support/github-webhook-hmac-handler.js';
+import { slackSignatureWrapper } from './support/slack/signature-wrapper.js';
 import AsoOverlayKeyHandler from './support/aso-overlay-key-handler.js';
 import ApiKeyImsHandler from './support/api-key-ims-handler.js';
 import RouteScopedLegacyApiKeyHandler from './support/route-scoped-legacy-api-key-handler.js';
@@ -165,7 +166,7 @@ function localCORSWrapper(fn) {
       response.headers.set(
         'Access-Control-Allow-Headers',
         'Content-Type, Authorization, x-api-key, x-ims-org-id, x-client-type, x-import-api-key, '
-        + 'x-trigger-audits, x-requested-with, origin, accept, x-view-as-trial, x-view-full-experience, x-product, x-promise-token, x-promise-audience',
+        + 'x-trigger-audits, x-requested-with, origin, accept, x-view-as-trial, x-view-full-experience, x-product, x-promise-token, x-promise-audience, if-match',
       );
       response.headers.set('Access-Control-Max-Age', '86400');
     }
@@ -228,7 +229,7 @@ async function run(request, context) {
   if (method === 'OPTIONS') {
     return noContent({
       'access-control-allow-methods': 'GET, HEAD, PATCH, POST, OPTIONS, DELETE',
-      'access-control-allow-headers': 'x-api-key, authorization, origin, x-requested-with, content-type, accept, x-import-api-key, x-client-type, x-trigger-audits, x-view-as-trial, x-view-full-experience, x-promise-token, x-promise-audience',
+      'access-control-allow-headers': 'x-api-key, authorization, origin, x-requested-with, content-type, accept, x-import-api-key, x-client-type, x-trigger-audits, x-view-as-trial, x-view-full-experience, x-promise-token, x-promise-audience, if-match',
       'access-control-max-age': '86400',
       'access-control-allow-origin': '*',
     });
@@ -490,7 +491,20 @@ const wrappedMain = wrap(run)
     routeCapabilities: routeRequiredCapabilities,
     internalRoutes: INTERNAL_ROUTES,
   })
-  .with(authWrapper, { authHandlers: AUTH_HANDLERS })
+  .with(authWrapper, {
+    authHandlers: AUTH_HANDLERS,
+    // Declare the route-based anonymous bypass explicitly rather than inheriting the shared
+    // library's default, so this service owns the list of routes it leaves unauthenticated.
+    // POST /slack/events is authenticated instead by slackSignatureWrapper above, which runs
+    // before this wrapper.
+    //
+    // Inert on the currently pinned @adobe/spacecat-shared-http-utils (which does not read the
+    // option and applies its own default); it takes effect once the version carrying
+    // `anonymousEndpoints` is picked up. Declaring it now is forward-safe, not a behaviour
+    // change: the option replaces only the exact-match route list -- the unconditional OPTIONS
+    // and `POST /hooks/site-detection/*` bypasses are separate clauses it does not touch.
+    anonymousEndpoints: ['POST /slack/events'],
+  })
   .with(s2sAuthWrapper, { routeCapabilities: routeRequiredCapabilities });
 
 export const main = wrappedMain
@@ -500,6 +514,11 @@ export const main = wrappedMain
   .with(dataAccess)
   .with(bodyData)
   .with(multipartFormData)
+  // Runs immediately after enrichPathInfo (so context.pathInfo.headers is populated) and
+  // before multipartFormData/bodyData (so the request body is still unread). Verifies the
+  // Slack request signature on /slack/events, which authWrapper treats as an anonymous
+  // endpoint and which bypasses Bolt's own receiver-level check (VULN-39365).
+  .with(slackSignatureWrapper)
   .with(enrichPathInfo)
   .with(sqs)
   .with(s3ClientWrapper)

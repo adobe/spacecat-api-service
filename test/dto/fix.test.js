@@ -14,7 +14,7 @@ import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
 
-import { FixDto } from '../../src/dto/fix.js';
+import { FixDto, withLegacyDocumentPath } from '../../src/dto/fix.js';
 import { SuggestionDto } from '../../src/dto/suggestion.js';
 
 use(chaiAsPromised);
@@ -247,6 +247,68 @@ describe('Fix DTO', () => {
 
       expect(json.suggestions).to.deep.equal([expectedSuggestionJson]);
       expect(SuggestionDto.toJSON).to.have.been.calledOnceWith(suggestion, 'full', null, null);
+    });
+
+    it('back-fills top-level documentPath from a v2 changeDetails.target.documentPath', () => {
+      const fix = createMockFix({
+        getChangeDetails: () => ({
+          schemaVersion: 2,
+          surface: 'ASO',
+          actorType: 'IMS_USER',
+          target: {
+            changeType: 'link-replace',
+            documentPath: 'https://author.example.com/mnt/overlay/.../redirects.xlsx',
+            changes: [],
+          },
+        }),
+      });
+
+      const json = FixDto.toJSON(fix);
+
+      expect(json.changeDetails.documentPath).to.equal(
+        'https://author.example.com/mnt/overlay/.../redirects.xlsx',
+      );
+      // original v2 record is preserved, not replaced
+      expect(json.changeDetails.target.documentPath).to.equal(
+        'https://author.example.com/mnt/overlay/.../redirects.xlsx',
+      );
+    });
+
+    it('does not overwrite an existing top-level documentPath', () => {
+      const fix = createMockFix({
+        getChangeDetails: () => ({
+          documentPath: 'https://legacy.example.com/edit.html',
+          target: { documentPath: 'https://v2.example.com/edit.html' },
+        }),
+      });
+
+      const json = FixDto.toJSON(fix);
+
+      expect(json.changeDetails.documentPath).to.equal('https://legacy.example.com/edit.html');
+    });
+
+    it('leaves changeDetails untouched when neither documentPath location is set', () => {
+      const fix = createMockFix({ getChangeDetails: () => ({ schemaVersion: 2, target: {} }) });
+
+      const json = FixDto.toJSON(fix);
+
+      expect(json.changeDetails).to.deep.equal({ schemaVersion: 2, target: {} });
+    });
+
+    it('handles a null/undefined changeDetails without throwing', () => {
+      const fix = createMockFix({ getChangeDetails: () => null });
+
+      const json = FixDto.toJSON(fix);
+
+      expect(json.changeDetails).to.equal(null);
+    });
+  });
+
+  describe('withLegacyDocumentPath', () => {
+    it('returns the input unchanged when there is nothing to back-fill', () => {
+      expect(withLegacyDocumentPath(undefined)).to.equal(undefined);
+      expect(withLegacyDocumentPath(null)).to.equal(null);
+      expect(withLegacyDocumentPath({ foo: 'bar' })).to.deep.equal({ foo: 'bar' });
     });
   });
 });

@@ -35,6 +35,7 @@ import {
 
 import { ErrorWithStatusCode, getImsUserToken, resolveSemrushImsToken } from '../support/utils.js';
 import { hostnameFromUrlString } from '../support/url-utils.js';
+import { BRAND_GUIDANCE_MAX_LENGTH, codePointLength } from '../support/brand-guidance.js';
 import {
   STATUS_BAD_REQUEST,
 } from '../utils/constants.js';
@@ -119,7 +120,6 @@ import {
 } from '../support/topics-storage.js';
 
 const HEADER_ERROR = 'x-error';
-const BRAND_GUIDANCE_MAX_LENGTH = 4000;
 const BRAND_GUIDANCE_FIELDS = ['brandContext', 'mentionSentimentGuidance'];
 
 /**
@@ -400,9 +400,11 @@ function BrandsController(ctx, log, env) {
         if (typeof value !== 'string') {
           return badRequest(`${field} must be a string or null`);
         }
-        // Validate the trimmed length: storage trims before persisting, so this
-        // mirrors what is actually stored (and the schema's maxLength).
-        if (value.trim().length > BRAND_GUIDANCE_MAX_LENGTH) {
+        // Validate the trimmed length in code points: storage trims before persisting,
+        // so this mirrors what is actually stored, and code-point counting matches the
+        // storage backstop (codePointLength) so both layers agree on "4000 characters"
+        // for non-BMP input (e.g. emoji count as one, not two UTF-16 units).
+        if (codePointLength(value.trim()) > BRAND_GUIDANCE_MAX_LENGTH) {
           return badRequest(`${field} must be at most ${BRAND_GUIDANCE_MAX_LENGTH} characters`);
         }
       }
@@ -2378,6 +2380,7 @@ function BrandsController(ctx, log, env) {
         updates,
         postgrestClient,
         updatedBy,
+        log,
       });
 
       if (!updatedRow) {
@@ -2771,6 +2774,7 @@ function BrandsController(ctx, log, env) {
         updates: { status: 'active', baseSiteId },
         postgrestClient,
         updatedBy,
+        log,
       });
       if (!updated) {
         return notFound(`Brand not found: ${brandId}`);
@@ -2833,6 +2837,18 @@ function BrandsController(ctx, log, env) {
           }
         }
 
+        // Resolve the site + real LLMO entitlement tier once, up front: needed both for
+        // the schedule's tier param (step 4, immediately below) and the post-activation
+        // side-effects (step 5/6). This route (LLMO-6634) intentionally has no paid gate
+        // on activation itself — a free/PLG org can reach this whole block as long as the
+        // brand already resolves to a valid primary site — so the schedule created below
+        // must NOT hardcode tier: 'PAID'; that would grant ChatGPT Paid / Copilot
+        // regardless of the org's real entitlement (LLMO-7366).
+        const activatedSite = await Site.findById(baseSiteId);
+        const isPaying = (drsConfigured && activatedSite)
+          ? await isPayingLlmoSite(activatedSite, context)
+          : false;
+
         // 4) Schedule — prompts-gated. Create the weekly brand-presence schedule only
         // when prompts were generated now or the brand already has prompts (a promptless
         // schedule is a weekly no-op). Idempotent: createBrandPresenceSchedule POSTs and
@@ -2854,12 +2870,12 @@ function BrandsController(ctx, log, env) {
             siteId: baseSiteId,
             brandId: brandUuid,
             orgId: spaceCatId,
+            // @ts-ignore tier not yet in the published drs-client type; pending the
+            // release of the spacecat-shared companion fix (LLMO-7366, PR #1915)
+            tier: isPaying ? 'PAID' : 'FREE_TRIAL',
           });
           scheduleId = schedule?.scheduleId;
         }
-
-        // Resolve the site once for the post-activation side-effects below.
-        const activatedSite = await Site.findById(baseSiteId);
 
         // 5) Brand-profile agent ("Brandaid"). The create→activate path never triggered it
         // (only full/PLG/Slack onboarding did), so brands added to an existing org had no
@@ -2903,7 +2919,7 @@ function BrandsController(ctx, log, env) {
         // throws, so a failure here degrades gracefully without failing activation.
         if (drsConfigured) {
           if (activatedSite) {
-            const isPaying = await isPayingLlmoSite(activatedSite, context);
+            // isPaying already resolved once, above, alongside the schedule's tier param.
             const { results, allSucceeded } = await ensurePromptSuggestionSchedules({
               drsClient, siteId: baseSiteId, isPaying, log,
             });
