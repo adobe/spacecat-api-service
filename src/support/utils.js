@@ -970,16 +970,21 @@ export async function getIMSPromiseToken(context, pair) {
 }
 
 /**
- * Exchange a promise token for an IMS access token.
+ * Exchanges a promise token and returns IMS's complete rotation response. Use
+ * this when the caller needs both the immediate access token and the rotated
+ * promise token for a deferred follow-up operation.
  * @param {object} context - The context of the request.
- * @param {string} promiseToken - The promise token to exchange (e.g. from request payload).
- * @param {string} [pair] - Optional IMS promise-pair selector (see
- *   {@link resolvePromisePair}). Omitted => the default pair. MUST match the pair
- *   that minted the token, or IMS rejects the exchange.
- * @returns {Promise<{ access_token: string }>} The access token response.
+ * @param {string} promiseToken - The promise token to exchange.
+ * @param {string} [pair] - Optional IMS promise-pair selector.
+ * @returns {Promise<{
+ *   access_token: string,
+ *   promise_token: string,
+ *   promise_token_expires_in: number,
+ *   token_type?: string,
+ * }>} The access token and rotated promise token response.
  * @throws {ErrorWithStatusCode} - If the promise token is missing.
  */
-export async function exchangePromiseToken(context, promiseToken, pair) {
+export async function exchangePromiseTokenResponse(context, promiseToken, pair) {
   if (!promiseToken) {
     throw new ErrorWithStatusCode('Missing promise token', STATUS_BAD_REQUEST);
   }
@@ -990,11 +995,25 @@ export async function exchangePromiseToken(context, promiseToken, pair) {
     { pair },
   );
 
-  const accessToken = (await imsClient.exchangeToken(
+  return imsClient.exchangeToken(
     promiseToken,
     !!context.env?.AUTOFIX_CRYPT_SECRET && !!context.env?.AUTOFIX_CRYPT_SALT,
-  )).access_token;
-  return accessToken;
+  );
+}
+
+/**
+ * Exchange a promise token for an IMS access token.
+ * @param {object} context - The context of the request.
+ * @param {string} promiseToken - The promise token to exchange (e.g. from request payload).
+ * @param {string} [pair] - Optional IMS promise-pair selector (see
+ *   {@link resolvePromisePair}). Omitted => the default pair. MUST match the pair
+ *   that minted the token, or IMS rejects the exchange.
+ * @returns {Promise<{ access_token: string }>} The access token response.
+ * @throws {ErrorWithStatusCode} - If the promise token is missing.
+ */
+export async function exchangePromiseToken(context, promiseToken, pair) {
+  const result = await exchangePromiseTokenResponse(context, promiseToken, pair);
+  return result.access_token;
 }
 
 /**
@@ -1035,6 +1054,46 @@ export function resolveCallerImsUserId(context) {
 }
 
 /**
+ * The SEMRUSH IMS promise-pair selector, re-exported from the SDK so callers can
+ * compare against it (e.g. validating `resolvePromisePair`'s return value) without
+ * hardcoding the string literal — if the SDK constant's value ever changes, callers
+ * comparing against this export change with it instead of silently rejecting every
+ * valid request.
+ *
+ * A FUNCTION, not a top-level const: `resolvePromisePair` below only reads
+ * `ImsPromiseClient.PROMISE_PAIR` lazily, inside its own body, which is why test
+ * suites elsewhere in this repo mock `ImsPromiseClient` with only the members
+ * their own test cases exercise (e.g. `{ createFrom, CLIENT_TYPE }`, no
+ * `PROMISE_PAIR`) — evaluating `.PROMISE_PAIR.SEMRUSH` eagerly at module load
+ * would throw against any such partial mock the moment this module is imported,
+ * regardless of whether that test ever touches this export.
+ */
+export function getSemrushPair() {
+  return ImsPromiseClient.PROMISE_PAIR.SEMRUSH;
+}
+
+/**
+ * Reads and decodes the caller's `x-promise-token` header, if present, WITHOUT
+ * exchanging it. Used by callers that need to hand the caller's promise token
+ * onward (e.g. the async job runner enqueue path) rather than exchange it for
+ * an access token themselves.
+ * @param {object} context
+ * @returns {string|undefined} The decoded promise token, or undefined if absent.
+ */
+export function getRawPromiseToken(context) {
+  const header = context?.pathInfo?.headers?.[X_PROMISE_TOKEN_HEADER];
+  if (!hasText(header)) {
+    return undefined;
+  }
+  try {
+    return decodeURIComponent(header);
+  } catch {
+    // Bearer-style tokens may contain literal %; use as-is.
+    return header;
+  }
+}
+
+/**
  * Resolves the IMS access token to forward to the Semrush gateway for a request.
  *
  * Preferred path: the caller sends `x-promise-token` (minted by POST /auth/v2/promise).
@@ -1067,14 +1126,8 @@ export async function resolveSemrushImsToken(
   fallback = getImsUserTokenStrict,
 ) {
   const pair = resolvePromisePair(context);
-  const promiseTokenHeader = context?.pathInfo?.headers?.[X_PROMISE_TOKEN_HEADER];
-  if (hasText(promiseTokenHeader)) {
-    let decoded = promiseTokenHeader;
-    try {
-      decoded = decodeURIComponent(promiseTokenHeader);
-    } catch {
-      // Bearer-style tokens may contain literal %; use as-is.
-    }
+  const decoded = getRawPromiseToken(context);
+  if (decoded !== undefined) {
     try {
       return await exchangePromiseToken(context, decoded, pair);
     } catch (e) {

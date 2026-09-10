@@ -114,8 +114,75 @@ function buildS2SHeaders(apiKey) {
   };
 }
 
-async function parseBody(response) {
+async function readBoundedText(response, maxResponseBytes, requestInfo) {
+  const limit = Number.isSafeInteger(maxResponseBytes) && maxResponseBytes > 0
+    ? maxResponseBytes
+    : undefined;
+  const contentLength = Number(response.headers?.get('content-length'));
+  if (limit && Number.isFinite(contentLength) && contentLength > limit) {
+    try {
+      await response.body?.cancel?.();
+    } catch {
+      // Preserve the deterministic typed size error even if Undici cannot cancel the stream.
+    }
+    throw new ElementsTransportError(
+      502,
+      `Elements API response exceeds configured ${limit}-byte limit`,
+      undefined,
+      requestInfo(),
+    );
+  }
+
+  if (limit && response.body?.getReader) {
+    const reader = response.body.getReader();
+    const chunks = [];
+    let total = 0;
+    while (true) {
+      // eslint-disable-next-line no-await-in-loop
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      total += value.byteLength;
+      if (total > limit) {
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          await reader.cancel();
+        } catch {
+          // Preserve the deterministic typed size error if stream cancellation fails.
+        }
+        throw new ElementsTransportError(
+          502,
+          `Elements API response exceeds configured ${limit}-byte limit`,
+          undefined,
+          requestInfo(),
+        );
+      }
+      chunks.push(value);
+    }
+    const bytes = new Uint8Array(total);
+    let offset = 0;
+    chunks.forEach((chunk) => {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    });
+    return new TextDecoder().decode(bytes);
+  }
+
   const text = await response.text();
+  if (limit && new TextEncoder().encode(text).byteLength > limit) {
+    throw new ElementsTransportError(
+      502,
+      `Elements API response exceeds configured ${limit}-byte limit`,
+      undefined,
+      requestInfo(),
+    );
+  }
+  return text;
+}
+
+async function parseBody(response, maxResponseBytes, requestInfo) {
+  const text = await readBoundedText(response, maxResponseBytes, requestInfo);
   if (!text) {
     return null;
   }
@@ -202,6 +269,8 @@ function nextRetryDelayMs(completedAttempt, baseDelayMs, response) {
  * @param {string} [opts.workspaceId] id of the workspace being called, carried onto the thrown
  *   error's request descriptor for the structured upstream-error log line (SITES-49993)
  * @param {string} [opts.elementId] id of the element being called, ditto
+ * @param {number} [opts.maxResponseBytes] maximum decompressed upstream response bytes
+ * @param {boolean} [opts.redactWorkspaceInErrors] omit workspace identifiers from errors
  * @returns {Promise<*>} parsed response body on success
  */
 async function request(url, headers, body, {
@@ -210,20 +279,29 @@ async function request(url, headers, body, {
   retryBaseDelayMs = DEFAULT_RETRY_BASE_DELAY_MS,
   workspaceId = undefined,
   elementId = undefined,
+  maxResponseBytes = undefined,
+  redactWorkspaceInErrors = false,
 } = {}) {
   const jsonBody = JSON.stringify(body);
   // Floor at 0: a negative/zero maxRetries degrades to a single attempt (no retry).
   const retries = Math.max(0, maxRetries);
+  const errorUrl = redactWorkspaceInErrors
+    ? url.replace(/\/workspaces\/[^/]+/, '/workspaces/[redacted]')
+    : url;
   // Structured request descriptor for the upstream-error log line (SITES-49993).
   // Built only when a throw actually happens — never on the happy path.
   const requestInfo = () => ({
-    method: 'POST', endpoint: endpointOf(url), workspaceId, elementId,
+    method: 'POST',
+    endpoint: endpointOf(errorUrl),
+    workspaceId: redactWorkspaceInErrors ? undefined : workspaceId,
+    elementId,
   });
 
   for (let attempt = 0; ; attempt += 1) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     let response;
+    let parsed;
     try {
       // eslint-disable-next-line no-await-in-loop
       response = await fetch(url, {
@@ -232,17 +310,20 @@ async function request(url, headers, body, {
         signal: controller.signal,
         body: jsonBody,
       });
+      // Keep the same abort budget active while consuming/decompressing the body. Fetch resolves
+      // when response headers arrive, so clearing the timer before this read would leave a stalled
+      // or slow body unbounded even though callers supplied timeoutMs.
+      // eslint-disable-next-line no-await-in-loop
+      parsed = await parseBody(response, maxResponseBytes, requestInfo);
     } catch (e) {
       if (e?.name === 'AbortError') {
-        throw new ElementsTransportError(504, `Elements API POST ${url} timed out after ${timeoutMs}ms`, undefined, requestInfo());
+        throw new ElementsTransportError(504, `Elements API POST ${errorUrl} timed out after ${timeoutMs}ms`, undefined, requestInfo());
       }
       throw e;
     } finally {
       clearTimeout(timer);
     }
 
-    // eslint-disable-next-line no-await-in-loop
-    const parsed = await parseBody(response);
     if (response.ok) {
       return parsed;
     }
@@ -255,7 +336,7 @@ async function request(url, headers, body, {
     } else {
       throw new ElementsTransportError(
         response.status,
-        `Elements API POST ${url} failed: ${response.status}`,
+        `Elements API POST ${errorUrl} failed: ${response.status}`,
         parsed,
         requestInfo(),
       );
@@ -321,6 +402,8 @@ export function createElementsTransport({
      *   general-purpose defaults. Omit for the normal single-call case.
      * @param {number} [callOpts.timeoutMs]
      * @param {number} [callOpts.maxRetries]
+     * @param {number} [callOpts.maxResponseBytes]
+     * @param {boolean} [callOpts.redactWorkspaceInErrors]
      */
     async fetchElement(workspaceId, elementId, payload, callOpts = {}) {
       const url = isS2SConsumer
@@ -336,6 +419,8 @@ export function createElementsTransport({
         timeoutMs: callOpts.timeoutMs,
         workspaceId,
         elementId,
+        maxResponseBytes: callOpts.maxResponseBytes,
+        redactWorkspaceInErrors: callOpts.redactWorkspaceInErrors,
       });
     },
   };

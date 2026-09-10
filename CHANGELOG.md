@@ -1,3 +1,30 @@
+# [1.805.0](https://github.com/adobe/spacecat-api-service/compare/v1.804.2...v1.805.0) (2026-09-10)
+
+
+### Bug Fixes
+
+* refresh taxonomy before bulk tag validation ([#3259](https://github.com/adobe/spacecat-api-service/issues/3259)) ([88f71fb](https://github.com/adobe/spacecat-api-service/commit/88f71fb0e08b8f6df3a5774a7d4faf3c3c873ec3)), closes [post-#3214](https://github.com/post-/issues/3214)
+* **security:** harden merged SEC-5 async-job access primitive ([#3222](https://github.com/adobe/spacecat-api-service/issues/3222)) ([#3232](https://github.com/adobe/spacecat-api-service/issues/3232)) ([d478dbb](https://github.com/adobe/spacecat-api-service/commit/d478dbb2a50fb2de9c7e3b7e162aa1c8353c7c86)), closes [#3203](https://github.com/adobe/spacecat-api-service/issues/3203)
+
+
+### Features
+
+* **serenity:** add paginated Brand Claims response feed ([#3255](https://github.com/adobe/spacecat-api-service/issues/3255)) ([7c82020](https://github.com/adobe/spacecat-api-service/commit/7c82020db5abaae7c594eb308a4efc3442170196)), closes [adobe/spacecat-api-service#3217](https://github.com/adobe/spacecat-api-service/issues/3217) [adobe/mysticat-architecture#295](https://github.com/adobe/mysticat-architecture/issues/295)
+
+## [1.804.2](https://github.com/adobe/spacecat-api-service/compare/v1.804.1...v1.804.2) (2026-09-10)
+
+
+### Bug Fixes
+
+* **serenity:** forward caller tokens for browser async jobs ([#3214](https://github.com/adobe/spacecat-api-service/issues/3214)) ([addda0a](https://github.com/adobe/spacecat-api-service/commit/addda0a29350ba08ba032eefc7b4519f91c1c1dc))
+
+## [1.804.1](https://github.com/adobe/spacecat-api-service/compare/v1.804.0...v1.804.1) (2026-09-10)
+
+
+### Bug Fixes
+
+* **cors:** allow If-Match request header ([#3258](https://github.com/adobe/spacecat-api-service/issues/3258)) ([fe217e1](https://github.com/adobe/spacecat-api-service/commit/fe217e1e08b2f2df916b4a270c6b340482f9cc8e)), closes [#3218](https://github.com/adobe/spacecat-api-service/issues/3218) [adobe/spacecat-infrastructure#788](https://github.com/adobe/spacecat-infrastructure/issues/788)
+
 # [1.804.0](https://github.com/adobe/spacecat-api-service/compare/v1.803.0...v1.804.0) (2026-09-10)
 
 
