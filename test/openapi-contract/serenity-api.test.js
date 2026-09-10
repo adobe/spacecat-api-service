@@ -32,6 +32,11 @@ use(sinonChai);
 const ORG = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
 const BRAND = '11111111-2222-3333-4444-555555555555';
 const WORKSPACE = '22222222-3333-4444-5555-666666666666';
+// The brand's linked base site — market-generation jobs carry this in metadata.siteId
+// (the producer resolves it from getBrandBaseSiteId). loadJobScopedToCaller, hardened
+// fail-closed in #3232, denies a resolver-supplied job with NO siteId, so the fixtures
+// must carry one and the Site lookup below must resolve.
+const SITE = '33333333-4444-5555-6666-777777777777';
 
 function fakeLog() {
   return {
@@ -48,9 +53,17 @@ function fakeContext({ params = {}, data = undefined, query = {} } = {}) {
     env: {},
     request: { url: `https://api.example.com/serenity${search ? `?${search}` : ''}` },
     pathInfo: { headers: { authorization: 'Bearer ims-token' } },
-    attributes: { authInfo: { getType: () => 'ims' } },
+    // getScopes → admin so the REAL AccessControlUtil inside loadJobScopedToCaller
+    // (the #3232 fail-closed site-ownership check; not the esmock-mocked instance the
+    // controller's own authorize uses) admits the legitimate owner for the two
+    // market-generation-job fixtures. Inert for every other fixture (they never reach
+    // the unmocked primitive).
+    attributes: { authInfo: { getType: () => 'ims', getScopes: () => [{ name: 'admin' }] } },
     dataAccess: {
       Organization: { findById: sinon.stub().resolves({ getId: () => ORG }) },
+      // The market-generation job's owning site — loadJobScopedToCaller resolves it
+      // (metadata.siteId) and enforces ownership via the mocked AccessControlUtil.
+      Site: { findById: sinon.stub().resolves({ getId: () => SITE }) },
       Brand: {
         findById: sinon.stub().resolves({
           getId: () => BRAND,
@@ -212,6 +225,7 @@ const FIXTURES = {
       getMetadata: () => ({
         jobType: 'serenity-generate-semrush-market',
         brandId: BRAND,
+        siteId: SITE,
       }),
     },
   },
@@ -239,6 +253,7 @@ const FIXTURES = {
         getMetadata: () => ({
           jobType: 'serenity-generate-semrush-market',
           brandId: BRAND,
+          siteId: SITE,
           imsUserId: 'ims-user-1',
         }),
         setMetadata: () => {},

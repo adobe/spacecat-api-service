@@ -2508,12 +2508,12 @@ function SerenityController(context, log, env) {
         return accessError;
       }
       // Additional brand scoping on the serenity surface (the route is brand-scoped).
-      // For a job on a brand with a linked site, `loadJobScopedToCaller` already
-      // enforced site-level ownership via `metadata.siteId`; for a genuinely siteless
-      // job (a brand with no site yet, so `metadata.siteId` is absent), that check is
-      // skipped and THIS brand-match is the sole ownership control — which is
-      // sufficient because the route itself is scoped to a brand the caller passed
-      // `authorize` for.
+      // The producer stamps `metadata.siteId` (from the brand's base site), so
+      // `loadJobScopedToCaller` already enforced site-level ownership. Since #3232
+      // hardened that primitive fail-closed, a resolver-supplied job with NO siteId is
+      // DENIED (404) there before reaching here — so this brand-match is a
+      // defense-in-depth SECONDARY control on top of the site-ownership check, not a
+      // fallback for siteless jobs.
       if (job.getMetadata?.()?.brandId !== auth.brandUuid) {
         return notFound(`Job not found: ${jobId}`);
       }
@@ -2552,9 +2552,10 @@ function SerenityController(context, log, env) {
         return accessError;
       }
       const metadata = job.getMetadata?.() ?? {};
-      // Brand scoping (the route is brand-scoped). Site-level ownership was enforced
-      // by loadJobScopedToCaller when the job carries a siteId; for a siteless job
-      // this brand-match is the sole ownership control (see the poll endpoint note).
+      // Brand scoping (the route is brand-scoped). Site-level ownership was already
+      // enforced by loadJobScopedToCaller (the producer stamps metadata.siteId; a
+      // resolver-supplied job with no siteId is denied fail-closed there since #3232).
+      // This brand-match is a defense-in-depth secondary control (see the poll note).
       if (metadata.brandId !== auth.brandUuid) {
         return notFound(`Job not found: ${jobId}`);
       }
