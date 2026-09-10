@@ -16,7 +16,7 @@ import {
 import {
   accepted, badRequest, internalServerError, notFound, ok,
 } from '@adobe/spacecat-shared-http-utils';
-import { createOaeValidationJob, getOaeValidationJob } from '@adobe/spacecat-shared-tokowaka-client';
+import { OaeValidationJobs } from '@adobe/spacecat-shared-tokowaka-client';
 
 /**
  * Creates an OAE validation controller instance.
@@ -45,6 +45,8 @@ function OaeValidationController(ctx, log, env) {
   if (!isNonEmptyObject(env)) {
     throw new Error('Environment object required');
   }
+
+  const oaeValidationJobs = OaeValidationJobs.createFrom({ dataAccess, sqs, log });
 
   /**
    * Validates the request data for job creation.
@@ -81,9 +83,7 @@ function OaeValidationController(ctx, log, env) {
     validateRequestData(data);
 
     const { siteId, type, suggestionIds } = data;
-    return createOaeValidationJob({
-      dataAccess, sqs, siteId, type, suggestionIds,
-    }, log);
+    return oaeValidationJobs.createJob({ siteId, type, suggestionIds });
   };
 
   /**
@@ -123,7 +123,7 @@ function OaeValidationController(ctx, log, env) {
     }
 
     try {
-      const job = await getOaeValidationJob({ dataAccess, jobId });
+      const job = await oaeValidationJobs.getJob(jobId);
 
       if (!job) {
         return notFound('Job not found');
