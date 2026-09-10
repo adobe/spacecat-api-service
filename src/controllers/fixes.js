@@ -455,6 +455,7 @@ export class FixesController {
           opportunityId,
           ...(hasText(callerUserId) && { executedBy: callerUserId }),
         });
+        let updatedSuggestions;
         if (suggestions) {
           await FixEntity.setSuggestionsForFixEntity(opportunityId, fixEntity, suggestions);
 
@@ -465,7 +466,7 @@ export class FixesController {
           // there throws before this line, so a suggestion is never transitioned
           // without a persisted, linked fix.
           if (hasText(fixData.suggestionsTargetStatus)) {
-            await this.#Suggestion.bulkUpdateStatus(
+            updatedSuggestions = await this.#Suggestion.bulkUpdateStatus(
               suggestions,
               fixData.suggestionsTargetStatus,
             );
@@ -474,6 +475,12 @@ export class FixesController {
         return {
           index,
           fix: FixDto.toJSON(fixEntity),
+          // Only present when suggestionsTargetStatus was provided — callers that
+          // didn't mutate suggestion status get no suggestions field, since nothing
+          // about suggestion state changed for them to sync.
+          ...(updatedSuggestions && {
+            suggestions: updatedSuggestions.map((s) => SuggestionDto.toJSON(s)),
+          }),
           statusCode: 201,
         };
       } catch (error) {
@@ -740,15 +747,27 @@ export class FixesController {
       // Opt-in (mirrors createFixes' suggestionsTargetStatus): only reached after the
       // fix status write above succeeded, so a suggestion is never transitioned
       // without a persisted fix status update.
+      let updatedSuggestions;
       if (hasText(suggestionsTargetStatus)) {
         const suggestions = await this.#FixEntity.getSuggestionsByFixEntityId(uuid);
         if (Array.isArray(suggestions) && suggestions.length > 0) {
-          await this.#Suggestion.bulkUpdateStatus(suggestions, suggestionsTargetStatus);
+          updatedSuggestions = await this.#Suggestion.bulkUpdateStatus(
+            suggestions,
+            suggestionsTargetStatus,
+          );
         }
       }
 
       return {
-        index, uuid, fix: FixDto.toJSON(updatedFix), statusCode: 200,
+        index,
+        uuid,
+        fix: FixDto.toJSON(updatedFix),
+        // Only present when suggestionsTargetStatus was provided and linked
+        // suggestions actually existed to transition.
+        ...(updatedSuggestions && {
+          suggestions: updatedSuggestions.map((s) => SuggestionDto.toJSON(s)),
+        }),
+        statusCode: 200,
       };
     } catch (error) {
       const statusCode = error?.name === VALIDATION_ERROR_NAME ? /* c8 ignore next */ 400 : 500;

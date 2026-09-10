@@ -2022,6 +2022,9 @@ describe('Fixes Controller', () => {
         errorItems: [],
         removedCount: 0,
       });
+      // bulkUpdateStatus mutates and returns the suggestions in the real
+      // collection; simulate that mutation for the stub.
+      suggestions.forEach((s) => s.setStatus(Suggestion.STATUSES.FIXED));
       suggestionCollection.bulkUpdateStatus.resolves(suggestions);
 
       const response = await fixesController.createFixes(requestContext);
@@ -2030,6 +2033,15 @@ describe('Fixes Controller', () => {
       const { fixes, metadata } = await response.json();
       expect(metadata).deep.equals({ total: 1, success: 1, failed: 0 });
       expect(fixes[0]).includes({ index: 0, statusCode: 201 });
+
+      // The response echoes back the updated suggestions so the caller (e.g. the
+      // Success Studio UI) can sync its local state without a separate refetch.
+      expect(fixes[0].suggestions).to.have.lengthOf(2);
+      expect(fixes[0].suggestions.map((s) => s.id)).to.have.members(
+        suggestions.map((s) => s.getId()),
+      );
+      expect(fixes[0].suggestions.every((s) => s.status === Suggestion.STATUSES.FIXED))
+        .to.be.true;
 
       expect(suggestionCollection.bulkUpdateStatus).to.have.been.calledOnceWith(
         suggestions,
@@ -2062,6 +2074,10 @@ describe('Fixes Controller', () => {
       const response = await fixesController.createFixes(requestContext);
       expect(response).includes({ status: 207 });
       expect(suggestionCollection.bulkUpdateStatus).to.not.have.been.called;
+
+      const { fixes } = await response.json();
+      // No suggestion mutation happened, so the response carries no suggestions field.
+      expect(fixes[0].suggestions).to.be.undefined;
     });
 
     describe('document path enrichment (AEM CS and AEM Edge)', () => {
@@ -2595,6 +2611,9 @@ describe('Fixes Controller', () => {
         opportunityId, type: 'CONTENT_UPDATE', status: 'PENDING',
       });
       fixEntityCollection.getSuggestionsByFixEntityId.withArgs(fixId).resolves([suggestion]);
+      // bulkUpdateStatus mutates and returns the suggestion in the real
+      // collection; simulate that mutation for the stub.
+      suggestion.setStatus(Suggestion.STATUSES.FIXED);
       suggestionCollection.bulkUpdateStatus.resolves([suggestion]);
 
       requestContext.data = [{
@@ -2606,6 +2625,14 @@ describe('Fixes Controller', () => {
       const { fixes, metadata } = await response.json();
       expect(metadata).deep.equals({ total: 1, success: 1, failed: 0 });
       expect(fixes[0]).includes({ index: 0, statusCode: 200 });
+
+      // The response echoes back the updated suggestion so the caller can sync its
+      // local state without a separate refetch.
+      expect(fixes[0].suggestions).to.have.lengthOf(1);
+      expect(fixes[0].suggestions[0]).to.include({
+        id: suggestion.getId(),
+        status: Suggestion.STATUSES.FIXED,
+      });
 
       expect(suggestionCollection.bulkUpdateStatus).to.have.been.calledOnceWith(
         [suggestion],
@@ -2643,6 +2670,9 @@ describe('Fixes Controller', () => {
       const response = await fixesController.patchFixesStatus(requestContext);
       expect(response).includes({ status: 207 });
       expect(suggestionCollection.bulkUpdateStatus).to.not.have.been.called;
+
+      const { fixes } = await response.json();
+      expect(fixes[0].suggestions).to.be.undefined;
     });
 
     it('can patch the status of multiple fixes', async () => {
