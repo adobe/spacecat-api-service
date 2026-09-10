@@ -139,12 +139,15 @@ jobs:
   # A SECOND Lambda per service (distinct `hedy --entryFile`, deployed as
   # spacecat-services--serenity-job-runner) that the reusable service-ci workflow
   # can't deploy. Two triggers:
-  #   1. push to `main` -> auto-deploy to the same envs api-service auto-deploys to
-  #      (STAGE then PROD; see the strategy block). Stops the worker drifting behind
-  #      the api-service Lambda — previously it was manual-dispatch ONLY, so a change
-  #      merged to the worker handler (e.g. PR #3138) shipped to api-service but left
-  #      the worker stale with no signal until a job failed.
-  #   2. workflow_dispatch -> manual single-env deploy (dev is manual-only).
+  #   1. push to `main` -> auto-deploy to PROD (the only env with the ESM wired
+  #      up — create_serenity_job_runner_esms is prod-only; stage never sets it,
+  #      so a stage-deployed worker is functionally inert, nothing ever invokes
+  #      it). Stops the worker drifting behind the api-service Lambda —
+  #      previously it was manual-dispatch ONLY, so a change merged to the worker
+  #      handler (e.g. PR #3138) shipped to api-service but left the worker stale
+  #      with no signal until a job failed.
+  #   2. workflow_dispatch -> manual single-env deploy (dev, stage, or prod) for
+  #      ad-hoc verification; stage is not part of the automatic push path.
   #
   # Deploys on every successful `main`-push `ci` run (service-ci.yaml@v3 exposes no
   # `released` output to gate on): a slight over-deploy that guarantees no drift.
@@ -162,19 +165,16 @@ jobs:
     timeout-minutes: 15
     needs: [ci]
     strategy:
-      # push -> stage THEN prod. `max-parallel: 1` runs the matrix legs one at a
-      # time in the order listed (stage, then prod), and `fail-fast: true` cancels
-      # the queued prod leg if the stage deploy fails -- so prod ONLY ships once
-      # stage has deployed cleanly (stage-first promotion gate). On
-      # workflow_dispatch the matrix is a single env, so both settings are no-ops.
+      # Both push and workflow_dispatch resolve to a single-element matrix now
+      # (push -> prod only), so fail-fast/max-parallel are no-ops here — kept
+      # only so a future multi-env push list stays ordered/serialized by default.
       fail-fast: true
       max-parallel: 1
       matrix:
-        environment: ${{ fromJSON(github.event_name == 'push' && '["stage","prod"]' || format('["{0}"]', inputs.environment)) }}
+        environment: ${{ fromJSON(github.event_name == 'push' && '["prod"]' || format('["{0}"]', inputs.environment)) }}
     concurrency:
-      # Per-environment: the two `main`-push matrix legs (and any concurrent
-      # manual dispatch) serialize within an env but never block a different
-      # env, so a stage deploy can't collide with a prod deploy.
+      # Serializes same-env deploys (e.g. a push deploy overlapping a manual
+      # workflow_dispatch to the same environment) without blocking other envs.
       group: deploy-worker-${{ matrix.environment }}
       cancel-in-progress: false
     environment: ${{ matrix.environment == 'dev' && 'dev-branches' || matrix.environment }}
