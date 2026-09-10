@@ -10,17 +10,13 @@
  * governing permissions and limitations under the License.
  */
 
-import crypto from 'crypto';
 import {
   isNonEmptyObject, isNonEmptyArray, isValidUUID, hasText,
 } from '@adobe/spacecat-shared-utils';
 import {
   accepted, badRequest, internalServerError, notFound, ok,
 } from '@adobe/spacecat-shared-http-utils';
-// Dispatch type import-worker's HANDLERS map routes on -- always this constant, regardless of
-// which validator (`validationType`) the job actually runs. Kept as a plain string (not a shared
-// import) since spacecat-api-service does not depend on spacecat-import-worker's source.
-const OAE_VALIDATION_IMPORT_TYPE = 'oae-validation';
+import { createOaeValidationJob, getOaeValidationJob } from '@adobe/spacecat-shared-tokowaka-client';
 
 /**
  * Creates an OAE validation controller instance.
@@ -85,20 +81,9 @@ function OaeValidationController(ctx, log, env) {
     validateRequestData(data);
 
     const { siteId, type, suggestionIds } = data;
-    const jobId = crypto.randomUUID();
-
-    const configuration = await dataAccess.Configuration.findLatest();
-    await sqs.sendMessage(configuration.getQueues().imports, {
-      type: OAE_VALIDATION_IMPORT_TYPE,
-      jobId,
-      siteId,
-      validationType: type,
-      suggestionIds,
-    });
-
-    log.info(`[oae-validation] queued job=${jobId} siteId=${siteId} type=${type} suggestions=${suggestionIds.length}`);
-
-    return { jobId };
+    return createOaeValidationJob({
+      dataAccess, sqs, siteId, type, suggestionIds,
+    }, log);
   };
 
   /**
@@ -138,22 +123,13 @@ function OaeValidationController(ctx, log, env) {
     }
 
     try {
-      const rows = await dataAccess.OaeValidation.allByJobId(jobId);
+      const job = await getOaeValidationJob({ dataAccess, jobId });
 
-      if (rows.length === 0) {
+      if (!job) {
         return notFound('Job not found');
       }
 
-      return ok({
-        jobId,
-        suggestions: rows.map((row) => ({
-          suggestionId: row.getSuggestionId(),
-          status: row.getStatus(),
-          outcome: row.getOutcome(),
-          completedAt: row.getCompletedAt(),
-          metadata: row.getMetadata(),
-        })),
-      });
+      return ok(job);
     } catch (error) {
       log.error(`Failed to get OAE validation job: ${error.message}`);
       return internalServerError(error.message);
