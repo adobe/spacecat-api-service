@@ -12,6 +12,7 @@
 
 import { buildAdvancedFilters, buildModelFilter } from '../constants.js';
 import { dateToIsoWeek } from '../week-utils.js';
+import { buildFacetedTagFilters } from './prompts.js';
 
 // Legacy default window is a rolling 28 days (see defaultDateRange in
 // llmo-brand-presence.js). Kept inline here so this definition stays pure and does
@@ -61,11 +62,24 @@ function defaultDateRange() {
  *    `category__<label>` prefix).
  *  - Cited Domains' `comparison_data_formatting: 'union'` and top-level `project_id` are
  *    intentionally NOT sent — this element ignores both (confirmed via the MFE probe).
- *  - Brand scoping comes from the request targeting the brand's sub-workspace (resolved in
- *    the controller); the MFE also passes `CBF_brand` (name), but the sub-workspace already
- *    scopes to the brand, so we don't duplicate it here.
- *    CAVEAT: that premise was DISPROVEN live for PROMPTS_BY_TOPIC (see topic-prompts.js);
- *    it is UNVERIFIED for this element and deserves its own MFE reconciliation.
+ *  - Brand scoping needs `CBF_brand` (the brand display name) — the sub-workspace ALONE is
+ *    NOT enough. This file previously claimed the opposite ("the sub-workspace already
+ *    scopes to the brand, so we don't duplicate it here"), with a caveat that the premise
+ *    had been disproven for PROMPTS_BY_TOPIC (see topic-prompts.js) but was unverified
+ *    here. It is now DISPROVEN for this element too (LLMO-7456), by replaying this exact
+ *    payload twice against the live element and changing only `CBF_brand` (brand "au",
+ *    2026-08-11..2026-09-09, search-gpt, one project). Week 2026-08-23 returned
+ *    positive/neutral/negative prompt counts of 319/345/16 WITH the filter and 507/585/66
+ *    WITHOUT it; `blocks.line` went 478 → 637. A brand's sub-workspace also holds its
+ *    tracked COMPETITORS (that is what powers Market Comparison), so without this filter
+ *    the element blends them into the brand's own sentiment — here au plus NTT Docomo,
+ *    SoftBank, Rakuten Mobile and povo. Rendered as a 100% split that understated positive
+ *    by 2-6 points and inflated negative roughly 3x (2% → 6%) on EVERY bar.
+ *    Sent as a bare `eq` (not an `or` block) — the shape captured from the live MFE and
+ *    the one replayed above; `brand-presence-stats.js` sends the same bare shape.
+ *    The column is `CBF_brand`, NOT `CBF_ws_brand`.
+ *    Like PROMPTS_BY_TOPIC, this filter changes the per-bucket VALUES, not the bucket set:
+ *    both probes returned the same four weekly buckets.
  *
  * @param {object} [params]
  * @param {string} [params.model] - AI model filter value (Semrush engine name or UI
@@ -80,9 +94,17 @@ function defaultDateRange() {
  * @param {string} [params.projectId] - Single Semrush project id to scope to (`CBF_project`).
  * @param {string[]} [params.projectIds] - Multiple Semrush project ids to OR together
  *   (`CBF_project`); takes precedence over `projectId` when both are given.
+ * @param {string} [params.brandName] - Brand display name to scope the sentiment counts to
+ *   this brand (`CBF_brand`). Omitted, blank or whitespace-only → brand-agnostic, which
+ *   blends the sub-workspace's tracked competitors into the result (see the module header).
+ *   Matching is exact and case-sensitive upstream, and registered aliases are NOT resolved
+ *   (verified on PROMPTS_BY_TOPIC, see topic-prompts.js), so this must be the brand's exact
+ *   Semrush-tracked name: a casing/rename/alias divergence silently zeroes the counts,
+ *   which is indistinguishable from a genuine "no sentiment". That is why a blank name
+ *   falls back to brand-agnostic rather than sending a value that cannot match.
  */
 export function buildSentimentOverviewPayload({
-  model, platform, startDate, endDate, category, projectId, projectIds,
+  model, platform, startDate, endDate, category, tagPaths, projectId, projectIds, brandName,
 } = {}) {
   // "All platforms" (param absent or 'all') → omit CBF_model so Semrush aggregates across
   // every model that produced data; otherwise scope to the single resolved model (LLMO-7093).
@@ -95,6 +117,20 @@ export function buildSentimentOverviewPayload({
   if (modelFilter) {
     advancedFilters.push(modelFilter);
   }
+  // Brand scoping: restrict the sentiment counts to THIS brand via CBF_brand. Without it
+  // the element blends in every competitor tracked in the same sub-workspace (LLMO-7456 —
+  // see the module header for the live A/B). Sent as a bare `eq`, the shape captured from
+  // the MFE and verified live against this element.
+  //
+  // Trimmed here, and treated as absent when the result is empty, so the invariant holds
+  // for EVERY caller: a blank or whitespace-only name must fall back to brand-agnostic
+  // rather than send `CBF_brand: "   "`, which matches no brand and would silently zero
+  // the counts — indistinguishable from a real "no sentiment". Note `hasText` does NOT
+  // trim (`!!str && isString(str)`), so guarding with it here would not catch "   ".
+  const scopedBrand = typeof brandName === 'string' ? brandName.trim() : '';
+  if (scopedBrand) {
+    advancedFilters.push({ op: 'eq', val: scopedBrand, col: 'CBF_brand' });
+  }
   // Project scoping: this element scopes by CBF_project (one or more Semrush project ids),
   // NOT a top-level project_id. Supplied by the caller via the `projectId` query param.
   const ids = Array.isArray(projectIds) && projectIds.length > 0
@@ -106,9 +142,7 @@ export function buildSentimentOverviewPayload({
       filters: ids.map((id) => ({ op: 'eq', val: id, col: 'CBF_project' })),
     });
   }
-  if (category) {
-    advancedFilters.push({ op: 'eq', val: category, col: 'CBF_tags' });
-  }
+  advancedFilters.push(...buildFacetedTagFilters({ tagPaths, category }));
 
   return {
     auto_bucketing: 'week',
@@ -133,6 +167,44 @@ function parseIsoWeekParts(weekStr) {
 
 const SENTIMENT_BUCKETS = ['positive', 'neutral', 'negative'];
 
+/**
+ * Which per-legend count drives the sentiment percentages (LLMO-7457).
+ *
+ * `PROMPTS` is the default and preserves this endpoint's original behaviour.
+ * `MENTIONS` matches the Semrush Brand Presence MFE — see the verification note on
+ * {@link transformSentimentOverviewResponse}.
+ *
+ * Temporary: this exists so both definitions can be compared in production (no dev org is
+ * correctly wired to Semrush). Once the UI has moved to `mentions`, the default flips and
+ * the `prompts` branch is removed along with this map.
+ */
+export const SENTIMENT_METRICS = Object.freeze({
+  PROMPTS: 'prompts',
+  MENTIONS: 'mentions',
+});
+
+/**
+ * Normalises one candidate metric value to a {@link SENTIMENT_METRICS} member.
+ *
+ * Trims and lowercases, so `' MENTIONS '` resolves like `'mentions'`. Only that
+ * one opt-in selects mention counts; everything else — absent, blank,
+ * unrecognised, non-string — resolves to `PROMPTS`, this endpoint's original
+ * behaviour. Deliberately permissive rather than throwing: an unrecognised value
+ * should degrade to today's numbers, not fail an otherwise-valid chart request.
+ *
+ * Shared by the controller's query-param parsing and by
+ * {@link transformSentimentOverviewResponse}, so a direct service caller gets the
+ * same answer as an HTTP one rather than silently falling back on casing alone.
+ *
+ * @param {*} value - Raw candidate value.
+ * @returns {'prompts'|'mentions'}
+ */
+export function normalizeSentimentMetric(value) {
+  return (typeof value === 'string' && value.trim().toLowerCase() === SENTIMENT_METRICS.MENTIONS)
+    ? SENTIMENT_METRICS.MENTIONS
+    : SENTIMENT_METRICS.PROMPTS;
+}
+
 // Guard against a non-date `bar` value (e.g. a metadata / "N/A" row from the upstream
 // element): an invalid day slices to junk that dateToIsoWeek turns into a "NaN-WNaN"
 // key, which would surface as a phantom weeklyTrends entry (weekNumber/year 0). Only a
@@ -146,8 +218,9 @@ function isoDayOf(bar) {
 /**
  * Transforms the raw Sentiment element response into the legacy Brand Presence
  * `sentiment-overview` contract so the sentiment chart is drop-in compatible:
- *   { weeklyTrends: [{ week, weekNumber, year,
+ *   { metric, weeklyTrends: [{ week, weekNumber, year,
  *       sentiment: [{ name, value, color } x Positive/Neutral/Negative],
+ *       mentionCounts, promptCounts, sentimentTotal,
  *       totalPrompts, promptsWithSentiment, mentions, citations,
  *       visibilityScore, competitors }] }
  * ordered oldest-first (matches the legacy aggregateSentimentByWeek sort).
@@ -164,9 +237,24 @@ function isoDayOf(bar) {
  * below is granularity-agnostic: one row per week means the per-week sums are identities, and
  * it would still correctly roll up were the element ever queried at daily granularity.)
  * Field mapping:
- *   positive/neutral/negative prompt counts ← `value__prompts` per legend for the week
- *   totalPrompts                            ← `blocks.line[].value` for the week
+ *   mentionCounts (positive/neutral/negative) ← `value` per legend for the week
+ *   promptCounts  (positive/neutral/negative) ← `value__prompts` per legend for the week
+ *   totalPrompts                              ← `blocks.line[].value` for the week
  *   mentions/citations/visibilityScore/competitors — stubbed 0/[] (as in the legacy handler)
+ *
+ * WHICH COUNT DRIVES THE PERCENTAGES — the `metric` param (LLMO-7457):
+ *   - `'prompts'`  (DEFAULT) → `value__prompts`. The behaviour this endpoint has always had.
+ *   - `'mentions'`           → `value`. What the Semrush Brand Presence MFE plots.
+ * VERIFIED against a live MFE tooltip (brand "au", bucket 2026-08-21): it showed
+ * Negative 1% / 7, Neutral 56% / 571, Positive 43% / 443. The raw row's `value` is
+ * 7/571/443 (exact match) while `value__prompts` is 7/208/165 (no match) — so the MFE
+ * plots `value`. Its percentages are each value over the SUM OF THE THREE (1021 → 1/56/43,
+ * an exact match); the `blocks.line` distinct total (275) yields 3/208/161 and is therefore
+ * definitively NOT the MFE's denominator. Our long-standing rounding rule below, applied to
+ * mentions, reproduces the MFE output exactly.
+ * BOTH count sets are returned on every response regardless of `metric`, so a caller can
+ * render true counts alongside the percentages (as the MFE does) and compare the two
+ * definitions from a single call.
  *
  * SEMANTIC NOTE: the three legends are OVERLAPPING sets, not a partition — a prompt with
  * mixed-sentiment mentions is counted in every legend it appears in. So Σ(value__prompts
@@ -176,24 +264,37 @@ function isoDayOf(bar) {
  *     invariant in aggregateSentimentByWeek where the three counts sum to it), so it
  *     can exceed `totalPrompts`. Do NOT compute promptsWithSentiment/totalPrompts as a
  *     coverage ratio in the UI — it can exceed 100%. (Flag for the UI-wiring follow-up.)
+ *   - This overlap is NOT a defect to correct: the MFE normalises over the same
+ *     sum-of-three (see the verification above). Do not "fix" it to the distinct total.
  *   - The sentiment PERCENTAGES are internal ratios of the three legend counts and are
  *     unaffected by this overlap; they are the chart's load-bearing content.
  * Percentages are computed exactly as the legacy handler: round positive & negative,
  * neutral = 100 − positive − negative (so the three always sum to 100).
  *
  * @param {object} raw - Raw response from the Sentiment element.
- * @returns {{ weeklyTrends: Array<object> }}
+ * @param {object} [options]
+ * @param {'prompts'|'mentions'} [options.metric] - Which count drives the percentages.
+ *   Normalised via `normalizeSentimentMetric`, so a trimmed/cased value from a direct
+ *   service caller resolves the same way an HTTP query value does. Anything other than
+ *   `'mentions'` (including absent) means `'prompts'`.
+ * @returns {{ metric: string, weeklyTrends: Array<object> }}
  */
-export function transformSentimentOverviewResponse(raw) {
+export function transformSentimentOverviewResponse(raw, { metric } = {}) {
+  // Shared with the controller's query parsing so both layers agree; only the
+  // explicit 'mentions' opt-in switches the source field.
+  const resolvedMetric = normalizeSentimentMetric(metric);
+  const useMentions = resolvedMetric === SENTIMENT_METRICS.MENTIONS;
   const rows = Array.isArray(raw?.blocks?.data) ? raw.blocks.data : [];
   const lineRows = Array.isArray(raw?.blocks?.line) ? raw.blocks.line : [];
 
-  // week -> { positive, neutral, negative, totalPrompts }
+  // week -> per-legend mention + prompt counts, plus the distinct-response line total.
   const weekMap = new Map();
   const ensureWeek = (week) => {
     if (!weekMap.has(week)) {
       weekMap.set(week, {
-        positive: 0, neutral: 0, negative: 0, totalPrompts: 0,
+        mentions: { positive: 0, neutral: 0, negative: 0 },
+        prompts: { positive: 0, neutral: 0, negative: 0 },
+        totalPrompts: 0,
       });
     }
     return weekMap.get(week);
@@ -205,9 +306,12 @@ export function transformSentimentOverviewResponse(raw) {
     if (!day || !SENTIMENT_BUCKETS.includes(bucket)) {
       return;
     }
-    const week = dateToIsoWeek(day);
+    const entry = ensureWeek(dateToIsoWeek(day));
     // `Number(x) || 0` (not `?? 0`) so a non-numeric value coerces to 0, not NaN.
-    ensureWeek(week)[bucket] += Number(row.value__prompts) || 0;
+    // Both counts are accumulated on every row so the response can carry both sets
+    // regardless of which one `metric` selects for the percentages.
+    entry.mentions[bucket] += Number(row.value) || 0;
+    entry.prompts[bucket] += Number(row.value__prompts) || 0;
   });
 
   // The total-prompts line is a separate per-day series; fold it into the same weeks.
@@ -223,13 +327,20 @@ export function transformSentimentOverviewResponse(raw) {
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([week, entry]) => {
       const { weekNumber, year } = parseIsoWeekParts(week);
-      const promptsWithSentiment = entry.positive + entry.neutral + entry.negative;
+      const { mentions: mentionCounts, prompts: promptCounts } = entry;
+      // The selected metric drives the percentages; the other set still ships.
+      const basis = useMentions ? mentionCounts : promptCounts;
+      const basisTotal = basis.positive + basis.neutral + basis.negative;
+      // Unchanged meaning: always the sum of the three PROMPT counts, whatever `metric` is,
+      // so this field does not silently change definition for existing consumers.
+      const promptsWithSentiment = promptCounts.positive
+        + promptCounts.neutral + promptCounts.negative;
       let positivePct = 0;
       let negativePct = 0;
       let neutralPct = 0;
-      if (promptsWithSentiment > 0) {
-        positivePct = Math.round((entry.positive / promptsWithSentiment) * 100);
-        negativePct = Math.round((entry.negative / promptsWithSentiment) * 100);
+      if (basisTotal > 0) {
+        positivePct = Math.round((basis.positive / basisTotal) * 100);
+        negativePct = Math.round((basis.negative / basisTotal) * 100);
         neutralPct = 100 - positivePct - negativePct;
         // Independent rounding of positive & negative can push their sum to 101
         // (e.g. 50.5→51 and 49.5→50), making the neutral remainder negative. Absorb
@@ -254,6 +365,11 @@ export function transformSentimentOverviewResponse(raw) {
           { name: 'Neutral', value: neutralPct, color: SENTIMENT_COLORS.neutral },
           { name: 'Negative', value: negativePct, color: SENTIMENT_COLORS.negative },
         ],
+        // Raw counts for both definitions — additive, so existing consumers are unaffected.
+        mentionCounts,
+        promptCounts,
+        // The denominator the percentages above were computed over.
+        sentimentTotal: basisTotal,
         totalPrompts: entry.totalPrompts,
         promptsWithSentiment,
         mentions: 0,
@@ -263,7 +379,10 @@ export function transformSentimentOverviewResponse(raw) {
       };
     });
 
-  return { weeklyTrends };
+  return {
+    metric: resolvedMetric,
+    weeklyTrends,
+  };
 }
 
 export { SENTIMENT_COLORS };

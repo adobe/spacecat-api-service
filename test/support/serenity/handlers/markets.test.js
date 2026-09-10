@@ -25,6 +25,7 @@ import {
   handleListModels,
   handleUpdateModels,
   listLanguageCatalog,
+  resolveLanguageId,
   resolveLocation,
   clearLanguageCache,
   clearTagCache,
@@ -38,6 +39,11 @@ use(sinonChai);
 
 const BRAND = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
 const WORKSPACE = 'workspace-1';
+
+// Shared across the create-market tests below (MysticatBot review, LLMO-7421):
+// a single flagged own-brand benchmark, satisfying the pre-publish invariant
+// without each test re-declaring the same listBenchmarks resolve value.
+const FLAGGED_BENCHMARKS = { aio_benchmarks: [{ id: 'bm-1', main_brand: true }] };
 
 function makeProject({
   semrushProjectId, geoTargetId, languageCode, remove, siteId = null,
@@ -207,8 +213,9 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     dataAccess.BrandSemrushProject.findBySlice.resolves(null);
     dataAccess.BrandSemrushProject.create.resolves();
     const transport = {
-      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English', code: 'en' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-new' }),
+      listBenchmarks: sinon.stub().resolves(FLAGGED_BENCHMARKS),
       updateProject: sinon.stub().resolves(),
       publishProject: sinon.stub().resolves(),
     };
@@ -260,8 +267,9 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     dataAccess.BrandSemrushProject.findBySlice.resolves(null);
     dataAccess.BrandSemrushProject.create.resolves();
     const transport = {
-      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English', code: 'en' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-new' }),
+      listBenchmarks: sinon.stub().resolves(FLAGGED_BENCHMARKS),
       updateProject: sinon.stub().resolves(),
       publishProject: sinon.stub().resolves(),
     };
@@ -288,8 +296,9 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     dataAccess.BrandSemrushProject.findBySlice.resolves(null);
     dataAccess.BrandSemrushProject.create.resolves();
     const transport = {
-      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English', code: 'en' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-new' }),
+      listBenchmarks: sinon.stub().resolves(FLAGGED_BENCHMARKS),
       updateProject: sinon.stub().resolves(),
       publishProject: sinon.stub().resolves(),
     };
@@ -313,8 +322,9 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     dataAccess.BrandSemrushProject.findBySlice.resolves(null);
     dataAccess.BrandSemrushProject.create.resolves();
     const transport = {
-      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English', code: 'en' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-new' }),
+      listBenchmarks: sinon.stub().resolves(FLAGGED_BENCHMARKS),
       updateProject: sinon.stub().rejects(new Error('patch boom')),
       publishProject: sinon.stub().resolves(),
     };
@@ -338,8 +348,9 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     dataAccess.BrandSemrushProject.create.resolves();
     dataAccess.Site.findById.resolves({ getBaseURL: () => 'https://acme.com/path' });
     const transport = {
-      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English', code: 'en' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-new' }),
+      listBenchmarks: sinon.stub().resolves(FLAGGED_BENCHMARKS),
       updateProject: sinon.stub().resolves(),
       publishProject: sinon.stub().resolves(),
     };
@@ -360,8 +371,9 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     dataAccess.BrandSemrushProject.create.resolves();
     dataAccess.Site.findById.resolves({ getBaseURL: () => 'https://kisqali.de' });
     const transport = {
-      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-de', name: 'German' }] }),
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-de', name: 'German', code: 'de' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-de' }),
+      listBenchmarks: sinon.stub().resolves(FLAGGED_BENCHMARKS),
       updateProject: sinon.stub().resolves(),
       publishProject: sinon.stub().resolves(),
     };
@@ -388,8 +400,9 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     dataAccess.BrandSemrushProject.findBySlice.resolves(null);
     dataAccess.BrandSemrushProject.create.resolves();
     const transport = {
-      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English', code: 'en' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-new' }),
+      listBenchmarks: sinon.stub().resolves(FLAGGED_BENCHMARKS),
       updateProject: sinon.stub().resolves(),
       publishProject: sinon.stub().resolves(),
     };
@@ -410,8 +423,9 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     dataAccess.BrandSemrushProject.create.resolves();
     dataAccess.Site.findById.resolves({ getBaseURL: () => 'https://nba.com/kings' });
     const transport = {
-      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English', code: 'en' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-new' }),
+      listBenchmarks: sinon.stub().resolves(FLAGGED_BENCHMARKS),
       updateProject: sinon.stub().resolves(),
       publishProject: sinon.stub().resolves(),
     };
@@ -435,8 +449,9 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     dataAccess.BrandSemrushProject.findBySlice.resolves(null);
     dataAccess.BrandSemrushProject.create.resolves();
     const transport = {
-      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English', code: 'en' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-new' }),
+      listBenchmarks: sinon.stub().resolves(FLAGGED_BENCHMARKS),
       updateProject: sinon.stub().resolves(),
       publishProject: sinon.stub().resolves(),
     };
@@ -459,8 +474,9 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     dataAccess.BrandSemrushProject.create.resolves();
     dataAccess.Site.findById.resolves({ getBaseURL: () => 'https://nba.com/kings' });
     const transport = {
-      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English', code: 'en' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-orphan-patch' }),
+      listBenchmarks: sinon.stub().resolves(FLAGGED_BENCHMARKS),
       updateProject: sinon.stub().rejects(new Error('upstream 503')),
       publishProject: sinon.stub().resolves(),
       deleteProject: sinon.stub().resolves(),
@@ -492,8 +508,9 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     dataAccess.BrandSemrushProject.create.resolves();
     dataAccess.Site.findById.resolves({ getBaseURL: () => 'https://nba.com/kings' });
     const transport = {
-      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English', code: 'en' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-new' }),
+      listBenchmarks: sinon.stub().resolves(FLAGGED_BENCHMARKS),
       updateProject: sinon.stub().resolves(),
       publishProject: sinon.stub().resolves(),
     };
@@ -518,8 +535,9 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     dataAccess.BrandSemrushProject.findBySlice.resolves(null);
     dataAccess.BrandSemrushProject.create.resolves();
     const transport = {
-      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English', code: 'en' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-new' }),
+      listBenchmarks: sinon.stub().resolves(FLAGGED_BENCHMARKS),
       updateProject: sinon.stub().resolves(),
       publishProject: sinon.stub().resolves(),
     };
@@ -549,7 +567,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     dataAccess.BrandSemrushProject.findBySlice.resolves(null);
     dataAccess.Site.findById.resolves(null); // unknown site
     const transport = {
-      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English', code: 'en' }] }),
     };
 
     const result = await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
@@ -597,7 +615,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     dataAccess.BrandSemrushProject.findBySlice.resolves(null);
     const transport = {
       // English not in catalog → resolveLanguageId returns null
-      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-de', name: 'German' }] }),
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-de', name: 'German', code: 'de' }] }),
     };
 
     const result = await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
@@ -608,14 +626,14 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     expect(result.body.error).to.equal('unknownLanguage');
   });
 
-  // Branch coverage: ICU DisplayNames returns the input verbatim for unknown
-  // tags. The handler guards against that and returns null from
-  // isoToEnglishName, which surfaces as 400 unknownLanguage.
-  it('400s when the language tag is not a real language (ICU returns it unchanged)', async () => {
+  // Branch coverage: a syntactically valid but unresolvable code (not a key in
+  // the catalog's byCode map) surfaces as 400 unknownLanguage — no fallback
+  // heuristic catches it (LLMO-7420: exact code match only).
+  it('400s when the language code is not in the Semrush catalog', async () => {
     const dataAccess = makeDataAccess([]);
     dataAccess.BrandSemrushProject.findBySlice.resolves(null);
     const transport = {
-      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English', code: 'en' }] }),
     };
     clearLanguageCache();
 
@@ -653,7 +671,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     const dataAccess = makeDataAccess([]);
     dataAccess.BrandSemrushProject.findBySlice.resolves(null);
     const transport = {
-      // Items exist but the {name, id} contract is broken — no `name` field.
+      // Items exist but the {code, id} contract is broken — no `code` field.
       listLanguages: sinon.stub().resolves({ items: [{ unexpected: 'shape' }] }),
     };
     const log = fakeLog();
@@ -665,7 +683,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
 
     expect(result.status).to.equal(400);
     expect(log.warn).to.have.been.calledWithMatch(
-      'resolveLanguageId: language catalog returned no usable names — upstream field shape may have changed',
+      'resolveLanguageId: language catalog returned no usable codes — upstream field shape may have changed',
       sinon.match.object,
     );
   });
@@ -710,8 +728,9 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     dataAccess.BrandSemrushProject.findBySlice.resolves(null);
     dataAccess.BrandSemrushProject.create.resolves();
     const transport = {
-      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English', code: 'en' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-orphan-1' }),
+      listBenchmarks: sinon.stub().resolves(FLAGGED_BENCHMARKS),
       updateProject: sinon.stub().resolves(),
       publishProject: sinon.stub().rejects(new Error('upstream 503')),
       deleteProject: sinon.stub().resolves(),
@@ -744,8 +763,9 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     const dataAccess = makeDataAccess([]);
     dataAccess.BrandSemrushProject.findBySlice.resolves(null);
     const transport = {
-      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English', code: 'en' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-orphan-3' }),
+      listBenchmarks: sinon.stub().resolves(FLAGGED_BENCHMARKS),
       updateProject: sinon.stub().resolves(),
       publishProject: sinon.stub().rejects(new Error('upstream 503')),
       deleteProject: sinon.stub().rejects(new Error('cleanup network glitch')),
@@ -776,8 +796,9 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     dataAccess.BrandSemrushProject.findBySlice.resolves(null);
     dataAccess.BrandSemrushProject.create.rejects(new Error('duplicate key value violates unique constraint'));
     const transport = {
-      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English', code: 'en' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-orphan-2' }),
+      listBenchmarks: sinon.stub().resolves(FLAGGED_BENCHMARKS),
       updateProject: sinon.stub().resolves(),
       publishProject: sinon.stub().resolves(),
     };
@@ -802,8 +823,9 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     const dataAccess = makeDataAccess([]);
     dataAccess.BrandSemrushProject.findBySlice.resolves(null);
     const transport = {
-      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English', code: 'en' }] }),
       createProject: sinon.stub().resolves({}), // missing id
+      listBenchmarks: sinon.stub().resolves(FLAGGED_BENCHMARKS),
       updateProject: sinon.stub().resolves(),
       publishProject: sinon.stub(),
     };
@@ -822,8 +844,9 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     dataAccess.BrandSemrushProject.findBySlice.resolves(null);
     dataAccess.BrandSemrushProject.create.resolves();
     const transport = {
-      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-de', name: 'German' }] }),
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-de', name: 'German', code: 'de' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-x' }),
+      listBenchmarks: sinon.stub().resolves(FLAGGED_BENCHMARKS),
       updateProject: sinon.stub().resolves(),
       publishProject: sinon.stub().resolves(),
     };
@@ -847,8 +870,9 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     dataAccess.BrandSemrushProject.findBySlice.resolves(null);
     dataAccess.BrandSemrushProject.create.resolves();
     const transport = {
-      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English', code: 'en' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-x' }),
+      listBenchmarks: sinon.stub().resolves(FLAGGED_BENCHMARKS),
       updateProject: sinon.stub().resolves(),
       publishProject: sinon.stub().resolves(),
     };
@@ -904,9 +928,10 @@ describe('handlers/markets.js — language-catalog cache (Important #8)', () => 
     dataAccess.BrandSemrushProject.findBySlice.resolves(null);
     dataAccess.BrandSemrushProject.create.resolves();
     const transport = {
-      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English', code: 'en' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-1' }),
       updateProject: sinon.stub().resolves(),
+      listBenchmarks: sinon.stub().resolves(FLAGGED_BENCHMARKS),
       publishProject: sinon.stub().resolves(),
     };
 
@@ -934,9 +959,10 @@ describe('handlers/markets.js — language-catalog cache (Important #8)', () => 
       dataAccess.BrandSemrushProject.findBySlice.resolves(null);
       dataAccess.BrandSemrushProject.create.resolves();
       const transport = {
-        listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+        listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English', code: 'en' }] }),
         createProject: sinon.stub().resolves({ id: 'proj-1' }),
         updateProject: sinon.stub().resolves(),
+        listBenchmarks: sinon.stub().resolves(FLAGGED_BENCHMARKS),
         publishProject: sinon.stub().resolves(),
       };
 
@@ -1231,7 +1257,7 @@ describe('handlers/markets.js — handleListTags / handleListModels', () => {
       geoTargetId: 2840, languageCode: 'en',
     }, fakeLog());
 
-    expect(result).to.deep.equal({ items: [] });
+    expect(result).to.deep.equal({ items: [], complete: true });
     expect(transport.listPromptsByTags).to.have.callCount(2);
   });
 
@@ -1285,12 +1311,12 @@ describe('handlers/markets.js — handleListTags / handleListModels', () => {
     expect(transport.listPromptsByTags).to.have.callCount(1);
   });
 
-  // Regression guard for the truncation warn log: when every one of the 50
+  // Regression guard for fail-closed reads: when every one of the 50
   // pages we read comes back full (200 items), there's at least one more page
   // upstream we never saw and the tag set is incomplete. We surface this to
   // operators via a `warn` log so the symptom (missing tag in the UI) is
   // diagnosable from log search.
-  it('listTags emits a warn log when the pagination ceiling is hit with full pages', async () => {
+  it('listTags returns a partial result when the pagination ceiling is hit with full pages', async () => {
     const project = makeProject({
       semrushProjectId: 'proj-big', geoTargetId: 2840, languageCode: 'en',
     });
@@ -1306,13 +1332,14 @@ describe('handlers/markets.js — handleListTags / handleListModels', () => {
     };
     const log = fakeLog();
 
-    await handleListTags(transport, dataAccess, BRAND, WORKSPACE, {
+    const result = await handleListTags(transport, dataAccess, BRAND, WORKSPACE, {
       geoTargetId: 2840, languageCode: 'en',
     }, log);
 
+    expect(result.complete).to.equal(false);
     expect(transport.listPromptsByTags).to.have.callCount(50);
     expect(log.warn).to.have.been.calledWithMatch(
-      'handleListTags: tag pagination ceiling reached, tag set is truncated',
+      'handleListTags: tag pagination ceiling reached',
       sinon.match({
         projectId: 'proj-big',
         pagesWalked: 50,
@@ -1352,6 +1379,7 @@ describe('handlers/markets.js — handleListTags / handleListModels', () => {
       childrenCount: 2,
       promptsCount: 0,
       path: null,
+      compatibility: { state: 'readOnly', reason: 'separatorInName' },
     }]);
     // Tree read, not the prompt-derived path.
     expect(transport.listPromptsByTags).to.not.have.been.called;
@@ -1396,6 +1424,7 @@ describe('handlers/markets.js — handleListTags / handleListModels', () => {
       childrenCount: 0,
       promptsCount: 0,
       path: [{ id: 'root-1', name: 'category:Footwear' }],
+      compatibility: { state: 'readOnly', reason: 'separatorInName' },
     }]);
     expect(transport.listProjectTags.firstCall.args[2]).to.include({ parentId: 'root-1', draft: true });
   });
@@ -1433,6 +1462,7 @@ describe('handlers/markets.js — handleListTags / handleListModels', () => {
       childrenCount: 0,
       promptsCount: 7,
       path: [{ id: 'root-1', name: 'category:Footwear' }],
+      compatibility: { state: 'readOnly', reason: 'separatorInName' },
     }]);
   });
 
@@ -1464,28 +1494,33 @@ describe('handlers/markets.js — handleListTags / handleListModels', () => {
     expect(transport.listProjectTags).to.not.have.been.called;
   });
 
-  it('listProjectTagTree warns and stops at the page ceiling when the last page is still full', async () => {
+  it('listProjectTagTree fails closed when pagination repeats without progress', async () => {
     const fullPage = Array.from({ length: 100 }, (_, i) => ({
       id: `tag-${i}`, name: `Tag ${i}`, parent_id: null, children_count: 0,
     }));
     const listProjectTags = sinon.stub().resolves({ page: 1, total: 5000, items: fullPage });
     const log = fakeLog();
 
-    const result = await listProjectTagTree(
+    await expect(listProjectTagTree(
       { listProjectTags },
       WORKSPACE,
       'proj-tree',
       '',
       log,
-    );
+    )).to.be.rejected.then((error) => {
+      expect(error.status).to.equal(503);
+      expect(error.code).to.equal('tagTreeReadIncomplete');
+    });
 
-    // 50 pages x 100 items, stopped by the ceiling rather than running forever.
-    expect(result.items).to.have.lengthOf(5000);
-    expect(listProjectTags.callCount).to.equal(50);
+    expect(listProjectTags.callCount).to.equal(2);
     expect(log.warn).to.have.been.calledOnceWith(
-      'listProjectTagTree: page ceiling hit; tag level may be truncated',
+      'listProjectTagTree: incomplete tag level',
       sinon.match({
-        semrushWorkspaceId: WORKSPACE, projectId: 'proj-tree', parentId: '', pages: 50, limit: 100,
+        semrushWorkspaceId: WORKSPACE,
+        projectId: 'proj-tree',
+        parentId: '',
+        page: 2,
+        reason: 'unexpectedPage',
       }),
     );
   });
@@ -2196,22 +2231,90 @@ describe('handlers/markets.js — handleUpdateModels', () => {
   });
 });
 
-describe('listLanguageCatalog', () => {
-  it('returns the Semrush language catalog, name-sorted, dropping nameless rows', async () => {
+describe('resolveLanguageId', () => {
+  beforeEach(() => {
+    clearLanguageCache();
+  });
+
+  // Regression test for the LLMO-7309 root cause: the old English-name-matching
+  // approach collapsed zh-Hans/zh-Hant to the same "Chinese" name and could not
+  // disambiguate them. Direct code resolution must keep them distinct.
+  it('resolves zh-Hans, zh-Hant, and fil — the LLMO-7309 motivating regression scenarios', async () => {
     const transport = {
       listLanguages: sinon.stub().resolves({
         items: [
-          { id: 'l-fr', name: 'French' },
-          { id: 'l-en', name: 'English' },
-          { id: 'l-bad' }, // no name → dropped
+          { id: 'lang-zh-s', name: 'Chinese Simplified', code: 'zh-Hans' },
+          { id: 'lang-zh-t', name: 'Chinese Traditional', code: 'zh-Hant' },
+          { id: 'lang-fil', name: 'Filipino', code: 'fil' },
+        ],
+      }),
+    };
+    expect(await resolveLanguageId(transport, 'zh-hans')).to.equal('lang-zh-s');
+    expect(await resolveLanguageId(transport, 'zh-hant')).to.equal('lang-zh-t');
+    expect(await resolveLanguageId(transport, 'fil')).to.equal('lang-fil');
+    // The bare primary subtag must NOT resolve when only script-qualified entries exist —
+    // proves there is no `.split('-')[0]`-style fallback lurking anywhere in this path.
+    expect(await resolveLanguageId(transport, 'zh')).to.equal(null);
+  });
+
+  it('returns null for a code not present in the catalog (no name-matching fallback)', async () => {
+    const transport = {
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English', code: 'en' }] }),
+    };
+    expect(await resolveLanguageId(transport, 'xx')).to.equal(null);
+  });
+
+  it('returns null for a null/empty languageCode without ever calling the transport (early-return guard)', async () => {
+    const transport = { listLanguages: sinon.stub().resolves({ items: [] }) };
+    expect(await resolveLanguageId(transport, null)).to.equal(null);
+    expect(await resolveLanguageId(transport, '')).to.equal(null);
+    expect(transport.listLanguages).to.not.have.been.called;
+  });
+});
+
+describe('listLanguageCatalog', () => {
+  it('returns the Semrush language catalog, name-sorted, dropping nameless/codeless rows', async () => {
+    const transport = {
+      listLanguages: sinon.stub().resolves({
+        items: [
+          { id: 'l-fr', name: 'French', code: 'fr' },
+          { id: 'l-en', name: 'English', code: 'en' },
+          { id: 'l-bad' }, // no name/code → dropped
+          { id: 'l-nocode', name: 'NoCode' }, // no code → dropped
         ],
       }),
     };
     const result = await listLanguageCatalog(transport);
     expect(result.items).to.deep.equal([
-      { id: 'l-en', name: 'English' },
-      { id: 'l-fr', name: 'French' },
+      { id: 'l-en', name: 'English', code: 'en' },
+      { id: 'l-fr', name: 'French', code: 'fr' },
     ]);
+  });
+
+  it('warns when entries are dropped for missing code', async () => {
+    const transport = {
+      listLanguages: sinon.stub().resolves({
+        items: [
+          { id: 'l-en', name: 'English', code: 'en' },
+          { id: 'l-nocode', name: 'NoCode' }, // no code → dropped, should warn
+        ],
+      }),
+    };
+    const log = fakeLog();
+    await listLanguageCatalog(transport, log);
+    expect(log.warn).to.have.been.calledWithMatch(
+      'listLanguageCatalog: dropped entries missing code or id — upstream field shape may have changed',
+      { droppedCount: 1 },
+    );
+  });
+
+  it('does not warn when no entries are dropped', async () => {
+    const transport = {
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'l-en', name: 'English', code: 'en' }] }),
+    };
+    const log = fakeLog();
+    await listLanguageCatalog(transport, log);
+    expect(log.warn).to.not.have.been.called;
   });
 
   it('tolerates a 404/405 catalog by returning an empty list', async () => {
@@ -2238,7 +2341,7 @@ describe('handlers/markets.js — defensive branch coverage', () => {
   // Line 615: `...(logCtx || {})` — the `|| {}` else branch fires when logCtx
   // is undefined. listTagsForProject reaches this only when the truncation
   // ceiling is hit AND logCtx was not supplied.
-  it('listTagsForProject spreads empty object when logCtx is undefined (truncation warn path)', async () => {
+  it('listTagsForProject returns partial data when logCtx is undefined and the read is incomplete', async () => {
     // Re-import so we can call listTagsForProject directly with logCtx omitted.
     const { listTagsForProject: ltp, clearTagCache: ctc } = await import(
       '../../../../src/support/serenity/handlers/markets.js'
@@ -2255,34 +2358,51 @@ describe('handlers/markets.js — defensive branch coverage', () => {
     };
     const log = fakeLog();
     // Call without logCtx (fourth arg omitted → undefined).
-    const result = await ltp(transport, WORKSPACE, 'proj-test', undefined, log);
+    const result = await ltp(
+      transport,
+      WORKSPACE,
+      'proj-test',
+      undefined,
+      log,
+    );
+    expect(result.complete).to.equal(false);
     // The warn fired; no logCtx keys in the spread means the warn object
     // only has the five built-in keys (semrushWorkspaceId, projectId, …).
     expect(log.warn).to.have.been.calledOnce;
-    expect(result.items.length).to.be.greaterThan(0);
   });
 
-  // Line 799: `id: hasText(l.id)?String(l.id):null` — the null branch fires
-  // when a language item has a blank or missing `id` field. listLanguageCatalog
-  // keeps such rows (they have a valid name) and maps id to null.
-  it('listLanguageCatalog maps a language item with missing id to null', async () => {
+  // listLanguageCatalog drops any entry with a blank or missing `id` entirely —
+  // it never maps id to null and keeps the row, since such an entry could never
+  // resolve at createProject time (see the `resolvable` filter in the handler).
+  it('listLanguageCatalog drops entries with a missing or blank id — they can never resolve', async () => {
     const transport = {
       listLanguages: sinon.stub().resolves({
         items: [
-          { name: 'English' }, // no id at all
-          { id: '', name: 'French' }, // blank id — hasText('') is false
-          { id: 'l-de', name: 'German' }, // normal
+          { name: 'English', code: 'en' }, // no id at all → dropped
+          { id: '', name: 'French', code: 'fr' }, // blank id — hasText('') is false → dropped
+          { id: 'l-de', name: 'German', code: 'de' }, // normal
         ],
       }),
     };
     const result = await listLanguageCatalog(transport);
-    // All three have names so none are dropped. id-less/blank-id rows get null.
-    const english = result.items.find((l) => l.name === 'English');
-    const french = result.items.find((l) => l.name === 'French');
-    const german = result.items.find((l) => l.name === 'German');
-    expect(english.id).to.equal(null);
-    expect(french.id).to.equal(null);
-    expect(german.id).to.equal('l-de');
+    expect(result.items).to.deep.equal([{ id: 'l-de', name: 'German', code: 'de' }]);
+  });
+
+  it('warns when entries are dropped for missing id (not just missing code)', async () => {
+    const transport = {
+      listLanguages: sinon.stub().resolves({
+        items: [
+          { id: 'l-en', name: 'English', code: 'en' },
+          { name: 'French', code: 'fr' }, // no id → dropped, should warn
+        ],
+      }),
+    };
+    const log = fakeLog();
+    await listLanguageCatalog(transport, log);
+    expect(log.warn).to.have.been.calledWithMatch(
+      'listLanguageCatalog: dropped entries missing code or id — upstream field shape may have changed',
+      { droppedCount: 1 },
+    );
   });
 
   // Line 871: `const ctx = logCtx || {}` in syncModelsForProject — the `|| {}`

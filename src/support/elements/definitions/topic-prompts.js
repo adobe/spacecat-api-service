@@ -11,6 +11,7 @@
  */
 
 import { resolveElementModel } from '../constants.js';
+import { buildFacetedTagFilters } from './prompts.js';
 
 /**
  * Definitions for the Data Insights "Prompts by Topic" element
@@ -90,7 +91,8 @@ function toNumberOrNull(value) {
  * @returns {object} Semrush element request payload.
  */
 export function buildTopicPromptsPayload({
-  topic, model, platform, startDate, endDate, projectId, projectIds, brandName,
+  topic, model, platform, startDate, endDate, tagPaths, category, projectId, projectIds,
+  brandName,
 } = {}) {
   const resolvedModel = resolveElementModel(model || platform);
 
@@ -127,6 +129,7 @@ export function buildTopicPromptsPayload({
       filters: ids.map((id) => ({ op: 'eq', val: id, col: 'CBF_project' })),
     });
   }
+  advancedFilters.push(...buildFacetedTagFilters({ tagPaths, category }));
 
   const filters = { advanced: { op: 'and', filters: advancedFilters } };
   // Only send a date window when the caller provided one; otherwise let the element
