@@ -187,7 +187,18 @@ async function enqueueChainedJobIfConfigured(
       error: lastError?.message,
     },
   );
-  return null;
+  // LLMO-7418 external-review Finding 12: a configured chain that could NOT be enqueued is a
+  // real failure of the operation the caller requested (a market / activation), NOT the plain
+  // bare-workspace success that `return null` would signal. Returning null here made the handler
+  // answer `{ provisioningStatus: 'ready' }`, the runner mark the job COMPLETED, and the client
+  // poll back a green success while no market was ever created and nothing would retry it. Throw
+  // instead so the job goes FAILED and the caller learns the chained work did not run. The
+  // workspace promotion is already durable (the brand stays ready/active — failBestEffort's CAS
+  // no longer matches a non-pending row), and the caller can safely re-issue the request.
+  /** @type {Error & { code?: string }} */
+  const err = new Error('chained provisioning job could not be enqueued after retries');
+  err.code = 'chained_job_enqueue_failed';
+  throw err;
 }
 
 /**
@@ -291,6 +302,10 @@ export async function provisionWorkspaceHandler(context, job, accessToken) {
   // already cleans up `candidate` before rethrowing — avoids a harmless but noisy double
   // cleanupIfOwned call from the outer catch below for that specific path.
   let candidateAlreadyCleanedUp = false;
+  // Set once promoteProvisioningReady succeeds: `candidate` is now the brand's CANONICAL, live
+  // workspace, not an orphan. If the chained-job enqueue then throws (Finding 12), the outer
+  // catch must NOT clean it up — emptying the canonical workspace would delete live data.
+  let candidatePromoted = false;
 
   // Declared above the try (LLMO-7418 external-review Finding 5) so the catch below can reach it
   // for cleanupIfOwned — but ASSIGNED inside the try (external-review Finding N3): its
@@ -444,6 +459,8 @@ export async function provisionWorkspaceHandler(context, job, accessToken) {
       log?.info?.('provision-workspace-job: promoted to ready', {
         brandId, attemptId, semrushWorkspaceId: candidate.workspaceId,
       });
+      // From here the candidate is the canonical workspace — never an orphan to clean up.
+      candidatePromoted = true;
       const chainedJobId = await enqueueChainedJobIfConfigured(
         context,
         metadata,
@@ -570,10 +587,18 @@ export async function provisionWorkspaceHandler(context, job, accessToken) {
     // it itself. Without this, an unexpected error anywhere before that point (a Postgres read
     // failure, create-or-adopt throwing mid-flow, ...) left a freshly-created candidate an
     // orphan: this attempt is about to be marked failed, so nothing else will ever revisit it.
-    if (transport && candidate && !requeueEnqueued && !candidateAlreadyCleanedUp) {
+    if (transport && candidate && !requeueEnqueued && !candidateAlreadyCleanedUp
+      && !candidatePromoted) {
       await cleanupIfOwned(transport, candidate, parentWorkspaceId, log, 'provision-worker-unexpected-error');
     }
-    await failBestEffort({ brandId, attemptId, postgrestClient }, log);
+    // Skip the failure-record when the attempt already reached `ready` (Finding 12): the only way
+    // to land here after promotion is a chained-job enqueue failure, and the brand is genuinely
+    // ready/active — its provisioning attempt SUCCEEDED. Marking it `failed` would be wrong
+    // intent (its CAS no-ops on a non-pending row anyway). Re-throw so the JOB goes FAILED and
+    // the caller learns the chained work did not run, without defacing the ready brand.
+    if (!candidatePromoted) {
+      await failBestEffort({ brandId, attemptId, postgrestClient }, log);
+    }
     throw error;
   }
 }
