@@ -115,7 +115,11 @@ function fakeContext({
   data = undefined,
   brandId = BRAND,
   brand = makeBrandModel(),
-  env = {},
+  // LLMO-7418: the global async-provisioning master switch is DEFAULT OFF in production, so an
+  // `async: true` request falls through to the synchronous branch unless it is enabled. Default it
+  // ON here so the existing async-path tests exercise the async branch they were written for; the
+  // OFF behaviour is covered by its own dedicated tests, which pass an env without this flag.
+  env = { SERENITY_ASYNC_PROVISIONING_ENABLED: 'true' },
   promiseToken = undefined,
   headers = {},
 } = {}) {
@@ -1695,6 +1699,26 @@ describe('SerenityController', () => {
       expect(response.status).to.equal(200);
       expect(handlers.handleGetMarketSubworkspace).to.have.been.calledOnce;
       expect(handlers.handleGetMarket).to.not.have.been.called;
+    });
+
+    it('createMarket runs the SYNCHRONOUS branch when the global async switch is off, even with async: true (LLMO-7418 master switch)', async () => {
+      // The master switch is DEFAULT OFF in production. An `async: true` request must then fall
+      // through to the synchronous branch — NOT error — so this whole stack can merge inert and
+      // async is turned on deliberately. This is what makes shipping safe by default.
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({
+        env: {}, // switch absent => off
+        data: {
+          market: 'us', languageCode: 'en', brandDomain: 'x.com', brandNames: ['X'], async: true,
+        },
+      });
+
+      const response = await controller.createMarket(ctx);
+
+      // Synchronous path: not a 202, and no provisioning attempt or job was created.
+      expect(response.status).to.not.equal(202);
+      expect(beginProvisioningAttemptStub).to.not.have.been.called;
+      expect(createAndEnqueueJobStub).to.not.have.been.called;
     });
 
     it('createMarket (PR-C) mints a provisioning attempt and enqueues the provision->create-market job chain, answering 202', async () => {

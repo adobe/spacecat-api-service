@@ -59,6 +59,42 @@ export const SERENITY_UI_FEATURE_FLAG_NAME = 'serenity_ui';
 export const ASYNC_PROVISIONING_KILL_SWITCH_FLAG_NAME = 'serenity_async_provisioning_disabled';
 
 /**
+ * GLOBAL async-provisioning master switch (LLMO-7352/LLMO-7418), DEFAULT OFF.
+ *
+ * This exists to separate "the code ships" from "the behaviour changes". Every Semrush
+ * brand-creating consumer now sends `async: true` (the dashboard's six flows), so without this
+ * gate the very act of merging flips every Serenity organization onto the async path at once,
+ * and the only way back is reverting a merge under pressure. With it, the stack merges inert,
+ * async is turned on deliberately, and it can be turned off again in seconds.
+ *
+ * Deliberately a single global env boolean rather than a per-organization opt-in row: there are
+ * ~140 Serenity organizations, so a per-org ENABLE flag would mean creating and maintaining a row
+ * for each — real operational burden for no extra safety. The per-org
+ * {@link ASYNC_PROVISIONING_KILL_SWITCH_FLAG_NAME} covers the opposite, cheap case (disable the
+ * one organization that misbehaves), because that one is exception-only.
+ *
+ * Same shape as this codebase's other global serenity toggles (`SERENITY_DEFER_PUBLISH`,
+ * `SERENITY_ALLOW_WORKSPACE_DELETE`, `SERENITY_ALLOW_NON_IMS_AUTH`). Wired to Vault at
+ * `dx_mysticat/<env>/api-service`, so flipping it is a config change, not a code deploy.
+ *
+ * When OFF, an `async: true` request is NOT an error — it falls through to the synchronous branch
+ * the endpoint has always run. That is what makes merging safe by default: every consumer keeps
+ * working exactly as today until this is switched on.
+ */
+export const ASYNC_PROVISIONING_ENABLED_ENV_FLAG = 'SERENITY_ASYNC_PROVISIONING_ENABLED';
+
+/**
+ * Reads the global async-provisioning master switch. `true` ONLY for the exact string `'true'`
+ * (env values are strings); anything else — unset, `'false'`, a typo — is OFF. Fail-safe by
+ * design: the default is the synchronous path this endpoint has always run.
+ * @param {object} [env] - the request env (`context.env`).
+ * @returns {boolean}
+ */
+export function isAsyncProvisioningEnabled(env) {
+  return env?.[ASYNC_PROVISIONING_ENABLED_ENV_FLAG] === 'true';
+}
+
+/**
  * Module-scoped TTL+size-bounded cache, mirroring the workspace-resolver cache
  * (warm Lambda containers reuse module state, so a Map here amortises the
  * PostgREST flag read over the container's lifetime).

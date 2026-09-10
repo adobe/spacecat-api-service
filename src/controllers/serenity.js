@@ -95,6 +95,7 @@ import { ensureSubworkspace, decommissionBrandWorkspace } from '../support/seren
 import {
   isSerenityActiveForBrand,
   isAsyncProvisioningKillSwitched,
+  isAsyncProvisioningEnabled,
 } from '../support/serenity/serenity-active.js';
 import { marketForGeoTargetId } from '../support/serenity/locations.js';
 import { brandNeedles, classifyBrandedTag } from '../support/serenity/branded-classifier.js';
@@ -1048,7 +1049,7 @@ function SerenityController(context, log, env) {
         // `createPrompts`'s flag, this one is NOT a permanent dual-mode feature: the
         // synchronous branch is the LLMO-7352 bug pattern itself, not a valid alternative, and
         // is slated for removal once every known caller has migrated to `async: true`.
-        if (validateAsync(requestBody)) {
+        if (validateAsync(requestBody) && isAsyncProvisioningEnabled(ctx.env || env)) {
           // LLMO-7418 external-review Finding 15: server-side kill switch — lets ops disable
           // the async path for this organization without a deploy if it misbehaves in
           // production. The caller falls back to the synchronous path on its own retry.
@@ -1694,7 +1695,7 @@ function SerenityController(context, log, env) {
         // run. `async: true` hands the sub-workspace-ensure + status flip off to the
         // `provision-workspace-job` ->
         // `serenity-activate-brand-workspace` job chain instead.
-        if (validateAsync(body)) {
+        if (validateAsync(body) && isAsyncProvisioningEnabled(ctx.env || env)) {
           // LLMO-7418 external-review Finding 15: server-side kill switch — see createMarket's
           // async branch for the full rationale.
           if (await isAsyncProvisioningKillSwitched(ctx, ctx?.params?.spaceCatId, log)) {
@@ -1843,7 +1844,7 @@ function SerenityController(context, log, env) {
         // already-active no-op re-affirm from a real pending->active transition, so
         // activate-brand-workspace-job.js's save-divergence handling matches this branch's own
         // 207-not-502 contract.
-        if (validateAsync(body)) {
+        if (validateAsync(body) && isAsyncProvisioningEnabled(ctx.env || env)) {
           // LLMO-7418 external-review Finding 15: server-side kill switch — see createMarket's
           // async branch for the full rationale.
           if (await isAsyncProvisioningKillSwitched(ctx, ctx?.params?.spaceCatId, log)) {
@@ -1980,7 +1981,7 @@ function SerenityController(context, log, env) {
       // LLMO-7352 bug pattern itself (this is one of the 3 real conversion candidates — the
       // in-request settle-poll + project-create/publish sequence), slated for removal once every
       // known caller has migrated to `async: true`.
-      if (validateAsync(body)) {
+      if (validateAsync(body) && isAsyncProvisioningEnabled(ctx.env || env)) {
         // LLMO-7418 external-review Finding 15: server-side kill switch — see createMarket's
         // async branch for the full rationale.
         if (await isAsyncProvisioningKillSwitched(ctx, ctx?.params?.spaceCatId, log)) {

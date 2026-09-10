@@ -157,6 +157,11 @@ describe('Brands Controller', () => {
       BRAND_IMS_CLIENT_ID: 'client123',
       BRAND_IMS_CLIENT_CODE: 'code123',
       BRAND_IMS_CLIENT_SECRET: 'secret123',
+      // LLMO-7418: the global async-provisioning master switch is DEFAULT OFF in production, so an
+      // `async: true` request falls through to the synchronous branch unless it is enabled. Default
+      // it ON here so the existing async-path tests exercise the async branch they were written
+      // for; the OFF behaviour has its own dedicated test that omits this flag.
+      SERENITY_ASYNC_PROVISIONING_ENABLED: 'true',
     };
 
     const authContextAdmin = {
@@ -10334,6 +10339,9 @@ describe('Brands Controller — defensive branch coverage', () => {
     BRAND_IMS_CLIENT_ID: 'client',
     BRAND_IMS_CLIENT_CODE: 'code',
     BRAND_IMS_CLIENT_SECRET: 'secret',
+    // LLMO-7418: global async-provisioning master switch (DEFAULT OFF in production). Enabled
+    // here so this block's `async: true` cases exercise the async branch they assert on.
+    SERENITY_ASYNC_PROVISIONING_ENABLED: 'true',
   };
 
   function buildContext() {

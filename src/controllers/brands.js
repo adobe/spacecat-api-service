@@ -99,6 +99,7 @@ import {
   isSerenityActiveForOrg,
   isSerenityUiActiveForOrg,
   isAsyncProvisioningKillSwitched,
+  isAsyncProvisioningEnabled,
 } from '../support/serenity/serenity-active.js';
 import {
   buildReservedIdentities,
@@ -1870,7 +1871,7 @@ function BrandsController(ctx, log, env) {
           // job chain, the same shared path Add Market uses. Unlike createPrompts's flag, this one
           // is NOT permanent: the synchronous branch is the LLMO-7352 bug pattern itself, slated
           // for removal once every known caller has migrated to `async: true`.
-          if (validateAsync(brandData)) {
+          if (validateAsync(brandData) && isAsyncProvisioningEnabled(context.env || env)) {
             // LLMO-7418 external-review Finding 15: server-side kill switch — lets ops disable
             // the async path for this organization without a deploy if it misbehaves in
             // production. The caller falls back to the synchronous path on its own retry.
@@ -1948,7 +1949,7 @@ function BrandsController(ctx, log, env) {
               languageCode: provisioned.languageCode,
             };
           }
-        } else if (validateAsync(brandData)) {
+        } else if (validateAsync(brandData) && isAsyncProvisioningEnabled(context.env || env)) {
           // B (LLMO-6405): sub-workspace-only active create — no market supplied, so
           // no project is provisioned. Markets are added afterwards from the Markets
           // tab. The brand is anchored by its primary site (baseSiteId, persisted by
