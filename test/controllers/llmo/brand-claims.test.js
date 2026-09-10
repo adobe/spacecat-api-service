@@ -154,6 +154,46 @@ describe('handleBrandClaims', () => {
     expect(signedKey()).to.equal(`brand_claims/llmo/${TEST_SITE_ID}/2026-W17/data.json.gz`);
   });
 
+  it('serves an explicit week without listing', async () => {
+    const context = { ...baseContext, data: { week: '2026-W17' } };
+
+    const result = await handleBrandClaims(context);
+
+    expect(result.status).to.equal(200);
+    // No list call — the week keys its folder directly.
+    expect(mockS3Send.getCall(0).args[0]).to.be.instanceOf(HeadObjectCommand);
+    expect(signedKey()).to.equal(`brand_claims/llmo/${TEST_SITE_ID}/2026-W17/data.json.gz`);
+  });
+
+  it('prefers week over date when both are supplied', async () => {
+    const context = { ...baseContext, data: { week: '2026-W17', date: '2026-01-05' } };
+
+    const result = await handleBrandClaims(context);
+
+    expect(result.status).to.equal(200);
+    expect(signedKey()).to.equal(`brand_claims/llmo/${TEST_SITE_ID}/2026-W17/data.json.gz`);
+  });
+
+  it('returns 400 for a malformed week', async () => {
+    const context = { ...baseContext, data: { week: '2026-17' } };
+
+    const result = await handleBrandClaims(context);
+
+    expect(result.status).to.equal(400);
+    expect((await result.json()).message).to.equal('Invalid week parameter: expected YYYY-Www format');
+    expect(mockS3Send).not.to.have.been.called;
+  });
+
+  it('returns 400 for a week with a path separator (no key probing)', async () => {
+    const context = { ...baseContext, data: { week: '../secrets' } };
+
+    const result = await handleBrandClaims(context);
+
+    expect(result.status).to.equal(400);
+    expect((await result.json()).message).to.equal('Invalid week parameter: expected YYYY-Www format');
+    expect(mockS3Send).not.to.have.been.called;
+  });
+
   it('returns 400 for an invalid date', async () => {
     const context = { ...baseContext, data: { date: 'not-a-date' } };
 
@@ -343,6 +383,171 @@ describe('handleBrandClaims', () => {
   });
 });
 
+describe('handleBrandClaimsWeeks', () => {
+  let handleBrandClaimsWeeks;
+  let mockLog;
+  let mockS3Send;
+  let baseContext;
+  let listBehavior; // () => Promise, controls the ListObjectsV2 call
+
+  const mockHttpUtils = {
+    ok: (data) => ({ status: 200, json: async () => data }),
+    badRequest: (message) => ({ status: 400, json: async () => ({ message }) }),
+    notFound: (message) => ({ status: 404, json: async () => ({ message }) }),
+    internalServerError: (message) => ({ status: 500, json: async () => ({ message }) }),
+  };
+
+  before(async () => {
+    const mod = await esmock('../../../src/controllers/llmo/brand-claims.js', {
+      '@adobe/spacecat-shared-http-utils': mockHttpUtils,
+    });
+    handleBrandClaimsWeeks = mod.handleBrandClaimsWeeks;
+  });
+
+  beforeEach(() => {
+    mockLog = { info: sinon.stub(), error: sinon.stub(), warn: sinon.stub() };
+    listBehavior = () => Promise.resolve({ CommonPrefixes: [] });
+
+    mockS3Send = sinon.stub().callsFake((command) => {
+      if (command instanceof ListObjectsV2Command) {
+        return listBehavior();
+      }
+      return Promise.resolve({});
+    });
+
+    baseContext = {
+      log: mockLog,
+      params: { siteId: TEST_SITE_ID },
+      data: {},
+      env: { ENV: 'dev' },
+      s3: { s3Client: { send: mockS3Send }, s3Bucket: 'test-bucket' },
+    };
+  });
+
+  it('lists available weeks newest first', async () => {
+    listBehavior = () => Promise.resolve({
+      CommonPrefixes: [weekPrefix('2026-W15'), weekPrefix('2026-W17'), weekPrefix('2026-W16')],
+    });
+
+    const result = await handleBrandClaimsWeeks(baseContext);
+
+    expect(result.status).to.equal(200);
+    const body = await result.json();
+    expect(body.siteId).to.equal(TEST_SITE_ID);
+    expect(body.weeks).to.deep.equal(['2026-W17', '2026-W16', '2026-W15']);
+    expect(body.count).to.equal(3);
+
+    const listCmd = mockS3Send.getCall(0).args[0];
+    expect(listCmd).to.be.instanceOf(ListObjectsV2Command);
+    expect(listCmd.input.Prefix).to.equal(`brand_claims/llmo/${TEST_SITE_ID}/`);
+    expect(listCmd.input.Delimiter).to.equal('/');
+  });
+
+  it('ignores non-week folders', async () => {
+    listBehavior = () => Promise.resolve({
+      CommonPrefixes: [weekPrefix('archive'), weekPrefix('2026-W09'), weekPrefix('latest')],
+    });
+
+    const body = await (await handleBrandClaimsWeeks(baseContext)).json();
+    expect(body.weeks).to.deep.equal(['2026-W09']);
+    expect(body.count).to.equal(1);
+  });
+
+  it('returns an empty list (200) when no week folders exist', async () => {
+    const result = await handleBrandClaimsWeeks(baseContext);
+    expect(result.status).to.equal(200);
+    const body = await result.json();
+    expect(body.weeks).to.deep.equal([]);
+    expect(body.count).to.equal(0);
+  });
+
+  it('defaults to 15 weeks when no limit is supplied', async () => {
+    listBehavior = () => Promise.resolve({
+      CommonPrefixes: Array.from({ length: 30 }, (_, i) => weekPrefix(`2026-W${String(i + 1).padStart(2, '0')}`)),
+    });
+
+    const body = await (await handleBrandClaimsWeeks(baseContext)).json();
+    expect(body.weeks).to.have.length(15);
+    expect(body.weeks[0]).to.equal('2026-W30'); // newest
+    expect(body.count).to.equal(15);
+  });
+
+  it('honors an explicit limit, clamped to the [1, 52] range', async () => {
+    listBehavior = () => Promise.resolve({
+      CommonPrefixes: Array.from({ length: 10 }, (_, i) => weekPrefix(`2026-W${String(i + 1).padStart(2, '0')}`)),
+    });
+
+    const body = await (await handleBrandClaimsWeeks({ ...baseContext, data: { limit: '3' } })).json();
+    expect(body.weeks).to.deep.equal(['2026-W10', '2026-W09', '2026-W08']);
+    expect(body.count).to.equal(3);
+  });
+
+  it('clamps a limit above the max to 52', async () => {
+    listBehavior = () => Promise.resolve({
+      CommonPrefixes: Array.from({ length: 60 }, (_, i) => weekPrefix(`2026-W${String(i + 1).padStart(2, '0')}`)),
+    });
+
+    const body = await (await handleBrandClaimsWeeks({ ...baseContext, data: { limit: '999' } })).json();
+    expect(body.weeks).to.have.length(52);
+  });
+
+  it('falls back to the default limit for a non-numeric limit', async () => {
+    listBehavior = () => Promise.resolve({
+      CommonPrefixes: Array.from({ length: 20 }, (_, i) => weekPrefix(`2026-W${String(i + 1).padStart(2, '0')}`)),
+    });
+
+    const body = await (await handleBrandClaimsWeeks({ ...baseContext, data: { limit: 'abc' } })).json();
+    expect(body.weeks).to.have.length(15);
+  });
+
+  it('warns when the listing is truncated', async () => {
+    listBehavior = () => Promise.resolve({ IsTruncated: true, CommonPrefixes: [weekPrefix('2026-W17')] });
+
+    const result = await handleBrandClaimsWeeks(baseContext);
+    expect(result.status).to.equal(200);
+    expect(mockLog.warn).to.have.been.calledWithMatch(/listing truncated/);
+  });
+
+  it('returns 400 when S3 is not configured', async () => {
+    const result = await handleBrandClaimsWeeks({ ...baseContext, s3: null });
+    expect(result.status).to.equal(400);
+    expect((await result.json()).message).to.equal('S3 storage is not configured for this environment');
+  });
+
+  it('returns 400 when S3 bucket is not configured', async () => {
+    const ctx = { ...baseContext, s3: { ...baseContext.s3, s3Bucket: null } };
+    const result = await handleBrandClaimsWeeks(ctx);
+    expect(result.status).to.equal(400);
+    expect((await result.json()).message).to.equal('S3 bucket is not configured for this environment');
+  });
+
+  it('returns 400 without leaking the bucket name when the bucket is missing', async () => {
+    const err = new Error('The specified bucket does not exist');
+    err.name = 'NoSuchBucket';
+    listBehavior = () => Promise.reject(err);
+
+    const result = await handleBrandClaimsWeeks(baseContext);
+    expect(result.status).to.equal(400);
+    const { message } = await result.json();
+    expect(message).to.equal('S3 storage is not properly configured for this environment');
+    expect(message).to.not.contain('test-bucket');
+  });
+
+  it('returns 500 (not 400) without leaking details for a server-side S3 error', async () => {
+    const err = new Error('Access denied for arn:aws:iam::123:role/secret');
+    err.name = 'AccessDenied';
+    listBehavior = () => Promise.reject(err);
+
+    const result = await handleBrandClaimsWeeks(baseContext);
+    expect(result.status).to.equal(500);
+    const { message } = await result.json();
+    expect(message).to.equal('Unable to list brand claims weeks');
+    expect(message).to.not.contain('Access denied');
+    // The real error is still logged for operators.
+    expect(mockLog.error).to.have.been.calledWithMatch(/S3 error listing brand claims weeks/);
+  });
+});
+
 describe('handleRequestBrandClaims (on-demand, LLMO-7263)', () => {
   let handleRequestBrandClaims;
   let sandbox;
@@ -387,6 +592,11 @@ describe('handleRequestBrandClaims (on-demand, LLMO-7263)', () => {
         SLACK_BRAND_CLAIMS_REQUEST_CHANNEL_ID: 'C123',
         SLACK_BOT_TOKEN: 'xoxb-1',
       },
+      attributes: {
+        authInfo: {
+          getProfile: () => ({ trial_email: 'ada@example.com', first_name: 'Ada', last_name: 'Lovelace' }),
+        },
+      },
     };
   });
 
@@ -403,6 +613,70 @@ describe('handleRequestBrandClaims (on-demand, LLMO-7263)', () => {
     expect(msg.onDemand).to.equal(true);
     expect(msg.auditContext).to.deep.equal({ trigger: 'on-demand-brand-claims' });
     expect(postSlackMessage).to.have.been.calledOnce;
+    // The alert carries only the coarse internal/external signal, not the requester's
+    // name or email. Default profile is a non-Adobe trial address, so: external.
+    const text = postSlackMessage.getCall(0).args[1];
+    expect(text).to.include('by an external user');
+    expect(text).to.not.include('Ada');
+    expect(text).to.not.include('ada@example.com');
+  });
+
+  it('labels an adobe.com requester as internal', async () => {
+    context.attributes.authInfo.getProfile = () => ({ trial_email: 'ada@adobe.com', first_name: 'Ada', last_name: 'Lovelace' });
+    await handleRequestBrandClaims(context, site);
+    const text = postSlackMessage.getCall(0).args[1];
+    expect(text).to.include('by an internal user');
+    expect(text).to.not.include('Ada');
+  });
+
+  it('labels an adobetest.com requester as internal', async () => {
+    context.attributes.authInfo.getProfile = () => ({ trial_email: 'exc-locuser-en+t2e@adobetest.com' });
+    await handleRequestBrandClaims(context, site);
+    expect(postSlackMessage.getCall(0).args[1]).to.include('by an internal user');
+  });
+
+  it('labels an Adobe subdomain requester as internal', async () => {
+    context.attributes.authInfo.getProfile = () => ({ preferred_username: 'ops@geo.adobe.com' });
+    await handleRequestBrandClaims(context, site);
+    expect(postSlackMessage.getCall(0).args[1]).to.include('by an internal user');
+  });
+
+  it('classifies via preferred_username when trial_email is absent', async () => {
+    context.attributes.authInfo.getProfile = () => ({ preferred_username: 'grace@example.com' });
+    await handleRequestBrandClaims(context, site);
+    expect(postSlackMessage.getCall(0).args[1]).to.include('by an external user');
+  });
+
+  it('omits the "by" clause when the profile has no email (only a name)', async () => {
+    context.attributes.authInfo.getProfile = () => ({ first_name: 'Ada', last_name: 'Lovelace' });
+    await handleRequestBrandClaims(context, site);
+    const text = postSlackMessage.getCall(0).args[1];
+    expect(text).to.not.include(' by ');
+    expect(text).to.not.include('Ada');
+  });
+
+  it('omits the "by" clause when the only email-like value has no domain (bare IMS GUID)', async () => {
+    context.attributes.authInfo.getProfile = () => ({ email: '6E3D1F2A0B9C4D5E7F8A9B0C' });
+    await handleRequestBrandClaims(context, site);
+    // A bare GUID has no '@', so there is no domain to classify — the alert stays
+    // unlabelled rather than guessing internal/external.
+    expect(postSlackMessage.getCall(0).args[1]).to.not.include(' by ');
+  });
+
+  it('omits the "by" clause when no identity is available', async () => {
+    delete context.attributes;
+    await handleRequestBrandClaims(context, site);
+    const text = postSlackMessage.getCall(0).args[1];
+    expect(text).to.not.include(' by ');
+    expect(text).to.include('(site-1).');
+  });
+
+  it('omits the "by" clause when the profile lookup throws (fail-safe)', async () => {
+    context.attributes.authInfo.getProfile = () => {
+      throw new Error('boom');
+    };
+    await handleRequestBrandClaims(context, site);
+    expect(postSlackMessage.getCall(0).args[1]).to.not.include(' by ');
   });
 
   it('returns 500 when AUDIT_JOBS_QUEUE_URL is not configured', async () => {
@@ -454,6 +728,19 @@ describe('handleRequestBrandClaims (on-demand, LLMO-7263)', () => {
     const result = await handleRequestBrandClaims(context, site);
     expect(result.status).to.equal(202);
     expect(sqsSend).to.have.been.calledOnce;
+  });
+
+  it('does not tag the Slack alert "(re-run)" on a first-ever run (no prior audit)', async () => {
+    await handleRequestBrandClaims(context, site);
+    expect(postSlackMessage.getCall(0).args[1]).to.not.include('(re-run)');
+  });
+
+  it('tags the Slack alert "(re-run)" when a prior (cooldown-cleared) audit exists', async () => {
+    const ranAt = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString(); // 8 days ago
+    getLatestAudit.resolves({ getAuditedAt: () => ranAt });
+    await handleRequestBrandClaims(context, site);
+    expect(postSlackMessage.getCall(0).args[1])
+      .to.include('On-demand Brand Claims requested (re-run) for');
   });
 
   it('proceeds (202) at the 7-day boundary (cooldown uses strict <)', async () => {

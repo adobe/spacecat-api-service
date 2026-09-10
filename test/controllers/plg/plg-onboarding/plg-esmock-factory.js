@@ -28,6 +28,7 @@ export async function createPlgEsmock(stubs, {
   const {
     composeBaseURLStub,
     detectBotBlockerStub,
+    detectAuthWallStub,
     detectLocaleStub,
     resolveCanonicalUrlStub,
     rumApiClientCreateFromStub,
@@ -137,6 +138,9 @@ export async function createPlgEsmock(stubs, {
         findDeliveryType: findDeliveryTypeStub,
         deriveProjectName: deriveProjectNameStub,
         queueDeliveryConfigWriter: queueDeliveryConfigWriterStub,
+      },
+      '../../../../src/support/detect-auth-wall.js': {
+        detectAuthWall: detectAuthWallStub,
       },
       '../../../../src/utils/slack/base.js': {
         loadProfileConfig: loadProfileConfigStub,

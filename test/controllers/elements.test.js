@@ -16,7 +16,7 @@ import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import esmock from 'esmock';
 import { ErrorWithStatusCode } from '../../src/support/utils.js';
-import { parseShowTrends, parseUserIntent } from '../../src/controllers/elements.js';
+import { parseShowTrends, parseUserIntent, parseSentimentMetric } from '../../src/controllers/elements.js';
 import { addDaysToDate } from '../../src/support/elements/week-utils.js';
 // Real error class (not a mock) so the controller's `instanceof SerenityTransportError`
 // check in checkAccess matches errors thrown by these tests — and so this file keeps a
@@ -141,6 +141,7 @@ function brandSemrushProjectsFor(ids) {
 function fakeContext({
   bearer = IMS_TOKEN,
   authType = 'ims',
+  isS2SConsumer = false,
   params = {},
   url = `https://api.example.com/v2/orgs/${ORG_ID}/brands/${BRAND_ID}/serenity/brand-presence/url-inspector/filter-dimensions`,
   org = { getId: () => ORG_ID },
@@ -149,21 +150,32 @@ function fakeContext({
   withBrandSemrushProject = false,
   promiseToken = undefined,
   postgrestClient = { from: sinon.stub() },
+  log = fakeLog(),
+  invocationId = 'req-1',
+  s2sConsumer = undefined,
 } = {}) {
   const BrandSemrushProject = withBrandSemrushProject
     ? { allByBrandId: sinon.stub().resolves(brandSemrushProjects) }
     : undefined;
+  let suffix;
+  try {
+    suffix = new URL(url).pathname;
+  } catch {
+    suffix = undefined;
+  }
   return {
     params: { spaceCatId: ORG_ID, brandId: BRAND_ID, ...params },
     request: { url },
     pathInfo: {
+      method: 'GET',
+      suffix,
       headers: {
         ...(bearer ? { authorization: `Bearer ${bearer}` } : {}),
         ...(promiseToken ? { 'x-promise-token': promiseToken } : {}),
       },
     },
     attributes: {
-      authInfo: { getType: () => authType },
+      authInfo: { getType: () => authType, isS2SConsumer: () => isS2SConsumer },
     },
     dataAccess: {
       Organization: { findById: sinon.stub().resolves(org) },
@@ -171,6 +183,9 @@ function fakeContext({
       ...(BrandSemrushProject && { BrandSemrushProject }),
     },
     _spacecatBrands: spacecatBrands,
+    log,
+    invocation: { id: invocationId },
+    s2sConsumer,
   };
 }
 
@@ -199,14 +214,12 @@ describe('ElementsController', () => {
   let createElementsServiceStub;
   let createElementsTransportStub;
   let exchangePromiseTokenStub;
-  let resolveBrandUuidStub;
   let MockElementsTransportError;
   let getWorkspaceResourcesStub;
   let createSerenityTransportStub;
   let ElementsController;
 
   beforeEach(async () => {
-    resolveBrandUuidStub = sinon.stub().resolves(BRAND_ID);
     resolveBrandWorkspaceStub = sinon.stub().resolves({
       mode: 'subworkspace', workspaceId: SUB_WORKSPACE_ID, parentWorkspaceId: WORKSPACE_ID,
     });
@@ -226,6 +239,8 @@ describe('ElementsController', () => {
       getUrlInspectorStats: sinon.stub().resolves(URL_INSPECTOR_STATS_RESULT),
       getDomainUrls: sinon.stub().resolves({ urls: [], totalCount: 0 }),
       getOwnedUrlProjects: sinon.stub().resolves([{ region: 'US', projectId: 'proj-1' }]),
+      getTopics: sinon.stub().resolves([]),
+      getTopicPrompts: sinon.stub().resolves([]),
     };
     createElementsServiceStub = sinon.stub().returns(serviceStub);
     createElementsTransportStub = sinon.stub().returns({ fetchElement: sinon.stub() });
@@ -249,6 +264,7 @@ describe('ElementsController', () => {
     const MockAccessControlUtil = {
       default: {
         fromContext: () => ({ hasAccess: accessControlHasAccessStub }),
+        isS2SConsumer: (ctx) => ctx?.attributes?.authInfo?.isS2SConsumer?.() ?? false,
       },
     };
 
@@ -265,9 +281,6 @@ describe('ElementsController', () => {
       '../../src/support/brands-storage.js': {
         getBrandIdentity: getBrandIdentityStub,
         getBrandBySite: getBrandBySiteStub,
-      },
-      '../../src/support/prompts-storage.js': {
-        resolveBrandUuid: resolveBrandUuidStub,
       },
       '../../src/support/serenity/workspace-resolver.js': {
         resolveBrandWorkspace: resolveBrandWorkspaceStub,
@@ -397,6 +410,116 @@ describe('ElementsController', () => {
     });
   });
 
+  // ─── S2S consumer access ──────────────────────────────────────────────────
+
+  describe('S2S consumer access', () => {
+    // authorizeOrgAccess makes its decision solely via the pre-existing, unmodified
+    // accessControl.hasAccess(organization) call - identical to a regular session-token
+    // user (e.g. an S2S JWT carrying a `tenants` claim naming the target org passes
+    // hasAccess() via authInfo.hasOrganization(), exactly like a human user would). The
+    // only S2S-specific addition is the [s2s]/[acl] audit-log observation below.
+
+    it('grants access when hasAccess() succeeds for an S2S consumer', async () => {
+      const ctx = fakeContext({ isS2SConsumer: true, authType: 'jwt', bearer: null });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
+      expect(res.status).to.equal(200);
+    });
+
+    it('returns 403 when hasAccess() denies an S2S consumer', async () => {
+      accessControlHasAccessStub.resolves(false);
+      const ctx = fakeContext({ isS2SConsumer: true, authType: 'jwt', bearer: null });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
+      expect(res.status).to.equal(403);
+    });
+
+    it('skips IMS token resolution and builds an S2S transport for an S2S consumer', async () => {
+      const ctx = fakeContext({ isS2SConsumer: true, authType: 'jwt', bearer: null });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
+      expect(res.status).to.equal(200);
+      expect(exchangePromiseTokenStub).to.not.have.been.called;
+      expect(createElementsTransportStub).to.have.been.calledWith(
+        sinon.match({ isS2SConsumer: true, imsToken: undefined }),
+      );
+    });
+
+    it('builds a regular (non-S2S) transport for a normal IMS caller', async () => {
+      const ctx = fakeContext();
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
+      expect(res.status).to.equal(200);
+      expect(createElementsTransportStub).to.have.been.calledWith(
+        sinon.match({ isS2SConsumer: false, imsToken: IMS_TOKEN }),
+      );
+    });
+
+    it('logs a [s2s] audit line with clientId/consumerId/organizationId/requestId on a granted read', async () => {
+      const s2sConsumer = { getClientId: () => 'client-abc', getId: () => 'consumer-123' };
+      const ctx = fakeContext({
+        isS2SConsumer: true,
+        authType: 'jwt',
+        bearer: null,
+        invocationId: 'req-audit-1',
+        s2sConsumer,
+      });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
+      expect(res.status).to.equal(200);
+      expect(ctx.log.info).to.have.been.calledWithMatch(
+        /^\[s2s\] .*granted clientId=client-abc consumerId=consumer-123 organizationId=/,
+      );
+      expect(ctx.log.info).to.have.been.calledWithMatch(/requestId=req-audit-1/);
+    });
+
+    it('logs an [acl] denial line with clientId/consumerId when an S2S consumer is denied', async () => {
+      const s2sConsumer = { getClientId: () => 'client-abc', getId: () => 'consumer-123' };
+      accessControlHasAccessStub.resolves(false);
+      const ctx = fakeContext({
+        isS2SConsumer: true,
+        authType: 'jwt',
+        bearer: null,
+        invocationId: 'req-audit-2',
+        s2sConsumer,
+      });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
+      expect(res.status).to.equal(403);
+      expect(ctx.log.info).to.have.been.calledWithMatch(
+        /^\[acl\] Denied .*reason=no-org-access clientId=client-abc consumerId=consumer-123/,
+      );
+      expect(ctx.log.info).to.have.been.calledWithMatch(/requestId=req-audit-2/);
+    });
+
+    it('falls back to "n/a" in the audit log when context.s2sConsumer is not set', async () => {
+      const ctx = fakeContext({ isS2SConsumer: true, authType: 'jwt', bearer: null });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
+      expect(res.status).to.equal(200);
+      expect(ctx.log.info).to.have.been.calledWithMatch(
+        /^\[s2s\] .*granted clientId=n\/a consumerId=n\/a/,
+      );
+    });
+
+    it('does not log [s2s]/[acl] lines for a regular (non-S2S) user', async () => {
+      const ctx = fakeContext();
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      await ctrl.listUrlInspectorFilterDimensions(ctx);
+      expect(ctx.log.info).to.not.have.been.calledWithMatch(/^\[s2s\]/);
+      expect(ctx.log.info).to.not.have.been.calledWithMatch(/^\[acl\]/);
+    });
+
+    it('does not log an [acl] denial line for a regular (non-S2S) user lacking org access', async () => {
+      accessControlHasAccessStub.resolves(false);
+      const ctx = fakeContext();
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
+      expect(res.status).to.equal(403);
+      expect(ctx.log.info).to.not.have.been.calledWithMatch(/^\[acl\]/);
+    });
+  });
+
   // ─── x-promise-token support ──────────────────────────────────────────────
 
   describe('x-promise-token support', () => {
@@ -484,6 +607,30 @@ describe('ElementsController', () => {
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
       expect(res.status).to.equal(403);
+    });
+
+    it('maps a 401 ElementsTransportError to 502 (not 401) for an S2S consumer, logging the admin credential', async () => {
+      serviceStub.getUrlInspectorFilterDimensions
+        .rejects(new MockElementsTransportError(401, 'upstream auth failed'));
+      const ctx = fakeContext({ isS2SConsumer: true, authType: 'jwt', bearer: null });
+      const log = fakeLog();
+      const ctrl = ElementsController(ctx, log, ENV);
+      const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
+      expect(res.status).to.equal(502);
+      const body = await readBody(res);
+      expect(body.error).to.equal('elementsUpstreamError');
+      expect(log.error).to.have.been.calledWithMatch(/SEMRUSH_ADMIN_ELEMENT_API_KEY/);
+    });
+
+    it('maps a 403 ElementsTransportError to 502 (not 403) for an S2S consumer', async () => {
+      serviceStub.getUrlInspectorFilterDimensions
+        .rejects(new MockElementsTransportError(403, 'forbidden'));
+      const ctx = fakeContext({ isS2SConsumer: true, authType: 'jwt', bearer: null });
+      const log = fakeLog();
+      const ctrl = ElementsController(ctx, log, ENV);
+      const res = await ctrl.listUrlInspectorFilterDimensions(ctx);
+      expect(res.status).to.equal(502);
+      expect(log.error).to.have.been.calledWithMatch(/SEMRUSH_ADMIN_ELEMENT_API_KEY/);
     });
 
     it('maps other ElementsTransportError statuses to 502', async () => {
@@ -809,7 +956,9 @@ describe('ElementsController', () => {
 
     it('calls getPrompts with the brand SUB-workspace ID and parsed filters', async () => {
       const ctx = fakeContext({
-        url: promptsUrl('?model=perplexity&tag=type__branded,category__Brand&projectId=proj-a,proj-b'),
+        url: promptsUrl(`?model=perplexity&tag=type__branded,category__Brand&projectId=${PROJECT_ID_A},${PROJECT_ID_B}`),
+        withBrandSemrushProject: true,
+        brandSemrushProjects: brandSemrushProjectsFor([PROJECT_ID_A, PROJECT_ID_B]),
       });
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       await ctrl.listPrompts(ctx);
@@ -817,24 +966,77 @@ describe('ElementsController', () => {
         model: 'perplexity',
         platform: undefined,
         tags: ['type__branded', 'category__Brand'],
-        projectIds: ['proj-a', 'proj-b'],
+        projectIds: [PROJECT_ID_A, PROJECT_ID_B],
         enrichUserIntent: false,
       });
     });
 
+    it('returns 403 when a caller-supplied projectId is not owned by this brand', async () => {
+      const ctx = fakeContext({
+        url: promptsUrl(`?projectId=${PROJECT_ID_A}`),
+        withBrandSemrushProject: true,
+        brandSemrushProjects: brandSemrushProjectsFor([PROJECT_ID_B]),
+      });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listPrompts(ctx);
+      expect(res.status).to.equal(403);
+      expect(serviceStub.getPrompts).to.not.have.been.called;
+    });
+
+    it('returns 400 when a projectId is not a valid UUID', async () => {
+      const ctx = fakeContext({ url: promptsUrl('?projectId=not-a-uuid') });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.listPrompts(ctx);
+      expect(res.status).to.equal(400);
+      expect(serviceStub.getPrompts).to.not.have.been.called;
+    });
+
+    it('uses the Elements-specific filter mode for repeated tagPath filters', async () => {
+      const ctx = fakeContext({
+        url: promptsUrl('?tagPath=tag__Campaign&tagPath=tag__Audience__Enterprise'
+          + '&tagFilterMode=elements-faceted-v1'),
+      });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+
+      const res = await ctrl.listPrompts(ctx);
+
+      expect(res.status).to.equal(200);
+      expect(serviceStub.getPrompts).to.have.been.calledWith(
+        SUB_WORKSPACE_ID,
+        sinon.match({
+          tagPaths: ['tag__Campaign', 'tag__Audience__Enterprise'],
+        }),
+      );
+    });
+
+    it('rejects native faceted-v1 on the incompatible Elements filter engine', async () => {
+      const ctx = fakeContext({
+        url: promptsUrl('?tagPath=tag__Campaign&tagFilterMode=faceted-v1'),
+      });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+
+      const res = await ctrl.listPrompts(ctx);
+      const body = await readBody(res);
+
+      expect(res.status).to.equal(400);
+      expect(body.error).to.equal('invalidTagFilter');
+      expect(body.message).to.match(/elements-faceted-v1/);
+      expect(serviceStub.getPrompts).not.to.have.been.called;
+    });
+
     it('passes enrichUserIntent: true to getPrompts when ?userIntent=true', async () => {
-      const ctx = fakeContext({ url: promptsUrl('?projectId=proj-a&userIntent=true') });
+      const ctx = fakeContext({ url: promptsUrl('?userIntent=true') });
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       await ctrl.listPrompts(ctx);
       const [, params] = serviceStub.getPrompts.firstCall.args;
       expect(params.enrichUserIntent).to.equal(true);
     });
 
-    it('resolves the brand uuid via resolveBrandUuid before querying', async () => {
+    it('resolves the brand identity via getBrandIdentity before querying', async () => {
       const ctx = fakeContext({ url: promptsUrl() });
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       await ctrl.listPrompts(ctx);
-      expect(resolveBrandUuidStub).to.have.been.calledWith(ORG_ID, BRAND_ID, sinon.match.object);
+      expect(getBrandIdentityStub).to.have.been.calledWith(ORG_ID, BRAND_ID, sinon.match.object);
       expect(resolveBrandWorkspaceStub)
         .to.have.been.calledWith(sinon.match.object, ORG_ID, BRAND_ID);
     });
@@ -849,11 +1051,15 @@ describe('ElementsController', () => {
     });
 
     it('accepts the project_id snake_case alias for projectId', async () => {
-      const ctx = fakeContext({ url: promptsUrl('?project_id=proj-x') });
+      const ctx = fakeContext({
+        url: promptsUrl(`?project_id=${PROJECT_ID_A}`),
+        withBrandSemrushProject: true,
+        brandSemrushProjects: brandSemrushProjectsFor([PROJECT_ID_A]),
+      });
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       await ctrl.listPrompts(ctx);
       const [, params] = serviceStub.getPrompts.firstCall.args;
-      expect(params.projectIds).to.deep.equal(['proj-x']);
+      expect(params.projectIds).to.deep.equal([PROJECT_ID_A]);
     });
 
     it('trims blank CSV entries', async () => {
@@ -874,7 +1080,7 @@ describe('ElementsController', () => {
     });
 
     it('404s when the brand does not resolve for the org', async () => {
-      resolveBrandUuidStub.resolves(null);
+      getBrandIdentityStub.resolves(null);
       const ctx = fakeContext({ url: promptsUrl() });
       const ctrl = ElementsController(ctx, fakeLog(), ENV);
       const res = await ctrl.listPrompts(ctx);
@@ -1095,6 +1301,19 @@ describe('ElementsController', () => {
       const body = await readBody(res);
       expect(body).to.deep.equal({ hasAccess: true });
       expect(getWorkspaceResourcesStub).to.have.been.calledOnce;
+    });
+
+    it('returns 200 { hasAccess: true } immediately for an S2S consumer, without probing upstream', async () => {
+      const ctx = fakeContext({
+        url: accessUrl(), isS2SConsumer: true, authType: 'jwt', bearer: null,
+      });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      const res = await ctrl.checkAccess(ctx);
+      expect(res.status).to.equal(200);
+      const body = await readBody(res);
+      expect(body).to.deep.equal({ hasAccess: true });
+      expect(getWorkspaceResourcesStub).to.not.have.been.called;
+      expect(exchangePromiseTokenStub).to.not.have.been.called;
     });
 
     it('forwards the resolved workspace id and the caller IMS token to the transport', async () => {
@@ -1970,8 +2189,288 @@ describe('ElementsController', () => {
     });
   });
 
+  // ─── listTopics / listTopicPrompts brand scoping (LLMO-7443) ──────────────
+  describe('listTopics / listTopicPrompts brand scoping', () => {
+    const TOPIC = '3 ft Bean Bag';
+    const topicsUrl = (qs = '') => `https://api.example.com/v2/orgs/${ORG_ID}`
+      + `/brands/${BRAND_ID}/serenity/brand-presence/topics${qs}`;
+    const promptsUrlForTopic = (qs = '') => `https://api.example.com/v2/orgs/${ORG_ID}`
+      + `/brands/${BRAND_ID}/serenity/brand-presence/topics/${encodeURIComponent(TOPIC)}/prompts${qs}`;
+
+    const topicsCtx = (overrides = {}) => fakeContext({
+      url: topicsUrl(),
+      withBrandSemrushProject: true,
+      brandSemrushProjects: [makeBrandSemrushProject({ getSemrushProjectId: () => 'proj-1' })],
+      ...overrides,
+    });
+
+    it('passes the brand display name to getTopics as brandName (CBF_brand)', async () => {
+      const ctx = topicsCtx({
+        url: topicsUrl('?tagPath=tag__Campaign__Q1&tagFilterMode=elements-faceted-v1'),
+      });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      await ctrl.listTopics(ctx);
+      const [, params] = serviceStub.getTopics.firstCall.args;
+      expect(params.brandName).to.equal('Adobe Brand');
+      expect(params.tagPaths).to.deep.equal(['tag__Campaign__Q1']);
+    });
+
+    it('passes the brand display name to getTopicPrompts as brandName (CBF_brand)', async () => {
+      const ctx = topicsCtx({
+        url: promptsUrlForTopic('?tagPath=category__Furniture&tagFilterMode=elements-faceted-v1'),
+        params: { topicId: encodeURIComponent(TOPIC) },
+      });
+      const ctrl = ElementsController(ctx, fakeLog(), ENV);
+      await ctrl.listTopicPrompts(ctx);
+      const [, params] = serviceStub.getTopicPrompts.firstCall.args;
+      expect(params.brandName).to.equal('Adobe Brand');
+      expect(params.tagPaths).to.deep.equal(['category__Furniture']);
+    });
+
+    // Fail-open: a brand with no usable display name must degrade to brand-agnostic
+    // counts rather than send a garbage CBF_brand, and must say so in the log.
+    // `hasText` does not trim, so whitespace-only is the case that would slip through
+    // a naive guard — assert it explicitly.
+    it('omits brandName and warns when the brand name is whitespace-only', async () => {
+      getBrandIdentityStub.resolves({ id: BRAND_ID, name: '   ' });
+      const log = fakeLog();
+      const ctx = topicsCtx();
+      const ctrl = ElementsController(ctx, log, ENV);
+      await ctrl.listTopics(ctx);
+      const [, params] = serviceStub.getTopics.firstCall.args;
+      expect(params.brandName).to.be.undefined;
+      expect(log.warn.calledWithMatch(/falls back to brand-agnostic counts/)).to.equal(true);
+    });
+  });
+
   // ─── extractQuery edge cases ──────────────────────────────────────────────
 
+  // ─── listResponseFeed (Brand Claims response feed) ─────────────────────────
+
+  describe('listResponseFeed', () => {
+    const FEED_RESULT = {
+      records: [{
+        projectId: 'proj-1',
+        prompt: 'best running shoes',
+        model: 'chatgpt-paid',
+        date: '2026-08-24',
+        response: 'Some answer',
+        sources: [],
+        sourceRowCount: 0,
+      }],
+      days: ['2026-08-24'],
+      projectIds: ['proj-1'],
+      pageSize: 5000,
+      truncated: false,
+      unmatchedSourceKeyCount: 0,
+    };
+
+    const feedUrl = (qs = '') => `https://api.example.com/v2/orgs/${ORG_ID}/brands/${BRAND_ID}`
+      + `/serenity/brand-presence/responses${qs}`;
+
+    beforeEach(() => {
+      serviceStub.getResponseFeed = sinon.stub().resolves(FEED_RESULT);
+    });
+
+    it('returns the DTO envelope for a valid range', async () => {
+      const ctx = fakeContext({ url: feedUrl('?from=2026-08-24&to=2026-08-24') });
+      const res = await ElementsController(ctx, fakeLog(), ENV).listResponseFeed(ctx);
+
+      expect(res.status).to.equal(200);
+      const body = await readBody(res);
+      expect(body.totalCount).to.equal(1);
+      expect(body.records[0].model).to.equal('chatgpt-paid');
+      expect(body.records[0].date).to.equal('2026-08-24');
+      expect(body.truncated).to.equal(false);
+    });
+
+    it('passes the resolved workspace, never a caller-supplied one', async () => {
+      const ctx = fakeContext({ url: feedUrl('?from=2026-08-24&to=2026-08-24&workspaceId=evil') });
+      await ElementsController(ctx, fakeLog(), ENV).listResponseFeed(ctx);
+
+      expect(serviceStub.getResponseFeed).to.have.been.calledWith(SUB_WORKSPACE_ID);
+    });
+
+    describe('date range', () => {
+      it('rejects a malformed from/to', async () => {
+        const ctx = fakeContext({ url: feedUrl('?from=24-08-2026&to=2026-08-24') });
+        const res = await ElementsController(ctx, fakeLog(), ENV).listResponseFeed(ctx);
+        expect(res.status).to.equal(400);
+      });
+
+      it('rejects an impossible calendar date', async () => {
+        const ctx = fakeContext({ url: feedUrl('?from=2026-13-45&to=2026-08-24') });
+        const res = await ElementsController(ctx, fakeLog(), ENV).listResponseFeed(ctx);
+        expect(res.status).to.equal(400);
+      });
+
+      it('rejects an inverted range', async () => {
+        const ctx = fakeContext({ url: feedUrl('?from=2026-08-24&to=2026-08-20') });
+        const res = await ElementsController(ctx, fakeLog(), ENV).listResponseFeed(ctx);
+        expect(res.status).to.equal(400);
+      });
+
+      // The upstream window is rolling and ~74 days. Beyond it a day is UNRECOVERABLE, and
+      // the upstream returns nothing rather than erroring — which would be served as an
+      // empty result indistinguishable from "no model ran". Rejecting keeps that
+      // ambiguity out of the response.
+      it('rejects a span beyond the rolling window rather than returning an empty result', async () => {
+        const ctx = fakeContext({ url: feedUrl('?from=2026-01-01&to=2026-08-24') });
+        const res = await ElementsController(ctx, fakeLog(), ENV).listResponseFeed(ctx);
+
+        expect(res.status).to.equal(400);
+        const body = await readBody(res);
+        expect(body.message).to.contain('unrecoverable');
+        expect(serviceStub.getResponseFeed).to.not.have.been.called;
+      });
+
+      it('accepts a span just inside the window', async () => {
+        const ctx = fakeContext({ url: feedUrl('?from=2026-06-13&to=2026-08-24') });
+        const res = await ElementsController(ctx, fakeLog(), ENV).listResponseFeed(ctx);
+        expect(res.status).to.equal(200);
+      });
+
+      it('accepts the startDate/endDate aliases', async () => {
+        const ctx = fakeContext({ url: feedUrl('?startDate=2026-08-23&endDate=2026-08-24') });
+        const res = await ElementsController(ctx, fakeLog(), ENV).listResponseFeed(ctx);
+
+        expect(res.status).to.equal(200);
+        expect(serviceStub.getResponseFeed.firstCall.args[1]).to.include({
+          startDate: '2026-08-23', endDate: '2026-08-24',
+        });
+      });
+
+      // Ending yesterday, not today: today's executions are still landing, so ending on
+      // today would report a partial day as if it were complete.
+      it('defaults to the last 7 days ending yesterday', async () => {
+        const ctx = fakeContext({ url: feedUrl() });
+        await ElementsController(ctx, fakeLog(), ENV).listResponseFeed(ctx);
+
+        const today = new Date().toISOString().slice(0, 10);
+        const { startDate, endDate } = serviceStub.getResponseFeed.firstCall.args[1];
+        expect(endDate).to.equal(addDaysToDate(today, -1));
+        expect(startDate).to.equal(addDaysToDate(today, -7));
+      });
+    });
+
+    describe('project ownership (tenant isolation)', () => {
+      // LOAD-BEARING: the technical account is broadly entitled, so a caller who guessed
+      // another brand's Semrush project UUID could otherwise read that tenant's answers.
+      it('forbids a projectId this brand does not own', async () => {
+        const ctx = fakeContext({
+          url: feedUrl('?from=2026-08-24&to=2026-08-24&projectId=11111111-1111-4111-8111-111111111111'),
+          withBrandSemrushProject: true,
+          brandSemrushProjects: brandSemrushProjectsFor(['22222222-2222-4222-8222-222222222222']),
+        });
+        const res = await ElementsController(ctx, fakeLog(), ENV).listResponseFeed(ctx);
+
+        expect(res.status).to.equal(403);
+        expect(serviceStub.getResponseFeed).to.not.have.been.called;
+      });
+
+      it('allows a projectId the brand owns', async () => {
+        const owned = '22222222-2222-4222-8222-222222222222';
+        const ctx = fakeContext({
+          url: feedUrl(`?from=2026-08-24&to=2026-08-24&projectId=${owned}`),
+          withBrandSemrushProject: true,
+          brandSemrushProjects: brandSemrushProjectsFor([owned]),
+        });
+        const res = await ElementsController(ctx, fakeLog(), ENV).listResponseFeed(ctx);
+
+        expect(res.status).to.equal(200);
+        expect(serviceStub.getResponseFeed.firstCall.args[1].projectIds).to.deep.equal([owned]);
+      });
+
+      it('rejects a non-UUID projectId before any upstream call', async () => {
+        const ctx = fakeContext({ url: feedUrl('?from=2026-08-24&to=2026-08-24&projectId=not-a-uuid') });
+        const res = await ElementsController(ctx, fakeLog(), ENV).listResponseFeed(ctx);
+
+        expect(res.status).to.equal(400);
+        expect(serviceStub.getResponseFeed).to.not.have.been.called;
+      });
+
+      it('scopes to all of the brand markets when no projectId is given', async () => {
+        const ctx = fakeContext({ url: feedUrl('?from=2026-08-24&to=2026-08-24') });
+        await ElementsController(ctx, fakeLog(), ENV).listResponseFeed(ctx);
+
+        expect(serviceStub.getResponseFeed.firstCall.args[1].projectIds).to.deep.equal([]);
+      });
+
+      // The ownership check must fail CLOSED when the data-access layer yields no
+      // BrandSemrushProject: the owned set is empty, so any supplied id is unowned and the
+      // request is denied rather than passed upstream unchecked.
+      it('denies a supplied projectId when no brand projects are resolvable', async () => {
+        const ctx = fakeContext({
+          url: feedUrl('?from=2026-08-24&to=2026-08-24&projectId=22222222-2222-4222-8222-222222222222'),
+          withBrandSemrushProject: true,
+          brandSemrushProjects: [],
+        });
+        const res = await ElementsController(ctx, fakeLog(), ENV).listResponseFeed(ctx);
+
+        expect(res.status).to.equal(403);
+        expect(serviceStub.getResponseFeed).to.not.have.been.called;
+      });
+    });
+
+    describe('auth guards', () => {
+      it('403s when the caller lacks access to the organization', async () => {
+        accessControlHasAccessStub.resolves(false);
+        const ctx = fakeContext({ url: feedUrl('?from=2026-08-24&to=2026-08-24') });
+        const res = await ElementsController(ctx, fakeLog(), ENV).listResponseFeed(ctx);
+
+        expect(res.status).to.equal(403);
+        expect(serviceStub.getResponseFeed).to.not.have.been.called;
+      });
+
+      it('404s when serenity is not active for the brand', async () => {
+        isSerenityActiveForBrandStub.resolves(false);
+        const ctx = fakeContext({ url: feedUrl('?from=2026-08-24&to=2026-08-24') });
+        const res = await ElementsController(ctx, fakeLog(), ENV).listResponseFeed(ctx);
+
+        expect(res.status).to.equal(404);
+      });
+
+      it('400s on a malformed brand id', async () => {
+        const ctx = fakeContext({
+          url: feedUrl('?from=2026-08-24&to=2026-08-24'),
+          params: { brandId: 'not-a-uuid' },
+        });
+        const res = await ElementsController(ctx, fakeLog(), ENV).listResponseFeed(ctx);
+
+        expect(res.status).to.equal(400);
+      });
+    });
+
+    describe('query passthrough', () => {
+      it('forwards the model filter and page limit', async () => {
+        const ctx = fakeContext({
+          url: feedUrl('?from=2026-08-24&to=2026-08-24&model=perplexity&limit=100'),
+        });
+        await ElementsController(ctx, fakeLog(), ENV).listResponseFeed(ctx);
+
+        expect(serviceStub.getResponseFeed.firstCall.args[1]).to.include({
+          model: 'perplexity', limit: '100',
+        });
+      });
+
+      it('accepts platform as a legacy alias for model', async () => {
+        const ctx = fakeContext({
+          url: feedUrl('?from=2026-08-24&to=2026-08-24&platform=grok'),
+        });
+        await ElementsController(ctx, fakeLog(), ENV).listResponseFeed(ctx);
+
+        expect(serviceStub.getResponseFeed.firstCall.args[1].model).to.equal('grok');
+      });
+    });
+
+    it('maps an upstream transport failure to 502', async () => {
+      serviceStub.getResponseFeed.rejects(new MockElementsTransportError(500, 'boom'));
+      const ctx = fakeContext({ url: feedUrl('?from=2026-08-24&to=2026-08-24') });
+      const res = await ElementsController(ctx, fakeLog(), ENV).listResponseFeed(ctx);
+
+      expect(res.status).to.equal(502);
+    });
+  });
   describe('extractQuery', () => {
     it('returns empty params (plus an empty projectIds) when request URL is missing', async () => {
       const ctx = fakeContext({ url: null });
@@ -2005,6 +2504,28 @@ describe('ElementsController', () => {
   // Exercised directly (not just through getStats) because extractQuery only
   // ever yields strings from URLSearchParams, so the boolean/number branch
   // below is unreachable via the HTTP query-string path.
+
+  describe('parseSentimentMetric', () => {
+    it("returns 'mentions' only for the explicit opt-in, case-insensitive and trimmed", () => {
+      expect(parseSentimentMetric({ metric: 'mentions' })).to.equal('mentions');
+      expect(parseSentimentMetric({ metric: 'MENTIONS' })).to.equal('mentions');
+      expect(parseSentimentMetric({ metric: '  Mentions  ' })).to.equal('mentions');
+    });
+
+    it('accepts the sentimentMetric / sentiment_metric aliases', () => {
+      expect(parseSentimentMetric({ sentimentMetric: 'mentions' })).to.equal('mentions');
+      expect(parseSentimentMetric({ sentiment_metric: 'mentions' })).to.equal('mentions');
+    });
+
+    // Deliberately permissive: an unrecognised value degrades to today's numbers
+    // rather than failing an otherwise-valid chart request.
+    it("defaults to 'prompts' for absent, blank, unrecognised or non-string values", () => {
+      for (const q of [undefined, null, {}, { metric: '' }, { metric: '  ' },
+        { metric: 'prompts' }, { metric: 'bogus' }, { metric: 42 }, { metric: true }]) {
+        expect(parseSentimentMetric(q), JSON.stringify(q ?? null)).to.equal('prompts');
+      }
+    });
+  });
 
   describe('parseShowTrends', () => {
     it('returns true for the boolean true', () => {

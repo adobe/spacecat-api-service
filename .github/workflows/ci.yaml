@@ -7,9 +7,16 @@ permissions:
   pull-requests: write
 
 on:
+  # `push:` stays unfiltered (all branches): the `type-check` push-fallback,
+  # `semver-check`, and the reusable workflow's `branch-deploy` job (auto-deploy of
+  # feature branches to the `dev-branches` env, which fires on push only) all run
+  # on non-main branch pushes.
   push:
   pull_request:
-    types: [opened, synchronize, ready_for_review, reopened, edited]
+    # `edited` removed: a PR title/body edit fired the full reusable CI (~23
+    # billable job-min, ~5 org runner slots) only to re-check the title. Title
+    # re-validation on edit now lives in the lightweight pr-title.yaml workflow.
+    types: [opened, synchronize, ready_for_review, reopened]
   workflow_dispatch:
     inputs:
       environment:
@@ -20,7 +27,29 @@ on:
         default: dev
 
 jobs:
+  # The reusable CI runs on both `push` and `pull_request`, so for an open PR its
+  # `build` + `it-postgres` would run twice per commit (the concurrency group keys
+  # on `github.ref`, which differs between the two events, so they don't cancel
+  # each other). `dedup-pr-runs: true` makes the shared service-ci workflow skip
+  # the redundant `pull_request` copy of that heavy path for a same-repo PR: the
+  # branch's `push` run covers the same head SHA and reports the required
+  # `ci / build` + `ci / it-postgres`, so the `pull_request` copies come back
+  # `skipped` and branch protection is satisfied by the push run.
+  #
+  # The `push` run is NEVER the one skipped, so `branch-deploy` (push-only,
+  # auto-deploys feature branches to `dev-branches`) is preserved. Skipping the
+  # push run instead is exactly what this repo's #3235 did — silently disabling
+  # branch-deploy — which the shared dedup is designed to avoid. Fork PRs still
+  # run the heavy path on `pull_request` (they have no base-repo push twin). See
+  # mysticat-ci `.github/actions/ci-context/README.md`.
+  #
+  # The caller-side DRAFT-PR skip is kept and composes with the above: a draft PR
+  # skips the whole `pull_request` `ci` job (the `push` run still covers the
+  # required checks and runs branch-deploy), and `ready_for_review` re-triggers
+  # the `pull_request` run — where the shared dedup then skips only build +
+  # it-postgres.
   ci:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     uses: adobe/mysticat-ci/.github/workflows/service-ci.yaml@v3
     with:
       service-name: api-service
@@ -29,6 +58,7 @@ jobs:
       it-postgres: true
       vpc-enabled: true
       bundle-build: true
+      dedup-pr-runs: true
     secrets: inherit
 
   # Opt-in TypeScript type-checking (checkJs + JSDoc, no .ts source) over the
