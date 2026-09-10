@@ -109,6 +109,16 @@ describe('handlers/activate-brand-workspace-job.js (Phase 4, LLMO-7352/LLMO-7418
     expect(context.log.info).to.have.been.calledOnce;
   });
 
+  it('reports 207/deleted instead of throwing when a concurrent hard-delete raced ahead of this chain (LLMO-7418 external-review Medium finding)', async () => {
+    findByIdStub.resolves(null);
+    const job = makeJob({ brandId: BRAND_ID, wasPending: true });
+
+    const result = await activateBrandWorkspaceJobHandler(context, job);
+
+    expect(result).to.deep.equal({ status: 207, body: { brandId: BRAND_ID, status: 'deleted', markets: [] } });
+    expect(context.log.info).to.have.been.calledOnce;
+  });
+
   it('defaults wasPending to false when absent from metadata, without affecting the (read-only) outcome', async () => {
     findByIdStub.resolves(makeBrand('active'));
     const job = makeJob({ brandId: BRAND_ID });
