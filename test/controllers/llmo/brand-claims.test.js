@@ -75,7 +75,7 @@ describe('handleBrandClaims', () => {
         return listBehavior();
       }
       if (command instanceof HeadObjectCommand) {
-        return headBehavior();
+        return headBehavior(command);
       }
       return Promise.resolve({});
     });
@@ -285,6 +285,190 @@ describe('handleBrandClaims', () => {
     expect(headCmd.input.Key).to.equal(`brand_claims/llmo/${TEST_SITE_ID}/gpt-4.1.json.gz`);
   });
 
+  const headCalls = () => mockS3Send.getCalls()
+    .filter((c) => c.args[0] instanceof HeadObjectCommand);
+
+  it('serves English with default locale fields when no locale is requested', async () => {
+    const result = await handleBrandClaims(baseContext);
+
+    expect(result.status).to.equal(200);
+    const body = await result.json();
+    expect(body.requestedLocale).to.equal(null);
+    expect(body.servedLocale).to.equal('default');
+    expect(signedKey()).to.equal(FLAT_KEY);
+    // Only the existence HEAD — no extra localized probe when locale is absent.
+    expect(headCalls()).to.have.length(1);
+  });
+
+  it('serves the localized sibling when it exists (single HEAD, no English probe)', async () => {
+    listResult = { CommonPrefixes: [weekPrefix('2026-W17')] };
+    const context = { ...baseContext, data: { locale: 'ja_jp' } };
+
+    const result = await handleBrandClaims(context);
+
+    expect(result.status).to.equal(200);
+    const body = await result.json();
+    expect(body.requestedLocale).to.equal('ja_jp');
+    expect(body.servedLocale).to.equal('ja_jp');
+    const localizedKey = `brand_claims/llmo/${TEST_SITE_ID}/2026-W17/data.ja_jp.json.gz`;
+    expect(signedKey()).to.equal(localizedKey);
+    // The localized HEAD confirmed existence, so there is no redundant English HEAD.
+    const heads = headCalls();
+    expect(heads).to.have.length(1);
+    expect(heads[0].args[0].input.Key).to.equal(localizedKey);
+  });
+
+  it('applies locale to an explicit week folder', async () => {
+    const context = { ...baseContext, data: { week: '2026-W17', locale: 'fr_fr' } };
+
+    const result = await handleBrandClaims(context);
+
+    expect(result.status).to.equal(200);
+    const body = await result.json();
+    expect(body.servedLocale).to.equal('fr_fr');
+    expect(signedKey()).to.equal(`brand_claims/llmo/${TEST_SITE_ID}/2026-W17/data.fr_fr.json.gz`);
+  });
+
+  it('falls back to English when the localized sibling is missing (HEAD 404)', async () => {
+    const notFoundError = new Error('Not Found');
+    notFoundError.name = 'NotFound';
+    // Localized HEAD 404s; the English existence HEAD succeeds.
+    headBehavior = (command) => (command.input.Key.endsWith('data.ja_jp.json.gz')
+      ? Promise.reject(notFoundError)
+      : Promise.resolve({}));
+    const context = { ...baseContext, data: { locale: 'ja_jp' } };
+
+    const result = await handleBrandClaims(context);
+
+    expect(result.status).to.equal(200);
+    const body = await result.json();
+    expect(body.requestedLocale).to.equal('ja_jp');
+    expect(body.servedLocale).to.equal('default'); // fell back to English
+    expect(signedKey()).to.equal(FLAT_KEY);
+    // Two HEADs: localized (404) then the English existence check.
+    const heads = headCalls();
+    expect(heads).to.have.length(2);
+    expect(heads[0].args[0].input.Key).to.equal(`brand_claims/llmo/${TEST_SITE_ID}/data.ja_jp.json.gz`);
+    expect(heads[1].args[0].input.Key).to.equal(FLAT_KEY);
+    expect(mockLog.info).to.have.been.calledWithMatch(/falling back to English/);
+  });
+
+  it('falls back to English when the localized HEAD 404s via $metadata (no error name)', async () => {
+    // Some S3 clients surface a missing object as an httpStatusCode, not a `NotFound`
+    // name — that branch must fall back to English just the same.
+    const statusError = new Error('Not Found');
+    statusError.$metadata = { httpStatusCode: 404 };
+    headBehavior = (command) => (command.input.Key.endsWith('data.ja_jp.json.gz')
+      ? Promise.reject(statusError)
+      : Promise.resolve({}));
+    const context = { ...baseContext, data: { locale: 'ja_jp' } };
+
+    const result = await handleBrandClaims(context);
+
+    expect(result.status).to.equal(200);
+    const body = await result.json();
+    expect(body.servedLocale).to.equal('default'); // fell back to English
+    expect(signedKey()).to.equal(FLAT_KEY);
+    expect(mockLog.info).to.have.been.calledWithMatch(/falling back to English/);
+  });
+
+  it('rethrows a non-404 error from the localized HEAD (no silent English fallback)', async () => {
+    // A NoSuchBucket/transient fault on the localized HEAD must NOT be swallowed as a
+    // "missing localized file" — it rethrows into the shared handler so the real
+    // failure surfaces instead of masquerading as an English fallback.
+    const bucketError = new Error('bucket gone');
+    bucketError.name = 'NoSuchBucket';
+    headBehavior = (command) => (command.input.Key.endsWith('data.ja_jp.json.gz')
+      ? Promise.reject(bucketError)
+      : Promise.resolve({}));
+    const context = { ...baseContext, data: { locale: 'ja_jp' } };
+
+    const result = await handleBrandClaims(context);
+
+    expect(result.status).to.equal(400);
+    expect((await result.json()).message).to.equal('S3 storage is not properly configured for this environment');
+    expect(mockGetSignedUrl).not.to.have.been.called;
+  });
+
+  it('returns 404 when both the localized and English objects are missing', async () => {
+    const notFoundError = new Error('Not Found');
+    notFoundError.name = 'NotFound';
+    headBehavior = () => Promise.reject(notFoundError); // every HEAD 404s
+    const context = { ...baseContext, data: { locale: 'ja_jp' } };
+
+    const result = await handleBrandClaims(context);
+
+    expect(result.status).to.equal(404);
+    expect(mockGetSignedUrl).not.to.have.been.called;
+  });
+
+  it('ignores locale when model is supplied (model files are not localized)', async () => {
+    const context = { ...baseContext, data: { model: 'gpt-4.1', locale: 'ja_jp' } };
+
+    const result = await handleBrandClaims(context);
+
+    expect(result.status).to.equal(200);
+    const body = await result.json();
+    expect(body.requestedLocale).to.equal(null);
+    expect(body.servedLocale).to.equal('default');
+    expect(signedKey()).to.equal(`brand_claims/llmo/${TEST_SITE_ID}/gpt-4.1.json.gz`);
+    // Flat model path: exactly one HEAD, no localized probe and no listing.
+    expect(mockS3Send).to.have.been.calledOnce;
+    expect(mockS3Send.getCall(0).args[0]).to.be.instanceOf(HeadObjectCommand);
+  });
+
+  it('returns 400 for an invalid locale string', async () => {
+    const context = { ...baseContext, data: { locale: 'japanese' } };
+
+    const result = await handleBrandClaims(context);
+
+    expect(result.status).to.equal(400);
+    expect((await result.json()).message).to.equal('Invalid locale parameter: expected e.g. ja_jp');
+    expect(mockS3Send).not.to.have.been.called;
+  });
+
+  it('returns 400 for a locale with a path separator (no key probing)', async () => {
+    const context = { ...baseContext, data: { locale: '../secret' } };
+
+    const result = await handleBrandClaims(context);
+
+    expect(result.status).to.equal(400);
+    expect((await result.json()).message).to.equal('Invalid locale parameter: expected e.g. ja_jp');
+    expect(mockS3Send).not.to.have.been.called;
+  });
+
+  it('returns 400 when locale has uppercase letters (strict lowercase only)', async () => {
+    const context = { ...baseContext, data: { locale: 'JA_JP' } };
+
+    const result = await handleBrandClaims(context);
+
+    expect(result.status).to.equal(400);
+    expect(mockS3Send).not.to.have.been.called;
+  });
+
+  it('treats an empty locale as absent and serves English (no extra HEAD)', async () => {
+    // `?locale=` -> hasText false -> useLocale false -> unchanged English behavior.
+    const context = { ...baseContext, data: { locale: '' } };
+
+    const result = await handleBrandClaims(context);
+
+    expect(result.status).to.equal(200);
+    const body = await result.json();
+    expect(body.requestedLocale).to.equal(null);
+    expect(body.servedLocale).to.equal('default');
+    expect(headCalls()).to.have.length(1); // only the English existence HEAD
+  });
+
+  it('returns 400 for a whitespace-only locale (present but invalid)', async () => {
+    // `?locale=%20%20` -> hasText true (not trimmed) -> validated -> rejected.
+    const context = { ...baseContext, data: { locale: '  ' } };
+
+    const result = await handleBrandClaims(context);
+
+    expect(result.status).to.equal(400);
+    expect(mockS3Send).not.to.have.been.called;
+  });
+
   it('returns 400 when S3 is not configured', async () => {
     const result = await handleBrandClaims({ ...baseContext, s3: null });
     expect(result.status).to.equal(400);
@@ -339,19 +523,21 @@ describe('handleBrandClaims', () => {
     const result = await handleBrandClaims(baseContext);
 
     expect(result.status).to.equal(400);
-    expect((await result.json()).message).to.equal('Storage bucket not found: test-bucket');
+    // Generic client message — the bucket name stays in the log, not the response.
+    expect((await result.json()).message).to.equal('S3 storage is not properly configured for this environment');
     expect(mockLog.error).to.have.been.calledWith('S3 bucket test-bucket not found');
   });
 
-  it('returns 400 for generic S3 errors', async () => {
+  it('returns 500 with a generic message for other S3 errors (no raw detail leaked)', async () => {
     const accessDeniedError = new Error('Access denied');
     accessDeniedError.name = 'AccessDenied';
     headBehavior = () => Promise.reject(accessDeniedError);
 
     const result = await handleBrandClaims(baseContext);
 
-    expect(result.status).to.equal(400);
-    expect((await result.json()).message).to.equal('Error retrieving brand claims: Access denied');
+    expect(result.status).to.equal(500);
+    // The raw AWS message (recon primitive) is logged, never returned to the caller.
+    expect((await result.json()).message).to.equal('Unable to retrieve brand claims');
     expect(mockLog.error).to.have.been.calledWith(
       `S3 error retrieving brand claims for site ${TEST_SITE_ID}: Access denied`,
     );
@@ -613,21 +799,54 @@ describe('handleRequestBrandClaims (on-demand, LLMO-7263)', () => {
     expect(msg.onDemand).to.equal(true);
     expect(msg.auditContext).to.deep.equal({ trigger: 'on-demand-brand-claims' });
     expect(postSlackMessage).to.have.been.calledOnce;
-    // The alert names who triggered it (name + human-readable email).
-    expect(postSlackMessage.getCall(0).args[1]).to.include('by Ada Lovelace (ada@example.com)');
+    // The alert carries only the coarse internal/external signal, not the requester's
+    // name or email. Default profile is a non-Adobe trial address, so: external.
+    const text = postSlackMessage.getCall(0).args[1];
+    expect(text).to.include('by an external user');
+    expect(text).to.not.include('Ada');
+    expect(text).to.not.include('ada@example.com');
   });
 
-  it('uses preferred_username (RFC-5322) over the profile.email GUID when there is no name', async () => {
+  it('labels an adobe.com requester as internal', async () => {
+    context.attributes.authInfo.getProfile = () => ({ trial_email: 'ada@adobe.com', first_name: 'Ada', last_name: 'Lovelace' });
+    await handleRequestBrandClaims(context, site);
+    const text = postSlackMessage.getCall(0).args[1];
+    expect(text).to.include('by an internal user');
+    expect(text).to.not.include('Ada');
+  });
+
+  it('labels an adobetest.com requester as internal', async () => {
+    context.attributes.authInfo.getProfile = () => ({ trial_email: 'exc-locuser-en+t2e@adobetest.com' });
+    await handleRequestBrandClaims(context, site);
+    expect(postSlackMessage.getCall(0).args[1]).to.include('by an internal user');
+  });
+
+  it('labels an Adobe subdomain requester as internal', async () => {
+    context.attributes.authInfo.getProfile = () => ({ preferred_username: 'ops@geo.adobe.com' });
+    await handleRequestBrandClaims(context, site);
+    expect(postSlackMessage.getCall(0).args[1]).to.include('by an internal user');
+  });
+
+  it('classifies via preferred_username when trial_email is absent', async () => {
     context.attributes.authInfo.getProfile = () => ({ preferred_username: 'grace@example.com' });
     await handleRequestBrandClaims(context, site);
-    expect(postSlackMessage.getCall(0).args[1]).to.include('by grace@example.com');
+    expect(postSlackMessage.getCall(0).args[1]).to.include('by an external user');
   });
 
-  it('uses the name alone when the profile has no email', async () => {
+  it('omits the "by" clause when the profile has no email (only a name)', async () => {
     context.attributes.authInfo.getProfile = () => ({ first_name: 'Ada', last_name: 'Lovelace' });
     await handleRequestBrandClaims(context, site);
-    // Ends with "by Ada Lovelace." — the name only, no "(email)" appended.
-    expect(postSlackMessage.getCall(0).args[1]).to.include('by Ada Lovelace.');
+    const text = postSlackMessage.getCall(0).args[1];
+    expect(text).to.not.include(' by ');
+    expect(text).to.not.include('Ada');
+  });
+
+  it('omits the "by" clause when the only email-like value has no domain (bare IMS GUID)', async () => {
+    context.attributes.authInfo.getProfile = () => ({ email: '6E3D1F2A0B9C4D5E7F8A9B0C' });
+    await handleRequestBrandClaims(context, site);
+    // A bare GUID has no '@', so there is no domain to classify — the alert stays
+    // unlabelled rather than guessing internal/external.
+    expect(postSlackMessage.getCall(0).args[1]).to.not.include(' by ');
   });
 
   it('omits the "by" clause when no identity is available', async () => {
@@ -644,14 +863,6 @@ describe('handleRequestBrandClaims (on-demand, LLMO-7263)', () => {
     };
     await handleRequestBrandClaims(context, site);
     expect(postSlackMessage.getCall(0).args[1]).to.not.include(' by ');
-  });
-
-  it('strips Slack mrkdwn control characters from the requester label', async () => {
-    context.attributes.authInfo.getProfile = () => ({ first_name: '<@here>', last_name: '`Ada`' });
-    await handleRequestBrandClaims(context, site);
-    const text = postSlackMessage.getCall(0).args[1];
-    expect(text).to.include('by @here Ada');
-    expect(text).to.not.match(/[<>`|]/);
   });
 
   it('returns 500 when AUDIT_JOBS_QUEUE_URL is not configured', async () => {
@@ -703,6 +914,19 @@ describe('handleRequestBrandClaims (on-demand, LLMO-7263)', () => {
     const result = await handleRequestBrandClaims(context, site);
     expect(result.status).to.equal(202);
     expect(sqsSend).to.have.been.calledOnce;
+  });
+
+  it('does not tag the Slack alert "(re-run)" on a first-ever run (no prior audit)', async () => {
+    await handleRequestBrandClaims(context, site);
+    expect(postSlackMessage.getCall(0).args[1]).to.not.include('(re-run)');
+  });
+
+  it('tags the Slack alert "(re-run)" when a prior (cooldown-cleared) audit exists', async () => {
+    const ranAt = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString(); // 8 days ago
+    getLatestAudit.resolves({ getAuditedAt: () => ranAt });
+    await handleRequestBrandClaims(context, site);
+    expect(postSlackMessage.getCall(0).args[1])
+      .to.include('On-demand Brand Claims requested (re-run) for');
   });
 
   it('proceeds (202) at the 7-day boundary (cooldown uses strict <)', async () => {
