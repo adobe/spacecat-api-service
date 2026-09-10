@@ -16,7 +16,7 @@ import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import esmock from 'esmock';
 import { ErrorWithStatusCode } from '../../src/support/utils.js';
-import { parseShowTrends, parseUserIntent } from '../../src/controllers/elements.js';
+import { parseShowTrends, parseUserIntent, parseSentimentMetric } from '../../src/controllers/elements.js';
 import { addDaysToDate } from '../../src/support/elements/week-utils.js';
 // Real error class (not a mock) so the controller's `instanceof SerenityTransportError`
 // check in checkAccess matches errors thrown by these tests — and so this file keeps a
@@ -2504,6 +2504,28 @@ describe('ElementsController', () => {
   // Exercised directly (not just through getStats) because extractQuery only
   // ever yields strings from URLSearchParams, so the boolean/number branch
   // below is unreachable via the HTTP query-string path.
+
+  describe('parseSentimentMetric', () => {
+    it("returns 'mentions' only for the explicit opt-in, case-insensitive and trimmed", () => {
+      expect(parseSentimentMetric({ metric: 'mentions' })).to.equal('mentions');
+      expect(parseSentimentMetric({ metric: 'MENTIONS' })).to.equal('mentions');
+      expect(parseSentimentMetric({ metric: '  Mentions  ' })).to.equal('mentions');
+    });
+
+    it('accepts the sentimentMetric / sentiment_metric aliases', () => {
+      expect(parseSentimentMetric({ sentimentMetric: 'mentions' })).to.equal('mentions');
+      expect(parseSentimentMetric({ sentiment_metric: 'mentions' })).to.equal('mentions');
+    });
+
+    // Deliberately permissive: an unrecognised value degrades to today's numbers
+    // rather than failing an otherwise-valid chart request.
+    it("defaults to 'prompts' for absent, blank, unrecognised or non-string values", () => {
+      for (const q of [undefined, null, {}, { metric: '' }, { metric: '  ' },
+        { metric: 'prompts' }, { metric: 'bogus' }, { metric: 42 }, { metric: true }]) {
+        expect(parseSentimentMetric(q), JSON.stringify(q ?? null)).to.equal('prompts');
+      }
+    });
+  });
 
   describe('parseShowTrends', () => {
     it('returns true for the boolean true', () => {

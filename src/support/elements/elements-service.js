@@ -615,8 +615,12 @@ export function createElementsService(transport, log) {
      *
      * @param {string} workspaceId - Semrush workspace UUID.
      * @param {object} params - Query params (model/platform, startDate, endDate, category,
-     *   projectId, projectIds, brandName).
-     * @returns {Promise<{ weeklyTrends: object[] }>} Legacy contract.
+     *   projectId, projectIds, brandName, metric).
+     * @param {'prompts'|'mentions'} [params.metric] - Which per-legend count drives the
+     *   sentiment percentages. Defaults to `prompts` (the original behaviour); `mentions`
+     *   matches the Semrush MFE. Does NOT affect the request payload — the element returns
+     *   both counts on every row, so this only selects which one the transform reads.
+     * @returns {Promise<{ metric: string, weeklyTrends: object[] }>} Legacy contract.
      */
     async getSentimentOverview(workspaceId, params) {
       const raw = await transport.fetchElement(
@@ -624,7 +628,7 @@ export function createElementsService(transport, log) {
         ELEMENT_IDS.SENTIMENT,
         buildSentimentOverviewPayload(params),
       );
-      return transformSentimentOverviewResponse(raw);
+      return transformSentimentOverviewResponse(raw, { metric: params?.metric });
     },
 
     /**
