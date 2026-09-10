@@ -1077,6 +1077,14 @@ function SerenityController(context, log, env) {
             err.code = 'semrush_provisioning_in_progress';
             throw err;
           }
+          // N2 note: no `title` is passed here deliberately. This branch runs only in
+          // subworkspace mode, where the brand already has a canonical pointer, so the worker
+          // polls that existing workspace and never reads `title`. The one exception is a narrow
+          // race (a concurrent deactivate clearing the pointer within the ~10s workspace-mode
+          // cache) in which the worker would take its create path with no title and fail fast —
+          // an acceptable, clearly-surfaced error, since creating a NEW sub-workspace mid
+          // add-market is itself not a valid outcome (unlike activate, which legitimately mints
+          // one and therefore does pass a title).
           const job = await createAndEnqueueJob(ctx, {
             jobType: PROVISION_WORKSPACE_JOB_TYPE,
             metadata: {
@@ -1811,6 +1819,12 @@ function SerenityController(context, log, env) {
           metadata: {
             brandId: brandUuid,
             attemptId,
+            // LLMO-7418 external-review Finding N2: an active flat-mode brand (authorize admits
+            // one that has an org workspace) reaches this branch with no sub-workspace pointer, so
+            // the worker takes its create-or-adopt path — which fail-fasts without a title. Supply
+            // the brand's name (the sub-workspace title convention) so that path yields a titled,
+            // adoptable workspace instead of a hard error.
+            title: brand.getName?.() ?? '',
             parentWorkspaceId: auth.parentWorkspaceId ?? '',
             chainedJobType: ACTIVATE_MARKETS_JOB_TYPE,
             chainedJobMetadata: {
@@ -1887,6 +1901,24 @@ function SerenityController(context, log, env) {
       }
       const transport = buildTransport(ctx, imsToken);
       const brand = await loadBrand(ctx, auth.brandUuid);
+      // LLMO-7418 external-review Finding 3 / N6: cancel any in-flight async provisioning attempt
+      // FIRST — before decommission, the pointer clear, and the status write. Once cancel sets
+      // semrush_provisioning_status='failed', a worker hop still mid-flight can no longer win its
+      // promoteProvisioningReady CAS (which requires status='pending'), so it cannot flip the
+      // brand back to 'active' and re-bind a workspace. Running it first (rather than last) both
+      // closes that race window and guarantees it still runs when the pointer/status save below
+      // throws. Best-effort: a failure here must never fail the deactivate itself.
+      try {
+        await cancelProvisioningAttempt({
+          brandId: /** @type {string} */ (auth.brandUuid),
+          postgrestClient: ctx.dataAccess.services.postgrestClient,
+        });
+      } catch (cancelError) {
+        log.error('serenity deactivate: failed to cancel an in-flight provisioning attempt (best-effort)', {
+          brandId: auth.brandUuid,
+          error: cancelError?.message,
+        });
+      }
       const subworkspaceId = brand.getSemrushSubWorkspaceId?.();
       if (hasText(subworkspaceId)) {
         await decommissionBrandWorkspace(
@@ -1936,22 +1968,6 @@ function SerenityController(context, log, env) {
           });
           throw saveError;
         }
-      }
-      // LLMO-7418 external-review Finding 3: cancel any in-flight async provisioning attempt so a
-      // worker hop still mid-flight can't later flip `status` back to `active`, resurrecting the
-      // brand we just deactivated — promoteProvisioningReady's own CAS has no way to know this
-      // deactivate happened. Best-effort: a failure here must never fail the deactivate itself,
-      // which has already fully succeeded by this point.
-      try {
-        await cancelProvisioningAttempt({
-          brandId: /** @type {string} */ (auth.brandUuid),
-          postgrestClient: ctx.dataAccess.services.postgrestClient,
-        });
-      } catch (cancelError) {
-        log.error('serenity deactivate: failed to cancel an in-flight provisioning attempt (best-effort)', {
-          brandId: auth.brandUuid,
-          error: cancelError?.message,
-        });
       }
       log.info('serenity deactivate: completed', {
         brandId: auth.brandUuid,
@@ -2015,6 +2031,13 @@ function SerenityController(context, log, env) {
         return notFound(`Job not found: ${jobId}`);
       }
       const metadata = job.getMetadata?.() ?? {};
+      // This single handler polls TWO unrelated job families that happen to share the async-job
+      // infrastructure: the pre-existing prompt-classification / bulk-tags / tag-impact jobs, and
+      // the provisioning jobs this stack added (PROVISION_WORKSPACE_JOB_TYPE + its chained
+      // market-create / activate hops). The chain-follow and the type label below must key off
+      // which family this job belongs to, or one family's behavior silently bleeds onto the other
+      // (LLMO-7418 external-review N4/N5).
+      const isProvisioningJob = metadata.jobType === PROVISION_WORKSPACE_JOB_TYPE;
       // Follow a chain/requeue to its EFFECTIVE terminal hop (LLMO-7418 external-review
       // Finding 8): the runner marks the ORIGINAL job COMPLETED on any non-throwing handler
       // return, including a self-requeue (`{ requeuedJobId }`, workspace not yet settled) or a
@@ -2026,8 +2049,15 @@ function SerenityController(context, log, env) {
       // caller polling a fixed URL never needs to learn about intermediate hop ids. Bounded to
       // guard against a corrupt/cyclic chain; a dangling pointer (an id the chain names but that
       // no longer resolves) simply stops following and reports the last hop actually found.
+      //
+      // N5: this is SCOPED to provisioning jobs. classifyPrompts jobs ALSO self-requeue and
+      // return `requeuedJobId`, but their shipped polling contract (before this stack) returned
+      // the FIRST hop's result — following their chain here would silently change what a live
+      // CSV-import consumer reads (hop-0 `{created,skipped,...}` vs a later reclassify hop's
+      // `{patched,...}`). Restore that contract by never following a non-provisioning chain; if
+      // the classify owners want terminal-hop following, that is theirs to opt into deliberately.
       const MAX_CHAIN_FOLLOW_HOPS = 10;
-      for (let hops = 0; job.getStatus() === 'COMPLETED' && hops < MAX_CHAIN_FOLLOW_HOPS; hops += 1) {
+      for (let hops = 0; isProvisioningJob && job.getStatus() === 'COMPLETED' && hops < MAX_CHAIN_FOLLOW_HOPS; hops += 1) {
         const hopResult = job.getResult?.();
         const nextJobId = hopResult?.chainedJobId || hopResult?.requeuedJobId;
         if (!nextJobId) {
@@ -2040,9 +2070,13 @@ function SerenityController(context, log, env) {
         }
         job = nextJob;
       }
-      /** @type {'classifyPrompts' | 'bulkTags' | 'tagImpact'} */
+      /** @type {'classifyPrompts' | 'bulkTags' | 'tagImpact' | 'provisionWorkspace'} */
       let publicJobType = 'classifyPrompts';
-      if (metadata.jobType === BULK_TAGS_JOB_TYPE) {
+      if (isProvisioningJob) {
+        // N4: a provisioning job must report its real family, not the classifyPrompts default —
+        // the async markets/activate/create clients (and the LLMO-7419 UI) branch on this.
+        publicJobType = 'provisionWorkspace';
+      } else if (metadata.jobType === BULK_TAGS_JOB_TYPE) {
         publicJobType = BULK_TAGS_PUBLIC_JOB_TYPE;
       } else if (metadata.jobType === 'serenity-tag-impact') {
         publicJobType = 'tagImpact';
