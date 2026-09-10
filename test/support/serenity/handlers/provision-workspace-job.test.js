@@ -611,19 +611,58 @@ describe('handlers/provision-workspace-job.js (LLMO-7352 / LLMO-7418)', () => {
       );
     });
 
-    it('does NOT clean up when a self-requeue already enqueued a future hop for the SAME candidate before the failure', async () => {
+    it('swallows a post-requeue freshness-write failure: resolves with the requeued hop, does not fail or clean up (LLMO-7418 external-review Finding N9)', async () => {
       transport.getWorkspaceStatus.resolves({ status: 'not_ready' });
       createAndEnqueueJobStub.resolves({ getId: () => 'job-followup' });
       updateProvisioningJobIdStub.rejects(new Error('freshness-write blip'));
       const { provisionWorkspaceHandler } = await loadHandler();
       const job = makeJob(makeMetadata());
 
-      await expect(provisionWorkspaceHandler(context, job, 'token')).to.be.rejectedWith('freshness-write blip');
+      // The self-requeue already succeeded; the best-effort job-id refresh is an optimization,
+      // not a safety mechanism. A failure there must NOT reach the outer catch: doing so would
+      // (a) mark the still-live attempt `failed` and (b) throw, invalidating the promise token
+      // the requeued hop needs — killing a healthy attempt and orphaning its workspace.
+      const result = await provisionWorkspaceHandler(context, job, 'token');
+      expect(result).to.deep.equal({ requeuedJobId: 'job-followup' });
 
       // The future hop (already enqueued) owns the candidate now — emptying it here would
-      // corrupt the workspace the NEXT invocation is about to poll.
+      // corrupt the workspace the NEXT invocation is about to poll, and the attempt must NOT
+      // be marked failed while a live hop is still in flight for it.
       expect(emptyWorkspaceBestEffortStub).to.not.have.been.called;
+      expect(promoteProvisioningFailedStub).to.not.have.been.called;
+    });
+
+    it('records a failure (no silent strand at pending) when transport construction itself throws (LLMO-7418 external-review Finding N3)', async () => {
+      // createSerenityTransport runs normalizeBaseUrl, which throws a 503 on a missing/malformed
+      // SEMRUSH_PROJECTS_BASE_URL. Constructing it INSIDE the try means that 503 is caught and
+      // recorded via failBestEffort → promoteProvisioningFailed, then re-thrown — rather than
+      // escaping and leaving the brand row stuck at `pending` forever.
+      const boom = new Error('SEMRUSH_PROJECTS_BASE_URL is not configured');
+      boom.status = 503;
+      const handlerWithBadTransport = await esmock('../../../../src/support/serenity/handlers/provision-workspace-job.js', {
+        '../../../../src/support/serenity/rest-transport.js': {
+          createSerenityTransport: sinon.stub().throws(boom),
+        },
+        '../../../../src/support/serenity/async-job-runner.js': {
+          createAndEnqueueJob: createAndEnqueueJobStub,
+        },
+        '../../../../src/support/brands-storage.js': {
+          getBrandProvisioningState: getBrandProvisioningStateStub,
+          persistProvisioningCandidate: persistProvisioningCandidateStub,
+          updateProvisioningJobId: updateProvisioningJobIdStub,
+          promoteProvisioningReady: promoteProvisioningReadyStub,
+          promoteProvisioningFailed: promoteProvisioningFailedStub,
+        },
+      });
+      const job = makeJob(makeMetadata());
+
+      await expect(
+        handlerWithBadTransport.provisionWorkspaceHandler(context, job, 'token'),
+      ).to.be.rejectedWith('SEMRUSH_PROJECTS_BASE_URL is not configured');
+
       expect(promoteProvisioningFailedStub).to.have.been.calledOnce;
+      // No candidate exists yet at construction time, so nothing to clean up.
+      expect(emptyWorkspaceBestEffortStub).to.not.have.been.called;
     });
 
     it('does NOT double-clean-up when promoteProvisioningReady already cleaned up before rethrowing', async () => {

@@ -181,13 +181,19 @@ export async function provisionWorkspaceHandler(context, job, accessToken) {
   // cleanupIfOwned call from the outer catch below for that specific path.
   let candidateAlreadyCleanedUp = false;
 
-  // Hoisted above the try (LLMO-7418 external-review Finding 5): a `const` declared INSIDE the
-  // try block is out of scope in the catch below, which is exactly why that catch could not
-  // previously call cleanupIfOwned for an unexpected error — this needs no request context
-  // beyond what the function already has, so there is no reason to construct it any later.
-  const transport = createSerenityTransport({ env, imsToken: accessToken });
+  // Declared above the try (LLMO-7418 external-review Finding 5) so the catch below can reach it
+  // for cleanupIfOwned — but ASSIGNED inside the try (external-review Finding N3): its
+  // construction runs normalizeBaseUrl, which throws ErrorWithStatusCode(503) on a missing or
+  // malformed SEMRUSH_PROJECTS_BASE_URL. Building it before the try let that 503 escape
+  // failBestEffort and strand the brand at `pending` forever — the exact failure mode this
+  // handler's outer catch exists to prevent. `candidate` is still undefined at this point, so a
+  // construction failure records `failed` and re-throws without any cleanup to do. `transport`
+  // can therefore be undefined in the catch below, where its only use (cleanupIfOwned) is
+  // guarded on it explicitly.
+  let transport;
 
   try {
+    transport = createSerenityTransport({ env, imsToken: accessToken });
     // Re-check FIRST, before any Semrush call: a newer attempt (a retry) or a terminal write
     // from a raced-ahead hop may have already superseded this one. Stand down as a clean no-op
     // rather than doing pointless — or actively harmful — Semrush work for an attempt nothing
@@ -385,9 +391,26 @@ export async function provisionWorkspaceHandler(context, job, accessToken) {
     // id. A rejected CAS here (attempt superseded in the tiny window since our earlier read)
     // is not itself an error — the new job's OWN next invocation re-checks currency and stands
     // down cleanly if so; this write is a freshness optimization, not a safety mechanism.
-    await updateProvisioningJobId({
-      brandId, attemptId, jobId: newJob.getId(), postgrestClient,
-    });
+    //
+    // LLMO-7418 external-review Finding N9: this write MUST NOT reach the outer catch. The
+    // self-requeue has already succeeded and a future hop now owns the candidate; letting a
+    // transient failure here fall through would (a) mark the still-live attempt `failed` via
+    // failBestEffort and (b) throw, which invalidates the promise token the requeued hop needs
+    // to run — killing a healthy attempt and orphaning its workspace. Swallow it locally,
+    // consistent with this write's own "optimization, not safety mechanism" contract.
+    try {
+      await updateProvisioningJobId({
+        brandId, attemptId, jobId: newJob.getId(), postgrestClient,
+      });
+    } catch (jobIdWriteError) {
+      log?.warn?.('provision-workspace-job: best-effort job-id refresh failed after a successful '
+        + 'self-requeue; the requeued hop is unaffected', {
+        brandId,
+        attemptId,
+        requeuedJobId: newJob.getId(),
+        error: jobIdWriteError?.message,
+      });
+    }
 
     return { requeuedJobId: newJob.getId() };
   } catch (error) {
@@ -404,7 +427,7 @@ export async function provisionWorkspaceHandler(context, job, accessToken) {
     // it itself. Without this, an unexpected error anywhere before that point (a Postgres read
     // failure, create-or-adopt throwing mid-flow, ...) left a freshly-created candidate an
     // orphan: this attempt is about to be marked failed, so nothing else will ever revisit it.
-    if (candidate && !requeueEnqueued && !candidateAlreadyCleanedUp) {
+    if (transport && candidate && !requeueEnqueued && !candidateAlreadyCleanedUp) {
       await cleanupIfOwned(transport, candidate, parentWorkspaceId, log, 'provision-worker-unexpected-error');
     }
     await failBestEffort({ brandId, attemptId, postgrestClient }, log);

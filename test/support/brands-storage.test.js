@@ -984,7 +984,7 @@ describe('brands-storage', () => {
   // so tests can verify which filters were applied to queries.
   function createCapturingClient(tableMap) {
     const calls = {
-      upsert: [], update: [], delete: [], or: [], neq: [], eq: [], is: [],
+      upsert: [], update: [], delete: [], or: [], neq: [], eq: [], is: [], in: [],
     };
     const callCounts = {};
     const makeQuery = (table) => {
@@ -1038,6 +1038,12 @@ describe('brands-storage', () => {
           if (prop === 'is') {
             return (col, val) => {
               calls.is.push({ table, col, val });
+              return new Proxy({}, handler);
+            };
+          }
+          if (prop === 'in') {
+            return (col, val) => {
+              calls.in.push({ table, col, val });
               return new Proxy({}, handler);
             };
           }
@@ -4654,6 +4660,37 @@ describe('brands-storage', () => {
             updated_by: 'serenity-provision-worker',
           },
         }]);
+      });
+
+      it('gates the CAS on an activatable brand status so a deleted/ignored brand cannot be resurrected (LLMO-7418 external-review Finding 3)', async () => {
+        const postgrestClient = createCapturingClient({
+          brands: { data: { id: BRAND_ID }, error: null },
+        });
+
+        await promoteProvisioningReady({
+          brandId: BRAND_ID,
+          attemptId: ATTEMPT_ID,
+          workspaceId: CANONICAL_WS,
+          hasSiteAnchor: true,
+          postgrestClient,
+        });
+
+        expect(postgrestClient.capturedCalls.in).to.deep.include({
+          table: 'brands', col: 'status', val: ['pending', 'active'],
+        });
+      });
+
+      it('returns false (a lost race) when the brand was deleted mid-attempt, leaving it deleted', async () => {
+        // A soft-deleted brand no longer matches the status predicate, so the CAS matches 0 rows.
+        const postgrestClient = createTableMockClient({ brands: { data: null, error: null } });
+        const result = await promoteProvisioningReady({
+          brandId: BRAND_ID,
+          attemptId: ATTEMPT_ID,
+          workspaceId: CANONICAL_WS,
+          hasSiteAnchor: true,
+          postgrestClient,
+        });
+        expect(result).to.equal(false);
       });
 
       it('writes the canonical pointer WITHOUT touching status when there is no site anchor (LLMO-7418 external-review Finding 5)', async () => {

@@ -2080,6 +2080,14 @@ export async function promoteProvisioningReady({
     .eq('id', brandId)
     .eq('semrush_provisioning_attempt_id', attemptId)
     .eq('semrush_provisioning_status', 'pending')
+    // LLMO-7418 external-review Finding 3: a soft-delete (status='deleted') or an offboard
+    // (status='ignored') never touches the provisioning columns, so without this predicate a
+    // late worker hop whose attempt is still 'pending' would flip a deleted/ignored brand back
+    // to 'active' and re-bind a fresh workspace to it — the "a late completion cannot restore,
+    // repoint, or reactivate the brand" AC. Only a brand still in an activatable state
+    // ('pending' → activate, or 'active' → re-affirm / add-market) may be promoted; a rejected
+    // CAS here is treated as a lost race and the worker cleans up its own candidate.
+    .in('status', ['pending', 'active'])
     .select('id')
     .maybeSingle();
 
