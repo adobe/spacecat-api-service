@@ -100,7 +100,7 @@ export default function llmoCloudflareOnboardingTests(getHttpClient, resetData) 
           `/sites/${SITE_1_ID}/llmo/cdn-onboard/cloudflare/config`,
         );
         expect(res.status).to.equal(200);
-        expect(res.body).to.deep.equal({ clientId: 'it-cloudflare-client-id' });
+        expect(res.body).to.deep.equal({ clientId: 'it-cloudflare-client-id', targetHost: 'site1.example.com' });
       });
     });
 
