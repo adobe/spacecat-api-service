@@ -1,3 +1,10 @@
+## [1.804.2](https://github.com/adobe/spacecat-api-service/compare/v1.804.1...v1.804.2) (2026-09-10)
+
+
+### Bug Fixes
+
+* **serenity:** forward caller tokens for browser async jobs ([#3214](https://github.com/adobe/spacecat-api-service/issues/3214)) ([addda0a](https://github.com/adobe/spacecat-api-service/commit/addda0a29350ba08ba032eefc7b4519f91c1c1dc))
+
 ## [1.804.1](https://github.com/adobe/spacecat-api-service/compare/v1.804.0...v1.804.1) (2026-09-10)
 
 
