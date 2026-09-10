@@ -58,6 +58,7 @@ import {
   isImpactMeasurementEligible,
 } from '../support/geo-experiment-helper.js';
 import { FixDto } from '../dto/fix.js';
+import { SUGGESTION_TYPES_REQUIRING_FIX_ENTITY } from '../utils/suggestion-fix-required-types.js';
 import { GeoExperimentDto } from '../dto/geo-experiment.js';
 import {
   sendAutofixMessage,
@@ -1149,6 +1150,12 @@ function SuggestionsController(ctx, sqs, env) {
 
       let isNewSkipTransition = false;
       if (hasText(status) && status !== suggestion.getStatus()) {
+        if (
+          status === SuggestionModel.STATUSES.FIXED
+          && SUGGESTION_TYPES_REQUIRING_FIX_ENTITY.includes(opportunity.getType())
+        ) {
+          return badRequest(`Suggestions of type '${opportunity.getType()}' cannot be marked FIXED directly; create a Fix via POST /sites/:siteId/opportunities/:opportunityId/fixes with suggestionsTargetStatus: FIXED instead.`);
+        }
         const { valid, error } = validateSkipFields(status, skipReason, skipDetail);
         if (!valid) {
           return badRequest(error);
@@ -1366,6 +1373,23 @@ function SuggestionsController(ctx, sqs, env) {
                 statusCode: 400,
               };
             }
+          }
+
+          // FIXED requires a Fix entity for these types (data-integrity gate): reject
+          // a direct transition to FIXED via this generic status endpoint and point
+          // callers at the fix-creation endpoint, which creates the Fix and flips
+          // suggestion status atomically. Checked ahead of the general transition
+          // gate below for the same reason the REJECTED rule is.
+          if (
+            status === SuggestionModel.STATUSES.FIXED
+            && SUGGESTION_TYPES_REQUIRING_FIX_ENTITY.includes(opportunity.getType())
+          ) {
+            return {
+              index,
+              uuid: id,
+              message: `Suggestions of type '${opportunity.getType()}' cannot be marked FIXED directly; create a Fix via POST /sites/:siteId/opportunities/:opportunityId/fixes with suggestionsTargetStatus: FIXED instead.`,
+              statusCode: 400,
+            };
           }
 
           // Per-item transition-legality gate (SITES-49063; part of the SITES-47286

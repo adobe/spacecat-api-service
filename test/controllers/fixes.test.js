@@ -1957,7 +1957,7 @@ describe('Fixes Controller', () => {
       expect(fixEntityCollection.setSuggestionsForFixEntity).to.have.been.calledTwice;
     });
 
-    it('handles invalid suggestion IDs during fix creation', async () => {
+    it('handles invalid suggestion IDs during fix creation without creating an orphaned fix', async () => {
       const validSuggestion = await createSuggestion({ type: 'CONTENT_UPDATE' });
       const invalidSuggestionId = '15345195-62e6-494c-81b1-1d0da0b51d84';
 
@@ -1968,9 +1968,7 @@ describe('Fixes Controller', () => {
       };
       requestContext.data = [fixData];
 
-      // Configure validation failure in setSuggestionsForFixEntity
       suggestionCollection.findById.withArgs(invalidSuggestionId).resolves(null);
-      fixEntityCollection.setSuggestionsForFixEntity.rejects(new Error('Invalid suggestion IDs'));
 
       const response = await fixesController.createFixes(requestContext);
       expect(response).includes({ status: 207 });
@@ -1978,8 +1976,92 @@ describe('Fixes Controller', () => {
       const { fixes, metadata } = await response.json();
       expect(metadata).deep.equals({ total: 1, success: 0, failed: 1 });
       expect(fixes).have.lengthOf(1);
-      expect(fixes[0]).includes({ index: 0, statusCode: 500 });
-      expect(fixes[0].message).to.include('Invalid suggestion IDs');
+      expect(fixes[0]).includes({ index: 0, statusCode: 400, message: 'Invalid suggestion IDs' });
+      // No fix should have been created for an invalid suggestionIds batch.
+      expect(fixEntityCollection.setSuggestionsForFixEntity).to.not.have.been.called;
+    });
+
+    it('rejects suggestion IDs belonging to a different opportunity', async () => {
+      const otherOpportunityId = 'b3d2f1e9-5f4c-4e6b-8c7d-0c7b5a2f1a2f';
+      const foreignSuggestion = await createSuggestion({
+        type: 'CONTENT_UPDATE',
+        opportunityId: otherOpportunityId,
+      });
+
+      requestContext.data = [{
+        type: 'CONTENT_UPDATE',
+        opportunityId,
+        suggestionIds: [foreignSuggestion.getId()],
+      }];
+
+      const response = await fixesController.createFixes(requestContext);
+      const { fixes, metadata } = await response.json();
+      expect(metadata).deep.equals({ total: 1, success: 0, failed: 1 });
+      expect(fixes[0]).includes({ index: 0, statusCode: 400, message: 'Invalid suggestion IDs' });
+      expect(fixEntityCollection.setSuggestionsForFixEntity).to.not.have.been.called;
+    });
+
+    it('marks linked suggestions FIXED atomically when suggestionsTargetStatus is set', async () => {
+      const suggestions = await Promise.all([
+        createSuggestion({ type: 'CONTENT_UPDATE' }),
+        createSuggestion({ type: 'CONTENT_UPDATE' }),
+      ]);
+
+      requestContext.data = [{
+        type: 'CONTENT_UPDATE',
+        opportunityId,
+        suggestionIds: suggestions.map((s) => s.getId()),
+        suggestionsTargetStatus: Suggestion.STATUSES.FIXED,
+      }];
+
+      fixEntityCollection.setSuggestionsForFixEntity.resolves({
+        createdItems: suggestions.map((s) => ({
+          getSuggestionId: () => s.getId(),
+          getFixEntityId: () => 'mock-fix-id',
+        })),
+        errorItems: [],
+        removedCount: 0,
+      });
+      suggestionCollection.bulkUpdateStatus.resolves(suggestions);
+
+      const response = await fixesController.createFixes(requestContext);
+      expect(response).includes({ status: 207 });
+
+      const { fixes, metadata } = await response.json();
+      expect(metadata).deep.equals({ total: 1, success: 1, failed: 0 });
+      expect(fixes[0]).includes({ index: 0, statusCode: 201 });
+
+      expect(suggestionCollection.bulkUpdateStatus).to.have.been.calledOnceWith(
+        suggestions,
+        Suggestion.STATUSES.FIXED,
+      );
+      // The fix must be created/linked before suggestions are marked fixed.
+      expect(fixEntityCollection.setSuggestionsForFixEntity).to.have.been.calledBefore(
+        suggestionCollection.bulkUpdateStatus,
+      );
+    });
+
+    it('does not mark suggestions FIXED when suggestionsTargetStatus is absent', async () => {
+      const suggestion = await createSuggestion({ type: 'CONTENT_UPDATE' });
+
+      requestContext.data = [{
+        type: 'CONTENT_UPDATE',
+        opportunityId,
+        suggestionIds: [suggestion.getId()],
+      }];
+
+      fixEntityCollection.setSuggestionsForFixEntity.resolves({
+        createdItems: [{
+          getSuggestionId: () => suggestion.getId(),
+          getFixEntityId: () => 'mock-fix-id',
+        }],
+        errorItems: [],
+        removedCount: 0,
+      });
+
+      const response = await fixesController.createFixes(requestContext);
+      expect(response).includes({ status: 207 });
+      expect(suggestionCollection.bulkUpdateStatus).to.not.have.been.called;
     });
 
     describe('document path enrichment (AEM CS and AEM Edge)', () => {
@@ -2504,6 +2586,63 @@ describe('Fixes Controller', () => {
       });
 
       expect(fix.patcher.save).calledOnce;
+    });
+
+    it('marks linked suggestions FIXED when suggestionsTargetStatus is set and status becomes DEPLOYED', async () => {
+      const fixId = 'a4a6055c-de4b-4552-bc0c-01fdb45b98d5';
+      await createFix(fixId);
+      const suggestion = await suggestionCollection.create({
+        opportunityId, type: 'CONTENT_UPDATE', status: 'PENDING',
+      });
+      fixEntityCollection.getSuggestionsByFixEntityId.withArgs(fixId).resolves([suggestion]);
+      suggestionCollection.bulkUpdateStatus.resolves([suggestion]);
+
+      requestContext.data = [{
+        id: fixId, status: 'DEPLOYED', suggestionsTargetStatus: Suggestion.STATUSES.FIXED,
+      }];
+
+      const response = await fixesController.patchFixesStatus(requestContext);
+      expect(response).includes({ status: 207 });
+      const { fixes, metadata } = await response.json();
+      expect(metadata).deep.equals({ total: 1, success: 1, failed: 0 });
+      expect(fixes[0]).includes({ index: 0, statusCode: 200 });
+
+      expect(suggestionCollection.bulkUpdateStatus).to.have.been.calledOnceWith(
+        [suggestion],
+        Suggestion.STATUSES.FIXED,
+      );
+    });
+
+    it('applies suggestionsTargetStatus regardless of which fix status it transitions to', async () => {
+      const fixId = 'a4a6055c-de4b-4552-bc0c-01fdb45b98d5';
+      await createFix(fixId);
+      const suggestion = await suggestionCollection.create({
+        opportunityId, type: 'CONTENT_UPDATE', status: 'PENDING',
+      });
+      fixEntityCollection.getSuggestionsByFixEntityId.withArgs(fixId).resolves([suggestion]);
+      suggestionCollection.bulkUpdateStatus.resolves([suggestion]);
+
+      requestContext.data = [{
+        id: fixId, status: 'FAILED', suggestionsTargetStatus: Suggestion.STATUSES.SKIPPED,
+      }];
+
+      const response = await fixesController.patchFixesStatus(requestContext);
+      expect(response).includes({ status: 207 });
+      expect(suggestionCollection.bulkUpdateStatus).to.have.been.calledOnceWith(
+        [suggestion],
+        Suggestion.STATUSES.SKIPPED,
+      );
+    });
+
+    it('does not mark suggestions FIXED when suggestionsTargetStatus is absent', async () => {
+      const fixId = 'a4a6055c-de4b-4552-bc0c-01fdb45b98d5';
+      await createFix(fixId);
+
+      requestContext.data = [{ id: fixId, status: 'DEPLOYED' }];
+
+      const response = await fixesController.patchFixesStatus(requestContext);
+      expect(response).includes({ status: 207 });
+      expect(suggestionCollection.bulkUpdateStatus).to.not.have.been.called;
     });
 
     it('can patch the status of multiple fixes', async () => {

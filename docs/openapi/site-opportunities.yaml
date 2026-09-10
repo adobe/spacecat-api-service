@@ -511,6 +511,12 @@ site-opportunity-suggestions-status:
       call this endpoint. The admin-only gate for `REJECTED` status transitions is bypassed
       for S2S callers holding this capability; all other validations (site membership,
       opportunity lookup, valid status transition) apply unchanged.
+
+      **FIXED status:** for opportunity types where a suggestion must have a corresponding
+      Fix entity before it can be FIXED, a direct transition to FIXED via this endpoint is
+      rejected with a 400. Use `POST .../opportunities/{opportunityId}/fixes` with
+      `suggestionsTargetStatus: FIXED` instead, which creates the Fix and transitions
+      the suggestion atomically.
     tags:
       - opportunity-suggestions
     requestBody:
@@ -1375,6 +1381,12 @@ site-opportunity-suggestion:
     operationId: updateSiteOpportunitySuggestion
     summary: |
       Update specific attributes of an existing suggestion
+    description: |
+      For opportunity types where a suggestion must have a corresponding Fix entity
+      before it can be FIXED, a direct transition to FIXED via this endpoint is
+      rejected with a 400. Use `POST .../opportunities/{opportunityId}/fixes` with
+      `suggestionsTargetStatus: FIXED` instead, which creates the Fix and transitions
+      the suggestion atomically.
     tags:
       - opportunity-suggestions
     requestBody:
@@ -1800,9 +1812,15 @@ site-opportunity-fixes:
     summary: |
       Create and add a list of one or more fixes to an opportunity in one transaction
     description: |
-      Creates one or more fix entities for a given opportunity. Each fix can optionally include 
-      an array of suggestionIds to associate existing suggestions with the fix. This allows you 
+      Creates one or more fix entities for a given opportunity. Each fix can optionally include
+      an array of suggestionIds to associate existing suggestions with the fix. This allows you
       to link fixes to the suggestions they address in a single transaction.
+
+      Set `suggestionsTargetStatus` on a fix to also transition its linked
+      suggestions to that status once the fix is successfully created and linked —
+      atomically, so a suggestion is never marked FIXED without a persisted Fix entity.
+      This is required for opportunity types where the suggestion-status PATCH
+      endpoints reject a direct transition to FIXED.
     tags:
       - opportunity-fixes
     requestBody:
@@ -2042,6 +2060,12 @@ site-opportunity-status:
     operationId: updateSiteOpportunityStatus
     summary: |
       Update the status of one or multiple fixes in one transaction
+    description: |
+      Set `suggestionsTargetStatus` on a fix update to also transition its linked
+      suggestions to that status once the fix status update is successfully
+      persisted — atomically, so a suggestion is never transitioned independently of
+      the fix update. This is required for opportunity types where the
+      suggestion-status PATCH endpoints reject a direct transition to FIXED.
     tags:
       - opportunity-fixes
     requestBody:

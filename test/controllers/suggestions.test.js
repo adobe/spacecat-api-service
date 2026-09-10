@@ -5162,6 +5162,80 @@ describe('Suggestions Controller', () => {
     });
   });
 
+  describe('FIXED requires a Fix entity for gated opportunity types', () => {
+    const patchToFixed = async (opportunityType, endpointName) => {
+      const suggestionEntity = mockSuggestionEntity({
+        id: SUGGESTION_IDS[0],
+        opportunityId: OPPORTUNITY_ID,
+        type: 'CODE_CHANGE',
+        status: 'IN_PROGRESS',
+        rank: 1,
+        data: { info: 'sample data' },
+      }, removeStub);
+      const saveSpy = sandbox.spy(suggestionEntity, 'save');
+      suggestionEntity.getOpportunity = () => ({
+        getSiteId: () => SITE_ID,
+        getType: () => opportunityType,
+      });
+
+      mockSuggestion.findById.withArgs(SUGGESTION_IDS[0]).resolves(suggestionEntity);
+      mockSite.findById.withArgs(SITE_ID).resolves(site);
+      sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
+      sandbox.stub(AccessControlUtil.prototype, 'hasS2SCapability').resolves({ allowed: false, reason: 'not-s2s' });
+      sandbox.stub(AccessControlUtil.prototype, 'hasAdminAccess').returns(true);
+
+      const response = endpointName === 'patchSuggestion'
+        ? await suggestionsController.patchSuggestion({
+          params: {
+            siteId: SITE_ID, opportunityId: OPPORTUNITY_ID, suggestionId: SUGGESTION_IDS[0],
+          },
+          data: { status: 'FIXED' },
+          ...context,
+        })
+        : await suggestionsController.patchSuggestionsStatus({
+          params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+          data: [{ id: SUGGESTION_IDS[0], status: 'FIXED' }],
+          ...context,
+        });
+      return { response, saveSpy };
+    };
+
+    it('patchSuggestion rejects direct FIXED transition for a gated type (alt-text)', async () => {
+      const { response, saveSpy } = await patchToFixed('alt-text', 'patchSuggestion');
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body.message).to.match(/cannot be marked FIXED directly/);
+      expect(body.message).to.include('alt-text');
+      expect(saveSpy).to.not.have.been.called;
+    });
+
+    it('patchSuggestion allows direct FIXED transition for a non-gated type', async () => {
+      const { response, saveSpy } = await patchToFixed('test-opportunity-type', 'patchSuggestion');
+      expect(response.status).to.equal(200);
+      expect(saveSpy).to.have.been.calledOnce;
+    });
+
+    it('patchSuggestionsStatus rejects direct FIXED transition for a gated type (broken-backlinks)', async () => {
+      const { response, saveSpy } = await patchToFixed('broken-backlinks', 'patchSuggestionsStatus');
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.suggestions[0]).to.have.property('statusCode', 400);
+      expect(body.suggestions[0].message).to.match(/cannot be marked FIXED directly/);
+      expect(body.suggestions[0].message).to.include('broken-backlinks');
+      expect(body.metadata).to.have.property('failed', 1);
+      expect(saveSpy).to.not.have.been.called;
+    });
+
+    it('patchSuggestionsStatus allows direct FIXED transition for a non-gated type', async () => {
+      const { response, saveSpy } = await patchToFixed('test-opportunity-type', 'patchSuggestionsStatus');
+      expect(response.status).to.equal(207);
+      const body = await response.json();
+      expect(body.suggestions[0]).to.have.property('statusCode', 200);
+      expect(body.metadata).to.have.property('success', 1);
+      expect(saveSpy).to.have.been.calledOnce;
+    });
+  });
+
   describe('auto-fix suggestions', () => {
     let suggestionsControllerWithMock;
     beforeEach(async () => {

@@ -4301,6 +4301,15 @@ FixCreate:
       description: Optional array of suggestion IDs to associate with this fix
       items:
         $ref: '#/Id'
+    suggestionsTargetStatus:
+      $ref: '#/SuggestionStatus'
+      description: >-
+        Optional. When set, the suggestions in suggestionIds are atomically
+        transitioned to this status once this fix is successfully created and linked.
+        Required for opportunity types where a suggestion cannot be marked FIXED
+        without a corresponding Fix entity (see PATCH suggestion status endpoints,
+        which reject direct transitions to FIXED for those types). Omit to leave
+        suggestion status untouched.
 
 FixOperationSuccess:
   type: object
@@ -4423,6 +4432,14 @@ FixStatusUpdate:
       status:
         description: Status of this fix; status reflects overall fix execution, flagged here for optimization
         $ref: '#/SuggestionStatus'
+      suggestionsTargetStatus:
+        $ref: '#/SuggestionStatus'
+        description: >-
+          Optional. When set, the fix's linked suggestions are atomically
+          transitioned to this status once the fix status update is successfully
+          persisted. Required for opportunity types where a suggestion cannot be
+          marked FIXED without a corresponding Fix entity. Omit to leave
+          suggestion status untouched.
     required:
       - id
       - status
