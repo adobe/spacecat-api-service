@@ -26,6 +26,11 @@
  */
 export const SERENITY_CLASSIFY_JOB_ID = 'eeee3333-3333-4333-a333-333333333333';
 
+// A COMPLETED preflight job owned by SITE_3 (organization ORG_2 — the "denied" org
+// for the `user` persona). Used to assert that GET /preflight/jobs/{jobId} returns
+// 404 (no existence disclosure) for a caller who does not own the job's site.
+export const SITE_3_PREFLIGHT_JOB_ID = 'eeee4444-4444-4444-b444-444444444444';
+
 export const asyncJobs = [
   {
     id: 'eeee2222-2222-4222-a222-222222222222',
@@ -78,5 +83,25 @@ export const asyncJobs = [
     },
     started_at: '2025-02-01T09:00:00.000Z',
     ended_at: '2025-02-01T09:01:00.000Z',
+  },
+  {
+    id: SITE_3_PREFLIGHT_JOB_ID,
+    status: 'COMPLETED',
+    result_location: 'https://results.example.com/preflight-003',
+    result_type: 'URL',
+    result: { summary: { totalIssues: 0, criticalIssues: 0 } },
+    metadata: {
+      payload: {
+        // SITE_3_ID — ORG_2, denied to the `user` persona. Literal to keep this seed
+        // file free of a cross-import dependency on seed-ids.js.
+        siteId: '55555555-5555-4555-9555-555555555555',
+        urls: ['https://site3-denied.example.com/page1'],
+        step: 'identify',
+      },
+      jobType: 'preflight',
+      tags: ['preflight'],
+    },
+    started_at: '2025-02-02T09:00:00.000Z',
+    ended_at: '2025-02-02T09:05:00.000Z',
   },
 ];
