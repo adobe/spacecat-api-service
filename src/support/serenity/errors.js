@@ -161,6 +161,8 @@ export const ERROR_CODES = Object.freeze({
   // Subworkspace provisioning (serenity dual-mode, subworkspace path).
   AMBIGUOUS_WORKSPACE: 'ambiguousWorkspace',
   LINKED_SUBWORKSPACES: 'linkedSubworkspaces',
+  SUBWORKSPACE_CREATION_FAILED: 'subworkspaceCreationFailed',
+  SUBWORKSPACE_CREATION_TIMEOUT: 'subworkspaceCreationTimeout',
   // Publish-after-populate (LLMO-5492): a publish rejected because the workspace
   // has no `ai.projects` quota (Semrush's disguised metered 405). PERMANENT —
   // alert, do not retry — distinct from the transient publish failures.

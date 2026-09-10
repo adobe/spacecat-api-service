@@ -167,6 +167,49 @@ describe('Customer Config Mapper', () => {
       expect(result.customer.brands[0].mentionSentimentGuidance).to.equal(null);
     });
 
+    it('strips control/invisible/bidi chars from legacy guidance (parity with the storage path)', () => {
+      // Good{U+202E bidi override}{U+200B zero-width}{NUL}{U+2028 line sep}text 🚀
+      const dirty = `Good${String.fromCharCode(0x202E)}${String.fromCharCode(0x200B)}`
+        + `${String.fromCharCode(0)}${String.fromCharCode(0x2028)}text 🚀`;
+      const llmoConfig = {
+        brands: {
+          aliases: [
+            { name: 'Test Brand', regions: ['US'] },
+          ],
+        },
+        claims: { brandContext: dirty },
+        categories: {},
+        topics: {},
+      };
+
+      const result = convertV1ToV2(llmoConfig, 'TestCo', 'test@org');
+      // Bidi/zero-width/control/line-separator removed; letters, space and emoji preserved.
+      expect(result.customer.brands[0].brandContext).to.equal('Goodtext 🚀');
+    });
+
+    it('truncates over-length guidance on code-point boundaries (no split astral chars)', () => {
+      const llmoConfig = {
+        brands: {
+          aliases: [
+            { name: 'Test Brand', regions: ['US'] },
+          ],
+        },
+        claims: {
+          // 4001 rocket emoji (each 1 code point / 2 UTF-16 units).
+          brandContext: '🚀'.repeat(4001),
+        },
+        categories: {},
+        topics: {},
+      };
+
+      const result = convertV1ToV2(llmoConfig, 'TestCo', 'test@org');
+      const { brandContext } = result.customer.brands[0];
+      // Truncated to 4000 whole code points, not 4000 UTF-16 units mid-emoji.
+      // (A naive slice(0, 4000) would yield 2000 emoji + a lone low surrogate.)
+      expect([...brandContext]).to.have.lengthOf(4000);
+      expect(brandContext).to.equal('🚀'.repeat(4000));
+    });
+
     it('handles null and non-string legacy claims guidance values', () => {
       const llmoConfig = {
         brands: {
