@@ -98,6 +98,17 @@ async function cleanupIfOwned(transport, candidate, parentWorkspaceId, log, phas
   }
 }
 
+// LLMO-7418 external-review Finding 12: bounded retry for the chained-job enqueue below — one
+// transient SQS blip must not permanently strand an otherwise-successful attempt (brand active
+// and ready, but no market and nothing left to ever retry it). 3 attempts total, short backoff;
+// this is fire-and-forget-adjacent (awaited inline, but genuinely brief) so a couple of quick
+// retries covers the common transient case without meaningfully extending this hop's runtime.
+export const CHAINED_JOB_ENQUEUE_ATTEMPTS = 3;
+const CHAINED_JOB_ENQUEUE_RETRY_DELAYS_MS = [250, 750];
+const defaultSleep = (ms) => new Promise((resolve) => {
+  setTimeout(resolve, ms);
+});
+
 /**
  * Enqueues the follow-up job named in `metadata.chainedJobType` (PR-C, LLMO-7352/LLMO-7418) once
  * the sub-workspace this attempt was provisioning is confirmed `ready` — e.g. the
@@ -105,45 +116,78 @@ async function cleanupIfOwned(transport, candidate, parentWorkspaceId, log, phas
  * now-ready workspace. Absent `chainedJobType`, this is a no-op (the bare-workspace-only callers
  * never set it).
  *
- * Deliberately swallows an enqueue failure rather than letting it propagate: the workspace IS
+ * Retries a bounded number of times (LLMO-7418 external-review Finding 12) before giving up —
+ * still swallows the failure after that, rather than letting it propagate: the workspace IS
  * genuinely ready and already durably promoted by the time this runs, so a failure here must
  * NEVER be mistaken for a provisioning failure (the outer catch's best-effort `failed` write
  * would incorrectly try to un-ready a brand that is, in fact, fine) — it only means the
- * follow-up work never got scheduled. Logged at `error` so it is not silently lost; there is no
- * automatic retry for this specific hop today (a known, narrower gap than the provisioning
- * attempt itself, tracked alongside it).
+ * follow-up work never got scheduled. Logged at `error` so it is not silently lost.
  *
  * @param {object} context
  * @param {object} metadata - the CURRENT job's metadata (`chainedJobType`/`chainedJobMetadata`).
  * @param {string} workspaceId - the just-confirmed-ready workspace id, merged into the chained
  *   job's own metadata under the same key the async worker itself uses.
  * @param {object} log
- * @returns {Promise<string|null>} the chained job's id, or null if none was configured or the
- *   enqueue itself failed.
+ * @param {(ms: number) => Promise<void>} [sleep] - injectable delay (tests pass a no-op).
+ * @returns {Promise<string|null>} the chained job's id, or null if none was configured or every
+ *   enqueue attempt failed.
  */
-async function enqueueChainedJobIfConfigured(context, metadata, workspaceId, log) {
+async function enqueueChainedJobIfConfigured(
+  context,
+  metadata,
+  workspaceId,
+  log,
+  sleep = defaultSleep,
+) {
   if (!metadata.chainedJobType) {
     return null;
   }
-  try {
-    const chainedJob = await createAndEnqueueJob(context, {
-      jobType: metadata.chainedJobType,
-      // Forward the SAME token this attempt already exchanged — the chained job has no HTTP
-      // context to mint its own, identical to every other self-requeue in this file.
-      promiseToken: metadata.promiseToken,
-      promisePair: metadata.promisePair,
-      metadata: { ...metadata.chainedJobMetadata, workspaceId },
-    });
-    log?.info?.('provision-workspace-job: chained job enqueued after ready promotion', {
-      chainedJobType: metadata.chainedJobType, chainedJobId: chainedJob.getId(), workspaceId,
-    });
-    return chainedJob.getId();
-  } catch (error) {
-    log?.error?.('provision-workspace-job: failed to enqueue the chained job; workspace IS ready, but no follow-up job was scheduled', {
-      chainedJobType: metadata.chainedJobType, workspaceId, error: error?.message,
-    });
-    return null;
+  let lastError;
+  for (let attempt = 0; attempt < CHAINED_JOB_ENQUEUE_ATTEMPTS; attempt += 1) {
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      const chainedJob = await createAndEnqueueJob(context, {
+        jobType: metadata.chainedJobType,
+        // Forward the SAME token this attempt already exchanged — the chained job has no HTTP
+        // context to mint its own, identical to every other self-requeue in this file.
+        promiseToken: metadata.promiseToken,
+        promisePair: metadata.promisePair,
+        metadata: { ...metadata.chainedJobMetadata, workspaceId },
+      });
+      log?.info?.('provision-workspace-job: chained job enqueued after ready promotion', {
+        chainedJobType: metadata.chainedJobType,
+        chainedJobId: chainedJob.getId(),
+        workspaceId,
+        attempt,
+      });
+      return chainedJob.getId();
+    } catch (error) {
+      lastError = error;
+      const isLastAttempt = attempt === CHAINED_JOB_ENQUEUE_ATTEMPTS - 1;
+      log?.warn?.('provision-workspace-job: chained job enqueue attempt failed', {
+        chainedJobType: metadata.chainedJobType,
+        workspaceId,
+        attempt,
+        error: error?.message,
+        willRetry: !isLastAttempt,
+      });
+      if (!isLastAttempt) {
+        // eslint-disable-next-line no-await-in-loop
+        await sleep(CHAINED_JOB_ENQUEUE_RETRY_DELAYS_MS[attempt]);
+      }
+    }
   }
+  log?.error?.(
+    'provision-workspace-job: failed to enqueue the chained job after all retries; workspace '
+    + 'IS ready, but no follow-up job was scheduled',
+    {
+      chainedJobType: metadata.chainedJobType,
+      workspaceId,
+      attempts: CHAINED_JOB_ENQUEUE_ATTEMPTS,
+      error: lastError?.message,
+    },
+  );
+  return null;
 }
 
 /**

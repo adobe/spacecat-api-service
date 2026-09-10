@@ -533,7 +533,7 @@ describe('handlers/provision-workspace-job.js (LLMO-7352 / LLMO-7418)', () => {
         expect(createAndEnqueueJobStub).to.not.have.been.called;
       });
 
-      it('does NOT throw and does NOT re-fail the (already ready) brand when the chain enqueue itself fails', async () => {
+      it('does NOT throw and does NOT re-fail the (already ready) brand when the chain enqueue itself fails after all retries (LLMO-7418 external-review Finding 12)', async () => {
         transport.getWorkspaceStatus.resolves({ status: 'active' });
         createAndEnqueueJobStub.rejects(new Error('sqs down'));
         const { provisionWorkspaceHandler } = await loadHandler();
@@ -543,6 +543,23 @@ describe('handlers/provision-workspace-job.js (LLMO-7352 / LLMO-7418)', () => {
 
         expect(result).to.deep.equal({ provisioningStatus: 'ready' });
         expect(promoteProvisioningFailedStub).to.not.have.been.called;
+        // Retried the full bounded count before giving up — one transient blip alone must not
+        // strand the brand (LLMO-7418 external-review Finding 12).
+        expect(createAndEnqueueJobStub.callCount).to.equal(3);
+      });
+
+      it('recovers on a retry after one transient chain-enqueue failure (LLMO-7418 external-review Finding 12)', async () => {
+        transport.getWorkspaceStatus.resolves({ status: 'active' });
+        createAndEnqueueJobStub
+          .onFirstCall().rejects(new Error('transient sqs blip'))
+          .onSecondCall().resolves({ getId: () => 'chained-job-retry-1' });
+        const { provisionWorkspaceHandler } = await loadHandler();
+        const job = makeJob(makeMetadata({ chainedJobType: 'serenity-create-market' }));
+
+        const result = await provisionWorkspaceHandler(context, job, 'token');
+
+        expect(result).to.deep.equal({ provisioningStatus: 'ready', chainedJobId: 'chained-job-retry-1' });
+        expect(createAndEnqueueJobStub.callCount).to.equal(2);
       });
 
       it('threads chainedJobType/chainedJobMetadata forward across a self-requeue hop', async () => {

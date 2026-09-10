@@ -100,7 +100,7 @@ import { isServicePrincipal, resolveBrandUuid } from '../support/prompts-storage
 import {
   getBrandAliases, getBrandBaseSiteId,
   cancelProvisioningAttempt,
-  guardAgainstConcurrentProvisioning, beginProvisioningAttempt,
+  guardAgainstConcurrentProvisioning, beginProvisioningAttempt, updateProvisioningJobId,
 } from '../support/brands-storage.js';
 import { ErrorWithStatusCode, resolveSemrushImsToken as resolveImsTokenViaPromise } from '../support/utils.js';
 import {
@@ -1095,6 +1095,22 @@ function SerenityController(context, log, env) {
               },
             },
           });
+          // LLMO-7418 external-review Finding 17: only the worker's OWN self-requeue path ever
+          // wrote semrush_provisioning_job_id, so an attempt resolving on its first hop (the
+          // common case) left it permanently NULL — contradicting the column's own database
+          // comment and leaving no brand-to-job link for an attempt that never requeues.
+          // Best-effort, same as the worker's own write: a failure here must never turn an
+          // already-successfully-enqueued job into a client-facing error.
+          await updateProvisioningJobId({
+            brandId: auth.brandUuid,
+            attemptId,
+            jobId: job.getId(),
+            postgrestClient: ctx.dataAccess.services.postgrestClient,
+          }).catch((updateError) => {
+            log.error('createMarket: failed to record the first-hop job id (best-effort)', {
+              brandId: auth.brandUuid, attemptId, jobId: job.getId(), error: updateError?.message,
+            });
+          });
           return accepted({ jobId: job.getId(), status: job.getStatus() });
         }
         // PR-C guard (LLMO-7352/LLMO-7418): this branch stays synchronous by default, but an
@@ -1805,6 +1821,18 @@ function SerenityController(context, log, env) {
               callerId: resolveCallerId(ctx),
             },
           },
+        });
+        // LLMO-7418 external-review Finding 17: see createMarket's async branch above for the
+        // full rationale. Best-effort — never turns an already-enqueued job into a client error.
+        await updateProvisioningJobId({
+          brandId: brandUuid,
+          attemptId,
+          jobId: job.getId(),
+          postgrestClient: ctx.dataAccess.services.postgrestClient,
+        }).catch((updateError) => {
+          log.error('activate: failed to record the first-hop job id (best-effort)', {
+            brandId: brandUuid, attemptId, jobId: job.getId(), error: updateError?.message,
+          });
         });
         return accepted({ jobId: job.getId(), status: job.getStatus() });
       }
