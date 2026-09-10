@@ -1,3 +1,10 @@
+## [1.804.1](https://github.com/adobe/spacecat-api-service/compare/v1.804.0...v1.804.1) (2026-09-10)
+
+
+### Bug Fixes
+
+* **cors:** allow If-Match request header ([#3258](https://github.com/adobe/spacecat-api-service/issues/3258)) ([fe217e1](https://github.com/adobe/spacecat-api-service/commit/fe217e1e08b2f2df916b4a270c6b340482f9cc8e)), closes [#3218](https://github.com/adobe/spacecat-api-service/issues/3218) [adobe/spacecat-infrastructure#788](https://github.com/adobe/spacecat-infrastructure/issues/788)
+
 # [1.804.0](https://github.com/adobe/spacecat-api-service/compare/v1.803.0...v1.804.0) (2026-09-10)
 
 
