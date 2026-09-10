@@ -3267,7 +3267,10 @@ function SuggestionsController(ctx, sqs, env) {
         continue; // eslint-disable-line no-continue
       }
 
-      const authorURL = configuredAuthorURL || deriveAuthorUrlFromPublishUrl(data.url);
+      // Tolerate stray whitespace in the stored suggestion URL: a leading/trailing
+      // space breaks both URL parsing and the publish->author hostname derivation.
+      const pageUrl = (data.url || '').trim();
+      const authorURL = configuredAuthorURL || deriveAuthorUrlFromPublishUrl(pageUrl);
       if (!authorURL) {
         results.push({
           uuid: suggestionId, index: i, statusCode: 422, message: `Site has no authorURL configured and it could not be derived from URL: ${data.url}`,
@@ -3283,7 +3286,7 @@ function SuggestionsController(ctx, sqs, env) {
         // `.html` (AEM CS delivery path), e.g. https://host/us/en.html -> /us/en.
         let publishPath;
         try {
-          publishPath = new URL(prependSchema(data.url)).pathname.replace(/\.html$/, '') || '/';
+          publishPath = new URL(prependSchema(pageUrl)).pathname.replace(/\.html$/, '') || '/';
         } catch {
           publishPath = null;
         }
