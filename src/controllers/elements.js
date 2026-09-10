@@ -10,6 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
+import { createHash } from 'node:crypto';
 import {
   badRequest, createResponse, forbidden, internalServerError, notFound, ok,
 } from '@adobe/spacecat-shared-http-utils';
@@ -23,6 +24,7 @@ import { createElementsService } from '../support/elements/elements-service.js';
 import { fetchOwnedUrlsTraffic, mergeOwnedUrlsTraffic } from '../support/elements/owned-urls-traffic.js';
 import { mapWithConcurrency } from '../support/elements/concurrency.js';
 import { addDaysToDate } from '../support/elements/week-utils.js';
+import { normalizeSentimentMetric, SENTIMENT_METRICS } from '../support/elements/definitions/index.js';
 import { resolveBrandWorkspace } from '../support/serenity/workspace-resolver.js';
 import { isSerenityActiveForBrand } from '../support/serenity/serenity-active.js';
 import { createSerenityTransport } from '../support/serenity/rest-transport.js';
@@ -40,18 +42,15 @@ const BEARER_PREFIX = 'Bearer ';
 // mapWithConcurrency itself lives in support/elements/concurrency.js (shared with the service).
 const FANOUT_CONCURRENCY = 8;
 
-/** Milliseconds in a day, for span arithmetic on `YYYY-MM-DD` bounds. */
-const MS_PER_DAY = 86400000;
-
-/**
- * Maximum span the response feed will serve, in days.
- *
- * The upstream window is ROLLING and about 74 days wide (measured 2026-09-04). Beyond it a
- * day is UNRECOVERABLE rather than expensive, and the failure is silent: the upstream
- * returns nothing for an out-of-window day, which is indistinguishable from "no model ran".
- * Rejecting at the edge keeps that ambiguity out of the response.
- */
-const RESPONSE_FEED_MAX_SPAN_DAYS = 74;
+const BRAND_CLAIMS_PAGE_SIZE = 500;
+// Defaults stay below Lambda's 6 MiB synchronous response ceiling while leaving room above
+// the largest measured 500-row upstream page (~2.5 MB). Environment overrides allow deployed
+// ceilings to be lowered without changing the contract.
+const BRAND_CLAIMS_MAX_UPSTREAM_BYTES = 8 * 1024 * 1024;
+const BRAND_CLAIMS_MAX_OUTBOUND_BYTES = 5 * 1024 * 1024;
+const BRAND_CLAIMS_QUERY_KEYS = new Set([
+  'geoTargetId', 'languageCode', 'date', 'offset', 'pageSize',
+]);
 
 /**
  * Maps a BrandSemrushProject model instance to the plain object shape the
@@ -63,6 +62,7 @@ function toPlainProject(p) {
     semrushProjectId: p.getSemrushProjectId(),
     geoTargetId: p.getGeoTargetId(),
     languageCode: p.getLanguageCode(),
+    deletedAt: p.getDeletedAt?.() ?? null,
   };
 }
 
@@ -139,6 +139,21 @@ function reqCtxOf(ctx) {
   };
 }
 
+function configuredByteLimit(env, name, fallback) {
+  const raw = env?.[name];
+  if (raw === undefined || raw === null || raw === '') {
+    return fallback;
+  }
+  if (!/^\d+$/.test(String(raw))) {
+    throw new ErrorWithStatusCode(`${name} must be a positive integer`, 503);
+  }
+  const parsed = Number(raw);
+  if (!Number.isSafeInteger(parsed) || parsed < 1) {
+    throw new ErrorWithStatusCode(`${name} must be a positive integer`, 503);
+  }
+  return parsed;
+}
+
 function mapError(e, log, reqCtx = {}) {
   if (e instanceof ErrorWithStatusCode) {
     const status = Number.isInteger(e.status) ? e.status : 400;
@@ -201,6 +216,25 @@ function extractQuery(context) {
     } catch { /* fall through */ }
   }
   return {};
+}
+
+function brandClaimsReqCtx(ctx) {
+  const query = extractQuery(ctx);
+  const brandId = ctx?.params?.brandId;
+  return {
+    requestId: ctx?.invocation?.id || 'unknown',
+    brandIdHash: hasText(brandId)
+      ? createHash('sha256').update(brandId).digest('hex').slice(0, 12)
+      : undefined,
+    geoTargetId: /^\d{1,10}$/.test(query.geoTargetId ?? '')
+      ? Number(query.geoTargetId)
+      : undefined,
+    languageCode: /^[A-Za-z0-9-]{1,20}$/.test(query.languageCode ?? '')
+      ? query.languageCode
+      : undefined,
+    offset: /^\d{1,16}$/.test(query.offset ?? '') ? Number(query.offset) : 0,
+    isS2SConsumer: AccessControlUtil.isS2SConsumer(ctx),
+  };
 }
 
 function tagFilterParams(query) {
@@ -343,6 +377,32 @@ function extractProjectIds(query) {
     );
   }
   return ids;
+}
+
+/**
+ * Normalises the `metric`/`sentimentMetric`/`sentiment_metric` query param for the
+ * sentiment-overview endpoint (LLMO-7457), mirroring the shape of {@link parseShowTrends}.
+ *
+ * Resolution walks the three accepted names and takes the first that is a NON-BLANK
+ * string, so a present-but-empty `metric` does not shadow a populated alias. `??` alone
+ * would have: it only skips null/undefined, so `{ metric: '', sentiment_metric: 'mentions' }`
+ * would have resolved to `prompts`.
+ *
+ * The value itself is normalised by `normalizeSentimentMetric`, shared with the
+ * transform, so both layers agree on what counts as the opt-in. Only the exact
+ * `'mentions'` (trimmed, case-insensitive) selects mention counts; anything else
+ * degrades to `'prompts'` rather than 400, so an unrecognised value returns today's
+ * numbers instead of failing an otherwise-valid chart request.
+ *
+ * Exported for direct unit testing, for the same reason as {@link parseShowTrends}.
+ *
+ * @param {object} q - Query object from `extractQuery`.
+ * @returns {'prompts'|'mentions'}
+ */
+export function parseSentimentMetric(q) {
+  const candidates = [q?.metric, q?.sentimentMetric, q?.sentiment_metric];
+  const supplied = candidates.find((v) => typeof v === 'string' && v.trim() !== '');
+  return normalizeSentimentMetric(supplied);
 }
 
 /**
@@ -1235,6 +1295,13 @@ export default function ElementsController(context, log, env) {
    * the brand's display name: without the latter the element blends in every competitor
    * tracked in the same sub-workspace, since that is also where Market Comparison's rivals
    * live (LLMO-7456 — see sentiment-overview.js for the live A/B).
+   *
+   * `metric` (optional, `prompts` | `mentions`) selects which per-legend count drives the
+   * percentages. Defaults to `prompts`, this endpoint's original behaviour; `mentions`
+   * matches what the Semrush Brand Presence MFE plots (LLMO-7457). Both count sets are
+   * returned regardless, as `mentionCounts` / `promptCounts`, so a caller can render true
+   * counts alongside the percentages and compare both definitions from one call.
+   * Temporary: the default flips to `mentions` and this param is removed once the UI moves.
    */
   /* c8 ignore start -- LLMO-6300 POC endpoint; unit tests intentionally deferred */
   const listSentimentOverview = async (ctx) => {
@@ -1288,10 +1355,32 @@ export default function ElementsController(context, log, env) {
         endDate,
         category: query.categoryId || query.category,
         brandName: resolveBrandFilterName(brand, log, 'listSentimentOverview'),
+        metric: parseSentimentMetric(query),
         ...tagFilterParams(query),
       };
 
       const result = await service.getSentimentOverview(workspaceId, params);
+      // The metric parse is deliberately permissive and this handler is
+      // coverage-ignored, so a mis-spelled param produces no error and no test
+      // failure. Log the non-default opt-in so the production A/B this parameter
+      // exists for is traceable from the server side, not only from the echoed
+      // field in a response someone happens to inspect (LLMO-7457).
+      if (params.metric !== SENTIMENT_METRICS.PROMPTS) {
+        log.info(`[serenity] sentiment-overview metric=${params.metric} brandId=${brand?.id}`);
+      }
+      // A zero basis while the other count set is non-empty means the upstream
+      // field this metric reads has gone missing, which otherwise surfaces only
+      // as an unexplained empty chart.
+      const suspectWeek = (result?.weeklyTrends ?? []).find((w) => {
+        const isMentions = params.metric === SENTIMENT_METRICS.MENTIONS;
+        const basis = isMentions ? w.mentionCounts : w.promptCounts;
+        const other = isMentions ? w.promptCounts : w.mentionCounts;
+        const sum = (c) => (c ? c.positive + c.neutral + c.negative : 0);
+        return sum(basis) === 0 && sum(other) > 0;
+      });
+      if (suspectWeek) {
+        log.warn(`[serenity] sentiment-overview metric=${params.metric} has a zero basis while the other count set is non-empty - week=${suspectWeek.week} brandId=${brand?.id}`);
+      }
       return cachedOk(result);
     } catch (e) {
       return mapError(e, log, reqCtxOf(ctx));
@@ -2391,87 +2480,122 @@ export default function ElementsController(context, log, env) {
   /* c8 ignore stop */
 
   /**
-   * GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/responses
-   *
-   * The Brand Claims RESPONSE FEED: each AI answer for the requested days, paired with the
-   * sources cited in that same execution. Brand Claims sits under Brand Presence within the
-   * ABV product, hence the path segment.
-   *
-   * Assembled from two elements that each hold half the record — 141adc88 has the answer but
-   * no date, 404fb017 has the date and citations but no answer — joined on
-   * `(project_id, prompt, model, date)`. See `elements-service.js#getResponseFeed`.
-   *
-   * RANGE-BASED BY DESIGN. Consecutive days share a window boundary, so N days cost N+1
-   * upstream pulls rather than 2N. A per-day endpoint would forfeit that and pay double.
+   * Returns one page of one owned market's combined Brand Claims execution corpus.
+   * The caller selects a market by geo/language; project and workspace identifiers remain
+   * server-side. Model is fixed to search-gpt and date must be an exact Monday.
    */
   const listResponseFeed = async (ctx) => {
     try {
-      const auth = await authorizeOrg(ctx);
+      const auth = await authorizeBrandSubWorkspace(ctx, log);
       if (auth.error) {
         return auth.error;
       }
-      // authorizeOrg validated `:brandId`, confirmed the brand belongs to the org, and
-      // resolved the brand's Semrush sub-workspace. The caller never supplies a workspace
-      // id and never holds a Semrush credential (design of record §10).
-      const { workspaceId, brand } = auth;
+      const { workspaceId, brandUuid } = auth;
       const query = extractQuery(ctx);
-
-      // Default to the last 7 days ending yesterday. Yesterday, not today: the upstream
-      // window is bounded by `CBF_date__end` and today's executions are still landing, so
-      // ending on today would report a partial day as though it were complete. Seven days
-      // is a working week of context at 8 boundary pulls per market — small enough to stay
-      // responsive, wide enough to be useful without a caller computing dates.
-      const defaultEnd = addDaysToDate(new Date().toISOString().slice(0, 10), -1);
-      const startDate = query.from || query.startDate || addDaysToDate(defaultEnd, -6);
-      const endDate = query.to || query.endDate || defaultEnd;
-
-      if (!isYmdDate(startDate) || !isYmdDate(endDate)) {
-        return badRequest('from and to must be valid YYYY-MM-DD dates');
-      }
-      if (startDate > endDate) {
-        return badRequest('from must not be after to');
+      const unsupported = Object.keys(query).filter((key) => !BRAND_CLAIMS_QUERY_KEYS.has(key));
+      if (unsupported.length > 0) {
+        return badRequest(`Unsupported query parameter: ${unsupported[0]}`);
       }
 
-      // The upstream window is ROLLING and about 74 days wide (measured 2026-09-04). A day
-      // older than that is UNRECOVERABLE, not merely expensive — the data is gone upstream.
-      // Rejecting is essential: serving such a request would return an empty result that is
-      // indistinguishable from "nothing ran", i.e. silent data loss presented as fact.
-      const spanDays = (Date.parse(`${endDate}T00:00:00Z`)
-        - Date.parse(`${startDate}T00:00:00Z`)) / MS_PER_DAY;
-      if (spanDays >= RESPONSE_FEED_MAX_SPAN_DAYS) {
-        return badRequest(
-          `Date range must not exceed ${RESPONSE_FEED_MAX_SPAN_DAYS} days: the upstream window `
-          + 'is rolling and older executions are unrecoverable',
+      const { geoTargetId, languageCode, date } = query;
+      if (!/^\d+$/.test(geoTargetId ?? '') || Number(geoTargetId) <= 0) {
+        return badRequest('geoTargetId must be a positive integer');
+      }
+      if (!hasText(languageCode) || languageCode.trim() !== languageCode) {
+        return badRequest('languageCode is required');
+      }
+      if (!isYmdDate(date)) {
+        return badRequest('date must be a valid YYYY-MM-DD date');
+      }
+      if (new Date(`${date}T00:00:00Z`).getUTCDay() !== 1) {
+        return badRequest('date must be a Monday');
+      }
+
+      const parseInteger = (value, fallback, min, max, name) => {
+        if (value === undefined) {
+          return fallback;
+        }
+        if (!/^\d+$/.test(value)) {
+          throw new ErrorWithStatusCode(`${name} must be an integer`, 400);
+        }
+        const parsed = Number(value);
+        if (!Number.isSafeInteger(parsed) || parsed < min || parsed > max) {
+          throw new ErrorWithStatusCode(`${name} must be between ${min} and ${max}`, 400);
+        }
+        return parsed;
+      };
+      const offset = parseInteger(query.offset, 0, 0, Number.MAX_SAFE_INTEGER, 'offset');
+      const pageSize = parseInteger(query.pageSize, BRAND_CLAIMS_PAGE_SIZE, 1, BRAND_CLAIMS_PAGE_SIZE, 'pageSize');
+
+      const { BrandSemrushProject } = ctx.dataAccess;
+      const projects = await fetchBrandSemrushProjects(BrandSemrushProject, [{ id: brandUuid }]);
+      const normalizedLanguage = languageCode.toLowerCase();
+      const matches = projects.filter((project) => project.brandId === brandUuid
+        && project.deletedAt === null
+        && Number(project.geoTargetId) === Number(geoTargetId)
+        && String(project.languageCode ?? '').toLowerCase() === normalizedLanguage
+        && hasText(project.semrushProjectId));
+      if (matches.length === 0) {
+        return notFound('No owned Semrush project matches the requested market');
+      }
+      if (matches.length > 1) {
+        return createResponse({
+          error: 'ambiguousMarket',
+          message: 'Multiple owned Semrush projects match the requested market',
+        }, 409);
+      }
+
+      const maxUpstreamBytes = configuredByteLimit(
+        env,
+        'BRAND_CLAIMS_MAX_UPSTREAM_BYTES',
+        BRAND_CLAIMS_MAX_UPSTREAM_BYTES,
+      );
+      const maxOutboundBytes = configuredByteLimit(
+        env,
+        'BRAND_CLAIMS_MAX_OUTBOUND_BYTES',
+        BRAND_CLAIMS_MAX_OUTBOUND_BYTES,
+      );
+      const service = await buildService(ctx);
+      const project = matches[0];
+      const result = await service.getResponseFeed(workspaceId, {
+        projectId: project.semrushProjectId,
+        date,
+        offset,
+        pageSize,
+        maxUpstreamBytes,
+      });
+      const envelope = ResponseFeedDto.toEnvelopeJSON({
+        ...result,
+        slice: {
+          geoTargetId: Number(project.geoTargetId),
+          languageCode: project.languageCode,
+          date,
+          model: 'search-gpt',
+        },
+      });
+      if (new TextEncoder().encode(JSON.stringify(envelope)).byteLength > maxOutboundBytes) {
+        throw new ElementsTransportError(
+          502,
+          `Brand Claims response exceeds configured ${maxOutboundBytes}-byte limit`,
         );
       }
-
-      const service = await buildService(ctx);
-
-      // Project scoping: caller-supplied projectId(s) (CSV) scope to those Semrush projects;
-      // absent → all of the brand's markets. LOAD-BEARING: the technical account is broadly
-      // entitled, so a caller who guessed another brand's project UUID could otherwise read
-      // that tenant's answers. Ownership is checked against this brand's own rows.
-      const projectIds = extractProjectIds(query);
-      // `dataAccess` is guaranteed present here — `authorizeOrg` above already read
-      // `Organization` from it — so this is a plain destructure rather than the optional
-      // form the sibling handlers use, whose fallback branch is unreachable in practice.
-      const { BrandSemrushProject } = ctx.dataAccess;
-      const brandSemrushProjects = await fetchBrandSemrushProjects(BrandSemrushProject, [brand]);
-      const ownershipError = checkProjectIdsOwnership(projectIds, brandSemrushProjects);
-      if (ownershipError) {
-        return ownershipError;
-      }
-
-      const result = await service.getResponseFeed(workspaceId, {
-        projectIds,
-        startDate,
-        endDate,
-        model: query.model || query.platform,
-        limit: query.limit,
-      });
-      return ok(ResponseFeedDto.toEnvelopeJSON(result));
+      return ok(envelope);
     } catch (e) {
-      return mapError(e, log, reqCtxOf(ctx));
+      if (e instanceof ElementsTransportError) {
+        const upstreamWorkspaceId = e.workspaceId;
+        e.workspaceId = undefined;
+        e.body = undefined;
+        if (hasText(upstreamWorkspaceId) && typeof e.message === 'string') {
+          e.message = e.message.replaceAll(upstreamWorkspaceId, '[redacted]');
+        }
+        if (typeof e.endpoint === 'string') {
+          e.endpoint = e.endpoint.replace(
+            /\/workspaces\/[^/]+/,
+            '/workspaces/[redacted]',
+          );
+        }
+      }
+      return mapError(e, log, brandClaimsReqCtx(ctx));
     }
   };
 

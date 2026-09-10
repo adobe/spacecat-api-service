@@ -17,6 +17,7 @@ import { hasText } from '@adobe/spacecat-shared-utils';
 import { HeadObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
 import { cachedOk } from '../../support/cached-response.js';
 import { dateToIsoWeek } from '../../support/elements/week-utils.js';
+import { isValidLocale } from '../../utils/validations.js';
 import { postSlackMessage } from '../../utils/slack/base.js';
 
 const CLAIMS_PREFIX = 'brand_claims/llmo';
@@ -70,6 +71,10 @@ const BRAND_CLAIMS_REQUEST_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
 // dots, hyphens, underscores — no `/` — to prevent using HeadObject as an
 // object-existence probe across arbitrary key paths.
 const MODEL_RE = /^[\w.-]+$/;
+// `locale` is interpolated into the S3 key too, so it is validated with the shared
+// `isValidLocale` (strict `xx_yy` shape) before it can reach a key — one definition of
+// "valid locale" across the service, and it blocks `..`, slashes, and arbitrary path
+// segments (S3 key injection) just like MODEL_RE.
 
 /**
  * Latest run key for a site: the lexically-greatest `YYYY-Www` folder under the
@@ -106,7 +111,9 @@ async function latestWeekKey(s3, bucketName, siteId, log) {
 export async function handleBrandClaims(context) {
   const { log, s3 } = context;
   const { siteId } = context.params;
-  const { model, date, week } = context.data;
+  const {
+    model, date, week, locale,
+  } = context.data;
 
   if (!s3 || !s3.s3Client) {
     return badRequest('S3 storage is not configured for this environment');
@@ -119,6 +126,16 @@ export async function handleBrandClaims(context) {
 
   if (model !== undefined && !MODEL_RE.test(model)) {
     return badRequest('Invalid model parameter');
+  }
+
+  // `locale` selects a localized sibling of the default `data.json.gz`
+  // (`data.<locale>.json.gz`). It applies ONLY to the default `data` family, so
+  // it is ignored when `model` is set (model files are not localized) — model
+  // wins, keeping the two selectors from interacting. Validate strictly here,
+  // before it can reach an S3 key (trust boundary).
+  const useLocale = !model && hasText(locale);
+  if (useLocale && !isValidLocale(locale)) {
+    return badRequest('Invalid locale parameter: expected e.g. ja_jp');
   }
 
   // Model files are managed flat (not week-partitioned) and take precedence;
@@ -166,12 +183,46 @@ export async function handleBrandClaims(context) {
       }
     }
 
+    // Localization: when a valid `locale` is requested, prefer the localized
+    // sibling that mystique writes next to the resolved English file
+    // (`data.json.gz` -> `data.<locale>.json.gz`, in the same week/flat folder),
+    // and transparently fall back to English when that sibling does not exist.
+    // getSignedUrl never checks existence, so an explicit HeadObject is the only
+    // way to detect a missing localized file. `servedLocale` reports which one
+    // the caller actually got so the UI can tell whether it fell back.
+    let servedLocale = 'default';
+    let verified = false;
+    const localizedKey = useLocale ? s3Key.replace(/data\.json\.gz$/, `data.${locale}.json.gz`) : s3Key;
+    // The regex-replace only produces a distinct key when the resolved English key ends
+    // in `data.json.gz` (true for every default-family branch today). Guard on
+    // `localizedKey !== s3Key` so that if a future key shape ever breaks that invariant,
+    // the replace no-op can't make us HEAD the English object and then report
+    // `servedLocale = locale` for an English file — a silent misreport.
+    if (useLocale && localizedKey !== s3Key) {
+      try {
+        await s3.s3Client.send(new HeadObjectCommand({ Bucket: bucketName, Key: localizedKey }));
+        s3Key = localizedKey;
+        servedLocale = locale;
+        verified = true; // localized object confirmed present; no second HEAD needed
+      } catch (localeError) {
+        if (localeError.name === 'NotFound' || localeError.$metadata?.httpStatusCode === 404) {
+          log.info(`Localized brand claims not found for site ${siteId} locale ${locale}; falling back to English`);
+        } else {
+          throw localeError; // NoSuchBucket / transient faults -> shared handler below
+        }
+      }
+    }
+
     // Presigning a GetObject URL is an offline operation and never checks that
     // the object exists, so without this HeadObject the endpoint would happily
     // hand out a URL that 404s on fetch. Verify existence first and return a
-    // clean 404 otherwise (mirrors getFanoutReport). This also lets callers use
-    // the endpoint as a cheap availability probe (e.g. an "all brands" view).
-    await s3.s3Client.send(new HeadObjectCommand({ Bucket: bucketName, Key: s3Key }));
+    // clean 404 otherwise (mirrors getFanoutReport). Skipped only when the
+    // localized HEAD above already confirmed this exact key. This also lets
+    // callers use the endpoint as a cheap availability probe (e.g. an "all
+    // brands" view).
+    if (!verified) {
+      await s3.s3Client.send(new HeadObjectCommand({ Bucket: bucketName, Key: s3Key }));
+    }
 
     const command = new GetObjectCommand({
       Bucket: bucketName,
@@ -184,6 +235,8 @@ export async function handleBrandClaims(context) {
     return cachedOk({
       siteId,
       model: model || 'default',
+      requestedLocale: useLocale ? locale : null,
+      servedLocale,
       presignedUrl: url,
       expiresAt: new Date(Date.now() + expiresIn * 1000).toISOString(),
     });
@@ -194,11 +247,15 @@ export async function handleBrandClaims(context) {
     }
     if (s3Error.name === 'NoSuchBucket') {
       log.error(`S3 bucket ${bucketName} not found`);
-      return badRequest(`Storage bucket not found: ${bucketName}`);
+      return badRequest('S3 storage is not properly configured for this environment');
     }
 
+    // Keep the raw AWS error (message, bucket, key layout) in the log only — echoing it
+    // to the client leaks recon primitives (e.g. an AccessDenied surfaces account/role/
+    // bucket), and trial users can reach this endpoint. Return generic text + a 5xx, so a
+    // real S3 fault isn't mislabelled a 400 (mirrors handleBrandClaimsWeeks).
     log.error(`S3 error retrieving brand claims for site ${siteId}: ${s3Error.message}`);
-    return badRequest(`Error retrieving brand claims: ${s3Error.message}`);
+    return internalServerError('Unable to retrieve brand claims');
   }
 }
 
@@ -254,32 +311,44 @@ export async function handleBrandClaimsWeeks(context) {
   }
 }
 
+// Adobe corporate and test email domains (plus their subdomains) that mark a
+// requester as internal; every other domain is treated as an external customer.
+const INTERNAL_EMAIL_DOMAINS = ['adobe.com', 'adobetest.com'];
+
 /**
- * Human-readable identity of the caller who triggered the request, for the Slack alert.
- * Mirrors user-details.js: prefer the RFC-5322 address (trial_email, then preferred_username)
- * over profile.email, which is an IMS user GUID; include the name when present. Returns
- * null when no identity is available (the alert then omits the "by ..." clause).
+ * Classifies the caller who triggered the request as an internal (Adobe) user or an
+ * external (customer) user, for the Slack alert, so operators can tell an internal or
+ * test run apart from a real customer request (LLMO-7263).
+ *
+ * The email is resolved the same way as the rest of the codebase (trial_email, then
+ * preferred_username, then profile.email — which may be an IMS GUID rather than an
+ * address) and classified purely by domain: an Adobe corporate/test domain
+ * (see INTERNAL_EMAIL_DOMAINS, incl. subdomains) is internal, any other domain is
+ * external. Returns null when no classifiable email is available (the alert then omits
+ * the "by ..." clause).
  *
  * @param {object} context - Request context (attributes.authInfo).
- * @returns {string|null} e.g. "Ada Lovelace (ada@example.com)" or "ada@example.com"; null
- *   when no identity is available.
+ * @returns {'internal'|'external'|null}
  */
-function getRequesterLabel(context) {
+function getRequesterAudience(context) {
   try {
     const authInfo = context?.attributes?.authInfo;
     const profile = authInfo?.getProfile?.() ?? authInfo?.profile ?? {};
     const email = [profile.trial_email, profile.preferred_username, profile.email]
       .find((v) => hasText(v));
-    const first = profile.first_name || profile.given_name;
-    const last = profile.last_name || profile.family_name;
-    const name = [first, last].filter((v) => hasText(v)).join(' ').trim();
-    const label = (name && email) ? `${name} (${email})` : (name || email);
-    // Trial users control their own display name, so strip the Slack mrkdwn control
-    // characters (<, >, `, |) that could inject a link/mention/code span into the alert.
-    return hasText(label) ? label.replace(/[<>`|]/g, '') : null;
+    // Domain is the part after the last '@'; a value without one (e.g. an IMS GUID)
+    // yields no domain and stays unclassified rather than being mislabelled.
+    const at = hasText(email) ? email.lastIndexOf('@') : -1;
+    const domain = at >= 0 ? email.slice(at + 1).toLowerCase().trim() : '';
+    if (!hasText(domain)) {
+      return null;
+    }
+    const isInternal = INTERNAL_EMAIL_DOMAINS
+      .some((d) => domain === d || domain.endsWith(`.${d}`));
+    return isInternal ? 'internal' : 'external';
   } catch {
-    // Best-effort label only — never let requester lookup throw into the (already
-    // queued) run or the Slack alert.
+    // Best-effort classification only — never let requester lookup throw into the
+    // (already queued) run or the Slack alert.
     return null;
   }
 }
@@ -317,8 +386,12 @@ export async function handleRequestBrandClaims(context, site) {
   // audit row both pass this check and both enqueue. The per-brand redelivery dedup
   // (blackboard fact freshness in mystique) makes the duplicate a cheap no-op, so a
   // best-effort check here is deliberate rather than a hard once-only lock.
+  // A prior audit that clears the cooldown means this request is a re-run rather than
+  // a first-ever run; the Slack alert below tags it so operators can tell them apart.
+  let isRerun = false;
   try {
     const latestAudit = await site.getLatestAuditByAuditType(BRAND_CLAIMS_AUDIT_TYPE);
+    isRerun = Boolean(latestAudit);
     const ranAtMs = typeof latestAudit?.getAuditedAt === 'function'
       ? Date.parse(latestAudit.getAuditedAt())
       : NaN;
@@ -364,11 +437,12 @@ export async function handleRequestBrandClaims(context, site) {
   const slackToken = env?.SLACK_BOT_TOKEN;
   if (slackChannel && slackToken) {
     try {
-      const requester = getRequesterLabel(context);
-      const requestedBy = requester ? ` by ${requester}` : '';
+      const audience = getRequesterAudience(context);
+      const requestedBy = audience ? ` by an ${audience} user` : '';
+      const rerunTag = isRerun ? ' (re-run)' : '';
       await postSlackMessage(
         slackChannel,
-        `:rocket: On-demand Brand Claims requested for *${site.getBaseURL()}* (${site.getId()})${requestedBy}.`,
+        `:rocket: On-demand Brand Claims requested${rerunTag} for *${site.getBaseURL()}* (${site.getId()})${requestedBy}.`,
         slackToken,
       );
     } catch (slackError) {

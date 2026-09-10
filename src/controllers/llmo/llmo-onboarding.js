@@ -39,6 +39,7 @@ import {
 import { upsertFeatureFlag } from '../../support/feature-flags-storage.js';
 import { detectCdnForDomain } from '../../support/cdn-detection.js';
 import { upsertBrand } from '../../support/brands-storage.js';
+import { assertSiteOrgReassignmentSafe } from '../../support/site-org-reassignment.js';
 import {
   PROMPT_SUGGESTION_PIPELINES,
   registerPromptSuggestionSchedule,
@@ -1109,19 +1110,21 @@ export async function determineOverrideBaseURL(baseURL, context) {
  * @returns {Promise<object>} The site object
  */
 export async function createOrFindSite(baseURL, organizationId, context, deliveryType) {
-  const { dataAccess } = context;
+  const { dataAccess, log } = context;
   const { Site } = dataAccess;
 
   const site = await Site.findByBaseURL(baseURL);
   if (site) {
     if (site.getOrganizationId() !== organizationId) {
-      const enrollments = await site.getSiteEnrollments();
-      if (!Array.isArray(enrollments)) {
-        throw new Error(`Unable to verify enrollments for site ${baseURL} (current org: ${site.getOrganizationId()}, requested org: ${organizationId}); aborting org move.`);
-      }
-      if (enrollments.length > 0) {
-        throw new Error(`Site ${baseURL} belongs to org ${site.getOrganizationId()} with active enrollments and cannot be moved to org ${organizationId}.`);
-      }
+      // LLMO-7284: converged onto the same guard the admin Slack reassignment paths use
+      // (set-ims-org-modal.js, onboard-llmo-modal.js::checkOrg, approve-org.js) instead of a
+      // separate inline check, so a straggler enrollment can't be orphaned by one path while
+      // the others are guarded. Throws `.status=409/.code=site_org_reassignment_blocked` when
+      // the move would orphan enrollments, or `.status=502/.code=site_org_reassignment_unverified`
+      // when the enrollments read is unverifiable — both callers of this function only ever
+      // inspect `error.message` (never `.status`/`.code`), so this is not an observable
+      // behavior change for onboarding's HTTP/Slack surfaces, only the internal message text.
+      await assertSiteOrgReassignmentSafe({ site, targetOrgId: organizationId, log });
       site.setOrganizationId(organizationId);
       // Persist the re-parent immediately. resolveLlmoOnboardingMode (called
       // right after this in performLlmoOnboarding) reads sites by org_id, so

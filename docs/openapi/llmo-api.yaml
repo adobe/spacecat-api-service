@@ -1922,6 +1922,21 @@ llmo-brand-claims:
         type: string
         format: date
         example: '2026-04-22'
+    - name: locale
+      in: query
+      required: false
+      description: >
+        Locale of the report to retrieve (`xx_yy`, e.g. `ja_jp`). Selects the
+        localized sibling of the default `data.json.gz` (`data.<locale>.json.gz`)
+        in the same folder as the resolved run, falling back to the English
+        `data.json.gz` when that sibling does not exist. Applies only to the
+        default `data` family and is ignored when `model` is set. The response
+        `servedLocale` reports which locale was actually served, so callers can
+        detect a fallback.
+      schema:
+        type: string
+        pattern: '^[a-z]{2}_[a-z]{2}$'
+        example: 'ja_jp'
   get:
     tags:
       - llmo
@@ -1959,6 +1974,19 @@ llmo-brand-claims:
                   type: string
                   description: The AI model name, or 'default' if no model was specified
                   example: 'gpt-4.1'
+                requestedLocale:
+                  type: [string, 'null']
+                  description: >
+                    The locale requested by the caller (`xx_yy`), or null when no
+                    locale was applied (absent, or ignored because `model` was set).
+                  example: 'ja_jp'
+                servedLocale:
+                  type: string
+                  description: >
+                    The locale actually served: the requested locale when its file
+                    exists, or 'default' when the English file was served (no locale
+                    requested, or a fallback because the localized file was missing).
+                  example: 'ja_jp'
                 presignedUrl:
                   type: string
                   format: uri
@@ -1971,6 +1999,8 @@ llmo-brand-claims:
               required:
                 - siteId
                 - model
+                - requestedLocale
+                - servedLocale
                 - presignedUrl
                 - expiresAt
       '400':
