@@ -21,6 +21,7 @@ import Ajv from 'ajv';
 import addFormats from 'ajv-formats';
 
 import { loadBundledSpec, operationsForTag } from './_lib/openapi-loader.js';
+import { ErrorWithStatusCode } from '../../src/support/utils.js';
 // Real class (not a mock) so the elements esmock block can pass it through without
 // adding a second class to this file (max-classes-per-file).
 import { SerenityTransportError } from '../../src/support/serenity/rest-transport.js';
@@ -235,6 +236,9 @@ const FIXTURES = {
       tagIds: ['tag-1'],
       filter: { tagIds: [], tagFilterMode: 'faceted-v1' },
     },
+    promiseToken: 'raw-bulk-tags-token',
+    promiseAudience: 'semrush',
+    expectPromiseForwarding: true,
   },
   listSerenityMarkets: {
     expectedStatus: 200,
@@ -1015,6 +1019,19 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
             createSerenityTransport: () => ({}),
             SerenityTransportError: class extends Error {},
           },
+          '../../src/support/utils.js': {
+            ErrorWithStatusCode,
+            resolveSemrushImsToken: () => Promise.resolve('ims-token'),
+            getRawPromiseToken: (ctx) => ctx?.pathInfo?.headers?.['x-promise-token'],
+            resolvePromisePair: () => 'SEMRUSH',
+            getSemrushPair: () => 'SEMRUSH',
+            exchangePromiseTokenResponse: () => Promise.resolve({
+              access_token: 'ims-token',
+              promise_token: 'rotated-bulk-tags-token',
+              promise_token_expires_in: 14399,
+              token_type: 'bearer',
+            }),
+          },
           '../../src/support/serenity/workspace-resolver.js': {
             resolveWorkspaceId: () => Promise.resolve(WORKSPACE),
             // Mode defaults to flat; a fixture pins `mode: 'subworkspace'` when the
@@ -1121,6 +1138,10 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
         data: fx.data,
         query: fx.query || {},
       });
+      if (fx.promiseToken) {
+        ctx.pathInfo.headers['x-promise-token'] = fx.promiseToken;
+        ctx.pathInfo.headers['x-promise-audience'] = fx.promiseAudience;
+      }
       // Ops that read an AsyncJob directly (no handler) get their job pinned here.
       if (fx.asyncJob) {
         ctx.dataAccess.AsyncJob = { findById: sinon.stub().resolves(fx.asyncJob) };
@@ -1130,6 +1151,17 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
       const response = await controller[fx.controllerMethod](ctx);
 
       expect(response.status).to.equal(fx.expectedStatus);
+      if (fx.expectPromiseForwarding) {
+        expect(handlerStubs.handleBulkTags).to.have.been.calledOnce;
+        expect(handlerStubs.handleBulkTags.firstCall.args.slice(-2)).to.deep.equal([
+          {
+            promise_token: 'rotated-bulk-tags-token',
+            expires_in: 14399,
+            token_type: 'bearer',
+          },
+          'SEMRUSH',
+        ]);
+      }
 
       // 204 No Content → no body to validate. The contract is just the status.
       if (fx.expectedStatus === 204) {

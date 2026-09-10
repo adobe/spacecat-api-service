@@ -30,6 +30,12 @@ import { readTagTreeSnapshot } from '../../../../src/support/serenity/tag-tree.j
 import { clearTagCache } from '../../../../src/support/serenity/handlers/markets.js';
 
 const SERVER_OWNED_DIMENSIONS = ['intent', 'type', 'source', 'origin'];
+const FORWARDED_PROMISE_TOKEN = {
+  promise_token: 'rotated-promise-token',
+  expires_in: 14399,
+  token_type: 'bearer',
+};
+const SEMRUSH_PROMISE_PAIR = 'SEMRUSH';
 
 function requestHash(body) {
   return createHash('sha256').update(JSON.stringify({
@@ -264,6 +270,8 @@ describe('acceptBulkTags idempotency', () => {
       callerId: 'caller',
       idempotencyKey: 'same-key',
       log: {},
+      promiseToken: FORWARDED_PROMISE_TOKEN,
+      promisePair: SEMRUSH_PROMISE_PAIR,
     });
     expect(replay).to.deep.equal({
       status: 200,
@@ -302,6 +310,8 @@ describe('acceptBulkTags idempotency', () => {
       callerId: 'caller',
       idempotencyKey: 'same-key',
       log: {},
+      promiseToken: FORWARDED_PROMISE_TOKEN,
+      promisePair: SEMRUSH_PROMISE_PAIR,
     });
 
     expect(replay.body).to.deep.include({
@@ -329,6 +339,8 @@ describe('acceptBulkTags idempotency', () => {
       callerId: 'caller',
       idempotencyKey: 'same-key',
       log: {},
+      promiseToken: FORWARDED_PROMISE_TOKEN,
+      promisePair: SEMRUSH_PROMISE_PAIR,
     })).to.be.rejected.then((error) => expect(error.code).to.equal('idempotencyConflict'));
   });
 });
