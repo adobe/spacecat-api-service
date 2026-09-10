@@ -1,3 +1,10 @@
+# [1.804.0](https://github.com/adobe/spacecat-api-service/compare/v1.803.0...v1.804.0) (2026-09-10)
+
+
+### Features
+
+* **llmo:** enforce org/identity integrity at write time (LLMO-7284) ([#3166](https://github.com/adobe/spacecat-api-service/issues/3166)) ([f0172d9](https://github.com/adobe/spacecat-api-service/commit/f0172d98ad4d10a52fc3514b800fb51ec44ea308))
+
 # [1.803.0](https://github.com/adobe/spacecat-api-service/compare/v1.802.0...v1.803.0) (2026-09-10)
 
 
