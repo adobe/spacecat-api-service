@@ -75,8 +75,12 @@ async function load({
     '../../../../src/support/serenity/workspace-lifecycle.js': {
       createOrAdoptSubworkspaceCandidate: createOrAdoptSubworkspaceCandidateStub,
       emptyWorkspaceBestEffort: emptyWorkspaceBestEffortStub,
-      isWorkspaceReady: (status) => ['created', 'active', 'ready'].includes(status),
-      isWorkspaceTerminalFailure: (status) => ['creation_failed', 'failed', 'error'].includes(status),
+      // LLMO-7418 external-review Medium finding: isWorkspaceReady/isWorkspaceTerminalFailure
+      // are pure functions with no reason to be re-implemented here — the hand-rolled stubs
+      // this replaced omitted the space-separated 'creation failed' variant (the one actually
+      // observed in production) and dropped case/whitespace normalization entirely, silently
+      // hiding a regression in either the real implementation or this handler's own use of it.
+      // esmock passes these two through un-mocked so tests exercise the REAL classifiers.
     },
     '../../../../src/support/brands-storage.js': {
       getBrandProvisioningState: getBrandProvisioningStateStub,
@@ -565,6 +569,72 @@ describe('handlers/provision-workspace-job.js (LLMO-7352 / LLMO-7418)', () => {
         postgrestClient,
       });
       expect(result).to.deep.equal({ provisioningStatus: 'failed' });
+    });
+
+    it('cleans up a freshly-created candidate once the requeue depth cap is reached (LLMO-7418 external-review Finding 16)', async () => {
+      transport.getWorkspaceStatus.resolves({ status: 'not_ready' });
+      const { provisionWorkspaceHandler } = await loadHandler();
+      const job = makeJob(makeMetadata({
+        requeueDepth: MAX_PROVISION_REQUEUE_DEPTH,
+        candidateWorkspaceId: CANDIDATE_WS,
+        freshlyCreated: true,
+      }));
+
+      await provisionWorkspaceHandler(context, job, 'token');
+
+      expect(emptyWorkspaceBestEffortStub).to.have.been.calledOnceWith(
+        transport,
+        CANDIDATE_WS,
+        PARENT_WS,
+        context.log,
+        'provision-worker-requeue-exhausted',
+      );
+    });
+  });
+
+  describe('unexpected errors reaching the outer catch clean up an owned candidate (LLMO-7418 external-review Finding 16)', () => {
+    it('cleans up a freshly-created candidate when an unexpected error is thrown BEFORE any self-requeue is enqueued', async () => {
+      getBrandProvisioningStateStub.rejects(new Error('db read blip'));
+      const { provisionWorkspaceHandler } = await loadHandler();
+      const job = makeJob(makeMetadata({
+        candidateWorkspaceId: CANDIDATE_WS, freshlyCreated: true,
+      }));
+
+      await expect(provisionWorkspaceHandler(context, job, 'token')).to.be.rejectedWith('db read blip');
+
+      expect(emptyWorkspaceBestEffortStub).to.have.been.calledOnceWith(
+        transport,
+        CANDIDATE_WS,
+        PARENT_WS,
+        context.log,
+        'provision-worker-unexpected-error',
+      );
+    });
+
+    it('does NOT clean up when a self-requeue already enqueued a future hop for the SAME candidate before the failure', async () => {
+      transport.getWorkspaceStatus.resolves({ status: 'not_ready' });
+      createAndEnqueueJobStub.resolves({ getId: () => 'job-followup' });
+      updateProvisioningJobIdStub.rejects(new Error('freshness-write blip'));
+      const { provisionWorkspaceHandler } = await loadHandler();
+      const job = makeJob(makeMetadata());
+
+      await expect(provisionWorkspaceHandler(context, job, 'token')).to.be.rejectedWith('freshness-write blip');
+
+      // The future hop (already enqueued) owns the candidate now — emptying it here would
+      // corrupt the workspace the NEXT invocation is about to poll.
+      expect(emptyWorkspaceBestEffortStub).to.not.have.been.called;
+      expect(promoteProvisioningFailedStub).to.have.been.calledOnce;
+    });
+
+    it('does NOT double-clean-up when promoteProvisioningReady already cleaned up before rethrowing', async () => {
+      transport.getWorkspaceStatus.resolves({ status: 'active' });
+      promoteProvisioningReadyStub.rejects(new Error('boom'));
+      const { provisionWorkspaceHandler } = await loadHandler();
+      const job = makeJob(makeMetadata());
+
+      await expect(provisionWorkspaceHandler(context, job, 'token')).to.be.rejectedWith('boom');
+
+      expect(emptyWorkspaceBestEffortStub).to.have.been.calledOnce;
     });
   });
 

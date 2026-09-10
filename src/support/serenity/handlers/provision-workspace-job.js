@@ -170,6 +170,16 @@ export async function provisionWorkspaceHandler(context, job, accessToken) {
       freshlyCreated: Boolean(metadata.freshlyCreated),
     };
   }
+  // LLMO-7418 external-review Finding 16: set the instant the self-requeue's own
+  // createAndEnqueueJob call succeeds — a FUTURE hop now owns `candidate` and will poll/use it,
+  // so the outer catch below must NOT clean it up even if something AFTER the enqueue (e.g.
+  // updateProvisioningJobId) throws. Stays false for every other failure path, where nothing
+  // else will ever revisit this candidate.
+  let requeueEnqueued = false;
+  // Set by the one inner catch (promoteProvisioningReady's own, on a non-conflict failure) that
+  // already cleans up `candidate` before rethrowing — avoids a harmless but noisy double
+  // cleanupIfOwned call from the outer catch below for that specific path.
+  let candidateAlreadyCleanedUp = false;
 
   // Hoisted above the try (LLMO-7418 external-review Finding 5): a `const` declared INSIDE the
   // try block is out of scope in the catch below, which is exactly why that catch could not
@@ -286,6 +296,7 @@ export async function provisionWorkspaceHandler(context, job, accessToken) {
         // rather than leaking it. Distinct from the requeue path below, which must NOT clean up
         // the candidate it is deliberately carrying forward to the next hop.
         await cleanupIfOwned(transport, candidate, parentWorkspaceId, log, 'provision-worker-ready-promotion-failed');
+        candidateAlreadyCleanedUp = true;
         throw error;
       }
       if (!promoted) {
@@ -321,6 +332,12 @@ export async function provisionWorkspaceHandler(context, job, accessToken) {
     // bounded). Self-requeue a brand-new job carrying the SAME candidate id (AND its provenance)
     // forward, with bounded exponential backoff, rather than looping/sleeping in this invocation.
     if (requeueDepth >= MAX_PROVISION_REQUEUE_DEPTH) {
+      // LLMO-7418 external-review Finding 16: no further hop will ever revisit this candidate
+      // once the attempt is failed here — clean it up if we own it. The shell is still "not
+      // ready" upstream (nothing has published a project into it yet in the common case), so
+      // this is normally a no-op, but it closes the gap for the rarer case where a project
+      // exists despite the not-ready status.
+      await cleanupIfOwned(transport, candidate, parentWorkspaceId, log, 'provision-worker-requeue-exhausted');
       await promoteProvisioningFailed({
         brandId, attemptId, error: REQUEUE_EXHAUSTED_MESSAGE, postgrestClient,
       });
@@ -349,6 +366,10 @@ export async function provisionWorkspaceHandler(context, job, accessToken) {
       },
       delaySeconds: nextDelaySeconds,
     });
+    // LLMO-7418 external-review Finding 16: the self-requeue succeeded — a future hop now owns
+    // `candidate` (forwarded in its metadata above) and will poll/use it, so the outer catch
+    // must not clean it up even if the freshness-optimization write just below throws.
+    requeueEnqueued = true;
 
     log?.info?.('provision-workspace-job: not ready; self-requeued with backoff', {
       brandId,
@@ -377,6 +398,15 @@ export async function provisionWorkspaceHandler(context, job, accessToken) {
     // revisits it — which is exactly the "silently, permanently broken" failure mode this whole
     // redesign exists to eliminate. Record failure best-effort, then re-throw the ORIGINAL error
     // unchanged so the outer runner's existing FAILED-job handling is unaffected.
+    //
+    // LLMO-7418 external-review Finding 16: clean up `candidate` here too if we own it — UNLESS
+    // a self-requeue already enqueued a future hop for it (`requeueEnqueued`), which will poll
+    // it itself. Without this, an unexpected error anywhere before that point (a Postgres read
+    // failure, create-or-adopt throwing mid-flow, ...) left a freshly-created candidate an
+    // orphan: this attempt is about to be marked failed, so nothing else will ever revisit it.
+    if (candidate && !requeueEnqueued && !candidateAlreadyCleanedUp) {
+      await cleanupIfOwned(transport, candidate, parentWorkspaceId, log, 'provision-worker-unexpected-error');
+    }
     await failBestEffort({ brandId, attemptId, postgrestClient }, log);
     throw error;
   }
