@@ -422,6 +422,23 @@ export class FixesController {
           return dedupedResult;
         }
 
+        // Resolve and validate suggestionIds before creating the fix, so an invalid
+        // suggestion ID (unknown, or belonging to a different opportunity) fails fast
+        // without leaving behind an orphaned, unlinked FixEntity.
+        let suggestions;
+        if (fixData.suggestionIds) {
+          suggestions = await Promise.all(
+            fixData.suggestionIds.map((id) => this.#Suggestion.findById(id)),
+          );
+          if (suggestions.some((s) => !s || s.getOpportunityId() !== opportunityId)) {
+            return {
+              index,
+              message: 'Invalid suggestion IDs',
+              statusCode: 400,
+            };
+          }
+        }
+
         const enrichedFixData = await FixesController.#enrichWithDocumentPath(
           fixData,
           enrichmentCtx,
@@ -438,15 +455,32 @@ export class FixesController {
           opportunityId,
           ...(hasText(callerUserId) && { executedBy: callerUserId }),
         });
-        if (fixData.suggestionIds) {
-          const suggestions = await Promise.all(
-            fixData.suggestionIds.map((id) => this.#Suggestion.findById(id)),
-          );
+        let updatedSuggestions;
+        if (suggestions) {
           await FixEntity.setSuggestionsForFixEntity(opportunityId, fixEntity, suggestions);
+
+          // Opt-in (SITES-fix-orphan): the fix has just been persisted and linked, so
+          // it's safe to transition these suggestions to the caller-specified status
+          // atomically with fix creation. Only reached after
+          // FixEntity.create/setSuggestionsForFixEntity succeeded above; a failure
+          // there throws before this line, so a suggestion is never transitioned
+          // without a persisted, linked fix.
+          if (hasText(fixData.suggestionsTargetStatus)) {
+            updatedSuggestions = await this.#Suggestion.bulkUpdateStatus(
+              suggestions,
+              fixData.suggestionsTargetStatus,
+            );
+          }
         }
         return {
           index,
           fix: FixDto.toJSON(fixEntity),
+          // Only present when suggestionsTargetStatus was provided — callers that
+          // didn't mutate suggestion status get no suggestions field, since nothing
+          // about suggestion state changed for them to sync.
+          ...(updatedSuggestions && {
+            suggestions: updatedSuggestions.map((s) => SuggestionDto.toJSON(s)),
+          }),
           statusCode: 201,
         };
       } catch (error) {
@@ -652,7 +686,14 @@ export class FixesController {
 
     const fixes = await Promise.all(
       context.data.map(
-        (data, index) => this.#patchFixStatus(data.id, data.status, index, opportunityId, siteId),
+        (data, index) => this.#patchFixStatus(
+          data.id,
+          data.status,
+          index,
+          opportunityId,
+          siteId,
+          data.suggestionsTargetStatus,
+        ),
       ),
     );
     const succeeded = countSucceeded(fixes);
@@ -662,7 +703,7 @@ export class FixesController {
     }, 207);
   }
 
-  async #patchFixStatus(uuid, status, index, opportunityId, siteId) {
+  async #patchFixStatus(uuid, status, index, opportunityId, siteId, suggestionsTargetStatus) {
     if (!hasText(uuid)) {
       return {
         index,
@@ -701,8 +742,32 @@ export class FixesController {
       }
 
       fix.setStatus(status);
+      const updatedFix = await fix.save();
+
+      // Opt-in (mirrors createFixes' suggestionsTargetStatus): only reached after the
+      // fix status write above succeeded, so a suggestion is never transitioned
+      // without a persisted fix status update.
+      let updatedSuggestions;
+      if (hasText(suggestionsTargetStatus)) {
+        const suggestions = await this.#FixEntity.getSuggestionsByFixEntityId(uuid);
+        if (Array.isArray(suggestions) && suggestions.length > 0) {
+          updatedSuggestions = await this.#Suggestion.bulkUpdateStatus(
+            suggestions,
+            suggestionsTargetStatus,
+          );
+        }
+      }
+
       return {
-        index, uuid, fix: FixDto.toJSON(await fix.save()), statusCode: 200,
+        index,
+        uuid,
+        fix: FixDto.toJSON(updatedFix),
+        // Only present when suggestionsTargetStatus was provided and linked
+        // suggestions actually existed to transition.
+        ...(updatedSuggestions && {
+          suggestions: updatedSuggestions.map((s) => SuggestionDto.toJSON(s)),
+        }),
+        statusCode: 200,
       };
     } catch (error) {
       const statusCode = error?.name === VALIDATION_ERROR_NAME ? /* c8 ignore next */ 400 : 500;
