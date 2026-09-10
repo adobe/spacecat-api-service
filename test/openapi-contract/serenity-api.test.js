@@ -567,31 +567,25 @@ const FIXTURES = {
     usesElementsController: true,
     controllerMethod: 'listResponseFeed',
     serviceMethod: 'getResponseFeed',
-    // from/to are optional (they default to the last 7 days ending yesterday), but are
-    // supplied here so the fixture is deterministic rather than clock-dependent.
-    query: { from: '2026-08-23', to: '2026-08-24' },
-    // getResponseFeed returns the joined shape; the controller maps it through
-    // ResponseFeedDto.toEnvelopeJSON before ok().
+    query: { geoTargetId: '2840', languageCode: 'en', date: '2026-08-24' },
     handlerResult: {
-      records: [{
-        projectId: 'cb4f6443-e01f-4075-a586-85511f136e31',
+      data: [{
+        projectId: 'proj-1',
         prompt: 'best running shoes for flat feet',
-        model: 'chatgpt-paid',
-        date: '2026-08-24',
         response: 'For flat feet, look for stability shoes with firm midsoles.',
-        sources: [{
-          url: 'https://www.runnersworld.com/gear/best-running-shoes',
-          source: 'runnersworld.com',
-          position: 1,
-          domainType: 'Earned',
-        }],
-        sourceRowCount: 1,
+        date: '2026-08-24',
+        model: 'search-gpt',
+        responses: 1,
+        sources: ['https://www.runnersworld.com/gear/best-running-shoes'],
+        tags: ['$abv_tags$intent__commercial'],
       }],
-      days: ['2026-08-23', '2026-08-24'],
-      projectIds: ['cb4f6443-e01f-4075-a586-85511f136e31'],
-      pageSize: 5000,
-      truncated: false,
-      unmatchedSourceKeyCount: 0,
+      page: {
+        offset: 0,
+        pageSize: 500,
+        returned: 1,
+        rowCount: 1,
+        nextOffset: null,
+      },
     },
   },
   listSerenityBrandPresenceSubreddits: {
