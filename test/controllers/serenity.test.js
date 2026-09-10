@@ -16,7 +16,7 @@ import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import esmock from 'esmock';
 import { ProjectEngineApiError } from '@adobe/spacecat-shared-project-engine-client';
-import { ErrorWithStatusCode } from '../../src/support/utils.js';
+import { ErrorWithStatusCode, getSemrushPair } from '../../src/support/utils.js';
 import { brandPointerReloader } from '../../src/controllers/serenity.js';
 // The REAL transport error type: since LLMO-6386 the controller's mapError classifies via
 // errors.js (isSemrushTransportError), which recognises the real SerenityTransportError /
@@ -2925,7 +2925,7 @@ describe('SerenityController', () => {
         // caller's raw promise token + SEMRUSH pair to the worker instead of
         // minting a new one via the (unprovisioned) EMITTER pair.
         expect(enqueueArgs.promiseToken).to.deep.equal({ promise_token: 'promise-token-xyz' });
-        expect(enqueueArgs.promisePair).to.equal('SEMRUSH');
+        expect(enqueueArgs.promisePair).to.equal(getSemrushPair());
         expect(enqueueArgs.metadata).to.deep.equal({
           // callerId captured at enqueue time (LLMO-6289) — no auth profile on the
           // test context, so it resolves to the `unknown` sentinel. The default
@@ -2965,7 +2965,7 @@ describe('SerenityController', () => {
         const [, enqueueArgs] = createAndEnqueueJobStub.firstCall.args;
         expect(enqueueArgs.jobType).to.equal('serenity-classify-prompts');
         expect(enqueueArgs.promiseToken).to.deep.equal({ promise_token: 'promise-token-xyz' });
-        expect(enqueueArgs.promisePair).to.equal('SEMRUSH');
+        expect(enqueueArgs.promisePair).to.equal(getSemrushPair());
         expect(enqueueArgs.metadata).to.deep.equal({
           mode: 'create',
           brandId: BRAND,
@@ -3027,6 +3027,9 @@ describe('SerenityController', () => {
         }));
 
         expect(response.status).to.equal(400);
+        const body = await readBody(response);
+        expect(body.error).to.equal('invalidRequest');
+        expect(body.message).to.match(/Unknown promise audience: bogus/);
         expect(createAndEnqueueJobStub).to.not.have.been.called;
       });
 

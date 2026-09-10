@@ -1035,6 +1035,25 @@ export function resolveCallerImsUserId(context) {
 }
 
 /**
+ * The SEMRUSH IMS promise-pair selector, re-exported from the SDK so callers can
+ * compare against it (e.g. validating `resolvePromisePair`'s return value) without
+ * hardcoding the string literal — if the SDK constant's value ever changes, callers
+ * comparing against this export change with it instead of silently rejecting every
+ * valid request.
+ *
+ * A FUNCTION, not a top-level const: `resolvePromisePair` below only reads
+ * `ImsPromiseClient.PROMISE_PAIR` lazily, inside its own body, which is why test
+ * suites elsewhere in this repo mock `ImsPromiseClient` with only the members
+ * their own test cases exercise (e.g. `{ createFrom, CLIENT_TYPE }`, no
+ * `PROMISE_PAIR`) — evaluating `.PROMISE_PAIR.SEMRUSH` eagerly at module load
+ * would throw against any such partial mock the moment this module is imported,
+ * regardless of whether that test ever touches this export.
+ */
+export function getSemrushPair() {
+  return ImsPromiseClient.PROMISE_PAIR.SEMRUSH;
+}
+
+/**
  * Reads and decodes the caller's `x-promise-token` header, if present, WITHOUT
  * exchanging it. Used by callers that need to hand the caller's promise token
  * onward (e.g. the async job runner enqueue path) rather than exchange it for

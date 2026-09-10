@@ -88,6 +88,7 @@ import {
   resolveSemrushImsToken as resolveImsTokenViaPromise,
   resolvePromisePair,
   getRawPromiseToken,
+  getSemrushPair,
 } from '../support/utils.js';
 import {
   ensureMarketSite,
@@ -618,7 +619,7 @@ function SerenityController(context, log, env) {
         // resolvePromisePair throws ErrorWithStatusCode(400) on an unknown audience —
         // let it propagate to the outer catch/mapError, which maps it to the same 400.
         const promisePair = resolvePromisePair(ctx);
-        if (promisePair !== 'SEMRUSH') {
+        if (promisePair !== getSemrushPair()) {
           return createResponse(
             { error: 'invalidRequest', message: 'Async prompt classification requires the x-promise-audience: semrush header' },
             400,
