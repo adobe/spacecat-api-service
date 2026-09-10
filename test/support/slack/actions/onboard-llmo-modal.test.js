@@ -2213,6 +2213,53 @@ example-com:
     });
   });
 
+  describe('updateIMSOrgModal (LLMO-7284 AC12)', () => {
+    it('blocks the reassignment and leaves the org unchanged when the site still has enrollments', async () => {
+      const mockSite = createDefaultMockSite(sandbox);
+      mockSite.getBaseURL = sandbox.stub().returns('https://example.com');
+      // site is in org123 (default); it still carries an enrollment
+      mockSite.getSiteEnrollments = sandbox.stub().resolves([{ getId: () => 'enr-1' }]);
+      const mockSiteModel = createDefaultMockSiteModel(sandbox, mockSite);
+      // target org differs from the site's current org, so this is a real move
+      const mockOrganization = createDefaultMockOrganization(sandbox);
+      mockOrganization.findByImsOrgId = sandbox.stub().resolves({ getId: () => 'new-org-999' });
+
+      const lambdaCtx = createDefaultMockLambdaCtx(sandbox, {
+        mockSite, mockSiteModel, mockOrganization,
+      });
+
+      const mockAck = sandbox.stub().resolves();
+      const mockClient = { chat: { postMessage: sandbox.stub().resolves() } };
+      const body = {
+        user: { id: 'user123' },
+        view: {
+          private_metadata: JSON.stringify({
+            originalChannel: 'C1',
+            originalThreadTs: 't1',
+            brandURL: 'https://example.com',
+            siteId: 'site123',
+            existingBrand: 'Test Brand',
+          }),
+          state: { values: { new_ims_org_input: { new_ims_org_id: { value: 'NEW@AdobeOrg' } } } },
+        },
+      };
+
+      const { updateIMSOrgModal } = mockedModule;
+      await updateIMSOrgModal(lambdaCtx)({ ack: mockAck, body, client: mockClient });
+
+      // The site's org is never changed and no entitlement/enrollment is created.
+      expect(mockSite.setOrganizationId).to.not.have.been.called;
+      expect(mockSite.save).to.not.have.been.called;
+      // LLMO-7284 (AC12): the guard aborts before any entitlement is provisioned, so no
+      // TierClient entitlement/enrollment is created for the would-be new org (parity with
+      // the set-ims-org block test's explicit entitlement-not-called assertion).
+      expect(mockTierClient.createEntitlement).to.not.have.been.called;
+      // The operator is told, explicitly and actionably, why the move was refused.
+      const texts = mockClient.chat.postMessage.getCalls().map((c) => c.args[0].text);
+      expect(texts.some((t) => t.includes(':x:') && t.includes('enrollment'))).to.equal(true);
+    });
+  });
+
   describe('updateOrgAction', () => {
     it('should successfully update organization modal', async () => {
       const mockBody = {
