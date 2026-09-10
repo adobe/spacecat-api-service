@@ -403,16 +403,9 @@ describe('bulk tags promise credential forwarding', () => {
   });
 
   it('rejects absent forwarded credentials instead of falling back to an emitter token', async () => {
-    const createAndEnqueueJob = sinon.stub();
-    const { acceptBulkTags: acceptBulkTagsWithStubbedEnqueue } = await esmock(
-      '../../../../src/support/serenity/handlers/bulk-tags-job.js',
-      {
-        '../../../../src/support/serenity/async-job-runner.js': { createAndEnqueueJob },
-      },
-    );
-
-    await expect(acceptBulkTagsWithStubbedEnqueue({
-      context: { dataAccess: { AsyncJob: {} } },
+    const create = sinon.stub().throws(new Error('enqueue must not be reached'));
+    await expect(acceptBulkTags({
+      context: { dataAccess: { AsyncJob: { create } } },
       transport: workerTransport([]),
       brandId: 'brand',
       orgId: 'org',
@@ -425,7 +418,7 @@ describe('bulk tags promise credential forwarding', () => {
       expect(error.status).to.equal(400);
       expect(error.code).to.equal('invalidRequest');
     });
-    expect(createAndEnqueueJob).not.to.have.been.called;
+    expect(create).not.to.have.been.called;
   });
 });
 
