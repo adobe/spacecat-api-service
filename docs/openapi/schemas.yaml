@@ -8037,7 +8037,13 @@ V2BrandInput:
   properties:
     name:
       type: string
-      description: Brand name (unique per organization, used as upsert key)
+      description: >-
+        Brand name (unique per organization, used as upsert key). An active
+        brand's name is additionally checked case- and whitespace-insensitively
+        against every other active brand in the organization (trim, collapse
+        internal whitespace, lowercase) — "Acme Inc" and "acme  inc" collide
+        even though they differ in exact spelling. A collision is rejected with
+        409 `brand_duplicate_active_name`.
     status:
       type: string
       enum: [active, pending]
@@ -8101,6 +8107,13 @@ V2BrandUpdateInput:
   properties:
     name:
       type: string
+      description: >-
+        Brand name. A rename that leaves the brand active, or a promotion to
+        active, is checked case- and whitespace-insensitively against every
+        other active brand in the organization (trim, collapse internal
+        whitespace, lowercase) — "Acme Inc" and "acme  inc" collide even
+        though they differ in exact spelling. A collision is rejected with
+        409 `brand_duplicate_active_name`.
     status:
       type: string
       enum: [active, pending]
