@@ -18,12 +18,69 @@ import AccessControlUtil from '../support/access-control-util.js';
 const LD_FF_PROJECT_NAME = 'experience-success-studio';
 const LD_API_TOKEN_ENV_VAR = 'LD_EXPERIENCE_SUCCESS_API_TOKEN';
 const LD_API_BASE_URL = 'https://app.launchdarkly.com';
+// LD's default page size is 20; ask for the max per page to minimize round trips.
+const LD_PAGE_LIMIT = 50;
+// Safety bound on pagination follow — LD projects here run in the low hundreds
+// of flags, so this comfortably covers real growth while still failing closed
+// against a malformed/looping `_links.next`.
+const MAX_PAGES = 50;
 
 /**
- * Admin-only passthrough to LaunchDarkly's "list flags for project" REST API
- * (`GET /api/v2/flags/:projectKey`). Returns the raw LD response as-is, with no
- * DTO/reshaping — an exploratory endpoint to inspect exactly what LD serves for this
- * project before deciding how UI consumers should shape it.
+ * Fetches every flag for the project, following LaunchDarkly's `_links.next`
+ * pagination until exhausted (LD paginates "list flags" at 20/page by default).
+ * @param {string} apiToken - LaunchDarkly API token
+ * @returns {Promise<object[]>} All flag objects across all pages
+ */
+async function fetchAllFlags(apiToken) {
+  const items = [];
+  let path = `/api/v2/flags/${encodeURIComponent(LD_FF_PROJECT_NAME)}?limit=${LD_PAGE_LIMIT}`;
+
+  for (let page = 0; path && page < MAX_PAGES; page += 1) {
+    // eslint-disable-next-line no-await-in-loop
+    const response = await fetch(`${LD_API_BASE_URL}${path}`, {
+      method: 'GET',
+      headers: { Authorization: apiToken },
+    });
+    // eslint-disable-next-line no-await-in-loop
+    const body = await response.json();
+
+    if (!response.ok) {
+      const error = new Error(`LaunchDarkly API error: ${response.status} ${response.statusText}`);
+      error.status = response.status;
+      throw error;
+    }
+
+    items.push(...(body.items ?? []));
+    // LD's response envelope names this field `_links` — destructure-rename sidesteps
+    // the no-underscore-dangle lint rule for this external, non-negotiable name.
+    const { _links: links } = body;
+    path = links?.next?.href ?? null;
+  }
+
+  return items;
+}
+
+/**
+ * Reduces a raw LaunchDarkly flag object to the shape backoffice actually consumes:
+ * the flag key and its variation-0 value (the org/site targeting map, or a plain
+ * boolean/string for simple flags) — mirrors what `plg-onboarding/launchdarkly.js`
+ * already reads via `flag.variations?.[0]?.value` and what
+ * `experience-success-studio-backoffice`'s `featureFlagParser.js` expects
+ * (`{ name, value }` per flag).
+ * @param {object} flag - Raw LaunchDarkly flag object
+ * @returns {{key: string, value: *}}
+ */
+function toFlagSummary(flag) {
+  return {
+    key: flag.key,
+    value: flag.variations?.[0]?.value,
+  };
+}
+
+/**
+ * Admin-only LaunchDarkly flags endpoint for the `experience-success-studio` project.
+ * Fetches every flag (paginating through LD's REST API) and returns only the fields
+ * UI consumers actually use, instead of the full raw LD payload.
  * @param {object} ctx - Request context (injected)
  */
 function LaunchDarklyController(ctx) {
@@ -35,9 +92,8 @@ function LaunchDarklyController(ctx) {
 
   /**
    * GET /tools/launchdarkly/flags
-   * Query params are forwarded as-is to the LaunchDarkly API (e.g. `env`, `summary`, `tag`).
-   * @param {object} context - Request context with request.url, env, log.
-   * @returns {Promise<Response>} The raw LaunchDarkly response body.
+   * @param {object} context - Request context with env, log.
+   * @returns {Promise<Response>} `{ items: [{ key, value }], totalCount }`
    */
   const getFlags = async (context) => {
     if (!accessControlUtil.hasAdminAccess()) {
@@ -51,22 +107,9 @@ function LaunchDarklyController(ctx) {
       return internalServerError('LaunchDarkly is not configured');
     }
 
-    const search = context.request?.url ? new URL(context.request.url).search : '';
-    const url = `${LD_API_BASE_URL}/api/v2/flags/${encodeURIComponent(LD_FF_PROJECT_NAME)}${search}`;
-
     try {
-      const response = await fetch(url, {
-        method: 'GET',
-        headers: { Authorization: apiToken },
-      });
-      const body = await response.json();
-
-      if (!response.ok) {
-        log.error(`LaunchDarkly API error ${response.status} for project ${LD_FF_PROJECT_NAME}`);
-        return internalServerError('Failed to fetch LaunchDarkly flags');
-      }
-
-      return ok(body);
+      const flags = await fetchAllFlags(apiToken);
+      return ok({ items: flags.map(toFlagSummary), totalCount: flags.length });
     } catch (e) {
       log.error(`Error fetching LaunchDarkly flags for project ${LD_FF_PROJECT_NAME}: ${e.message}`);
       return internalServerError('Failed to fetch LaunchDarkly flags');

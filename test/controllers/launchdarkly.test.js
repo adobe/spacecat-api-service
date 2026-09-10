@@ -26,6 +26,17 @@ import {
 use(chaiAsPromised);
 use(sinonChai);
 
+/**
+ * Builds a minimal raw-LD-shaped flag object, with an optional `next` link
+ * (relative href, as LD returns them) to simulate pagination.
+ */
+function ldPage(items, nextHref) {
+  return {
+    items,
+    _links: nextHref ? { next: { href: nextHref } } : {},
+  };
+}
+
 describe('LaunchDarklyController', () => {
   const sandbox = sinon.createSandbox();
 
@@ -45,7 +56,6 @@ describe('LaunchDarklyController', () => {
       env: { LD_EXPERIENCE_SUCCESS_API_TOKEN: 'test-token' },
       log: { error: sandbox.stub() },
       attributes: { authInfo: { isAdmin: () => true } },
-      request: { url: 'https://spacecat.experiencecloud.live/tools/launchdarkly/flags?env=production' },
     };
     controller = LaunchDarklyController(baseCtx);
   });
@@ -68,36 +78,81 @@ describe('LaunchDarklyController', () => {
       expect(resp.status).to.equal(STATUS_INTERNAL_SERVER_ERROR);
     });
 
-    it('returns the raw LaunchDarkly response on success', async () => {
-      const ldBody = { items: [{ key: 'FF_alt-text-assess' }] };
+    it('returns key + variation-0 value per flag, on a single page', async () => {
+      const flags = [
+        { key: 'FF_bool-flag', variations: [{ value: true }, { value: false }] },
+        {
+          key: 'FF_alt-text-assess',
+          variations: [{ value: '{"org-1":["site-1"]}' }],
+        },
+      ];
       sandbox.stub(global, 'fetch').resolves({
         ok: true,
         status: 200,
-        json: async () => ldBody,
+        json: async () => ldPage(flags),
       });
 
       const resp = await controller.getFlags(baseCtx);
 
       expect(global.fetch).to.have.been.calledOnce;
       const [url, options] = global.fetch.firstCall.args;
-      expect(url).to.equal('https://app.launchdarkly.com/api/v2/flags/experience-success-studio?env=production');
+      expect(url).to.equal('https://app.launchdarkly.com/api/v2/flags/experience-success-studio?limit=50');
       expect(options.headers.Authorization).to.equal('test-token');
       expect(resp.status).to.equal(STATUS_OK);
       const body = await resp.json();
-      expect(body).to.deep.equal(ldBody);
+      expect(body).to.deep.equal({
+        totalCount: 2,
+        items: [
+          { key: 'FF_bool-flag', value: true },
+          { key: 'FF_alt-text-assess', value: '{"org-1":["site-1"]}' },
+        ],
+      });
     });
 
-    it('forwards no query string when request.url is absent', async () => {
-      sandbox.stub(global, 'fetch').resolves({ ok: true, status: 200, json: async () => ({}) });
-      await controller.getFlags({ ...baseCtx, request: undefined });
-      const [url] = global.fetch.firstCall.args;
-      expect(url).to.equal('https://app.launchdarkly.com/api/v2/flags/experience-success-studio');
+    it('follows LD pagination links until exhausted', async () => {
+      const fetchStub = sandbox.stub(global, 'fetch');
+      fetchStub.onCall(0).resolves({
+        ok: true,
+        status: 200,
+        json: async () => ldPage(
+          [{ key: 'flag-1', variations: [{ value: true }] }],
+          '/api/v2/flags/experience-success-studio?limit=50&offset=50',
+        ),
+      });
+      fetchStub.onCall(1).resolves({
+        ok: true,
+        status: 200,
+        json: async () => ldPage([{ key: 'flag-2', variations: [{ value: false }] }]),
+      });
+
+      const resp = await controller.getFlags(baseCtx);
+
+      expect(fetchStub).to.have.been.calledTwice;
+      expect(fetchStub.secondCall.args[0]).to.equal(
+        'https://app.launchdarkly.com/api/v2/flags/experience-success-studio?limit=50&offset=50',
+      );
+      const body = await resp.json();
+      expect(body.totalCount).to.equal(2);
+      expect(body.items.map((i) => i.key)).to.deep.equal(['flag-1', 'flag-2']);
+    });
+
+    it('handles a flag with no variations without throwing', async () => {
+      sandbox.stub(global, 'fetch').resolves({
+        ok: true,
+        status: 200,
+        json: async () => ldPage([{ key: 'FF_no-variations', variations: [] }]),
+      });
+      const resp = await controller.getFlags(baseCtx);
+      const body = await resp.json();
+      // JSON serialization drops the `value` key entirely when it's undefined.
+      expect(body.items).to.deep.equal([{ key: 'FF_no-variations' }]);
     });
 
     it('returns 500 when LaunchDarkly responds with an error status', async () => {
       sandbox.stub(global, 'fetch').resolves({
         ok: false,
         status: 401,
+        statusText: 'Unauthorized',
         json: async () => ({ message: 'invalid token' }),
       });
       const resp = await controller.getFlags(baseCtx);
