@@ -8068,6 +8068,50 @@ V2BrandInput:
         onboarded inline. Written to `brands.site_id` as the brand's primary-URL
         anchor. Sent on every create (a Serenity brand is anchored by BOTH its
         sub-workspace and this primary Site).
+    semrushMarket:
+      type: object
+      description: >-
+        Provisions an initial Semrush market (project) for the brand at create
+        time, in a serenity-active organization. Requires `market` and
+        `languageCode`; omit entirely for a sub-workspace-only create (markets
+        added afterwards from the Markets tab).
+      required: [market, languageCode]
+      properties:
+        market:
+          type: string
+          pattern: '^[A-Za-z]{2}$'
+          description: ISO 3166-1 alpha-2 country code; resolved server-side to a Geo Target ID.
+        languageCode:
+          type: string
+          pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$'
+    semrushModelIds:
+      type: array
+      items: { type: string }
+      description: >-
+        AI model (LLM) ids to attach to the initial market's project. Required
+        (non-empty) when `generatePrompts` is true; optional otherwise (the
+        project is created model-less until models are added later).
+    generatePrompts:
+      type: boolean
+      default: false
+      description: >-
+        Whether to generate topics/prompts for the initial `semrushMarket`
+        project. Requires a primary URL and `semrushModelIds`.
+    async:
+      type: boolean
+      default: false
+      description: >
+        PR-C (LLMO-7352/LLMO-7418). Only meaningful when `semrushMarket` is
+        supplied. When true, the brand row is persisted first (visible,
+        non-active — "Setting up"), then the sub-workspace ready-check and the
+        initial market's project create/publish are enqueued to a background
+        job chain instead of running inline, and the endpoint returns 202 with
+        a job id to poll via `GET .../serenity/jobs/{jobId}`. Omitted/false
+        processes synchronously as today (still 201) — this is opt-in only and
+        not yet the default. Unlike `SerenityCreatePromptsRequest`'s `async`
+        flag, this one is not intended to be a permanent dual-mode feature: the
+        synchronous path is the LLMO-7352 bug pattern itself, and is expected
+        to be retired once known callers have migrated to `async: true`.
 
 V2BrandUpdateInput:
   type: object
@@ -12246,6 +12290,37 @@ SerenityPromptsJobStatus:
             retryable: { type: boolean }
         - { type: 'null' }
 
+SerenityJobStatus:
+  type: object
+  description: |
+    Poll response for ANY async Serenity job — serenity-classify-prompts,
+    serenity-provision-workspace, serenity-create-market, or
+    serenity-activate-markets (PR-C, LLMO-7352/LLMO-7418). Secret-free by
+    design — the job's internal metadata (promise token etc.) is never exposed.
+  required: [jobId, status]
+  properties:
+    jobId:
+      type: string
+      format: uuid
+    status:
+      type: string
+      enum: [IN_PROGRESS, COMPLETED, FAILED]
+    result:
+      description: >
+        The job result once COMPLETED — the same body the equivalent
+        synchronous endpoint would have returned (shape depends on which
+        `async: true` call created this job: SerenityCreatePromptsResponse,
+        SerenityMarket, or SerenityActivateResponse). Null while IN_PROGRESS or
+        on FAILED.
+    error:
+      description: The failure envelope once FAILED; null otherwise.
+      oneOf:
+        - type: object
+          properties:
+            code: { type: string }
+            message: { type: string }
+        - { type: 'null' }
+
 SerenityUpdatePromptRequest:
   type: object
   description: |
@@ -12597,6 +12672,18 @@ SerenityActivateRequest:
             description: >-
               Optional AI model (LLM) ids to attach to this market's project
               (already-active brand reactivation).
+    async:
+      type: boolean
+      default: false
+      description: >
+        PR-C (LLMO-7352/LLMO-7418). Only meaningful on the already-active-brand,
+        markets-supplied path — a pending or bare-reactivation activation always
+        stays synchronous regardless of this flag. When true, the sub-workspace
+        ready-check and the per-market project create/publish + site-link + active
+        flip are enqueued to a background job chain instead of running inline, and
+        the endpoint returns 202 with a job id to poll via
+        `GET .../serenity/jobs/{jobId}`. Omitted/false processes synchronously as
+        today — this is opt-in only and not yet the default.
 
 SerenityActivateResponse:
   type: object
@@ -12727,6 +12814,20 @@ SerenityCreateMarketRequest:
         e.g. www.nba.com/kings). Written to Semrush `settings.ai.primary_url` via
         a best-effort PATCH before publish (serenity-docs#348). Optional — falls
         back to `brandDomain` (host-only) when omitted.
+    async:
+      type: boolean
+      default: false
+      description: >
+        PR-C (LLMO-7352/LLMO-7418). When true (sub-workspace-mode brands only),
+        the sub-workspace-ready check and the project create/publish are
+        enqueued to a background job chain instead of running inline, and the
+        endpoint returns 202 with a job id to poll via
+        `GET .../serenity/jobs/{jobId}`. Omitted/false processes synchronously
+        as today — this is opt-in only and not yet the default. Unlike
+        `SerenityCreatePromptsRequest`'s `async` flag, this one is not intended
+        to be a permanent dual-mode feature: the synchronous path is the
+        LLMO-7352 bug pattern itself, and is expected to be retired once known
+        callers have migrated to `async: true`.
 
 SerenityTag:
   type: object

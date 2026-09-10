@@ -1011,6 +1011,7 @@ describe('getRouteHandlers', () => {
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/bulk-tags',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/bulk-delete',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/jobs/:jobId',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/jobs/:jobId',
       'PATCH /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/:semrushPromptId',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets',

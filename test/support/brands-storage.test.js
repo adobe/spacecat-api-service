@@ -41,6 +41,9 @@ import {
   promoteProvisioningReady,
   promoteProvisioningFailed,
   cancelProvisioningAttempt,
+  beginProvisioningAttempt,
+  guardAgainstConcurrentProvisioning,
+  PROVISIONING_STALE_THRESHOLD_MS,
 } from '../../src/support/brands-storage.js';
 
 use(sinonChai);
@@ -4450,6 +4453,7 @@ describe('brands-storage', () => {
       });
 
       it('maps the provisioning columns to camelCase', async () => {
+        const updatedAt = '2026-09-08T12:00:00.000Z';
         const postgrestClient = createTableMockClient({
           brands: {
             data: {
@@ -4465,6 +4469,7 @@ describe('brands-storage', () => {
               // this fixture.
               semrush_provisioning_candidate_workspace_id: CANDIDATE_WS,
               site_id: 'a-site-id',
+              updated_at: updatedAt,
             },
             error: null,
           },
@@ -4480,6 +4485,7 @@ describe('brands-storage', () => {
           provisioningStatus: 'pending',
           provisioningAttemptId: ATTEMPT_ID,
           provisioningJobId: JOB_ID,
+          updatedAt,
         });
       });
 
@@ -4842,6 +4848,191 @@ describe('brands-storage', () => {
         });
         await expect(cancelProvisioningAttempt({ brandId: BRAND_ID, postgrestClient }))
           .to.be.rejectedWith('Failed to cancel provisioning attempt: boom');
+      });
+    });
+
+    describe('beginProvisioningAttempt (PR-C)', () => {
+      it('throws when postgrestClient is missing', async () => {
+        await expect(beginProvisioningAttempt({
+          brandId: BRAND_ID, attemptId: ATTEMPT_ID, postgrestClient: null,
+        })).to.be.rejectedWith('PostgREST client is required');
+      });
+
+      it('mints the attempt, flips to pending, and clears prior-attempt residue on a matched CAS', async () => {
+        const postgrestClient = createCapturingClient({
+          brands: { data: { id: BRAND_ID }, error: null },
+        });
+
+        const result = await beginProvisioningAttempt({
+          brandId: BRAND_ID,
+          attemptId: ATTEMPT_ID,
+          postgrestClient,
+          updatedBy: 'serenity-create-market',
+        });
+
+        expect(result).to.equal(true);
+        expect(postgrestClient.capturedCalls.update).to.deep.equal([{
+          table: 'brands',
+          row: {
+            semrush_provisioning_status: 'pending',
+            semrush_provisioning_attempt_id: ATTEMPT_ID,
+            semrush_provisioning_job_id: null,
+            semrush_provisioning_candidate_workspace_id: null,
+            semrush_provisioning_error: null,
+            updated_by: 'serenity-create-market',
+          },
+        }]);
+        expect(postgrestClient.capturedCalls.or).to.deep.equal([{
+          table: 'brands',
+          filter: 'semrush_provisioning_status.is.null,semrush_provisioning_status.eq.ready,'
+            + 'semrush_provisioning_status.eq.failed',
+        }]);
+      });
+
+      it('returns false when a pending attempt already owns the brand (CAS rejected)', async () => {
+        const postgrestClient = createTableMockClient({ brands: { data: null, error: null } });
+        const result = await beginProvisioningAttempt({
+          brandId: BRAND_ID, attemptId: ATTEMPT_ID, postgrestClient,
+        });
+        expect(result).to.equal(false);
+      });
+
+      it('throws a generic error on other database failures', async () => {
+        const postgrestClient = createTableMockClient({
+          brands: [{ data: null, error: { message: 'boom' } }],
+        });
+        await expect(beginProvisioningAttempt({
+          brandId: BRAND_ID, attemptId: ATTEMPT_ID, postgrestClient,
+        })).to.be.rejectedWith('Failed to begin provisioning attempt: boom');
+      });
+    });
+
+    describe('guardAgainstConcurrentProvisioning (PR-C)', () => {
+      function stateWith(overrides = {}) {
+        return {
+          id: BRAND_ID,
+          status: 'pending',
+          semrush_sub_workspace_id: null,
+          semrush_provisioning_status: 'pending',
+          semrush_provisioning_attempt_id: ATTEMPT_ID,
+          semrush_provisioning_job_id: JOB_ID,
+          updated_at: new Date().toISOString(),
+          ...overrides,
+        };
+      }
+
+      it('no-ops when the brand does not exist', async () => {
+        const postgrestClient = createTableMockClient({ brands: { data: null, error: null } });
+        const call = guardAgainstConcurrentProvisioning(BRAND_ID, postgrestClient);
+        await expect(call).to.not.be.rejected;
+      });
+
+      it('no-ops when there is no in-flight attempt (status is not pending)', async () => {
+        const postgrestClient = createTableMockClient({
+          brands: { data: stateWith({ semrush_provisioning_status: 'ready' }), error: null },
+        });
+        const call = guardAgainstConcurrentProvisioning(BRAND_ID, postgrestClient);
+        await expect(call).to.not.be.rejected;
+      });
+
+      it('throws a 409 when a FRESH attempt is genuinely in flight', async () => {
+        const postgrestClient = createTableMockClient({
+          brands: { data: stateWith({ updated_at: new Date().toISOString() }), error: null },
+        });
+
+        let caught;
+        try {
+          await guardAgainstConcurrentProvisioning(BRAND_ID, postgrestClient);
+        } catch (e) {
+          caught = e;
+        }
+
+        expect(caught).to.exist;
+        expect(caught.status).to.equal(409);
+        expect(caught.code).to.equal('semrush_provisioning_in_progress');
+      });
+
+      it('reconciles a STALE attempt to failed and returns without throwing', async () => {
+        const staleAgeMs = PROVISIONING_STALE_THRESHOLD_MS + 1000;
+        const staleUpdatedAt = new Date(Date.now() - staleAgeMs).toISOString();
+        const postgrestClient = createCapturingClient({
+          brands: [
+            { data: stateWith({ updated_at: staleUpdatedAt }), error: null },
+            { data: { id: BRAND_ID }, error: null },
+          ],
+        });
+
+        const call = guardAgainstConcurrentProvisioning(BRAND_ID, postgrestClient, console);
+        await expect(call).to.not.be.rejected;
+
+        expect(postgrestClient.capturedCalls.update).to.deep.equal([{
+          table: 'brands',
+          row: {
+            semrush_provisioning_status: 'failed',
+            semrush_provisioning_error: 'Provisioning attempt went stale (no update within the '
+              + 'expected window) and was reconciled by a later request',
+          },
+        }]);
+      });
+
+      it('degrades to a no-op (does not throw) when the provisioning columns do not exist yet (LLMO-7418 external-review Finding 1)', async () => {
+        const postgrestClient = createTableMockClient({
+          brands: {
+            data: null,
+            error: { message: 'column brands.semrush_provisioning_status does not exist', code: '42703' },
+          },
+        });
+        const warn = sinon.stub();
+
+        const call = guardAgainstConcurrentProvisioning(BRAND_ID, postgrestClient, { warn });
+        await expect(call).to.not.be.rejected;
+        expect(warn).to.have.been.calledOnce;
+      });
+
+      it('still fails closed (rethrows) on any OTHER read error, e.g. a transient DB failure', async () => {
+        const postgrestClient = createTableMockClient({
+          brands: { data: null, error: { message: 'connection reset', code: 'ECONNRESET' } },
+        });
+
+        let caught;
+        try {
+          await guardAgainstConcurrentProvisioning(BRAND_ID, postgrestClient);
+        } catch (e) {
+          caught = e;
+        }
+
+        expect(caught).to.exist;
+        expect(caught.message).to.include('Failed to read brand provisioning state');
+      });
+
+      it('treats an unparseable updated_at (NaN age) as fresh rather than reconciling it away (LLMO-7418 external-review Finding 11)', async () => {
+        const postgrestClient = createTableMockClient({
+          brands: { data: stateWith({ updated_at: 'not-a-real-timestamp' }), error: null },
+        });
+
+        let caught;
+        try {
+          await guardAgainstConcurrentProvisioning(BRAND_ID, postgrestClient);
+        } catch (e) {
+          caught = e;
+        }
+
+        expect(caught).to.exist;
+        expect(caught.status).to.equal(409);
+      });
+
+      it('does not throw when the stale-reconciliation CAS is itself rejected (already reconciled)', async () => {
+        const staleAgeMs = PROVISIONING_STALE_THRESHOLD_MS + 1000;
+        const staleUpdatedAt = new Date(Date.now() - staleAgeMs).toISOString();
+        const postgrestClient = createTableMockClient({
+          brands: [
+            { data: stateWith({ updated_at: staleUpdatedAt }), error: null },
+            { data: null, error: null },
+          ],
+        });
+
+        const call = guardAgainstConcurrentProvisioning(BRAND_ID, postgrestClient);
+        await expect(call).to.not.be.rejected;
       });
     });
   });

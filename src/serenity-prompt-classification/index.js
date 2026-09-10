@@ -40,6 +40,14 @@ import {
   PROVISION_WORKSPACE_JOB_TYPE,
 } from '../support/serenity/handlers/provision-workspace-job.js';
 import {
+  createMarketJobHandler,
+  CREATE_MARKET_JOB_TYPE,
+} from '../support/serenity/handlers/create-market-job.js';
+import {
+  activateMarketsJobHandler,
+  ACTIVATE_MARKETS_JOB_TYPE,
+} from '../support/serenity/handlers/activate-markets-job.js';
+import {
   isRateLimited,
   isSemrushTransportError,
 } from '../support/serenity/errors.js';
@@ -106,11 +114,12 @@ export const vaultOpts = {
  * first-and-persist promise-token handling, terminal-state invalidation).
  * Per-consumer job logic — serenity-docs#33's prompt intent classification
  * (classify -> create-with-tags -> publish) — lives in
- * `../support/serenity/handlers/classify-prompts-job.js`; bulk tag operations
- * live in `../support/serenity/handlers/bulk-tags-job.js`; and LLMO-7352/
- * LLMO-7418's async Semrush sub-workspace provisioning lives in
- * `../support/serenity/handlers/provision-workspace-job.js`. All three are
- * registered below.
+ * `../support/serenity/handlers/classify-prompts-job.js`; bulk tag operations live in
+ * `../support/serenity/handlers/bulk-tags-job.js`; LLMO-7352/LLMO-7418's async Semrush
+ * sub-workspace provisioning lives in `../support/serenity/handlers/provision-workspace-job.js`;
+ * and PR-C's two chained market-creation phases (workspace ready -> create the market/run the
+ * activate batch against it) live in `../support/serenity/handlers/create-market-job.js` and
+ * `../support/serenity/handlers/activate-markets-job.js`. All five are registered below.
  *
  * @type {Record<string, (context: object, job: object,
  *   accessToken: string) => Promise<object>>}
@@ -119,6 +128,8 @@ const HANDLERS = {
   [CLASSIFY_PROMPTS_JOB_TYPE]: classifyPromptsHandler,
   [BULK_TAGS_JOB_TYPE]: bulkTagsHandler,
   [PROVISION_WORKSPACE_JOB_TYPE]: provisionWorkspaceHandler,
+  [CREATE_MARKET_JOB_TYPE]: createMarketJobHandler,
+  [ACTIVATE_MARKETS_JOB_TYPE]: activateMarketsJobHandler,
 };
 
 const TRANSIENT_NETWORK_ERROR_CODES = new Set([
@@ -259,8 +270,12 @@ export async function run(message, context) {
     // `requeuePending`) forwards this job's CURRENT promise token onto the new
     // job's metadata, rather than minting a fresh one — the worker has no HTTP
     // context to mint from. Revocation is by identity, so invalidating here
-    // would also kill the requeued job's copy before it ever runs.
-    tokenOwnershipTransferred = Boolean(result?.requeuedJobId);
+    // would also kill the requeued job's copy before it ever runs. A CHAINED job
+    // (PR-C, LLMO-7418: provision-workspace-job.js enqueuing a follow-up job after
+    // promoting to ready) forwards the SAME token for the identical reason, so it
+    // counts here too — a chainedJobId with no live token would strand the chained
+    // job on its very first hop with a dead promise token.
+    tokenOwnershipTransferred = Boolean(result?.requeuedJobId || result?.chainedJobId);
   } catch (error) {
     if (isRetryableJobError(error)) {
       log.warn(`[serenity-job-runner] Job ${jobId} remains IN_PROGRESS for SQS retry: ${error.message}`);

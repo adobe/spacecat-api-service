@@ -473,6 +473,58 @@ v2-serenity-prompts-job-by-id:
         description: Organization, brand, or job not found, serenity is not active for the brand, or the job belongs to a different brand.
       '500': { $ref: './responses.yaml#/500' }
 
+v2-serenity-job-by-id:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID-only on the /serenity/* surface)
+      schema:
+        type: string
+        format: uuid
+    - name: jobId
+      in: path
+      required: true
+      description: 'Async job id returned by any `async: true` 202 response.'
+      schema:
+        type: string
+        format: uuid
+  get:
+    tags: [serenity]
+    summary: Poll any Serenity async job (PR-C, LLMO-7352/LLMO-7418)
+    description: |
+      Job-type-agnostic alias of `GET .../serenity/prompts/jobs/{jobId}` (same
+      handler — it never inspects the job's `type`, only its `brandId`). Use this
+      path, not the prompts-named one, to poll a job returned by `async: true` on
+      `POST .../serenity/markets`, `POST .../serenity/activate`, or
+      `POST /v2/orgs/{spaceCatId}/brands` — the prompts path works too, but this
+      one doesn't say "prompts" for a workspace-provisioning or market/activation
+      job. Access is gated by the same org/brand access + serenity-active checks
+      as every other serenity endpoint; a job that does not belong to the
+      addressed brand 404s exactly like a missing job (jobs are never leaked
+      across brands). The response is secret-free — only
+      `{ jobId, status, result, error }`.
+    operationId: getSerenityJobStatus
+    security:
+      - session_token: []
+    responses:
+      '200':
+        description: Job status (and result when COMPLETED / error when FAILED).
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityJobStatus' }
+      '400': { $ref: './responses.yaml#/400' }
+      '404':
+        description: Organization, brand, or job not found, serenity is not active for the brand, or the job belongs to a different brand.
+      '500': { $ref: './responses.yaml#/500' }
+
 # ─── Markets ──────────────────────────────────────────────────────────────────
 
 v2-serenity-markets:
@@ -539,12 +591,28 @@ v2-serenity-markets:
         content:
           application/json:
             schema: { $ref: './schemas.yaml#/SerenityMarket' }
+      '202':
+        description: |
+          PR-C (LLMO-7352/LLMO-7418): the request set `async: true` (a
+          sub-workspace-mode brand only). The sub-workspace-ready check and the
+          project create/publish are enqueued to a background job chain instead
+          of running inline. Poll the returned `jobId` at
+          `GET .../serenity/jobs/{jobId}` for status + result — the polling
+          endpoint transparently follows the job chain to its EFFECTIVE
+          terminal hop, so `status` only reports `COMPLETED` once the actual
+          market create/publish has run, not merely once the sub-workspace
+          became ready; on COMPLETED, `result` is the same body a synchronous
+          `201` would have returned. Absent/false runs synchronously as
+          today; this is opt-in only and not yet the default.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityPromptsJobAccepted' }
       '400':
         description: Bad request (unknown market, malformed languageCode, missing field).
       '404':
         description: Organization has no workspace, or serenity is not active for the organization.
       '409':
-        description: A market already exists for this (brandId, geoTargetId, languageCode) slice.
+        description: A market already exists for this (brandId, geoTargetId, languageCode) slice, or (async only) a provisioning attempt is already in flight for this brand.
       '502':
         description: Upstream returned a non-2xx response.
         content:
@@ -1134,6 +1202,14 @@ v2-serenity-activate:
       pending and the response is HTTP 502 (its stash + workspace pointer are kept
       intact; retry converges idempotently). An already-active brand re-supplying
       markets is never downgraded (a partial failure is reported as 207).
+
+      PR-C (LLMO-7352/LLMO-7418): when a primary URL/domain and markets are
+      present (the branch described above — NOT the sub-workspace-only pending
+      or bare-reactivation paths, which always stay synchronous), the caller may
+      set `async: true` to enqueue the whole batch to a background job chain
+      instead of running it inline; see the `202` response. Absent/false runs
+      synchronously as described above — this is opt-in only and not yet the
+      default.
     operationId: activateSerenityBrand
     security:
       - session_token: []
@@ -1148,6 +1224,22 @@ v2-serenity-activate:
         content:
           application/json:
             schema: { $ref: './schemas.yaml#/SerenityActivateResponse' }
+      '202':
+        description: |
+          PR-C (LLMO-7352/LLMO-7418): the request set `async: true` on the
+          project-activation branch (primary URL + markets present). The whole
+          batch (sub-workspace ready-check, every market's project create/
+          publish, the site link, and the active flip) is enqueued to a
+          background job chain instead of running inline. Poll the returned
+          `jobId` at `GET .../serenity/jobs/{jobId}` for status + result — the
+          polling endpoint transparently follows the job chain to its
+          EFFECTIVE terminal hop, so `status` only reports `COMPLETED` once
+          the actual batch has run, not merely once the sub-workspace became
+          ready; on COMPLETED, `result` is the same body a synchronous
+          `200`/`207` would have returned.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityPromptsJobAccepted' }
       '207':
         description: >-
           An already-active brand re-supplied markets and at least one failed; the
@@ -1163,9 +1255,11 @@ v2-serenity-activate:
           Either (a) the primary domain is already another active brand's primary
           site (`brands_base_site_unique`): the brand STAYS `pending` and the body
           carries `error: serenityActivationSiteConflict` plus the per-market
-          outcomes — the operator must choose a different primary URL; or (b)
+          outcomes — the operator must choose a different primary URL; (b)
           misconfiguration: the brand's sub-workspace equals the organization parent
-          workspace (refused to avoid acting on the shared parent pool).
+          workspace (refused to avoid acting on the shared parent pool); or (c)
+          (PR-C, `async: true` only) a provisioning attempt is already in flight for
+          this brand (`error: semrush_provisioning_in_progress`) — retry shortly.
         content:
           application/json:
             schema:
