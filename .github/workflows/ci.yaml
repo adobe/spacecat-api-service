@@ -150,7 +150,11 @@ jobs:
   #      ad-hoc verification; stage is not part of the automatic push path.
   #
   # Deploys on every successful `main`-push `ci` run (service-ci.yaml@v3 exposes no
-  # `released` output to gate on): a slight over-deploy that guarantees no drift.
+  # `released` output to gate on) WHOSE diff actually touches the worker's own
+  # bundle — see the "Check worker paths changed" step below. A push that
+  # doesn't touch that bundle skips the deploy steps entirely: over-deploying
+  # unrelated changes (docs, controllers, unrelated tests, ...) costs a ~15min
+  # job for zero effect, since the worker's code hasn't moved.
   #
   # !!! DEPLOY != ROLLOUT !!!  This keeps the worker *code* current; it enables the
   # feature for NO ONE. Rollout stays gated by the `create_serenity_job_runner_esms`
@@ -186,13 +190,58 @@ jobs:
         uses: actions/checkout@v6
         with:
           persist-credentials: false
+          # `github.event.before` needs history beyond the pushed commit itself
+          # to diff against — a shallow (default depth-1) checkout would only
+          # ever see the tip commit and make every push look like it changed
+          # everything.
+          fetch-depth: 0
 
+      # push-only: workflow_dispatch is an explicit, single-env, human-requested
+      # deploy and always runs regardless of what changed.
+      #
+      # Paths are deliberately broader than just the worker's own directory:
+      # `src/serenity-prompt-classification/index.js` imports from
+      # `src/support/serenity/**`, `src/support/data-access.js` and
+      # `src/support/sqs.js` (and hedy bundles the whole dependency tree), plus
+      # `package.json`/`package-lock.json` for third-party deps — a change
+      # confined to `src/support/**` or a dependency bump can change the
+      # deployed bundle just as much as a change under the worker's own
+      # directory. This intentionally over-deploys (e.g. an unrelated
+      # `src/support/` file the worker doesn't import) rather than risk
+      # under-deploying a real behavioural change to the worker.
+      - name: Check worker paths changed
+        if: github.event_name == 'push'
+        id: paths-check
+        run: |
+          set -euo pipefail
+          BEFORE_SHA="${{ github.event.before }}"
+          # A branch's first push (or a force-push GitHub can't diff) reports
+          # an all-zero `before` SHA -- treat that as "changed" (deploy) rather
+          # than silently skip with nothing safe to diff against.
+          if [[ "$BEFORE_SHA" =~ ^0+$ ]] || ! git cat-file -e "$BEFORE_SHA" 2>/dev/null; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::No usable previous commit to diff against — deploying worker to be safe"
+            exit 0
+          fi
+          CHANGED_FILES=$(git diff --name-only "$BEFORE_SHA" "${{ github.sha }}")
+          if echo "$CHANGED_FILES" | grep -qE '^(src/serenity-prompt-classification/|src/support/|package\.json$|package-lock\.json$)'; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No changes under the worker's bundled paths — skipping worker deploy for this push"
+          fi
+
+      # steps.paths-check.outputs.changed is an empty string (not 'false') on
+      # workflow_dispatch, since the step above doesn't run there -- the
+      # '!= false' checks below rely on that negative match.
       - name: Setup Node & NPM
+        if: steps.paths-check.outputs.changed != 'false'
         uses: adobe/mysticat-ci/.github/actions/setup-node-npm@v1
         env:
           MYSTICAT_DATA_SERVICE_REPO_READ_TOKEN: ${{ secrets.MYSTICAT_DATA_SERVICE_REPO_READ_TOKEN }}
 
       - name: Configure AWS
+        if: steps.paths-check.outputs.changed != 'false'
         uses: adobe/mysticat-ci/.github/actions/configure-aws@v1
         with:
           # Explicit per-env branches (no fall-through-to-prod default): an
@@ -206,6 +255,7 @@ jobs:
       - name: Deploy worker
         # dev -> deploy-dev:worker, stage -> deploy-stage:worker,
         # prod -> deploy:worker (see package.json scripts).
+        if: steps.paths-check.outputs.changed != 'false'
         run: npm run ${{ (matrix.environment == 'dev' && 'deploy-dev:worker') || (matrix.environment == 'stage' && 'deploy-stage:worker') || (matrix.environment == 'prod' && 'deploy:worker') }}
         env:
           AWS_REGION: us-east-1
