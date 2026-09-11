@@ -100,6 +100,16 @@ import {
 } from '../support/llmo-onboarding-mode.js';
 import { postLlmoAlert } from './llmo/llmo-onboarding.js';
 import {
+  isOnestopAuthEnabled,
+  generatePkce,
+  signState,
+  verifyState,
+  buildAuthorizeUrl,
+  exchangeCodeForToken,
+  activateBrandAsOperator,
+} from '../support/ims-oauth.js';
+import { postSlackMessage } from '../utils/slack/base.js';
+import {
   ensurePromptSuggestionSchedules,
   isPayingLlmoSite,
 } from '../support/prompt-suggestion-schedules.js';
@@ -3093,8 +3103,109 @@ function BrandsController(ctx, log, env) {
     return createResponse('', 302, { location: destination });
   };
 
+  /**
+   * LLMO-7369 Path A — GET /v2/orgs/:spaceCatId/brands/:brandId/authorize
+   *
+   * Anonymous authorize-start (clicked from Slack): builds the IMS interactive login URL
+   * (PKCE + signed, short-TTL state carrying the flow context) and 302s the operator's browser
+   * to it. INERT unless the interactive IMS OAuth client is configured (isOnestopAuthEnabled) —
+   * that client registration + a security review are external prerequisites (see
+   * docs/LLMO-7369/path-a-oauth-onestop-plan.md §7).
+   */
+  const startBrandProvisioningAuth = async (context) => {
+    if (!isOnestopAuthEnabled(env)) {
+      return notFound('One-stop provisioning is not enabled.');
+    }
+    const { spaceCatId, brandId } = context.params || {};
+    if (!isValidUUID(spaceCatId) || !isValidUUID(brandId)) {
+      return badRequest('Invalid organization or brand id.');
+    }
+    const { channel, thread } = getQueryParams(context);
+    const { verifier, challenge } = generatePkce();
+    const state = signState(
+      {
+        orgId: spaceCatId,
+        brandId,
+        channel: channel || null,
+        threadTs: thread || null,
+        verifier,
+      },
+      env.IMS_OAUTH_STATE_SECRET,
+    );
+    return createResponse('', 302, { location: buildAuthorizeUrl(env, state, challenge) });
+  };
+
+  /**
+   * LLMO-7369 Path A — GET /auth/ims/callback
+   *
+   * Anonymous callback: verify state + PKCE, exchange the code for the operator's own IMS user
+   * token, provision Semrush as them via the existing authenticated /serenity/activate, notify
+   * Slack, and render a simple result page. The token is used transiently and never stored or
+   * logged. All destinations/pages are fixed — no caller-supplied content is reflected.
+   */
+  const handleImsOnboardingCallback = async (context) => {
+    if (!isOnestopAuthEnabled(env)) {
+      return notFound('One-stop provisioning is not enabled.');
+    }
+    const page = (title, body, status = 200) => createResponse(
+      `<!doctype html><meta charset="utf-8"><title>${title}</title>`
+      + `<body style="font-family:system-ui;margin:3rem"><h2>${title}</h2><p>${body}</p></body>`,
+      status,
+      { 'content-type': 'text/html; charset=utf-8' },
+    );
+    const { code, state, error } = getQueryParams(context);
+    if (error) {
+      return page('Sign-in cancelled', 'Authorization was not granted. You can retry from Slack.', 400);
+    }
+    const payload = verifyState(state, env.IMS_OAUTH_STATE_SECRET);
+    if (!payload || !code) {
+      return page('Link expired', 'This provisioning link is invalid or expired. Please retry from Slack.', 400);
+    }
+    const notify = async (msg) => {
+      const token = env.SLACK_BOT_TOKEN;
+      if (token && payload.channel) {
+        try {
+          await postSlackMessage(payload.channel, msg, token);
+        } catch (e) {
+          log.warn(`Path A: Slack notify failed: ${e.message}`);
+        }
+      }
+    };
+    let accessToken;
+    try {
+      accessToken = await exchangeCodeForToken(env, code, payload.verifier);
+    } catch (e) {
+      log.error(`Path A: token exchange failed for brand ${payload.brandId}: ${e.message}`);
+      await notify(':x: Semrush provisioning could not start (sign-in exchange failed). Please retry.');
+      return page('Sign-in failed', 'We could not complete sign-in. Please retry from Slack.', 502);
+    }
+    let res;
+    try {
+      res = await activateBrandAsOperator(
+        env,
+        payload.orgId,
+        payload.brandId,
+        accessToken,
+        payload.markets,
+      );
+    } catch (e) {
+      log.error(`Path A: activate call threw for brand ${payload.brandId}: ${e.message}`);
+      await notify(':x: Semrush provisioning failed to reach the service. Please retry.');
+      return page('Provisioning failed', 'We signed you in but the provisioning call failed. Please retry from Slack.', 502);
+    }
+    if (res.ok) {
+      await notify(':white_check_mark: Semrush provisioning completed for the brand you onboarded.');
+      return page('Provisioning complete', 'You can close this tab and return to Slack.');
+    }
+    log.error(`Path A: activate returned ${res.status} for brand ${payload.brandId}`);
+    await notify(`:warning: Semrush provisioning did not complete (status ${res.status}). Please retry.`);
+    return page('Provisioning incomplete', 'Provisioning did not complete. Please retry from Slack.', 502);
+  };
+
   return {
     resumeBrandProvisioning,
+    startBrandProvisioningAuth,
+    handleImsOnboardingCallback,
     getBrandsForOrganization,
     getBrandGuidelinesForSite,
     getBrandForOrg,

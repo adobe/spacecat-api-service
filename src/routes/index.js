@@ -243,6 +243,10 @@ export default function getRouteHandlers(
     // LLMO-7369: anonymous backend-owned hand-off (see anonymousEndpoints in index.js).
     // Redirects a Slack-clicked link to the authenticated elmo-ui brand-approval flow.
     'GET /v2/orgs/:spaceCatId/brands/:brandId/resume': brandsController.resumeBrandProvisioning,
+    // LLMO-7369 Path A: anonymous interactive-IMS-OAuth one-stop provisioning (flag-gated,
+    // inert unless the IMS OAuth client is configured). See the Path A plan doc.
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/authorize': brandsController.startBrandProvisioningAuth,
+    'GET /auth/ims/callback': brandsController.handleImsOnboardingCallback,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts': serenityController.listPrompts,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts': serenityController.createPrompts,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/bulk-tags': serenityController.bulkTagPrompts,
