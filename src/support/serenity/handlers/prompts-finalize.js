@@ -20,6 +20,7 @@ import {
   PUBLISH_STATUS, PUBLISH_OUTCOME, readPublishStatus, pollProjectPublished,
 } from './publish-status.js';
 import { buildSliceProjectMap, sliceKey } from '../subworkspace-projects.js';
+import { mapLimit, BULK_CREATE_CONCURRENCY } from './prompts.js';
 
 /** @typedef {import('../rest-transport.js').SerenityTransport} SerenityTransport */
 
@@ -55,6 +56,31 @@ export const FINALIZE_OUTCOME = {
   FAILED: 'failed',
 };
 
+// Independently chosen (not tied to any existing per-brand market cap) — a
+// CSV import supplies exactly one slice in practice (serenity-docs#472 §4);
+// this just bounds the generic multi-slice contract against an unbounded
+// caller-supplied array, mirroring BULK_PROMPTS_MAX_ITEMS's role for creates.
+export const MAX_FINALIZE_SLICES = 50;
+
+// Caps a caller-supplied value reflected back into an error entry — an
+// unresolvable slice's raw geoTargetId/languageCode round-trip into the
+// response for the caller's own debugging, but must never carry an
+// unbounded string/object straight from the request body.
+const MAX_ECHO_LEN = 200;
+/**
+ * @param {unknown} value
+ * @returns {string | number | boolean | null}
+ */
+function sanitizeEchoValue(value) {
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return value;
+  }
+  if (typeof value === 'string') {
+    return value.length > MAX_ECHO_LEN ? value.slice(0, MAX_ECHO_LEN) : value;
+  }
+  return null;
+}
+
 /**
  * @param {unknown} raw
  * @returns {{ geoTargetId: number, languageCode: string } | null}
@@ -75,6 +101,12 @@ function normalizeSlice(raw) {
 function assertSlices(rawSlices) {
   if (!Array.isArray(rawSlices) || rawSlices.length === 0) {
     throw new ErrorWithStatusCode('Body must include a non-empty slices array', 400);
+  }
+  if (rawSlices.length > MAX_FINALIZE_SLICES) {
+    throw new ErrorWithStatusCode(
+      `slices array exceeds maxItems=${MAX_FINALIZE_SLICES}`,
+      400,
+    );
   }
   return rawSlices;
 }
@@ -170,6 +202,75 @@ export async function finalizeProjectPublish(
 }
 
 /**
+ * Resolves every raw slice to a project id via the caller-supplied per-mode
+ * `resolveProjectId`, then fans the actual finalize work out ONE call per
+ * DISTINCT resolved project — never one call per slice. Two slices that
+ * resolve to the same project (a caller-supplied duplicate, or a market
+ * shared across slices) are deduped here so they trigger exactly one
+ * `finalizeProjectPublish`, never redundant concurrent publishes against the
+ * same project. Bounded by `BULK_CREATE_CONCURRENCY`, matching the same
+ * concurrency ceiling `handleCreatePrompts` fans its own per-project work out
+ * with — an unbounded `Promise.all` here would let a caller-supplied slices
+ * array (already capped at {@link MAX_FINALIZE_SLICES}, but still sizable)
+ * drive that many concurrent upstream requests with no ceiling.
+ * @param {Array<unknown>} rawSlices
+ * @param {(slice: { geoTargetId: number, languageCode: string }) =>
+ *   (string | undefined)} resolveProjectId
+ * @param {SerenityTransport} transport
+ * @param {string} semrushWorkspaceId
+ * @param {any} log
+ * @param {object} options
+ * @returns {Promise<Array<object>>}
+ */
+async function resolveAndFinalizeSlices(
+  rawSlices,
+  resolveProjectId,
+  transport,
+  semrushWorkspaceId,
+  log,
+  options,
+) {
+  const resolved = rawSlices.map((raw) => {
+    const slice = normalizeSlice(raw);
+    if (!slice) {
+      return {
+        geoTargetId: sanitizeEchoValue(/** @type {any} */ (raw)?.geoTargetId),
+        languageCode: sanitizeEchoValue(/** @type {any} */ (raw)?.languageCode),
+        outcome: FINALIZE_OUTCOME.FAILED,
+        error: 'geoTargetId and languageCode are required',
+      };
+    }
+    const projectId = resolveProjectId(slice);
+    if (!projectId) {
+      return {
+        ...slice,
+        outcome: FINALIZE_OUTCOME.FAILED,
+        error: 'No market for slice',
+        code: ERROR_CODES.MARKET_NOT_FOUND,
+      };
+    }
+    return { ...slice, projectId };
+  });
+
+  const projectIds = [...new Set(
+    resolved.map((r) => /** @type {any} */ (r).projectId).filter(Boolean),
+  )];
+  /** @type {Map<string, object>} */
+  const resultByProjectId = new Map();
+  await mapLimit(projectIds, BULK_CREATE_CONCURRENCY, async (projectId) => {
+    resultByProjectId.set(
+      projectId,
+      await finalizeProjectPublish(transport, semrushWorkspaceId, projectId, { ...options, log }),
+    );
+  });
+
+  return resolved.map((r) => {
+    const { projectId, ...slice } = /** @type {any} */ (r);
+    return projectId ? { ...slice, ...resultByProjectId.get(projectId) } : slice;
+  });
+}
+
+/**
  * Flat-mode entry point: resolves each slice's project via the brand's
  * `BrandSemrushProject` DB rows — same lookup `handleCreatePrompts` uses, so
  * finalize can only ever touch a project this brand's prompt-create call
@@ -200,33 +301,15 @@ export async function handleFinalizePrompts(
     projectsBySlice.set(`${p.getGeoTargetId()}:${p.getLanguageCode()}`, p);
   }
 
-  const slices = await Promise.all(rawSlices.map(async (raw) => {
-    const slice = normalizeSlice(raw);
-    if (!slice) {
-      return {
-        geoTargetId: /** @type {any} */ (raw)?.geoTargetId,
-        languageCode: /** @type {any} */ (raw)?.languageCode,
-        outcome: FINALIZE_OUTCOME.FAILED,
-        error: 'geoTargetId and languageCode are required',
-      };
-    }
-    const project = projectsBySlice.get(`${slice.geoTargetId}:${slice.languageCode}`);
-    if (!project) {
-      return {
-        ...slice,
-        outcome: FINALIZE_OUTCOME.FAILED,
-        error: 'No market for slice',
-        code: ERROR_CODES.MARKET_NOT_FOUND,
-      };
-    }
-    const result = await finalizeProjectPublish(
-      transport,
-      semrushWorkspaceId,
-      project.getSemrushProjectId(),
-      { ...options, log },
-    );
-    return { ...slice, ...result };
-  }));
+  const slices = await resolveAndFinalizeSlices(
+    rawSlices,
+    (slice) => projectsBySlice.get(`${slice.geoTargetId}:${slice.languageCode}`)
+      ?.getSemrushProjectId(),
+    transport,
+    semrushWorkspaceId,
+    log,
+    options,
+  );
 
   return { slices };
 }
@@ -235,6 +318,14 @@ export async function handleFinalizePrompts(
  * Subworkspace-mode entry point: resolves every slice's project from ONE live
  * listing ({@link buildSliceProjectMap}) instead of a DB row — the twin of
  * {@link handleFinalizePrompts}.
+ *
+ * `buildSliceProjectMap` is itself a live upstream call (unlike the flat
+ * twin's local DB read), so it carries the same transient-failure profile the
+ * existing-prompt-index read had before this ticket's containment fix. A
+ * failed listing is therefore CONTAINED here too: every requested slice comes
+ * back `failed` with the listing error, rather than throwing an outer 502
+ * that discards the itemized-per-slice contract this endpoint exists to
+ * provide.
  * @param {SerenityTransport} transport
  * @param {string} workspaceId
  * @param {object} body - `{ slices: Array<{ geoTargetId, languageCode }> }`
@@ -250,35 +341,38 @@ export async function handleFinalizePromptsSubworkspace(
   options = {},
 ) {
   const rawSlices = assertSlices(body?.slices);
-  const projectsBySlice = await buildSliceProjectMap(transport, workspaceId, log);
 
-  const slices = await Promise.all(rawSlices.map(async (raw) => {
-    const slice = normalizeSlice(raw);
-    if (!slice) {
-      return {
-        geoTargetId: /** @type {any} */ (raw)?.geoTargetId,
-        languageCode: /** @type {any} */ (raw)?.languageCode,
-        outcome: FINALIZE_OUTCOME.FAILED,
-        error: 'geoTargetId and languageCode are required',
-      };
-    }
-    const project = projectsBySlice.get(sliceKey(slice.geoTargetId, slice.languageCode));
-    if (!project) {
-      return {
-        ...slice,
-        outcome: FINALIZE_OUTCOME.FAILED,
-        error: 'No market for slice',
-        code: ERROR_CODES.MARKET_NOT_FOUND,
-      };
-    }
-    const result = await finalizeProjectPublish(
-      transport,
-      workspaceId,
-      String(project.id),
-      { ...options, log },
+  let projectsBySlice;
+  try {
+    projectsBySlice = await buildSliceProjectMap(transport, workspaceId, log);
+  } catch (e) {
+    log?.error?.(
+      'handleFinalizePromptsSubworkspace: project listing failed — failing every '
+      + 'requested slice rather than throwing an outer error',
+      { workspaceId, error: e.message },
     );
-    return { ...slice, ...result };
-  }));
+    const message = redactUpstreamMessage(e);
+    return {
+      slices: rawSlices.map((raw) => ({
+        geoTargetId: sanitizeEchoValue(/** @type {any} */ (raw)?.geoTargetId),
+        languageCode: sanitizeEchoValue(/** @type {any} */ (raw)?.languageCode),
+        outcome: FINALIZE_OUTCOME.FAILED,
+        error: message,
+      })),
+    };
+  }
+
+  const slices = await resolveAndFinalizeSlices(
+    rawSlices,
+    (slice) => {
+      const project = projectsBySlice.get(sliceKey(slice.geoTargetId, slice.languageCode));
+      return project ? String(project.id) : undefined;
+    },
+    transport,
+    workspaceId,
+    log,
+    options,
+  );
 
   return { slices };
 }

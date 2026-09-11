@@ -2240,10 +2240,11 @@ export async function handleCreatePrompts(
   // publish:false — the caller (finalize) batches a single publish after models
   // are also set, so skip the per-create publish (and its quota-rollback
   // reconciliation) here; finalize's own publish step is the one that runs it.
-  // `published` stays `true` in this branch — this caller ignores the field (it
-  // drives its own confirmed-live bookkeeping), and no publish was even
-  // attempted here to report false about.
-  let published = true;
+  // `published` is false in this branch — no publish was even attempted, so
+  // true would misreport it, matching the truthfulness fix below. The current
+  // caller (finalize) ignores this field regardless (it drives its own
+  // confirmed-live bookkeeping from finalizeSerenityProjects' own publish step).
+  let published = false;
   if (publish) {
     const alertContext = { orgId, brandId, env };
     const publishErrors = await publishAffected(

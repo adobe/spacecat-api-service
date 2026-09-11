@@ -20,6 +20,7 @@ import {
   handleFinalizePrompts,
   handleFinalizePromptsSubworkspace,
   FINALIZE_OUTCOME,
+  MAX_FINALIZE_SLICES,
 } from '../../../../src/support/serenity/handlers/prompts-finalize.js';
 import { ErrorWithStatusCode } from '../../../../src/support/utils.js';
 import { SerenityTransportError } from '../../../../src/support/serenity/rest-transport.js';
@@ -41,6 +42,8 @@ const row = (semrushProjectId, geoTargetId, languageCode) => ({
 });
 
 describe('finalizeProjectPublish (LLMO-7533 / serenity-docs#472 §4)', () => {
+  afterEach(() => sinon.restore());
+
   it('is a no-op for an already-live project', async () => {
     const transport = {
       getProjectStatus: sinon.stub().resolves({ publish_status: 'live' }),
@@ -136,6 +139,8 @@ describe('finalizeProjectPublish (LLMO-7533 / serenity-docs#472 §4)', () => {
 });
 
 describe('handleFinalizePrompts (flat mode)', () => {
+  afterEach(() => sinon.restore());
+
   it('400s when slices is missing or empty', async () => {
     const dataAccess = { BrandSemrushProject: { allByBrandId: sinon.stub().resolves([]) } };
     await expect(handleFinalizePrompts({}, dataAccess, BRAND, WS, {}, noopLog))
@@ -215,9 +220,66 @@ describe('handleFinalizePrompts (flat mode)', () => {
     expect(result.slices[0].outcome).to.equal(FINALIZE_OUTCOME.FAILED);
     expect(result.slices[0].error).to.match(/geoTargetId and languageCode are required/);
   });
+
+  it('caps the echoed geoTargetId/languageCode on an invalid slice so an oversized/'
+    + 'non-primitive value is never reflected verbatim', async () => {
+    const dataAccess = { BrandSemrushProject: { allByBrandId: sinon.stub().resolves([]) } };
+    const transport = {};
+    const hugeString = 'x'.repeat(500);
+
+    const result = await handleFinalizePrompts(transport, dataAccess, BRAND, WS, {
+      slices: [{ geoTargetId: { nested: 'object' }, languageCode: hugeString }],
+    }, noopLog);
+
+    expect(result.slices[0].outcome).to.equal(FINALIZE_OUTCOME.FAILED);
+    expect(result.slices[0].geoTargetId).to.equal(null);
+    expect(result.slices[0].languageCode).to.have.lengthOf(200);
+  });
+
+  it(`400s when the slices array exceeds maxItems=${MAX_FINALIZE_SLICES}`, async () => {
+    const dataAccess = { BrandSemrushProject: { allByBrandId: sinon.stub().resolves([]) } };
+    const tooMany = Array.from(
+      { length: MAX_FINALIZE_SLICES + 1 },
+      (_, i) => ({ geoTargetId: 2840, languageCode: 'en', note: i }),
+    );
+    await expect(handleFinalizePrompts({}, dataAccess, BRAND, WS, { slices: tooMany }, noopLog))
+      .to.be.rejectedWith(ErrorWithStatusCode, /slices array exceeds maxItems/);
+  });
+
+  it(
+    'dedupes slices resolving to the SAME project — one finalize call, not one per slice',
+    async () => {
+      const dataAccess = {
+        BrandSemrushProject: {
+          allByBrandId: sinon.stub().resolves([
+            row('shared-proj', 2840, 'en'),
+            row('shared-proj', 2276, 'de'),
+          ]),
+        },
+      };
+      const transport = {
+        getProjectStatus: sinon.stub().resolves({ publish_status: 'live' }),
+        publishProject: sinon.stub().resolves(),
+      };
+
+      const result = await handleFinalizePrompts(transport, dataAccess, BRAND, WS, {
+        slices: [
+          { geoTargetId: 2840, languageCode: 'en' },
+          { geoTargetId: 2276, languageCode: 'de' },
+        ],
+      }, noopLog);
+
+      expect(transport.getProjectStatus).to.have.been.calledOnce;
+      expect(result.slices).to.have.lengthOf(2);
+      expect(result.slices[0].outcome).to.equal(FINALIZE_OUTCOME.ALREADY_PUBLISHED);
+      expect(result.slices[1].outcome).to.equal(FINALIZE_OUTCOME.ALREADY_PUBLISHED);
+    },
+  );
 });
 
 describe('handleFinalizePromptsSubworkspace', () => {
+  afterEach(() => sinon.restore());
+
   const proj = (id, geo, lang) => ({
     id, settings: { ai: { location: { id: geo }, language: { name: lang } } },
   });
@@ -253,4 +315,53 @@ describe('handleFinalizePromptsSubworkspace', () => {
     await expect(handleFinalizePromptsSubworkspace(transport, WS, {}, noopLog))
       .to.be.rejectedWith(ErrorWithStatusCode, /non-empty slices array/);
   });
+
+  it('contains a project-listing failure — fails every requested slice instead of throwing '
+    + 'an outer error', async () => {
+    const transport = {
+      listProjects: sinon.stub().rejects(Object.assign(new Error('upstream 502'), { status: 502 })),
+    };
+
+    const result = await handleFinalizePromptsSubworkspace(transport, WS, {
+      slices: [
+        { geoTargetId: 2840, languageCode: 'en' },
+        { geoTargetId: 2276, languageCode: 'de' },
+      ],
+    }, noopLog);
+
+    expect(result.slices).to.have.lengthOf(2);
+    expect(result.slices[0]).to.include({
+      geoTargetId: 2840, languageCode: 'en', outcome: FINALIZE_OUTCOME.FAILED,
+    });
+    expect(result.slices[1]).to.include({
+      geoTargetId: 2276, languageCode: 'de', outcome: FINALIZE_OUTCOME.FAILED,
+    });
+  });
+
+  it(
+    'dedupes slices resolving to the SAME project — one finalize call, not one per slice',
+    async () => {
+      const transport = {
+        listProjects: sinon.stub().resolves({
+          items: [proj('shared-sub-proj', 2840, 'en')],
+        }),
+        getProjectStatus: sinon.stub().resolves({ publish_status: 'live' }),
+      };
+
+      // Both slices resolve to the same subworkspace project because the fixture
+      // lists only one project — a duplicate slice, or two slices sharing a
+      // market, both hit this path.
+      const result = await handleFinalizePromptsSubworkspace(transport, WS, {
+        slices: [
+          { geoTargetId: 2840, languageCode: 'en' },
+          { geoTargetId: 2840, languageCode: 'en' },
+        ],
+      }, noopLog);
+
+      expect(transport.getProjectStatus).to.have.been.calledOnce;
+      expect(result.slices).to.have.lengthOf(2);
+      expect(result.slices[0].outcome).to.equal(FINALIZE_OUTCOME.ALREADY_PUBLISHED);
+      expect(result.slices[1].outcome).to.equal(FINALIZE_OUTCOME.ALREADY_PUBLISHED);
+    },
+  );
 });
