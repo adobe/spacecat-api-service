@@ -39,6 +39,7 @@ import {
   isViewAsTrialRequest,
   isViewFullExperienceRequest,
   getImsUserTokenStrict,
+  getRawPromiseToken,
   resolveCallerImsUserId,
   sendGlobalImportRunMessage,
   triggerGlobalImportRun,
@@ -2112,6 +2113,79 @@ describe('utils', () => {
       expect(err.status).to.equal(400);
       expect(err.message).to.not.contain('\n');
       expect(err.message).to.not.contain('\r');
+    });
+  });
+
+  describe('getRawPromiseToken', () => {
+    const ctx = (token) => ({
+      pathInfo: { headers: token === undefined ? {} : { 'x-promise-token': token } },
+    });
+
+    it('decodes and returns the promise token when the header is present', () => {
+      expect(getRawPromiseToken(ctx('promise%20token%20xyz'))).to.equal('promise token xyz');
+    });
+
+    it('returns an already-decoded token unchanged', () => {
+      expect(getRawPromiseToken(ctx('raw-promise-token'))).to.equal('raw-promise-token');
+    });
+
+    it('returns the raw header value when it is not valid percent-encoding', () => {
+      expect(getRawPromiseToken(ctx('promise%zztoken'))).to.equal('promise%zztoken');
+    });
+
+    it('returns undefined when the header is absent', () => {
+      expect(getRawPromiseToken(ctx())).to.equal(undefined);
+    });
+
+    it('returns undefined when the header is empty', () => {
+      expect(getRawPromiseToken(ctx(''))).to.equal(undefined);
+    });
+
+    it('returns undefined when the context is nullish', () => {
+      expect(getRawPromiseToken(undefined)).to.equal(undefined);
+    });
+  });
+
+  describe('exchangePromiseTokenResponse', () => {
+    it('returns the complete IMS rotation response while exchangePromiseToken preserves its access-token return type', async () => {
+      const exchangeToken = sinon.stub().resolves({
+        access_token: 'access-token',
+        promise_token: 'rotated-token',
+        promise_token_expires_in: 14399,
+        token_type: 'bearer',
+      });
+      const createFrom = sinon.stub().returns({ exchangeToken });
+      const {
+        exchangePromiseToken,
+        exchangePromiseTokenResponse,
+      } = await esmock('../../src/support/utils.js', {
+        '@adobe/spacecat-shared-ims-client': {
+          ImsPromiseClient: {
+            createFrom,
+            CLIENT_TYPE: { CONSUMER: 'consumer', EMITTER: 'emitter' },
+          },
+        },
+      });
+      const context = { env: {} };
+
+      const result = await exchangePromiseTokenResponse(context, 'raw-token', 'SEMRUSH');
+      const accessToken = await exchangePromiseToken(context, 'next-raw-token', 'SEMRUSH');
+
+      expect(result).to.deep.equal({
+        access_token: 'access-token',
+        promise_token: 'rotated-token',
+        promise_token_expires_in: 14399,
+        token_type: 'bearer',
+      });
+      expect(accessToken).to.equal('access-token');
+      expect(createFrom).to.have.been.calledTwice;
+      expect(createFrom).to.have.been.calledWith(
+        context,
+        'consumer',
+        { pair: 'SEMRUSH' },
+      );
+      expect(exchangeToken).to.have.been.calledWith('raw-token', false);
+      expect(exchangeToken).to.have.been.calledWith('next-raw-token', false);
     });
   });
 

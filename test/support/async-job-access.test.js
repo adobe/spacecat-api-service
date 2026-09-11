@@ -152,18 +152,23 @@ describe('loadJobScopedToCaller', () => {
     expect(context.dataAccess.Site.findById).to.not.have.been.called;
   });
 
-  it('skips the ownership check when the resolver returns no siteId', async () => {
+  it('denies (404) when a resolver is supplied but yields no siteId (fail closed)', async () => {
+    // A resolver was supplied, so the job is expected to be owned. Resolving to no
+    // siteId (a malformed/partially-written record) must DENY, not fall open and
+    // return the job. This is distinct from the ownerless "no resolver" path below.
     const context = makeContext();
-    const job = makeJob({ jobType: 'site-detection', payload: {} });
+    const job = makeJob({ jobType: 'preflight', payload: {} });
     context.dataAccess.AsyncJob.findById.resolves(job);
 
     const result = await loadJobScopedToCaller(context, {
       jobId,
-      allowedJobTypes: ['site-detection'],
+      allowedJobTypes: ['preflight'],
       resolveOwnerSiteId: (j) => j.getMetadata().payload.siteId, // undefined
     });
 
-    expect(result.job).to.equal(job);
+    expect(result.job).to.be.undefined;
+    expect(result.error.status).to.equal(404);
+    // Denied before any site lookup.
     expect(context.dataAccess.Site.findById).to.not.have.been.called;
   });
 });
