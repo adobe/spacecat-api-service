@@ -666,6 +666,7 @@ const routeFacsCapabilities = {
       'POST /sites/:siteId/url-store/delete': 'llmo/can_configure',
       'POST /sites/:siteId/user-activities': 'llmo/can_configure',
       'POST /sites/detect/jobs': 'llmo/can_configure',
+      'POST /seo-gap-analysis': 'llmo/can_configure',
       'POST /tools/api-keys': 'llmo/can_configure',
       'POST /tools/import/jobs': 'llmo/can_configure',
       'POST /tools/import/jobs/:jobId/result': 'llmo/can_configure',
@@ -868,6 +869,7 @@ const routeFacsCapabilities = {
       'GET /sites/:siteId/user-activities': 'llmo/can_view',
       'GET /sites/by-base-url/:baseURL': 'llmo/can_view',
       'GET /sites/detect/jobs/:jobId': 'llmo/can_view',
+      'GET /seo-gap-analysis/jobs/:jobId': 'llmo/can_view',
       'GET /tools/api-keys': 'llmo/can_view',
       'GET /tools/import/jobs/:jobId': 'llmo/can_view',
       'GET /tools/import/jobs/:jobId/progress': 'llmo/can_view',
@@ -1032,6 +1034,7 @@ const routeFacsCapabilities = {
       'POST /tools/import/jobs/:jobId/result': 'aso/can_configure',
       'POST /tools/scrape/jobs': 'aso/can_configure',
       'POST /sites/detect/jobs': 'aso/can_configure',
+      'POST /seo-gap-analysis': 'aso/can_configure',
       'POST /consent-banner': 'aso/can_configure',
       'POST /organizations/:organizationId/sites/:siteId/contact-sales-lead': 'aso/can_configure',
       'PATCH /contact-sales-leads/:contactSalesLeadId': 'aso/can_configure',
@@ -1135,6 +1138,7 @@ const routeFacsCapabilities = {
       'POST /sites/:siteId/graph': 'aso/can_view',
       'GET /preflight/jobs/:jobId': 'aso/can_view',
       'GET /sites/detect/jobs/:jobId': 'aso/can_view',
+      'GET /seo-gap-analysis/jobs/:jobId': 'aso/can_view',
 
       // Paid traffic (full surface)
       'GET /sites/:siteId/traffic/paid': 'aso/can_view',

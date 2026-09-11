@@ -460,6 +460,8 @@ const routeRequiredCapabilities = {
   'POST /sites': CAP_SITE_CREATE,
   'POST /sites/detect/jobs': 'site:write',
   'GET /sites/detect/jobs/:jobId': 'site:read',
+  'POST /seo-gap-analysis': 'site:write',
+  'GET /seo-gap-analysis/jobs/:jobId': 'site:read',
   'GET /sites.csv': 'site:read',
   'GET /sites.xlsx': 'site:read',
   'GET /sites/:siteId': 'site:read',
