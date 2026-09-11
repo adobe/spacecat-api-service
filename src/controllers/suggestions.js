@@ -2542,7 +2542,7 @@ function SuggestionsController(ctx, sqs, env) {
               [ROUTING_VALIDATOR_TYPE]: [oaeValidationJobId],
             };
           } catch (error) {
-            context.log.error(`[edge-geo-exp] site: ${apexBaseUrl}, failed to queue OAE routing-validation job: ${error.message}`);
+            context.log.error(`[geo-experiment-failed] site: ${apexBaseUrl}, failed to queue OAE routing-validation job: ${error.message}`);
           }
         }
 

@@ -52,7 +52,7 @@ describe('OaeValidation Controller', () => {
       OaeValidation: { allByJobId: sandbox.stub() },
       Suggestion: { findById: sandbox.stub() },
       Opportunity: { findById: sandbox.stub() },
-      Site: { findById: sandbox.stub() },
+      Site: { findById: sandbox.stub().resolves({ getId: () => siteId }) },
     };
 
     ctx = { dataAccess, sqs };
@@ -85,6 +85,11 @@ describe('OaeValidation Controller', () => {
   });
 
   describe('createValidationJob', () => {
+    let authCtx;
+    beforeEach(() => {
+      authCtx = { dataAccess, attributes: { authInfo: { type: 'jwt' } }, pathInfo: { headers: {} } };
+    });
+
     it('returns 400 when data is missing', async () => {
       const response = await controller.createValidationJob({ data: undefined });
       expect(response.status).to.equal(400);
@@ -99,6 +104,7 @@ describe('OaeValidation Controller', () => {
 
     it('returns 400 when type is missing', async () => {
       const response = await controller.createValidationJob({
+        ...authCtx,
         data: { siteId, suggestionIds: [suggestionId1] },
       });
       expect(response.status).to.equal(400);
@@ -106,6 +112,7 @@ describe('OaeValidation Controller', () => {
 
     it('returns 400 when type is not a recognized validation type', async () => {
       const response = await controller.createValidationJob({
+        ...authCtx,
         data: { siteId, type: 'bogus-type', suggestionIds: [suggestionId1] },
       });
       expect(response.status).to.equal(400);
@@ -113,6 +120,7 @@ describe('OaeValidation Controller', () => {
 
     it('returns 400 when suggestionIds is missing', async () => {
       const response = await controller.createValidationJob({
+        ...authCtx,
         data: { siteId, type: 'routing' },
       });
       expect(response.status).to.equal(400);
@@ -120,6 +128,7 @@ describe('OaeValidation Controller', () => {
 
     it('returns 400 when suggestionIds is empty', async () => {
       const response = await controller.createValidationJob({
+        ...authCtx,
         data: { siteId, type: 'routing', suggestionIds: [] },
       });
       expect(response.status).to.equal(400);
@@ -127,6 +136,7 @@ describe('OaeValidation Controller', () => {
 
     it('returns 400 when a suggestionId is not a valid UUID', async () => {
       const response = await controller.createValidationJob({
+        ...authCtx,
         data: { siteId, type: 'routing', suggestionIds: ['not-a-uuid'] },
       });
       expect(response.status).to.equal(400);
@@ -134,6 +144,7 @@ describe('OaeValidation Controller', () => {
 
     it('sends one SQS message and returns 202 with a generated jobId', async () => {
       const response = await controller.createValidationJob({
+        ...authCtx,
         data: { siteId, type: 'routing', suggestionIds: [suggestionId1, suggestionId2] },
       });
 
@@ -157,10 +168,35 @@ describe('OaeValidation Controller', () => {
       sqs.sendMessage.rejects(new Error('SQS unavailable'));
 
       const response = await controller.createValidationJob({
+        ...authCtx,
         data: { siteId, type: 'routing', suggestionIds: [suggestionId1] },
       });
 
       expect(response.status).to.equal(500);
+    });
+
+    it('returns 403 when the caller does not have access to the site', async () => {
+      AccessControlUtil.prototype.hasAccess.resolves(false);
+
+      const response = await controller.createValidationJob({
+        ...authCtx,
+        data: { siteId, type: 'routing', suggestionIds: [suggestionId1] },
+      });
+
+      expect(response.status).to.equal(403);
+      expect(sqs.sendMessage).to.not.have.been.called;
+    });
+
+    it('returns 403 when the site cannot be found', async () => {
+      dataAccess.Site.findById.resolves(undefined);
+
+      const response = await controller.createValidationJob({
+        ...authCtx,
+        data: { siteId, type: 'routing', suggestionIds: [suggestionId1] },
+      });
+
+      expect(response.status).to.equal(403);
+      expect(sqs.sendMessage).to.not.have.been.called;
     });
   });
 

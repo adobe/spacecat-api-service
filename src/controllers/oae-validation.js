@@ -14,7 +14,7 @@ import {
   isNonEmptyObject, isNonEmptyArray, isValidUUID, hasText,
 } from '@adobe/spacecat-shared-utils';
 import {
-  accepted, badRequest, internalServerError, notFound, ok,
+  accepted, badRequest, forbidden, internalServerError, notFound, ok,
 } from '@adobe/spacecat-shared-http-utils';
 import { OaeValidationJobs, ROUTING_VALIDATOR_TYPE } from '@adobe/spacecat-shared-tokowaka-client';
 import AccessControlUtil from '../support/access-control-util.js';
@@ -102,6 +102,16 @@ function OaeValidationController(ctx, log, env) {
     const { data } = context;
     let jobId;
     try {
+      // Only siteId's shape is checked here (full payload validation happens inside createJob
+      // right after) -- access control needs a resolvable site to check against, so a malformed
+      // siteId just falls through to createJob's own "Invalid request" 400 below.
+      if (isNonEmptyObject(data) && isValidUUID(data.siteId)) {
+        const site = await dataAccess.Site.findById(data.siteId);
+        const accessControlUtil = AccessControlUtil.fromContext(context);
+        if (!site || !await accessControlUtil.hasAccess(site)) {
+          return forbidden('User does not have access to this site');
+        }
+      }
       ({ jobId } = await createJob(data));
     } catch (error) {
       if (error.message.startsWith('Invalid request')) {
