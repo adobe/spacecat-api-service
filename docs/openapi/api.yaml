@@ -287,6 +287,10 @@ paths:
     $ref: './site-detection-api.yaml#/site-detection-jobs'
   /sites/detect/jobs/{jobId}:
     $ref: './site-detection-api.yaml#/site-detection-job-status'
+  /seo-gap-analysis:
+    $ref: './seo-gap-analysis-api.yaml#/seo-gap-analysis-jobs'
+  /seo-gap-analysis/jobs/{jobId}:
+    $ref: './seo-gap-analysis-api.yaml#/seo-gap-analysis-job-status'
   /tools/scrape/jobs:
     $ref: './scrape-api.yaml#/create-scrape-job'
   /tools/scrape/jobs/{jobId}:
