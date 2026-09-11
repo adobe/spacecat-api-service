@@ -1,3 +1,10 @@
+# [1.806.0](https://github.com/adobe/spacecat-api-service/compare/v1.805.0...v1.806.0) (2026-09-11)
+
+
+### Features
+
+* **autofix-checks:** allow CM GitHub-BYOG code-repo-access precheck (SITES-50145) ([#3118](https://github.com/adobe/spacecat-api-service/issues/3118)) ([c2c6466](https://github.com/adobe/spacecat-api-service/commit/c2c646603744f3ea9f10f02fd8502fc698f30ce3))
+
 # [1.805.0](https://github.com/adobe/spacecat-api-service/compare/v1.804.2...v1.805.0) (2026-09-10)
 
 
