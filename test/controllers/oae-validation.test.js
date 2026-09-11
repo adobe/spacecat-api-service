@@ -12,12 +12,14 @@
 
 import { use, expect } from 'chai';
 import sinonChai from 'sinon-chai';
+import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
 
 import OaeValidationController from '../../src/controllers/oae-validation.js';
 import AccessControlUtil from '../../src/support/access-control-util.js';
 
 use(sinonChai);
+use(chaiAsPromised);
 
 describe('OaeValidation Controller', () => {
   const sandbox = sinon.createSandbox();
@@ -87,6 +89,18 @@ describe('OaeValidation Controller', () => {
 
     it('throws when env is missing', () => {
       expect(() => OaeValidationController(ctx, log, null)).to.throw('Environment object required');
+    });
+  });
+
+  describe('createJob (internal, called directly by in-process callers e.g. suggestions.js)', () => {
+    it('throws when data is missing', async () => {
+      await expect(controller.createJob(undefined)).to.be.rejectedWith('Invalid request: missing application/json data');
+    });
+
+    it('throws when siteId is not a valid UUID', async () => {
+      await expect(controller.createJob({
+        siteId: 'not-a-uuid', opportunityId, type: 'routing', suggestionIds: [suggestionId1],
+      })).to.be.rejectedWith('Invalid request: siteId must be a valid UUID');
     });
   });
 
@@ -447,7 +461,7 @@ describe('OaeValidation Controller', () => {
       expect(AccessControlUtil.prototype.hasAccess).to.not.have.been.called;
     });
 
-    it('returns 404 when the caller does not have access to the job\'s site', async () => {
+    it('returns 403 when the caller does not have access to the job\'s site', async () => {
       dataAccess.OaeValidation.allByJobId.resolves([{
         getSuggestionId: () => suggestionId1,
         getStatus: () => 'COMPLETE',
@@ -467,7 +481,7 @@ describe('OaeValidation Controller', () => {
         pathInfo: { headers: {} },
       });
 
-      expect(response.status).to.equal(404);
+      expect(response.status).to.equal(403);
     });
 
     it('returns 500 when the query fails', async () => {

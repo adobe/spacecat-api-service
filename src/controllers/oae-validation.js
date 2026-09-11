@@ -177,7 +177,9 @@ function OaeValidationController(ctx, log, env) {
       // their own site could otherwise view a different site's job by naming their own siteId
       // in the URL alongside someone else's jobId). Fail closed (404, no existence disclosure)
       // if any hop can't be resolved or the sites don't match -- same philosophy as
-      // loadJobScopedToCaller (support/async-job-access.js).
+      // loadJobScopedToCaller (support/async-job-access.js). Once resolved to a real, matching
+      // site, an access-control failure is a distinct 403 -- the job's existence is no longer
+      // a secret at that point, so there's nothing left to hide by returning 404 instead.
       const { Suggestion, Opportunity, Site } = dataAccess;
       const [firstResult] = job.suggestions;
       const suggestion = firstResult && await Suggestion.findById(firstResult.suggestionId);
@@ -190,7 +192,7 @@ function OaeValidationController(ctx, log, env) {
 
       const accessControlUtil = AccessControlUtil.fromContext(context);
       if (!await accessControlUtil.hasAccess(site)) {
-        return notFound('Job not found');
+        return forbidden('User does not have access to this site');
       }
 
       return ok(job);
