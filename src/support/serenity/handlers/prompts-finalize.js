@@ -113,16 +113,26 @@ function assertSlices(rawSlices) {
 
 /**
  * @param {{outcome: string, status: (string|null), failedReason: (string|null)}} confirm
+ * @param {any} [log]
  */
-function outcomeFromConfirm(confirm) {
+function outcomeFromConfirm(confirm, log) {
   if (confirm.outcome === PUBLISH_OUTCOME.PUBLISHED) {
     return { outcome: FINALIZE_OUTCOME.PUBLISHED, publishStatus: confirm.status };
   }
   if (confirm.outcome === PUBLISH_OUTCOME.FAILED) {
+    // `confirm.failedReason` is Semrush's raw `publishing_failed_reason` text —
+    // logged server-side only, never returned to the caller verbatim (matches
+    // the redaction discipline `finalizeProjectPublish`'s other failure branches
+    // use via redactUpstreamMessage).
+    if (confirm.failedReason) {
+      log?.error?.('finalizeProjectPublish: publish reported failed by upstream', {
+        publishStatus: confirm.status, failedReason: confirm.failedReason,
+      });
+    }
     return {
       outcome: FINALIZE_OUTCOME.FAILED,
       publishStatus: confirm.status,
-      error: confirm.failedReason || confirm.status || 'initial_publish_failed',
+      error: confirm.status || 'initial_publish_failed',
     };
   }
   // PENDING — accepted (or already publishing), not confirmed live within budget.
@@ -171,7 +181,7 @@ export async function finalizeProjectPublish(
     const confirm = await pollProjectPublished(transport, semrushWorkspaceId, projectId, {
       attempts: confirmAttempts, intervalMs: confirmIntervalMs, log,
     });
-    return outcomeFromConfirm(confirm);
+    return outcomeFromConfirm(confirm, log);
   }
 
   // draft, live_with_unpublished_updates, or unknown/absent status → publish.
@@ -198,7 +208,7 @@ export async function finalizeProjectPublish(
   const confirm = await pollProjectPublished(transport, semrushWorkspaceId, projectId, {
     attempts: confirmAttempts, intervalMs: confirmIntervalMs, log,
   });
-  return outcomeFromConfirm(confirm);
+  return outcomeFromConfirm(confirm, log);
 }
 
 /**

@@ -1773,6 +1773,27 @@ export function isIndexError(entry) {
   return !!entry && 'indexError' in entry;
 }
 
+export async function mapLimit(items, limit, mapper) {
+  const out = new Array(items.length);
+  let i = 0;
+  const workers = Array.from(
+    { length: Math.max(1, Math.min(limit, items.length)) },
+    async () => {
+      while (true) {
+        const idx = i;
+        i += 1;
+        if (idx >= items.length) {
+          return;
+        }
+        // eslint-disable-next-line no-await-in-loop
+        out[idx] = await mapper(items[idx], idx);
+      }
+    },
+  );
+  await Promise.all(workers);
+  return out;
+}
+
 /**
  * Builds one {@link buildExistingPromptIndex} per affected project, CONTAINING a
  * per-project read failure instead of letting it abort the whole fan-out
@@ -1794,29 +1815,28 @@ export function isIndexError(entry) {
 export async function buildPromptIndexByProject(transport, semrushWorkspaceId, projectIds, log) {
   /** @type {Map<string, PromptIndex | PromptIndexError>} */
   const promptIndexByProject = new Map();
-  await Promise.all(
-    [...new Set(projectIds.filter(Boolean))].map(async (projectId) => {
-      const pid = /** @type {string} */ (projectId);
-      try {
-        promptIndexByProject.set(pid, await buildExistingPromptIndex(
-          transport,
-          semrushWorkspaceId,
-          pid,
-          log,
-        ));
-      } catch (e) {
-        log?.error?.(
-          'serenity upsert: existing-prompt index read failed for project — failing only that '
-          + "project's inputs, unaffected projects continue",
-          { projectId: pid, error: e.message },
-        );
-        promptIndexByProject.set(pid, {
-          indexError: redactUpstreamMessage(e),
-          indexErrorStatus: e.status || 502,
-        });
-      }
-    }),
-  );
+  const uniqueProjectIds = [...new Set(projectIds.filter(Boolean))];
+  await mapLimit(uniqueProjectIds, BULK_CREATE_CONCURRENCY, async (projectId) => {
+    const pid = /** @type {string} */ (projectId);
+    try {
+      promptIndexByProject.set(pid, await buildExistingPromptIndex(
+        transport,
+        semrushWorkspaceId,
+        pid,
+        log,
+      ));
+    } catch (e) {
+      log?.error?.(
+        'serenity upsert: existing-prompt index read failed for project — failing only that '
+        + "project's inputs, unaffected projects continue",
+        { projectId: pid, error: e.message },
+      );
+      promptIndexByProject.set(pid, {
+        indexError: redactUpstreamMessage(e),
+        indexErrorStatus: e.status || 502,
+      });
+    }
+  });
   return promptIndexByProject;
 }
 
@@ -1863,27 +1883,6 @@ export async function applyUpsertTagWrites(
       projectId, count: updates.length, error: e?.message,
     });
   }
-}
-
-export async function mapLimit(items, limit, mapper) {
-  const out = new Array(items.length);
-  let i = 0;
-  const workers = Array.from(
-    { length: Math.max(1, Math.min(limit, items.length)) },
-    async () => {
-      while (true) {
-        const idx = i;
-        i += 1;
-        if (idx >= items.length) {
-          return;
-        }
-        // eslint-disable-next-line no-await-in-loop
-        out[idx] = await mapper(items[idx], idx);
-      }
-    },
-  );
-  await Promise.all(workers);
-  return out;
 }
 
 /**

@@ -241,6 +241,16 @@ export default function serenityTests(
       expect(res.body.error).to.equal('invalidRequest');
     });
 
+    // LLMO-7533 / serenity-docs#472 §4 — the finalize endpoint's own route/auth/
+    // brand-resolution wiring, proven the same way every sibling write route above
+    // is: a real request that passes auth + brand resolution and fails at the
+    // handler's own body validation.
+    it('POST /serenity/prompts/finalize 400s on an empty slices array', async () => {
+      const res = await getHttpClient().admin.post(`${base}/prompts/finalize`, { slices: [] });
+      expect(res.status).to.equal(400);
+      expect(res.body.error).to.equal('invalidRequest');
+    });
+
     it('PATCH /serenity/prompts/:id 400s when text/tags are missing', async () => {
       const res = await getHttpClient().admin.patch(`${base}/prompts/some-prompt-id`, {});
       expect(res.status).to.equal(400);
@@ -1105,6 +1115,56 @@ export default function serenityTests(
       expect(third.status).to.equal(200);
       expect(third.body.updated).to.have.lengthOf(1);
       expect(await categoriesOf()).to.deep.equal(['Features & Pricing']);
+    });
+
+    // LLMO-7533 / serenity-docs#472 §4 — the finalize endpoint's happy path: a
+    // deferred (draft-only) prompt write is invisible via GET /prompts (that read
+    // materializes the LIVE view only) until finalize publishes it, and a second
+    // finalize call against the now-live project is a no-op.
+    it('POST /serenity/prompts/finalize publishes a pending draft, then is idempotent '
+      + 'once live', async () => {
+      await createUsMarket();
+      const tagId = await createCategory('Finalize');
+      const text = 'What is your return policy?';
+
+      const create = await getHttpClient().admin.post(`${base}/prompts`, {
+        deferPublish: true,
+        prompts: [{
+          text, tagIds: [tagId], geoTargetId: US_GEO, languageCode: 'en',
+        }],
+      });
+      expect(create.status).to.equal(200);
+      expect(create.body.created).to.have.lengthOf(1);
+      expect(create.body.published).to.equal(false);
+
+      // Deferred: the draft write has not reached the live view GET /prompts reads.
+      const beforeFinalize = await getHttpClient().admin.get(
+        `${base}/prompts?geoTargetId=${US_GEO}&languageCode=en`,
+      );
+      expect(beforeFinalize.status).to.equal(200);
+      expect(beforeFinalize.body.items.some((p) => p.text === text)).to.equal(false);
+
+      const finalize = await getHttpClient().admin.post(`${base}/prompts/finalize`, {
+        slices: [{ geoTargetId: US_GEO, languageCode: 'en' }],
+      });
+      expect(finalize.status).to.equal(200);
+      expect(finalize.body.slices).to.have.lengthOf(1);
+      expect(finalize.body.slices[0]).to.include({ geoTargetId: US_GEO, languageCode: 'en' });
+      expect(finalize.body.slices[0].outcome).to.not.equal('failed');
+
+      // The customer-visible effect: the previously-invisible draft now lists live.
+      const afterFinalize = await getHttpClient().admin.get(
+        `${base}/prompts?geoTargetId=${US_GEO}&languageCode=en`,
+      );
+      expect(afterFinalize.status).to.equal(200);
+      expect(afterFinalize.body.items.some((p) => p.text === text)).to.equal(true);
+
+      // Idempotent: calling finalize again against the now-live project is a no-op.
+      const again = await getHttpClient().admin.post(`${base}/prompts/finalize`, {
+        slices: [{ geoTargetId: US_GEO, languageCode: 'en' }],
+      });
+      expect(again.status).to.equal(200);
+      expect(again.body.slices[0].outcome).to.equal('alreadyPublished');
     });
 
     // In-place edit (serenity-docs#63, gate G1): PATCH edits the prompt via the

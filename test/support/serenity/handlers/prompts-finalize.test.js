@@ -82,6 +82,31 @@ describe('finalizeProjectPublish (LLMO-7533 / serenity-docs#472 §4)', () => {
     expect(result.outcome).to.equal(FINALIZE_OUTCOME.PUBLISHED);
   });
 
+  it('redacts the raw upstream failedReason from a post-publish confirm-poll failure — '
+    + 'logs it, never returns it', async () => {
+    const errorLog = sinon.stub();
+    const transport = {
+      getProjectStatus: sinon.stub()
+        .onFirstCall().resolves({ publish_status: 'draft' })
+        .onSecondCall()
+        .resolves({
+          publish_status: 'initial_publish_failed',
+          publishing_failed_reason: 'raw upstream secret detail',
+        }),
+      publishProject: sinon.stub().resolves(),
+    };
+    const result = await finalizeProjectPublish(transport, WS, 'proj-1', {
+      confirmAttempts: 1, log: { ...noopLog, error: errorLog },
+    });
+    expect(result.outcome).to.equal(FINALIZE_OUTCOME.FAILED);
+    expect(result.error).to.not.include('raw upstream secret detail');
+    expect(result.error).to.equal('initial_publish_failed');
+    expect(errorLog).to.have.been.calledWithMatch(
+      sinon.match.string,
+      sinon.match({ failedReason: 'raw upstream secret detail' }),
+    );
+  });
+
   it('does NOT resend publish for a project already publishing — polls instead', async () => {
     const transport = {
       getProjectStatus: sinon.stub().resolves({ publish_status: 'publishing' }),
