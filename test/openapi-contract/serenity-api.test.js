@@ -21,6 +21,7 @@ import Ajv from 'ajv';
 import addFormats from 'ajv-formats';
 
 import { loadBundledSpec, operationsForTag } from './_lib/openapi-loader.js';
+import { ErrorWithStatusCode } from '../../src/support/utils.js';
 // Real class (not a mock) so the elements esmock block can pass it through without
 // adding a second class to this file (max-classes-per-file).
 import { SerenityTransportError } from '../../src/support/serenity/rest-transport.js';
@@ -235,6 +236,9 @@ const FIXTURES = {
       tagIds: ['tag-1'],
       filter: { tagIds: [], tagFilterMode: 'faceted-v1' },
     },
+    promiseToken: 'raw-bulk-tags-token',
+    promiseAudience: 'semrush',
+    expectPromiseForwarding: true,
   },
   listSerenityMarkets: {
     expectedStatus: 200,
@@ -527,8 +531,16 @@ const FIXTURES = {
     serviceMethod: 'getSentimentOverview',
     // startDate/endDate are required + validated by the controller before the
     // service is called (see listSentimentOverview) — supply them via query.
-    query: { startDate: '2026-06-01', endDate: '2026-07-16' },
+    query: { startDate: '2026-06-01', endDate: '2026-07-16', metric: 'mentions' },
+    // Pins the controller->service half of the `metric` seam (LLMO-7457). The
+    // service->transform half is covered in elements-service.test.js, but nothing
+    // otherwise asserts the controller WRITES the key it reads: `metric:` at
+    // elements.js:1321 is inside a `c8 ignore` block, so renaming it or dropping
+    // the line would leave `?metric=mentions` a permanent silent no-op with green
+    // CI — the failure this PR's production A/B depends on not having.
+    expectServiceParams: { metric: 'mentions' },
     handlerResult: {
+      metric: 'prompts',
       weeklyTrends: [{
         week: '2026-W24',
         weekNumber: 24,
@@ -538,6 +550,9 @@ const FIXTURES = {
           { name: 'Neutral', value: 39, color: '#4B5563' },
           { name: 'Negative', value: 8, color: '#B91C1C' },
         ],
+        mentionCounts: { positive: 12043, neutral: 8871, negative: 1819 },
+        promptCounts: { positive: 4866, neutral: 3581, negative: 734 },
+        sentimentTotal: 9181,
         totalPrompts: 5261,
         promptsWithSentiment: 9181,
         mentions: 0,
@@ -552,31 +567,25 @@ const FIXTURES = {
     usesElementsController: true,
     controllerMethod: 'listResponseFeed',
     serviceMethod: 'getResponseFeed',
-    // from/to are optional (they default to the last 7 days ending yesterday), but are
-    // supplied here so the fixture is deterministic rather than clock-dependent.
-    query: { from: '2026-08-23', to: '2026-08-24' },
-    // getResponseFeed returns the joined shape; the controller maps it through
-    // ResponseFeedDto.toEnvelopeJSON before ok().
+    query: { geoTargetId: '2840', languageCode: 'en', date: '2026-08-24' },
     handlerResult: {
-      records: [{
-        projectId: 'cb4f6443-e01f-4075-a586-85511f136e31',
+      data: [{
+        projectId: 'proj-1',
         prompt: 'best running shoes for flat feet',
-        model: 'chatgpt-paid',
-        date: '2026-08-24',
         response: 'For flat feet, look for stability shoes with firm midsoles.',
-        sources: [{
-          url: 'https://www.runnersworld.com/gear/best-running-shoes',
-          source: 'runnersworld.com',
-          position: 1,
-          domainType: 'Earned',
-        }],
-        sourceRowCount: 1,
+        date: '2026-08-24',
+        model: 'search-gpt',
+        responses: 1,
+        sources: ['https://www.runnersworld.com/gear/best-running-shoes'],
+        tags: ['$abv_tags$intent__commercial'],
       }],
-      days: ['2026-08-23', '2026-08-24'],
-      projectIds: ['cb4f6443-e01f-4075-a586-85511f136e31'],
-      pageSize: 5000,
-      truncated: false,
-      unmatchedSourceKeyCount: 0,
+      page: {
+        offset: 0,
+        pageSize: 500,
+        returned: 1,
+        rowCount: 1,
+        nextOffset: null,
+      },
     },
   },
   listSerenityBrandPresenceSubreddits: {
@@ -871,6 +880,12 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
       expect(op, `operation ${operationId} not found in spec`).to.exist;
 
       if (fx.usesElementsController) {
+        // Hoisted so a fixture can assert on what the controller actually handed
+        // the service. The controller->service param seam is otherwise untested:
+        // handlers like listSentimentOverview sit inside `c8 ignore` blocks, so a
+        // renamed key (e.g. `sentimentMetric:` instead of `metric:`) would ship
+        // green as a silent no-op. See `expectServiceParams` below.
+        const serviceMethodStub = sinon.stub().resolves(fx.handlerResult);
         const ElementsController = (await esmock(
           '../../src/controllers/elements.js',
           {
@@ -889,7 +904,10 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
               isSerenityActiveForBrand: () => Promise.resolve(true),
             },
             '../../src/support/access-control-util.js': {
-              default: { fromContext: () => ({ hasAccess: () => Promise.resolve(true) }) },
+              default: {
+                fromContext: () => ({ hasAccess: () => Promise.resolve(true) }),
+                isS2SConsumer: () => false,
+              },
             },
             // authorizeBrandSubWorkspace (used by listTopicPrompts) resolves the brand
             // UUID via prompts-storage before resolving the sub-workspace.
@@ -898,7 +916,7 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
             },
             '../../src/support/elements/elements-service.js': {
               createElementsService: () => ({
-                [fx.serviceMethod]: sinon.stub().resolves(fx.handlerResult),
+                [fx.serviceMethod]: serviceMethodStub,
                 resolveRegionProjectId: sinon.stub().resolves(null),
                 // Only consumed by getUrlInspectorStats's aggregate (no-region)
                 // path — without at least one project, it 404s before ever
@@ -929,6 +947,18 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
         const response = await controller[fx.controllerMethod](ctx);
 
         expect(response.status).to.equal(fx.expectedStatus);
+
+        // Optional per-fixture assertion on the params the controller built and
+        // passed to the service — the only place that seam is exercised, since
+        // the handlers themselves are coverage-ignored.
+        if (fx.expectServiceParams) {
+          expect(serviceMethodStub, `${operationId}: service was not called`).to.have.been.called;
+          const [, actualParams] = serviceMethodStub.firstCall.args;
+          Object.entries(fx.expectServiceParams).forEach(([key, value]) => {
+            expect(actualParams, `${operationId}: params.${key}`)
+              .to.have.property(key, value);
+          });
+        }
 
         const responseSchema = op.responseSchema(fx.expectedStatus);
         expect(responseSchema, `no ${fx.expectedStatus} schema for ${operationId}`).to.exist;
@@ -982,6 +1012,19 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
           '../../src/support/serenity/rest-transport.js': {
             createSerenityTransport: () => ({}),
             SerenityTransportError: class extends Error {},
+          },
+          '../../src/support/utils.js': {
+            ErrorWithStatusCode,
+            resolveSemrushImsToken: () => Promise.resolve('ims-token'),
+            getRawPromiseToken: (ctx) => ctx?.pathInfo?.headers?.['x-promise-token'],
+            resolvePromisePair: () => 'SEMRUSH',
+            getSemrushPair: () => 'SEMRUSH',
+            exchangePromiseTokenResponse: () => Promise.resolve({
+              access_token: 'ims-token',
+              promise_token: 'rotated-bulk-tags-token',
+              promise_token_expires_in: 14399,
+              token_type: 'bearer',
+            }),
           },
           '../../src/support/serenity/workspace-resolver.js': {
             resolveWorkspaceId: () => Promise.resolve(WORKSPACE),
@@ -1089,6 +1132,10 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
         data: fx.data,
         query: fx.query || {},
       });
+      if (fx.promiseToken) {
+        ctx.pathInfo.headers['x-promise-token'] = fx.promiseToken;
+        ctx.pathInfo.headers['x-promise-audience'] = fx.promiseAudience;
+      }
       // Ops that read an AsyncJob directly (no handler) get their job pinned here.
       if (fx.asyncJob) {
         ctx.dataAccess.AsyncJob = { findById: sinon.stub().resolves(fx.asyncJob) };
@@ -1098,6 +1145,17 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
       const response = await controller[fx.controllerMethod](ctx);
 
       expect(response.status).to.equal(fx.expectedStatus);
+      if (fx.expectPromiseForwarding) {
+        expect(handlerStubs.handleBulkTags).to.have.been.calledOnce;
+        expect(handlerStubs.handleBulkTags.firstCall.args.slice(-2)).to.deep.equal([
+          {
+            promise_token: 'rotated-bulk-tags-token',
+            expires_in: 14399,
+            token_type: 'bearer',
+          },
+          'SEMRUSH',
+        ]);
+      }
 
       // 204 No Content → no body to validate. The contract is just the status.
       if (fx.expectedStatus === 204) {

@@ -16,14 +16,17 @@ import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import esmock from 'esmock';
 import { ProjectEngineApiError } from '@adobe/spacecat-shared-project-engine-client';
-import { ErrorWithStatusCode } from '../../src/support/utils.js';
+import { ErrorWithStatusCode, getSemrushPair } from '../../src/support/utils.js';
+import {
+  ERROR_CODES,
+  MainBrandBenchmarkInvariantError,
+} from '../../src/support/serenity/errors.js';
 import { brandPointerReloader } from '../../src/controllers/serenity.js';
 // The REAL transport error type: since LLMO-6386 the controller's mapError classifies via
 // errors.js (isSemrushTransportError), which recognises the real SerenityTransportError /
 // ProjectEngineApiError by `instanceof`. The mapError tests below must feed those real types
 // (a bare mock class would not be recognised → would wrongly fall through to the generic 500).
 import { SerenityTransportError as RealSerenityTransportError } from '../../src/support/serenity/serenity-transport-error.js';
-import { MainBrandBenchmarkInvariantError } from '../../src/support/serenity/errors.js';
 import { assertCreatePromptTagLimits } from '../../src/support/serenity/handlers/prompts.js';
 
 use(chaiAsPromised);
@@ -98,6 +101,7 @@ function fakeContext({
   brand = makeBrandModel(),
   env = {},
   promiseToken = undefined,
+  promiseAudience = undefined,
   headers = {},
 } = {}) {
   return {
@@ -106,6 +110,7 @@ function fakeContext({
       headers: {
         ...(bearer ? { authorization: `Bearer ${bearer}` } : {}),
         ...(promiseToken ? { 'x-promise-token': promiseToken } : {}),
+        ...(promiseAudience ? { 'x-promise-audience': promiseAudience } : {}),
         ...headers,
       },
     },
@@ -192,6 +197,7 @@ describe('SerenityController', () => {
   let unlinkMarketSiteIfOrphanedStub;
   let getBrandBaseSiteIdStub;
   let exchangePromiseTokenStub;
+  let exchangePromiseTokenResponseStub;
   let linkSiteToLiveRowsStub;
   let linkSiteToRowStub;
   let tombstoneAllForBrandStub;
@@ -231,6 +237,12 @@ describe('SerenityController', () => {
     unlinkMarketSiteIfOrphanedStub = sinon.stub().resolves(true);
     getBrandBaseSiteIdStub = sinon.stub().resolves(null);
     exchangePromiseTokenStub = sinon.stub().resolves('exchanged-ims-token');
+    exchangePromiseTokenResponseStub = sinon.stub().resolves({
+      access_token: 'bulk-tags-ims-token',
+      promise_token: 'rotated-promise-token',
+      promise_token_expires_in: 14399,
+      token_type: 'bearer',
+    });
     linkSiteToLiveRowsStub = sinon.stub().resolves();
     linkSiteToRowStub = sinon.stub().resolves();
     tombstoneAllForBrandStub = sinon.stub().resolves();
@@ -334,6 +346,29 @@ describe('SerenityController', () => {
         resolveSemrushImsToken: makeResolveSemrushImsTokenStub(
           (...args) => exchangePromiseTokenStub(...args),
         ),
+        getRawPromiseToken: (ctx) => {
+          const token = ctx?.pathInfo?.headers?.['x-promise-token'];
+          if (!token) {
+            return undefined;
+          }
+          try {
+            return decodeURIComponent(token);
+          } catch {
+            return token;
+          }
+        },
+        resolvePromisePair: (ctx) => {
+          const audience = ctx?.pathInfo?.headers?.['x-promise-audience'];
+          if (!audience) {
+            return undefined;
+          }
+          if (audience.trim().toLowerCase() === 'semrush') {
+            return getSemrushPair();
+          }
+          throw new ErrorWithStatusCode(`Unknown promise audience: ${audience}`, 400);
+        },
+        getSemrushPair,
+        exchangePromiseTokenResponse: exchangePromiseTokenResponseStub,
       },
       '../../src/support/serenity/mapping-rows.js': {
         linkSiteToLiveRows: linkSiteToLiveRowsStub,
@@ -1320,7 +1355,7 @@ describe('SerenityController', () => {
       expect(options.callerId).to.equal('unknown');
     });
 
-    it('bulkTagPrompts dispatches flat arguments and reads Idempotency-Key case-insensitively', async () => {
+    it('bulkTagPrompts exchanges once and forwards the rotated token and SEMRUSH pair in flat mode', async () => {
       const data = {
         geoTargetId: 2840,
         languageCode: 'en',
@@ -1337,6 +1372,8 @@ describe('SerenityController', () => {
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const ctx = fakeContext({
         data,
+        promiseToken: 'raw-promise-token',
+        promiseAudience: 'semrush',
         headers: { 'iDeMpOtEnCy-KeY': 'flat-key' },
       });
 
@@ -1354,8 +1391,61 @@ describe('SerenityController', () => {
         'unknown',
         'flat-key',
         sinon.match.object,
+        {
+          promise_token: 'rotated-promise-token',
+          expires_in: 14399,
+          token_type: 'bearer',
+        },
+        getSemrushPair(),
       );
       expect(handlers.handleBulkTagsSubworkspace).not.to.have.been.called;
+      expect(exchangePromiseTokenResponseStub).to.have.been.calledOnceWithExactly(
+        ctx,
+        'raw-promise-token',
+        getSemrushPair(),
+      );
+      expect(exchangePromiseTokenStub).not.to.have.been.called;
+    });
+
+    it('bulkTagPrompts 400s without a promise token and does not exchange or dispatch', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+
+      const response = await controller.bulkTagPrompts(fakeContext({ data: {} }));
+
+      expect(response.status).to.equal(400);
+      expect((await readBody(response)).message).to.match(/require a promise token/i);
+      expect(exchangePromiseTokenResponseStub).not.to.have.been.called;
+      expect(handlers.handleBulkTags).not.to.have.been.called;
+      expect(handlers.handleBulkTagsSubworkspace).not.to.have.been.called;
+    });
+
+    it('bulkTagPrompts 400s without the SEMRUSH promise audience and does not dispatch', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+
+      const response = await controller.bulkTagPrompts(fakeContext({
+        data: {},
+        promiseToken: 'raw-promise-token',
+      }));
+
+      expect(response.status).to.equal(400);
+      expect((await readBody(response)).message).to.match(/x-promise-audience: semrush/);
+      expect(exchangePromiseTokenResponseStub).not.to.have.been.called;
+      expect(handlers.handleBulkTags).not.to.have.been.called;
+    });
+
+    it('bulkTagPrompts 400s for an invalid promise audience without exchange or dispatch', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+
+      const response = await controller.bulkTagPrompts(fakeContext({
+        data: {},
+        promiseToken: 'raw-promise-token',
+        promiseAudience: 'other',
+      }));
+
+      expect(response.status).to.equal(400);
+      expect((await readBody(response)).message).to.match(/Unknown promise audience/);
+      expect(exchangePromiseTokenResponseStub).not.to.have.been.called;
+      expect(handlers.handleBulkTags).not.to.have.been.called;
     });
 
     it('createTag routes to the flat handler in flat mode and returns its status', async () => {
@@ -2156,7 +2246,7 @@ describe('SerenityController', () => {
       expect(options.callerId).to.equal('unknown');
     });
 
-    it('bulkTagPrompts reads Idempotency-Key from Headers-like objects in subworkspace mode', async () => {
+    it('bulkTagPrompts forwards the rotated token in subworkspace mode', async () => {
       const data = {
         geoTargetId: 2840,
         languageCode: 'en',
@@ -2176,7 +2266,12 @@ describe('SerenityController', () => {
           name.toLowerCase() === 'idempotency-key' ? 'headers-key' : null
         )),
       };
-      const ctx = fakeContext({ data, headers });
+      const ctx = fakeContext({
+        data,
+        headers,
+        promiseToken: 'raw-subworkspace-promise-token',
+        promiseAudience: 'semrush',
+      });
 
       const response = await controller.bulkTagPrompts(ctx);
 
@@ -2191,8 +2286,20 @@ describe('SerenityController', () => {
         'unknown',
         'headers-key',
         sinon.match.object,
+        {
+          promise_token: 'rotated-promise-token',
+          expires_in: 14399,
+          token_type: 'bearer',
+        },
+        getSemrushPair(),
       );
       expect(handlers.handleBulkTags).not.to.have.been.called;
+      expect(exchangePromiseTokenResponseStub).to.have.been.calledOnceWithExactly(
+        ctx,
+        'raw-subworkspace-promise-token',
+        getSemrushPair(),
+      );
+      expect(exchangePromiseTokenStub).not.to.have.been.called;
     });
 
     it('listTags routes to the subworkspace handler in subworkspace mode', async () => {
@@ -2288,6 +2395,37 @@ describe('SerenityController', () => {
       expect(ensureSubworkspaceStub).to.have.been.calledOnce;
       expect(ensureSubworkspaceStub.firstCall.args[6].brandCollection)
         .to.equal(ctx.dataAccess.Brand);
+    });
+
+    it('activate maps a terminal subworkspace creation failure to its stable 502 token', async () => {
+      const error = new ErrorWithStatusCode('Subworkspace creation failed', 502);
+      error.code = ERROR_CODES.SUBWORKSPACE_CREATION_FAILED;
+      ensureSubworkspaceStub.rejects(error);
+      getBrandBaseSiteIdStub.resolves('primary-site');
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+
+      const response = await controller.activate(fakeContext());
+      const body = await readBody(response);
+
+      expect(response.status).to.equal(502);
+      expect(body.error).to.equal(ERROR_CODES.SUBWORKSPACE_CREATION_FAILED);
+      expect(body.message).to.equal('Subworkspace creation failed');
+    });
+
+    it('activate maps a workspace readiness timeout without exposing its workspace id', async () => {
+      const error = new ErrorWithStatusCode('Subworkspace creation timed out', 504);
+      error.code = ERROR_CODES.SUBWORKSPACE_CREATION_TIMEOUT;
+      ensureSubworkspaceStub.rejects(error);
+      getBrandBaseSiteIdStub.resolves('primary-site');
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+
+      const response = await controller.activate(fakeContext());
+      const body = await readBody(response);
+
+      expect(response.status).to.equal(504);
+      expect(body.error).to.equal(ERROR_CODES.SUBWORKSPACE_CREATION_TIMEOUT);
+      expect(body.message).to.equal('Subworkspace creation timed out');
+      expect(JSON.stringify(body)).to.not.include(SUBWS);
     });
 
     it('activate ensures the subworkspace ONCE for the batch and creates each market against it', async () => {
@@ -3143,6 +3281,8 @@ describe('SerenityController', () => {
         }];
         const response = await controller.createPrompts(fakeContext({
           data: { async: true, prompts },
+          promiseToken: 'promise-token-xyz',
+          promiseAudience: 'semrush',
         }));
 
         expect(response.status).to.equal(202);
@@ -3153,6 +3293,11 @@ describe('SerenityController', () => {
         expect(createAndEnqueueJobStub).to.have.been.calledOnce;
         const [, enqueueArgs] = createAndEnqueueJobStub.firstCall.args;
         expect(enqueueArgs.jobType).to.equal('serenity-classify-prompts');
+        // Regression guard for the async-500 bug: the controller forwards the
+        // caller's raw promise token + SEMRUSH pair to the worker instead of
+        // minting a new one via the (unprovisioned) EMITTER pair.
+        expect(enqueueArgs.promiseToken).to.deep.equal({ promise_token: 'promise-token-xyz' });
+        expect(enqueueArgs.promisePair).to.equal(getSemrushPair());
         expect(enqueueArgs.metadata).to.deep.equal({
           // callerId captured at enqueue time (LLMO-6289) — no auth profile on the
           // test context, so it resolves to the `unknown` sentinel. The default
@@ -3182,6 +3327,8 @@ describe('SerenityController', () => {
         }];
         const response = await controller.createPrompts(fakeContext({
           data: { async: true, prompts },
+          promiseToken: 'promise-token-xyz',
+          promiseAudience: 'semrush',
         }));
 
         expect(response.status).to.equal(202);
@@ -3192,6 +3339,8 @@ describe('SerenityController', () => {
         expect(createAndEnqueueJobStub).to.have.been.calledOnce;
         const [, enqueueArgs] = createAndEnqueueJobStub.firstCall.args;
         expect(enqueueArgs.jobType).to.equal('serenity-classify-prompts');
+        expect(enqueueArgs.promiseToken).to.deep.equal({ promise_token: 'promise-token-xyz' });
+        expect(enqueueArgs.promisePair).to.equal(getSemrushPair());
         expect(enqueueArgs.metadata).to.deep.equal({
           mode: 'create',
           brandId: BRAND,
@@ -3210,6 +3359,54 @@ describe('SerenityController', () => {
         // Neither synchronous create handler runs.
         expect(handlers.handleCreatePromptsSubworkspace).to.not.have.been.called;
         expect(handlers.handleCreatePrompts).to.not.have.been.called;
+      });
+
+      // Async classify writes to Semrush on the caller's behalf after the request
+      // returns, so it REQUIRES the caller's promise token + semrush audience to
+      // carry forward. These two guards are defense-in-depth (the UI always sends
+      // both) and, critically, prevent the async branch from falling through to the
+      // token-MINT path that shipped broken (unprovisioned EMITTER pair → 500).
+      it('400s without enqueueing when async is true but the x-promise-token header is absent', async () => {
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const response = await controller.createPrompts(fakeContext({
+          data: { async: true, prompts: [{ text: 'x', geoTargetId: 2840, languageCode: 'en' }] },
+          promiseAudience: 'semrush',
+        }));
+
+        expect(response.status).to.equal(400);
+        const body = await readBody(response);
+        expect(body.error).to.equal('invalidRequest');
+        expect(body.message).to.match(/requires a promise token/i);
+        expect(createAndEnqueueJobStub).to.not.have.been.called;
+      });
+
+      it('400s without enqueueing when async is true but the x-promise-audience: semrush header is absent', async () => {
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const response = await controller.createPrompts(fakeContext({
+          data: { async: true, prompts: [{ text: 'x', geoTargetId: 2840, languageCode: 'en' }] },
+          promiseToken: 'promise-token-xyz',
+        }));
+
+        expect(response.status).to.equal(400);
+        const body = await readBody(response);
+        expect(body.error).to.equal('invalidRequest');
+        expect(body.message).to.match(/x-promise-audience: semrush/);
+        expect(createAndEnqueueJobStub).to.not.have.been.called;
+      });
+
+      it('400s without enqueueing when async is true and the x-promise-audience is an unknown value', async () => {
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const response = await controller.createPrompts(fakeContext({
+          data: { async: true, prompts: [{ text: 'x', geoTargetId: 2840, languageCode: 'en' }] },
+          promiseToken: 'promise-token-xyz',
+          promiseAudience: 'bogus',
+        }));
+
+        expect(response.status).to.equal(400);
+        const body = await readBody(response);
+        expect(body.error).to.equal('invalidRequest');
+        expect(body.message).to.match(/Unknown promise audience: bogus/);
+        expect(createAndEnqueueJobStub).to.not.have.been.called;
       });
 
       // Regression guard for the #2 collision (the whole point of this fix):
@@ -3233,6 +3430,7 @@ describe('SerenityController', () => {
         await controller.createPrompts(fakeContext({
           authType: 'api-key',
           promiseToken: 'promise-token',
+          promiseAudience: 'semrush',
           data: {
             async: true,
             prompts: [{ text: 'generated prompt', geoTargetId: 2840, languageCode: 'en' }],

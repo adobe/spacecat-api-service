@@ -1108,8 +1108,8 @@ v2-serenity-activate:
     tags: [serenity]
     summary: Activate a brand into sub-workspace mode
     description: |
-      Ensures the brand has its own resourced Semrush sub-workspace (creating
-      it on first call and persisting `brands.semrush_workspace_id`, which flips
+      Ensures the brand has its own Semrush sub-workspace (creating it on first
+      call and persisting `brands.semrush_sub_workspace_id`, which flips
       the brand into sub-workspace mode), then per supplied market creates-or-resumes a
       draft and publishes it once. Markets are caller-supplied (reactivation
       re-supplies them — there is no stored market memory). A pending (draft)
@@ -1178,10 +1178,26 @@ v2-serenity-activate:
           not fully complete (a market failed, or markets are live but could not be
           linked as Sites). The brand STAYS `pending`; the body carries
           `error`/`message` and the per-market outcomes so the caller can retry.
-          Also returned when an upstream call returns a non-2xx response.
+          Also returned when a readiness check observes a terminal sub-workspace
+          creation status, or another upstream call returns a non-2xx response.
+          Fresh sub-workspace-only activation intentionally skips readiness
+          polling, so it does not detect terminal creation status in that request.
+          Responses with an `error` field and no `markets` array use
+          `SerenityErrorResponse`.
         content:
           application/json:
-            schema: { $ref: './schemas.yaml#/SerenityActivateResponse' }
+            schema:
+              anyOf:
+                - { $ref: './schemas.yaml#/SerenityActivateResponse' }
+                - { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '504':
+        description: >-
+          The sub-workspace remained in a transient provisioning state until the
+          readiness polling budget was exhausted. The response carries
+          `error: subworkspaceCreationTimeout`.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
       '500': { $ref: './responses.yaml#/500' }
 
 v2-serenity-deactivate:
@@ -1204,12 +1220,12 @@ v2-serenity-deactivate:
     tags: [serenity]
     summary: Deactivate a brand (decommission its sub-workspace)
     description: |
-      Decommissions the brand's sub-workspace: deletes every project and
-      releases the allocation back to the parent pool, then DISCONNECTS the
-      brand by clearing its `semrush_workspace_id` pointer. The sub-workspace
-      itself is never deleted (it is left empty and unowned); a future activate
-      allocates a fresh one. Sets the brand status to `pending`. No-op (200) for
-      a brand with no sub-workspace. Convergent and idempotent.
+      Decommissions the brand's sub-workspace by deleting every project, then
+      DISCONNECTS the brand by clearing its `semrush_sub_workspace_id` pointer.
+      The sub-workspace itself is never deleted or reallocated; it remains as an
+      empty shell, and a future activate creates or adopts a suitable workspace.
+      Sets the brand status to `pending`. No-op (200) for a brand with no
+      sub-workspace. Convergent and idempotent.
     operationId: deactivateSerenityBrand
     security:
       - session_token: []
@@ -1226,8 +1242,8 @@ v2-serenity-deactivate:
         description: >-
           Refused to protect dependents: the brand's sub-workspace equals the
           organization parent workspace, or it still has active linked (child)
-          sub-workspaces. Decommission would empty/release a shared or
-          depended-on pool, so it is blocked.
+          sub-workspaces. Decommission would empty a shared or depended-on
+          workspace, so it is blocked.
         content:
           application/json:
             schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
@@ -1700,6 +1716,46 @@ v2-serenity-brand-presence-sentiment-overview:
           and the bare `category` slug are recognized for the tag prefix
           itself (tag-display-names.md §1 item 6).
         schema: { type: string }
+      - name: metric
+        in: query
+        required: false
+        description: |
+          Which per-legend count drives the `sentiment[]` percentages.
+          `prompts` (default) uses the element's per-prompt counts — this
+          endpoint's original behaviour. `mentions` uses the per-mention counts,
+          which is what the Semrush Brand Presence MFE plots, and reproduces its
+          percentages exactly.
+
+          Unrecognised, blank and absent values all resolve to `prompts` rather
+          than returning 400, so an unknown value degrades to today's numbers
+          instead of failing the chart request. Aliases: `sentimentMetric`,
+          `sentiment_metric` — resolution takes the first of the three that is a
+          non-blank string, so a present-but-empty `metric` does not shadow a
+          populated alias.
+
+          `mentionCounts` and `promptCounts` are returned regardless of this
+          value, so both definitions can be compared from a single call.
+
+          Temporary (LLMO-7457): the default flips to `mentions` and this
+          parameter is removed once the UI has migrated.
+        schema:
+          type: string
+          enum: [prompts, mentions]
+          default: prompts
+      - name: sentimentMetric
+        in: query
+        required: false
+        description: Alias for `metric`. Used only if `metric` is absent or blank.
+        schema:
+          type: string
+          enum: [prompts, mentions]
+      - name: sentiment_metric
+        in: query
+        required: false
+        description: Snake_case alias for `metric`. Used only if `metric` and `sentimentMetric` are absent or blank.
+        schema:
+          type: string
+          enum: [prompts, mentions]
     responses:
       '200':
         description: Weekly sentiment retrieved.
@@ -1729,127 +1785,69 @@ v2-serenity-brand-presence-responses:
       in: path
       required: true
       description: SpaceCat Organization ID (UUID)
-      schema:
-        type: string
-        format: uuid
+      schema: { type: string, format: uuid }
     - name: brandId
       in: path
       required: true
       description: Brand ID (UUID-only on the /serenity/* surface)
-      schema:
-        type: string
-        format: uuid
+      schema: { type: string, format: uuid }
   get:
     tags: [serenity]
-    summary: Brand Claims response feed — AI answers paired with the sources cited in the same execution
+    summary: One paginated market slice of Brand Claims responses
     description: |
-      Returns one record per AI answer for each day in the range, carrying that
-      execution's own cited sources. Brand Claims sits under Brand Presence within the
-      ABV product.
-
-      Assembled from two Semrush elements that each hold half the record: `141adc88`
-      has the answer text but no date, `404fb017` has the date and the cited URLs but
-      no answer. They are joined on `(project_id, prompt, model, date)`, which is sound
-      because at most one execution exists per that tuple (measured: 2,553 tuples, each
-      mapping to exactly one execution id).
-
-      Brand-scoped via the brand's Semrush sub-workspace, resolved from `:brandId` — the
-      caller never supplies a workspace and never holds a Semrush credential.
-
-      **Range-based by design.** The upstream window is bounded above only, so a single
-      day is recovered as the difference between two pulls. Consecutive days share a
-      boundary, so an N-day range costs N+1 upstream pulls per element rather than 2N.
-
-      **Absence is meaningful.** A `(prompt, model)` tuple runs on roughly 61 of 74 days
-      in practice; some models far fewer. A missing tuple means that model did not run
-      that day — never an error, and never lost data. An answer that cited nothing is
-      returned with an empty `sources` array rather than omitted.
-
-      **Ordering caveat.** `sources` is ordered by the element's aggregate `rank`, which
-      is NOT the order the sources appeared inline in the answer. True inline citation
-      order is not available upstream; do not present this as citation order.
+      Returns one page from combined Semrush element `55e89619` for exactly one
+      brand-owned market, one selected Monday, and model `search-gpt`. The service
+      resolves the brand sub-workspace and Semrush project; callers cannot supply either.
+      `rowCount` is the upstream corpus count and `nextOffset` is null exactly when the
+      returned page reaches it. Source order is preserved exactly because current Claims
+      numeric citations resolve by source-array index.
     operationId: listSerenityBrandPresenceResponses
     security:
       - session_token: []
     parameters:
-      - name: from
+      - name: geoTargetId
         in: query
-        required: false
-        description: |
-          Inclusive range start (YYYY-MM-DD). Alias `startDate`. Defaults to 7 days
-          before `to`. The span must be under 74 days — the upstream window is rolling
-          and older executions are unrecoverable, so a wider request is rejected rather
-          than served as an empty result.
+        required: true
+        description: Geo target of one market owned by the brand.
+        schema: { type: integer, minimum: 1 }
+      - name: languageCode
+        in: query
+        required: true
+        description: Language code paired with geoTargetId in the brand market mapping.
+        schema: { type: string, minLength: 1 }
+      - name: date
+        in: query
+        required: true
+        description: Exact selected Monday.
         schema: { type: string, format: date }
-      - name: to
+      - name: offset
         in: query
         required: false
-        description: |
-          Inclusive range end (YYYY-MM-DD). Alias `endDate`. Defaults to yesterday —
-          today's executions are still landing, so ending on today would report a
-          partial day as though complete.
-        schema: { type: string, format: date }
-      - name: startDate
+        schema: { type: integer, minimum: 0, default: 0 }
+      - name: pageSize
         in: query
         required: false
-        description: Alias for `from`; `from` takes precedence when both are given.
-        schema: { type: string, format: date }
-      - name: endDate
-        in: query
-        required: false
-        description: Alias for `to`; `to` takes precedence when both are given.
-        schema: { type: string, format: date }
-      - name: model
-        in: query
-        required: false
-        description: |
-          AI model to scope to. Accepts a Semrush Elements model name directly, or a
-          UI platform code which is translated server-side.
-        schema: { type: string }
-      - name: platform
-        in: query
-        required: false
-        description: Legacy alias for `model`; `model` takes precedence when both are given.
-        schema: { type: string }
-      - name: projectId
-        in: query
-        required: false
-        description: |
-          Comma-separated Semrush project UUIDs (one project per market). Alias
-          `project_id`. Omitted → all of the brand's markets. Each id must be a valid
-          UUID (400 otherwise) and must be owned by this brand (403 otherwise).
-        schema: { type: string, pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(,[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}){0,7}$' }
-      - name: project_id
-        in: query
-        required: false
-        description: Snake_case alias for `projectId`.
-        schema: { type: string }
-      - name: limit
-        in: query
-        required: false
-        description: |
-          Upstream page size, clamped to 1..20000 (default 5000). 20000 is the largest
-          page that works on both upstream routes. Raising this is preferable to paging,
-          because every upstream call re-scans the whole rolling window.
-        schema: { type: integer, minimum: 1, maximum: 20000, default: 5000 }
+        schema: { type: integer, minimum: 1, maximum: 500, default: 500 }
     responses:
       '200':
-        description: Response feed retrieved.
+        description: Response page retrieved.
         content:
           application/json:
             schema: { $ref: './schemas.yaml#/SerenityBrandPresenceResponseFeed' }
       '400': { $ref: './responses.yaml#/400' }
       '403':
-        description: Caller lacks access to the organization, or a supplied projectId is not owned by the brand.
+        description: Caller lacks access to the organization or brand.
       '404':
-        description: Organization not found, brand not found for this organization, serenity is not active for the brand, or the brand has no resolvable Semrush workspace.
+        description: Organization, brand, sub-workspace, or owned market was not found.
+      '409':
+        description: More than one owned project maps to the requested market.
       '502':
-        description: Upstream returned a non-2xx response.
+        description: Upstream request or response validation failed.
         content:
           application/json:
             schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
       '503':
-        description: PostgREST client not available (required to resolve the brand's Semrush workspace before the element call).
+        description: Required data access or upstream credential configuration is unavailable.
         content:
           application/json:
             schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }

@@ -42,6 +42,31 @@ function makeResponse(status, body, headers = {}) {
   };
 }
 
+function makeStreamingResponse(status, chunks) {
+  const encoded = chunks.map((chunk) => new TextEncoder().encode(chunk));
+  let index = 0;
+  const cancel = sinon.stub().resolves();
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    headers: { get: () => null },
+    body: {
+      getReader: () => ({
+        read: async () => {
+          if (index >= encoded.length) {
+            return { done: true, value: undefined };
+          }
+          const value = encoded[index];
+          index += 1;
+          return { done: false, value };
+        },
+        cancel,
+      }),
+    },
+    cancel,
+  };
+}
+
 describe('createElementsTransport', () => {
   let fetchStub;
   let originalFetch;
@@ -148,6 +173,72 @@ describe('createElementsTransport', () => {
       const transport = createElementsTransport({ env: ENV, imsToken: IMS_TOKEN });
       const result = await transport.fetchElement(WORKSPACE_ID, ELEMENT_ID, {});
       expect(result).to.deep.equal(responseBody);
+    });
+
+    it('accepts a response exactly at the per-call decompressed byte ceiling', async () => {
+      const body = JSON.stringify({ ok: true });
+      fetchStub.resolves(makeStreamingResponse(200, [body]));
+      const transport = createElementsTransport({ env: ENV, imsToken: IMS_TOKEN });
+      const result = await transport.fetchElement(WORKSPACE_ID, ELEMENT_ID, {}, {
+        maxResponseBytes: new TextEncoder().encode(body).byteLength,
+      });
+      expect(result).to.deep.equal({ ok: true });
+    });
+
+    it('cancels and rejects a streamed response above the decompressed byte ceiling', async () => {
+      const response = makeStreamingResponse(200, ['1234', '5678']);
+      fetchStub.resolves(response);
+      const transport = createElementsTransport({ env: ENV, imsToken: IMS_TOKEN });
+      await expect(transport.fetchElement(WORKSPACE_ID, ELEMENT_ID, {}, {
+        maxResponseBytes: 7,
+      })).to.be.rejectedWith(ElementsTransportError, /exceeds configured 7-byte limit/);
+      expect(response.cancel).to.have.been.calledOnce;
+    });
+
+    it('preserves the typed streamed-overflow error when cancellation fails', async () => {
+      const response = makeStreamingResponse(200, ['1234', '5678']);
+      response.cancel.rejects(new Error('cancel failed'));
+      fetchStub.resolves(response);
+      const transport = createElementsTransport({ env: ENV, imsToken: IMS_TOKEN });
+
+      await expect(transport.fetchElement(WORKSPACE_ID, ELEMENT_ID, {}, {
+        maxResponseBytes: 7,
+      })).to.be.rejectedWith(ElementsTransportError, /exceeds configured 7-byte limit/);
+      expect(response.cancel).to.have.been.calledOnce;
+    });
+
+    it('best-effort cancels an unread body rejected by Content-Length', async () => {
+      const cancel = sinon.stub().rejects(new Error('cancel failed'));
+      fetchStub.resolves({
+        ok: true,
+        status: 200,
+        headers: { get: (name) => (name === 'content-length' ? '8' : null) },
+        body: { cancel },
+      });
+      const transport = createElementsTransport({ env: ENV, imsToken: IMS_TOKEN });
+
+      await expect(transport.fetchElement(WORKSPACE_ID, ELEMENT_ID, {}, {
+        maxResponseBytes: 7,
+      })).to.be.rejectedWith(ElementsTransportError, /exceeds configured 7-byte limit/);
+      expect(cancel).to.have.been.calledOnce;
+    });
+
+    it('redacts the workspace from endpoint-specific error descriptors', async () => {
+      fetchStub.resolves(makeResponse(500, { error: 'failed' }));
+      const transport = createElementsTransport({ env: ENV, imsToken: IMS_TOKEN });
+      let error;
+      try {
+        await transport.fetchElement(WORKSPACE_ID, ELEMENT_ID, {}, {
+          redactWorkspaceInErrors: true,
+        });
+      } catch (e) {
+        error = e;
+      }
+      expect(error.workspaceId).to.equal(undefined);
+      expect(error.endpoint).to.include('/workspaces/[redacted]/');
+      expect(error.endpoint).to.not.include(WORKSPACE_ID);
+      expect(error.message).to.include('/workspaces/[redacted]/');
+      expect(error.message).to.not.include(WORKSPACE_ID);
     });
 
     it('URL-encodes workspaceId in the path', async () => {
@@ -306,6 +397,45 @@ describe('createElementsTransport', () => {
         const err = await settledPromise;
         expect(err).to.be.instanceOf(ElementsTransportError);
         expect(err.status).to.equal(504);
+      } finally {
+        clock.restore();
+      }
+    });
+
+    it('keeps the timeout active after headers while the response body is read', async () => {
+      const clock = sinon.useFakeTimers();
+      try {
+        fetchStub.callsFake(async (url, init) => ({
+          ok: true,
+          status: 200,
+          headers: { get: () => null },
+          body: {
+            getReader: () => ({
+              read: () => new Promise((resolve, reject) => {
+                init.signal.addEventListener('abort', () => {
+                  reject(Object.assign(new Error('The operation was aborted'), {
+                    name: 'AbortError',
+                  }));
+                }, { once: true });
+              }),
+              cancel: sinon.stub().resolves(),
+            }),
+          },
+        }));
+        const transport = createElementsTransport({ env: ENV, imsToken: IMS_TOKEN });
+        const settledPromise = transport.fetchElement(WORKSPACE_ID, ELEMENT_ID, {}, {
+          timeoutMs: 5000,
+          maxResponseBytes: 8 * 1024 * 1024,
+        }).catch((e) => e);
+
+        // Fetch has already returned headers, but its body remains stalled.
+        await clock.tickAsync(4999);
+        await clock.tickAsync(1);
+
+        const err = await settledPromise;
+        expect(err).to.be.instanceOf(ElementsTransportError);
+        expect(err.status).to.equal(504);
+        expect(err.message).to.include('timed out after 5000ms');
       } finally {
         clock.restore();
       }
@@ -534,6 +664,94 @@ describe('createElementsTransport', () => {
         randStub.restore();
         clock.restore();
       }
+    });
+  });
+
+  describe('S2S consumer transport', () => {
+    const S2S_BASE_URL = 'https://api.semrush.com';
+    const API_KEY = 'test-admin-element-api-key';
+    const S2S_ENV = { SEO_API_BASE_URL: S2S_BASE_URL, SEMRUSH_ADMIN_ELEMENT_API_KEY: API_KEY };
+    const EXPECTED_S2S_URL = `${S2S_BASE_URL}/apis/v4-raw/external-api/v1/workspaces/${WORKSPACE_ID}/products/ai/elements/${ELEMENT_ID}`;
+
+    describe('SEO_API_BASE_URL validation', () => {
+      it('throws 503 when SEO_API_BASE_URL is not set', () => {
+        expect(() => createElementsTransport({ env: {}, isS2SConsumer: true }))
+          .to.throw().with.property('status', 503);
+      });
+
+      it('throws 503 when SEO_API_BASE_URL is not a valid URL', () => {
+        expect(() => createElementsTransport({
+          env: { SEO_API_BASE_URL: 'not a url' },
+          isS2SConsumer: true,
+        })).to.throw().with.property('status', 503);
+      });
+
+      it('throws 503 when SEO_API_BASE_URL uses http instead of https', () => {
+        expect(() => createElementsTransport({
+          env: { SEO_API_BASE_URL: 'http://api.semrush.com' },
+          isS2SConsumer: true,
+        })).to.throw().with.property('status', 503);
+      });
+
+      it('does not require SEMRUSH_PROJECTS_BASE_URL when isS2SConsumer is true', () => {
+        expect(() => createElementsTransport({ env: S2S_ENV, isS2SConsumer: true })).to.not.throw();
+      });
+    });
+
+    it('POSTs to the v4-raw external-api URL with no trailing /data', async () => {
+      fetchStub.resolves(makeResponse(200, { blocks: { value: [] } }));
+      const transport = createElementsTransport({ env: S2S_ENV, isS2SConsumer: true });
+      await transport.fetchElement(WORKSPACE_ID, ELEMENT_ID, { foo: 'bar' });
+      const [url] = fetchStub.firstCall.args;
+      expect(url).to.equal(EXPECTED_S2S_URL);
+    });
+
+    it('sends an Apikey Authorization header instead of Bearer', async () => {
+      fetchStub.resolves(makeResponse(200, {}));
+      const transport = createElementsTransport({ env: S2S_ENV, isS2SConsumer: true });
+      await transport.fetchElement(WORKSPACE_ID, ELEMENT_ID, {});
+      const [, init] = fetchStub.firstCall.args;
+      expect(init.headers.Authorization).to.equal(`Apikey ${API_KEY}`);
+    });
+
+    it('wraps the payload in { render_data: payload }', async () => {
+      fetchStub.resolves(makeResponse(200, {}));
+      const transport = createElementsTransport({ env: S2S_ENV, isS2SConsumer: true });
+      const payload = { comparison_data_formatting: 'union' };
+      await transport.fetchElement(WORKSPACE_ID, ELEMENT_ID, payload);
+      const [, init] = fetchStub.firstCall.args;
+      expect(JSON.parse(init.body)).to.deep.equal({ render_data: payload });
+    });
+
+    it('throws 503 when SEMRUSH_ADMIN_ELEMENT_API_KEY is missing (server config gap, not caller auth failure)', async () => {
+      const transport = createElementsTransport({
+        env: { SEO_API_BASE_URL: S2S_BASE_URL },
+        isS2SConsumer: true,
+      });
+      await expect(transport.fetchElement(WORKSPACE_ID, ELEMENT_ID, {}))
+        .to.be.rejected.then((err) => {
+          expect(err).to.have.property('status', 503);
+        });
+    });
+
+    it('returns the same response shape as the regular (IMS) path', async () => {
+      const successBody = { blocks: { value: [{ id: 1 }] } };
+      fetchStub.resolves(makeResponse(200, successBody));
+      const transport = createElementsTransport({ env: S2S_ENV, isS2SConsumer: true });
+      const result = await transport.fetchElement(WORKSPACE_ID, ELEMENT_ID, {});
+      expect(result).to.deep.equal(successBody);
+    });
+
+    it('still retries a 429 for S2S calls', async () => {
+      const successBody = { ok: true };
+      fetchStub.onCall(0).resolves(makeResponse(429, {}));
+      fetchStub.onCall(1).resolves(makeResponse(200, successBody));
+      const transport = createElementsTransport({
+        env: S2S_ENV, isS2SConsumer: true, retryBaseDelayMs: 0,
+      });
+      const result = await transport.fetchElement(WORKSPACE_ID, ELEMENT_ID, {});
+      expect(fetchStub.callCount).to.equal(2);
+      expect(result).to.deep.equal(successBody);
     });
   });
 });
