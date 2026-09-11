@@ -163,7 +163,7 @@
     "@semantic-release/git": "10.0.1",
     "@semantic-release/npm": "^13.1.5",
     "@types/node": "24.13.2",
-    "@xmldom/xmldom": "0.9.10",
+    "@xmldom/xmldom": "0.9.12",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",
     "c8": "^11.0.0",
