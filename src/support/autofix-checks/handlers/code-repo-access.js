@@ -14,19 +14,16 @@ const CHECK_TYPE = 'code-repo-access';
 
 const CODE_TYPE = {
   STANDARD: 'standard',
-  GITHUB: 'github',
 };
-
-const isNumericString = (value) => !!value && /^\d+$/.test(value);
 
 /**
  * Checks whether a site's code repository supports PR creation for code patches.
  *
  * Mirrors the client-side `getCodePatchRestriction` logic in the UI:
  *   - CM Standard (type="standard")       → FAILED (PRs not supported)
- *   - CM BYOG GitHub (type="github" with
- *     numeric owner+repo)                 → FAILED (PR creation coming soon)
- *   - AEMY / GitLab / Bitbucket / Azure   → PASSED
+ *   - CM BYOG GitHub / AEMY / GitLab /
+ *     Bitbucket / Azure                   → PASSED (SITES-50145: CM repo
+ *                                           service now supports GitHub PRs)
  *   - No code config                      → SKIPPED (not a code-apply site)
  *
  * @param {Object} site - Site entity
@@ -49,14 +46,6 @@ export default function codeRepoAccessHandler(site) {
       status: 'FAILED',
       message: 'Pull Request creation is not supported on Cloud Manager standard repositories. Please migrate to Cloud Manager BYOG.',
       details: code.url,
-    };
-  }
-
-  if (code.type === CODE_TYPE.GITHUB && isNumericString(code.owner) && isNumericString(code.repo)) {
-    return {
-      type: CHECK_TYPE,
-      status: 'FAILED',
-      message: 'Pull Request creation for Cloud Manager GitHub repositories is coming soon.',
     };
   }
 
