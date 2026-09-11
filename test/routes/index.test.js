@@ -673,6 +673,11 @@ describe('getRouteHandlers', () => {
     createSchedules: sinon.stub(),
   };
 
+  const mockOaeValidationController = {
+    createValidationJob: sinon.stub(),
+    getValidationJob: sinon.stub(),
+  };
+
   it('segregates static and dynamic routes', () => {
     const { staticRoutes, dynamicRoutes } = getRouteHandlers(
       mockAuditsController,
@@ -743,6 +748,7 @@ describe('getRouteHandlers', () => {
       mockRedirectsController,
       mockAuditPolicyController,
       mockPromptSuggestionSchedulesController,
+      mockOaeValidationController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -1341,6 +1347,8 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/llmo/strategy',
       'PUT /sites/:siteId/llmo/strategy',
       'PUT /sites/:siteId/llmo/opportunities-reviewed',
+      'POST /sites/:siteId/llmo/oae-validation/jobs',
+      'GET /sites/:siteId/llmo/oae-validation/jobs/:jobId',
       'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/config',
       'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/accounts',
       'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/zones',

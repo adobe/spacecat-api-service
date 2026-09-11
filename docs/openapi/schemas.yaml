@@ -14793,3 +14793,61 @@ OnboardingProvisioningResponse:
         workspace (or its parent) before this call — Semrush's 409 response,
         which is treated as success rather than an error.
       example: true
+CreateOaeValidationJobRequest:
+  type: object
+  required:
+    - siteId
+    - type
+    - suggestionIds
+  properties:
+    siteId:
+      type: string
+      format: uuid
+      description: The site the suggestions belong to.
+    type:
+      type: string
+      enum: [routing]
+      description: The validator to run against each suggestion.
+    suggestionIds:
+      type: array
+      items:
+        type: string
+        format: uuid
+      minItems: 1
+      description: The suggestions to validate.
+CreateOaeValidationJobResponse:
+  type: object
+  properties:
+    jobId:
+      type: string
+      format: uuid
+      description: The ID of the newly created OAE validation job.
+OaeValidationJobResponse:
+  type: object
+  properties:
+    jobId:
+      type: string
+      format: uuid
+      description: The ID of the OAE validation job.
+    suggestions:
+      type: array
+      description: Per-suggestion validation status and outcome.
+      items:
+        type: object
+        properties:
+          suggestionId:
+            type: string
+            format: uuid
+          status:
+            type: string
+            enum: [IN_PROGRESS, COMPLETE, FAILED]
+          outcome:
+            type: [string, 'null']
+            enum: [pass, fail, unknown, null]
+            description: The validation result once status is COMPLETE; null until then.
+          completedAt:
+            type: [string, 'null']
+            format: date-time
+          metadata:
+            type: [object, 'null']
+            description: Validator-specific detail (e.g. origin_status, or a network error reason).
