@@ -246,6 +246,7 @@ export default function getRouteHandlers(
     'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts': serenityController.createPrompts,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/bulk-tags': serenityController.bulkTagPrompts,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/bulk-delete': serenityController.bulkDeletePrompts,
+    'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/finalize': serenityController.finalizePrompts,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/jobs/:jobId': serenityController.getPromptsJobStatus,
     'PATCH /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/:semrushPromptId': serenityController.updatePrompt,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets': serenityController.listMarkets,

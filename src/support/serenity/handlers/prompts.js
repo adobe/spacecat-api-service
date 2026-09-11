@@ -18,7 +18,9 @@ import { ErrorWithStatusCode, resolveCallerImsUserId } from '../../utils.js';
 import { redactUpstreamMessage } from '../rest-transport.js';
 import { ERROR_CODES, isMeteredQuota, isUpstreamGone } from '../errors.js';
 import { alertQuotaRejection, alertRollbackFailure } from '../quota-alerts.js';
-import { normalizeGeoTargetId, normalizeLanguageCode, isValidTagIdFormat } from '../validation.js';
+import {
+  normalizeGeoTargetId, normalizeLanguageCode, isValidTagIdFormat, hasDisallowedControlChars,
+} from '../validation.js';
 import {
   invalidateTagCacheForProject,
   MAX_PROMPT_TAG_IDS,
@@ -72,6 +74,16 @@ export const BULK_CREATE_CONCURRENCY = 8;
 // handler would faithfully build per-project Maps + upstream payloads for all
 // of them. Defense-in-depth, not a correctness gate.
 export const BULK_PROMPTS_MAX_ITEMS = 500;
+
+// PLACEHOLDER (LLMO-7533 / serenity-docs#472 §6): the real Semrush prompt-text
+// length contract is NOT YET CONFIRMED — do not reuse the unrelated
+// 2,000-character limit from another endpoint, and do not tighten this without
+// a verified answer from the Project Engine owner or a live probe (both
+// attempted for this ticket; the live probe couldn't reach Semrush's dev
+// gateway from outside its VPC — see the LLMO-7533 follow-up ticket). Deliberately
+// generous so this never falsely rejects real customer content before the real
+// limit is known — it only guards against pathological/runaway input.
+export const MAX_PROMPT_TEXT_LENGTH = 10_000;
 
 /**
  * @typedef {{
@@ -1185,6 +1197,19 @@ export function normalizePromptInput(input) {
   if (!text || languageCode === null || geoTargetId === null) {
     return { value: null, reason: 'text, languageCode, and geoTargetId are required' };
   }
+  // PLACEHOLDER (LLMO-7533 §6): MAX_PROMPT_TEXT_LENGTH is a provisional bound,
+  // not the confirmed Semrush contract — see its definition. Rejected here
+  // (skipped[], no upstream call) rather than left for Semrush to reject, per
+  // the ticket's "before any Semrush call" requirement.
+  if (text.length > MAX_PROMPT_TEXT_LENGTH) {
+    return {
+      value: null,
+      reason: `text exceeds the maximum length of ${MAX_PROMPT_TEXT_LENGTH} characters`,
+    };
+  }
+  if (hasDisallowedControlChars(text)) {
+    return { value: null, reason: 'text contains disallowed control characters' };
+  }
   if (input?.tags !== undefined) {
     return {
       value: null,
@@ -1542,6 +1567,25 @@ export function parseUpdatePromptBody(body) {
       body: { error: 'invalidRequest', message: 'text must be a non-empty string' },
     };
   }
+  // Mirror the create contract's placeholder length/control-char guard
+  // (LLMO-7533 §6 — see normalizePromptInput / MAX_PROMPT_TEXT_LENGTH).
+  if (text.length > MAX_PROMPT_TEXT_LENGTH) {
+    return {
+      ok: false,
+      status: 400,
+      body: {
+        error: 'invalidRequest',
+        message: `text exceeds the maximum length of ${MAX_PROMPT_TEXT_LENGTH} characters`,
+      },
+    };
+  }
+  if (hasDisallowedControlChars(text)) {
+    return {
+      ok: false,
+      status: 400,
+      body: { error: 'invalidRequest', message: 'text contains disallowed control characters' },
+    };
+  }
   if (Array.isArray(body.tagIds) && body.tagIds.length > MAX_TAG_IDS) {
     return {
       ok: false,
@@ -1703,6 +1747,67 @@ export function findStoredPrompt(index, text) {
     return undefined;
   }
   return index.byText.get(text) ?? index.byLower.get(text.toLowerCase());
+}
+
+/**
+ * @typedef {{ byText: Map<string, any>, byLower: Map<string, any> }} PromptIndex
+ * @typedef {{ indexError: string, indexErrorStatus: number }} PromptIndexError
+ */
+
+/**
+ * Type guard for a {@link buildPromptIndexByProject} entry that failed to read.
+ * @param {PromptIndex | PromptIndexError | undefined} entry
+ * @returns {entry is PromptIndexError}
+ */
+export function isIndexError(entry) {
+  return !!entry && 'indexError' in entry;
+}
+
+/**
+ * Builds one {@link buildExistingPromptIndex} per affected project, CONTAINING a
+ * per-project read failure instead of letting it abort the whole fan-out
+ * (serenity-docs#472 §2 / LLMO-7533). An unguarded `Promise.all` over this read
+ * used to propagate a transient upstream failure (e.g. a transport-level `502`)
+ * out of the whole create/upsert handler — the controller then answered a bare
+ * outer HTTP failure with no mixed-result body, so the caller could not tell
+ * which rows (if any) actually failed and could not continue with later
+ * batches. Every OTHER project's index still builds normally; only the failed
+ * project's entry is replaced with a {@link PromptIndexError} marker, which the
+ * caller's per-item loop must check for BEFORE calling {@link findStoredPrompt}
+ * (an error marker has no `byText`/`byLower` and is not itself index-shaped).
+ * @param {SerenityTransport} transport
+ * @param {string} semrushWorkspaceId
+ * @param {Array<string | null | undefined>} projectIds
+ * @param {any} [log]
+ * @returns {Promise<Map<string, PromptIndex | PromptIndexError>>}
+ */
+export async function buildPromptIndexByProject(transport, semrushWorkspaceId, projectIds, log) {
+  /** @type {Map<string, PromptIndex | PromptIndexError>} */
+  const promptIndexByProject = new Map();
+  await Promise.all(
+    [...new Set(projectIds.filter(Boolean))].map(async (projectId) => {
+      const pid = /** @type {string} */ (projectId);
+      try {
+        promptIndexByProject.set(pid, await buildExistingPromptIndex(
+          transport,
+          semrushWorkspaceId,
+          pid,
+          log,
+        ));
+      } catch (e) {
+        log?.error?.(
+          'serenity upsert: existing-prompt index read failed for project — failing only that '
+          + "project's inputs, unaffected projects continue",
+          { projectId: pid, error: e.message },
+        );
+        promptIndexByProject.set(pid, {
+          indexError: redactUpstreamMessage(e),
+          indexErrorStatus: e.status || 502,
+        });
+      }
+    }),
+  );
+  return promptIndexByProject;
 }
 
 /**
@@ -1907,22 +2012,11 @@ export async function handleCreatePrompts(
       projectId: project ? project.getSemrushProjectId() : null,
     };
   });
-  /** @type {Map<string, { byText: Map<string, any>, byLower: Map<string, any> }>} */
-  const promptIndexByProject = new Map();
-  await Promise.all(
-    [...new Set(normalizedInputs.map((n) => n.projectId).filter(Boolean))].map(
-      async (projectId) => {
-        promptIndexByProject.set(
-          /** @type {string} */ (projectId),
-          await buildExistingPromptIndex(
-            transport,
-            semrushWorkspaceId,
-            /** @type {string} */ (projectId),
-            log,
-          ),
-        );
-      },
-    ),
+  const promptIndexByProject = await buildPromptIndexByProject(
+    transport,
+    semrushWorkspaceId,
+    normalizedInputs.map((n) => n.projectId),
+    log,
   );
 
   const results = await mapLimit(normalizedInputs, BULK_CREATE_CONCURRENCY, async (entry) => {
@@ -1944,7 +2038,21 @@ export async function handleCreatePrompts(
       };
     }
     const { projectId } = entry;
-    const stored = findStoredPrompt(promptIndexByProject.get(projectId), input.text);
+    const projectIndex = promptIndexByProject.get(projectId);
+    if (isIndexError(projectIndex)) {
+      // serenity-docs#472 §2: the existing-prompt index read failed for this project —
+      // fail only its inputs (itemized, HTTP 200) instead of aborting the whole batch.
+      return {
+        failed: {
+          text: input.text,
+          geoTargetId: input.geoTargetId,
+          languageCode: input.languageCode,
+          status: projectIndex.indexErrorStatus,
+          message: projectIndex.indexError,
+        },
+      };
+    }
+    const stored = findStoredPrompt(projectIndex, input.text);
     try {
       if (stored) {
         // REPLACE the existing prompt's tags. The stored authorship rides along so
@@ -2132,6 +2240,10 @@ export async function handleCreatePrompts(
   // publish:false — the caller (finalize) batches a single publish after models
   // are also set, so skip the per-create publish (and its quota-rollback
   // reconciliation) here; finalize's own publish step is the one that runs it.
+  // `published` stays `true` in this branch — this caller ignores the field (it
+  // drives its own confirmed-live bookkeeping), and no publish was even
+  // attempted here to report false about.
+  let published = true;
   if (publish) {
     const alertContext = { orgId, brandId, env };
     const publishErrors = await publishAffected(
@@ -2154,6 +2266,11 @@ export async function handleCreatePrompts(
       log,
       alertContext,
     );
+    // serenity-docs#472 §6 / LLMO-7533: `published` must be false whenever ANY
+    // affected project failed to publish — never returned true unconditionally
+    // just because publish was attempted (Elmo used to infer success purely
+    // from batch position; the API must tell the truth here for that fix to work).
+    published = publishErrors.length === 0;
   }
 
   return {
@@ -2162,7 +2279,7 @@ export async function handleCreatePrompts(
     updated,
     skipped,
     failed,
-    published: true,
+    published,
   };
 }
 

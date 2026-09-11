@@ -593,6 +593,78 @@ describe('prompts-subworkspace handlers', () => {
       expect(result.failed[0].error).to.equal(ERROR_CODES.QUOTA_EXCEEDED);
       expect(result.failed[0].text).to.equal('p');
     });
+
+    // LLMO-7533 / serenity-docs#472: lockstep with the flat twin's mixed-result
+    // containment coverage.
+    it('contains an existing-prompt index read failure to its own project — the other '
+      + "project's inputs still process (serenity-docs#472 §2)", async () => {
+      const transport = makeTransport({
+        listProjects: sinon.stub().resolves({
+          items: [proj({ id: 'p-us-en', geo: 2840, lang: 'en' }),
+            proj({ id: 'p-de-de', geo: 2276, lang: 'de' })],
+        }),
+        listPromptsByTags: sinon.stub().callsFake(async (ws, projectId) => {
+          if (projectId === 'p-us-en') {
+            throw Object.assign(new Error('upstream 502'), { status: 502 });
+          }
+          return { items: [] };
+        }),
+        createPromptsWithMetadata: sinon.stub().callsFake(async (ws, pid, items) => {
+          const { name } = items[0];
+          return { page: 1, total: 1, items: [{ id: `new-${name}`, name }] };
+        }),
+      });
+
+      const result = await handleCreatePromptsSubworkspace(transport, WS, {
+        prompts: [
+          {
+            text: 'a-prompt', tagIds: ['tag-1'], geoTargetId: 2840, languageCode: 'en',
+          },
+          {
+            text: 'b-prompt', tagIds: ['tag-1'], geoTargetId: 2276, languageCode: 'de',
+          },
+        ],
+      }, log);
+
+      expect(result.failed).to.have.lengthOf(1);
+      expect(result.failed[0].text).to.equal('a-prompt');
+      expect(result.failed[0].status).to.equal(502);
+      expect(result.created).to.have.lengthOf(1);
+      expect(result.created[0].text).to.equal('b-prompt');
+    });
+
+    it('returns published:false when publishing one of the affected projects fails '
+      + '(serenity-docs#472 §6)', async () => {
+      const transport = makeTransport({
+        listProjects: sinon.stub().resolves({
+          items: [proj({ id: 'p-us-en', geo: 2840, lang: 'en' }),
+            proj({ id: 'p-de-de', geo: 2276, lang: 'de' })],
+        }),
+        createPromptsWithMetadata: sinon.stub().callsFake(async (ws, pid, items) => {
+          const { name } = items[0];
+          return { page: 1, total: 1, items: [{ id: `new-${name}`, name }] };
+        }),
+        publishProject: sinon.stub().callsFake(async (ws, projectId) => {
+          if (projectId === 'p-de-de') {
+            throw Object.assign(new Error('publish failed'), { status: 500 });
+          }
+        }),
+      });
+
+      const result = await handleCreatePromptsSubworkspace(transport, WS, {
+        prompts: [
+          {
+            text: 'a-prompt', tagIds: ['tag-1'], geoTargetId: 2840, languageCode: 'en',
+          },
+          {
+            text: 'b-prompt', tagIds: ['tag-1'], geoTargetId: 2276, languageCode: 'de',
+          },
+        ],
+      }, log);
+
+      expect(result.created).to.have.lengthOf(2);
+      expect(result.published).to.equal(false);
+    });
   });
 
   describe('handleUpdatePromptSubworkspace', () => {

@@ -168,6 +168,8 @@ describe('SerenityController', () => {
     handleCreatePromptsSubworkspace: sinon.stub(),
     handleUpdatePromptSubworkspace: sinon.stub(),
     handleBulkDeletePromptsSubworkspace: sinon.stub(),
+    handleFinalizePrompts: sinon.stub(),
+    handleFinalizePromptsSubworkspace: sinon.stub(),
     handleCreateTag: sinon.stub(),
     handleCreateTagSubworkspace: sinon.stub(),
     handleUpdateTag: sinon.stub(),
@@ -302,6 +304,10 @@ describe('SerenityController', () => {
         handleCreatePromptsSubworkspace: handlers.handleCreatePromptsSubworkspace,
         handleUpdatePromptSubworkspace: handlers.handleUpdatePromptSubworkspace,
         handleBulkDeletePromptsSubworkspace: handlers.handleBulkDeletePromptsSubworkspace,
+      },
+      '../../src/support/serenity/handlers/prompts-finalize.js': {
+        handleFinalizePrompts: handlers.handleFinalizePrompts,
+        handleFinalizePromptsSubworkspace: handlers.handleFinalizePromptsSubworkspace,
       },
       '../../src/support/serenity/handlers/tags.js': {
         handleCreateTag: handlers.handleCreateTag,
@@ -2147,6 +2153,19 @@ describe('SerenityController', () => {
       expect(handlers.handleCreatePrompts).to.not.have.been.called;
     });
 
+    it('finalizePrompts routes to the subworkspace handler in subworkspace mode', async () => {
+      handlers.handleFinalizePromptsSubworkspace.resolves({ slices: [] });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.finalizePrompts(fakeContext({
+        data: { slices: [{ geoTargetId: 2840, languageCode: 'en' }] },
+      }));
+      expect(response.status).to.equal(200);
+      expect(handlers.handleFinalizePromptsSubworkspace).to.have.been.calledOnce;
+      expect(handlers.handleFinalizePromptsSubworkspace.firstCall.args[1])
+        .to.equal('subworkspace-ws-1');
+      expect(handlers.handleFinalizePrompts).to.not.have.been.called;
+    });
+
     it('updatePrompt routes to the subworkspace handler in subworkspace mode', async () => {
       handlers.handleUpdatePromptSubworkspace.resolves({ status: 200, body: { semrushPromptId: 'p2' } });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
@@ -3252,6 +3271,19 @@ describe('SerenityController', () => {
       expect(handlers.handleCreatePrompts.firstCall.lastArg)
         .to.include({ originValue: 'human' });
       expect(handlers.handleCreatePromptsSubworkspace).not.to.have.been.called;
+    });
+
+    it('finalizePrompts routes to handleFinalizePrompts in flat mode and returns ok(result)', async () => {
+      handlers.handleFinalizePrompts.resolves({ slices: [] });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.finalizePrompts(fakeContext({
+        data: { slices: [{ geoTargetId: 2840, languageCode: 'en' }] },
+      }));
+      expect(response.status).to.equal(200);
+      expect(handlers.handleFinalizePrompts).to.have.been.calledOnce;
+      expect(handlers.handleFinalizePrompts.firstCall.args[2]).to.equal(BRAND);
+      expect(handlers.handleFinalizePrompts.firstCall.args[3]).to.equal(WORKSPACE);
+      expect(handlers.handleFinalizePromptsSubworkspace).not.to.have.been.called;
     });
 
     it('passes ai origin to synchronous creates from a service principal', async () => {

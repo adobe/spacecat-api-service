@@ -36,6 +36,8 @@ import {
   resolveSort,
   validateTagIds,
   capUpdateTagIds,
+  parseUpdatePromptBody,
+  MAX_PROMPT_TEXT_LENGTH,
 } from '../../../../src/support/serenity/handlers/prompts.js';
 import { ErrorWithStatusCode } from '../../../../src/support/utils.js';
 import { SerenityTransportError } from '../../../../src/support/serenity/rest-transport.js';
@@ -3282,6 +3284,111 @@ describe('handlers/prompts.js — deferPublish (serenity-docs#32 CSV-chunking)',
   });
 });
 
+// LLMO-7533 / serenity-docs#472: mixed-result containment and publish
+// truthfulness for the CSV-import path.
+describe('handlers/prompts.js — mixed-result containment (LLMO-7533)', () => {
+  const projectA = () => makeProject({
+    semrushProjectId: 'proj-a', geoTargetId: 2840, languageCode: 'en',
+  });
+  const projectB = () => makeProject({
+    semrushProjectId: 'proj-b', geoTargetId: 2276, languageCode: 'de',
+  });
+
+  it('contains an existing-prompt index read failure to its own project — the other project\'s '
+    + 'inputs still process (serenity-docs#472 §2)', async () => {
+    const dataAccess = makeDataAccess([projectA(), projectB()]);
+    const transport = {
+      listProjectTags: makeListProjectTagsStub(),
+      listPromptsByTags: sinon.stub().callsFake(async (ws, projectId) => {
+        if (projectId === 'proj-a') {
+          throw Object.assign(new Error('upstream 502'), { status: 502 });
+        }
+        return { items: [] };
+      }),
+      createPromptsWithMetadata: sinon.stub().callsFake(async (ws, pid, items) => {
+        const { name } = items[0];
+        return { page: 1, total: 1, items: [{ id: `new-${name}`, name }] };
+      }),
+      publishProject: sinon.stub().resolves(),
+    };
+
+    const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      prompts: [
+        {
+          text: 'a-prompt', geoTargetId: 2840, languageCode: 'en', tagIds: ['tag-cat-1'],
+        },
+        {
+          text: 'b-prompt', geoTargetId: 2276, languageCode: 'de', tagIds: ['tag-cat-1'],
+        },
+      ],
+    }, fakeLog());
+
+    // proj-a's input is failed with the upstream status, NOT thrown — the whole
+    // request must not abort with a bare outer 502.
+    expect(result.failed).to.have.lengthOf(1);
+    expect(result.failed[0].text).to.equal('a-prompt');
+    expect(result.failed[0].status).to.equal(502);
+    // proj-b is unaffected and still creates normally.
+    expect(result.created).to.have.lengthOf(1);
+    expect(result.created[0].text).to.equal('b-prompt');
+  });
+
+  it('returns published:false when publishing one of the affected projects fails '
+    + '(serenity-docs#472 §6)', async () => {
+    const dataAccess = makeDataAccess([projectA(), projectB()]);
+    const transport = {
+      listProjectTags: makeListProjectTagsStub(),
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
+      createPromptsWithMetadata: sinon.stub().callsFake(async (ws, pid, items) => {
+        const { name } = items[0];
+        return { page: 1, total: 1, items: [{ id: `new-${name}`, name }] };
+      }),
+      publishProject: sinon.stub().callsFake(async (ws, projectId) => {
+        if (projectId === 'proj-b') {
+          throw Object.assign(new Error('publish failed'), { status: 500 });
+        }
+      }),
+    };
+
+    const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      prompts: [
+        {
+          text: 'a-prompt', geoTargetId: 2840, languageCode: 'en', tagIds: ['tag-cat-1'],
+        },
+        {
+          text: 'b-prompt', geoTargetId: 2276, languageCode: 'de', tagIds: ['tag-cat-1'],
+        },
+      ],
+    }, fakeLog());
+
+    // Both prompts were created (publish is a separate step from the write) —
+    // but the batch as a whole must NOT be reported as published, since one of
+    // the two affected projects failed to publish.
+    expect(result.created).to.have.lengthOf(2);
+    expect(result.published).to.equal(false);
+  });
+
+  it('reports published:true when every affected project publishes successfully', async () => {
+    const dataAccess = makeDataAccess([projectA()]);
+    const transport = {
+      listProjectTags: makeListProjectTagsStub(),
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
+      createPromptsWithMetadata: sinon.stub().resolves({
+        page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'a-prompt' }],
+      }),
+      publishProject: sinon.stub().resolves(),
+    };
+
+    const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      prompts: [{
+        text: 'a-prompt', geoTargetId: 2840, languageCode: 'en', tagIds: ['tag-cat-1'],
+      }],
+    }, fakeLog());
+
+    expect(result.published).to.equal(true);
+  });
+});
+
 // PR26: origin (authorship) and source (producing system) remain independent
 // live dimensions. A create writes both; an update preserves both from the
 // caller's complete replacement set.
@@ -3451,6 +3558,73 @@ describe('handlers/prompts.js — independent origin and source dimensions', () 
       // Same project + same values => served from the dimension caches.
       expect(transport.listProjectTags.callCount).to.equal(readsAfterFirst);
       expect(transport.createProjectTags).to.not.have.been.called;
+    });
+  });
+});
+
+// LLMO-7533 §6: prompt-text length/character validation, rejected into
+// skipped[] (create) / 400 (update) BEFORE any Semrush call. MAX_PROMPT_TEXT_LENGTH
+// is a placeholder pending the confirmed Semrush contract — see its definition.
+describe('handlers/prompts.js — prompt-text length/character validation (LLMO-7533 §6)', () => {
+  const base = {
+    languageCode: 'en', geoTargetId: 2840, tagIds: ['t1'],
+  };
+
+  describe('normalizePromptInput', () => {
+    it('accepts text at exactly MAX_PROMPT_TEXT_LENGTH', () => {
+      const text = 'x'.repeat(MAX_PROMPT_TEXT_LENGTH);
+      const { value, reason } = normalizePromptInput({ ...base, text });
+      expect(reason).to.equal(null);
+      expect(value.text).to.equal(text);
+    });
+
+    it('rejects text one character over MAX_PROMPT_TEXT_LENGTH, into skipped (no upstream call)', () => {
+      const text = 'x'.repeat(MAX_PROMPT_TEXT_LENGTH + 1);
+      const { value, reason } = normalizePromptInput({ ...base, text });
+      expect(value).to.equal(null);
+      expect(reason).to.match(/exceeds the maximum length/);
+    });
+
+    it('rejects a disallowed control character in the text', () => {
+      const { value, reason } = normalizePromptInput({
+        ...base, text: `hello${String.fromCharCode(1)}world`,
+      });
+      expect(value).to.equal(null);
+      expect(reason).to.match(/disallowed control characters/);
+    });
+
+    it('accepts ordinary whitespace (newline, tab) and unicode/emoji in the text', () => {
+      const text = 'line one\nline two\tcol — café 🎉';
+      const { value, reason } = normalizePromptInput({ ...base, text });
+      expect(reason).to.equal(null);
+      expect(value.text).to.equal(text);
+    });
+  });
+
+  describe('parseUpdatePromptBody', () => {
+    const updateBase = { geoTargetId: 2840, languageCode: 'en', tagIds: ['t1'] };
+
+    it('accepts text at exactly MAX_PROMPT_TEXT_LENGTH', () => {
+      const text = 'x'.repeat(MAX_PROMPT_TEXT_LENGTH);
+      const result = parseUpdatePromptBody({ ...updateBase, text });
+      expect(result.ok).to.equal(true);
+    });
+
+    it('400s text one character over MAX_PROMPT_TEXT_LENGTH', () => {
+      const text = 'x'.repeat(MAX_PROMPT_TEXT_LENGTH + 1);
+      const result = parseUpdatePromptBody({ ...updateBase, text });
+      expect(result.ok).to.equal(false);
+      expect(result.status).to.equal(400);
+      expect(result.body.message).to.match(/exceeds the maximum length/);
+    });
+
+    it('400s a disallowed control character in the text', () => {
+      const result = parseUpdatePromptBody({
+        ...updateBase, text: `hello${String.fromCharCode(1)}world`,
+      });
+      expect(result.ok).to.equal(false);
+      expect(result.status).to.equal(400);
+      expect(result.body.message).to.match(/disallowed control characters/);
     });
   });
 });

@@ -162,6 +162,31 @@ const FIXTURES = {
       }],
     },
   },
+  finalizeSerenityPrompts: {
+    expectedStatus: 200,
+    controllerMethod: 'finalizePrompts',
+    handlerName: 'handleFinalizePrompts',
+    handlerResult: {
+      slices: [
+        {
+          geoTargetId: 2840, languageCode: 'en', outcome: 'published', publishStatus: 'live',
+        },
+        {
+          geoTargetId: 2276,
+          languageCode: 'de',
+          outcome: 'failed',
+          error: 'No market for slice',
+          code: 'marketNotFound',
+        },
+      ],
+    },
+    data: {
+      slices: [
+        { geoTargetId: 2840, languageCode: 'en' },
+        { geoTargetId: 2276, languageCode: 'de' },
+      ],
+    },
+  },
   getSerenityPromptsJobStatus: {
     expectedStatus: 200,
     controllerMethod: 'getPromptsJobStatus',
@@ -994,6 +1019,7 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
         handleUpdateModels: sinon.stub(),
         handleCreateMarketSubworkspace: sinon.stub(),
         handleListMarketsSubworkspace: sinon.stub(),
+        handleFinalizePrompts: sinon.stub(),
         ensureSubworkspace: sinon.stub().resolves(WORKSPACE),
         decommissionBrandWorkspace: sinon.stub(),
         listGlobalModelCatalog: sinon.stub(),
@@ -1093,6 +1119,10 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
             handleCreatePromptsSubworkspace: sinon.stub(),
             handleUpdatePromptSubworkspace: sinon.stub(),
             handleBulkDeletePromptsSubworkspace: sinon.stub(),
+          },
+          '../../src/support/serenity/handlers/prompts-finalize.js': {
+            handleFinalizePrompts: handlerStubs.handleFinalizePrompts,
+            handleFinalizePromptsSubworkspace: sinon.stub(),
           },
           '../../src/support/serenity/workspace-lifecycle.js': {
             ensureSubworkspace: handlerStubs.ensureSubworkspace,

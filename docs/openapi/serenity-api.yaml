@@ -212,6 +212,64 @@ v2-serenity-prompts:
             schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
       '500': { $ref: './responses.yaml#/500' }
 
+v2-serenity-prompts-finalize:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID-only on the /serenity/* surface)
+      schema:
+        type: string
+        format: uuid
+  post:
+    tags: [serenity]
+    summary: Finalize (publish) pending draft prompts for a set of slices
+    description: |
+      serenity-docs#472 §4 / LLMO-7533 — short-term recovery surface for the
+      browser-orchestrated CSV-import path. A chunked import writes
+      deferred-publish (draft) batches (`deferPublish: true`); if a later
+      batch fails, is cancelled, or the browser never reaches the original
+      final batch, the earlier acknowledged writes stay unpublished until
+      something calls this endpoint.
+
+      Idempotent per slice: the upstream `publish_status` observed at call
+      time decides the action, never the caller — `live` is a no-op,
+      `draft`/`live_with_unpublished_updates` are published (then
+      bounded-confirmed), `publishing` is polled without issuing a second
+      publish request, and `initial_publish_failed` is a terminal failure.
+
+      The project for each slice is resolved through the same org/brand/
+      workspace authorization used by prompt creation — the body carries only
+      (geoTargetId, languageCode) slices, never a caller-supplied project or
+      workspace id.
+    operationId: finalizeSerenityPrompts
+    security:
+      - session_token: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: './schemas.yaml#/SerenityFinalizePromptsRequest' }
+    responses:
+      '200':
+        description: >
+          Finalize attempted for every requested slice (per-slice outcomes;
+          mixed success allowed — one failing slice does not fail the call).
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityFinalizePromptsResponse' }
+      '400': { $ref: './responses.yaml#/400' }
+      '404':
+        description: Organization or brand not found, or serenity is not active for the organization.
+      '500': { $ref: './responses.yaml#/500' }
+
 v2-serenity-prompt-by-id:
   parameters:
     - name: spaceCatId

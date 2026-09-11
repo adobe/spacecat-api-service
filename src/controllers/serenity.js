@@ -75,6 +75,10 @@ import {
   handleBulkDeletePromptsSubworkspace,
 } from '../support/serenity/handlers/prompts-subworkspace.js';
 import {
+  handleFinalizePrompts,
+  handleFinalizePromptsSubworkspace,
+} from '../support/serenity/handlers/prompts-finalize.js';
+import {
   handleCreateTag,
   handleCreateTagSubworkspace,
   handleUpdateTag,
@@ -815,6 +819,46 @@ function SerenityController(context, log, env) {
           writeDeadline,
           callerId,
           { orgId: ctx?.params?.spaceCatId, originValue },
+        );
+      return createResponse(result, 200);
+    } catch (e) {
+      return mapError(e, log, reqCtxOf(ctx, auth));
+    }
+  };
+
+  /**
+   * POST .../serenity/prompts/finalize (serenity-docs#472 §4 / LLMO-7533).
+   *
+   * Short-term recovery surface for the browser-orchestrated CSV-import path:
+   * publishes whatever draft state is currently owed for a set of
+   * (geoTargetId, languageCode) slices, independent of how the import that
+   * staged those drafts ended. The project for each slice is resolved through
+   * the SAME org/brand/workspace authorization `createPrompts` uses — the body
+   * carries only slices, never a caller-supplied project or workspace id.
+   */
+  const finalizePrompts = async (ctx) => {
+    let auth;
+    try {
+      auth = await authorize(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const imsToken = await resolveSemrushImsToken(ctx);
+      const transport = buildTransport(ctx, imsToken);
+      const result = auth.mode === 'subworkspace'
+        ? await handleFinalizePromptsSubworkspace(
+          transport,
+          /** @type {string} */ (auth.workspaceId),
+          ctx.data || {},
+          log,
+        )
+        : await handleFinalizePrompts(
+          transport,
+          ctx.dataAccess,
+          /** @type {string} */ (auth.brandUuid),
+          /** @type {string} */ (auth.workspaceId),
+          ctx.data || {},
+          log,
         );
       return createResponse(result, 200);
     } catch (e) {
@@ -2363,6 +2407,7 @@ function SerenityController(context, log, env) {
   return {
     listPrompts,
     createPrompts,
+    finalizePrompts,
     getPromptsJobStatus,
     updatePrompt,
     bulkTagPrompts,

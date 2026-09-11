@@ -12088,7 +12088,14 @@ SerenityPromptInput:
     (project, parent). A `tags` key is rejected with 400.
   required: [text, geoTargetId, languageCode, tagIds]
   properties:
-    text: { type: string }
+    text:
+      type: string
+      maxLength: 10000
+      description: >
+        PLACEHOLDER limit (LLMO-7533 §6) — the real Semrush prompt-text length
+        contract is not yet confirmed; this bound is deliberately generous so it
+        never falsely rejects real content before the true limit is known. Also
+        rejects C0 control characters other than TAB/LF/CR, and DEL.
     tagIds:
       type: array
       items: { type: string }
@@ -12194,6 +12201,62 @@ SerenityCreatePromptsResponse:
       type: [string, 'null']
       format: uuid
 
+SerenityFinalizePromptsRequest:
+  type: object
+  required: [slices]
+  properties:
+    slices:
+      type: array
+      minItems: 1
+      items:
+        type: object
+        required: [geoTargetId, languageCode]
+        properties:
+          geoTargetId: { type: integer, minimum: 1 }
+          languageCode:
+            type: string
+            pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$'
+      description: >
+        (geoTargetId, languageCode) slices to finalize (publish) any pending
+        draft state for. The project for each slice is resolved through the
+        SAME org/brand/workspace authorization as prompt creation — a
+        caller-supplied project or workspace id is never accepted here.
+
+SerenityFinalizePromptsResponse:
+  type: object
+  required: [slices]
+  properties:
+    slices:
+      type: array
+      items: { $ref: '#/SerenityFinalizeSliceResult' }
+
+SerenityFinalizeSliceResult:
+  type: object
+  required: [geoTargetId, languageCode, outcome]
+  properties:
+    geoTargetId: { type: integer }
+    languageCode: { type: string }
+    outcome:
+      type: string
+      enum: [alreadyPublished, published, pending, failed]
+      description: >
+        `alreadyPublished`: the project was already live with no pending
+        draft — no-op. `published`: a pending draft was published and
+        CONFIRMED live within the bounded confirm budget. `pending`: publish
+        was accepted (or was already in progress) but not confirmed live
+        within budget — poll again later; never treat as live. `failed`: a
+        terminal publish failure (including a permanent quota rejection), an
+        upstream read failure, or the slice could not be resolved to a
+        project (`code: marketNotFound`).
+    publishStatus:
+      type: [string, 'null']
+      description: The raw upstream `publish_status` observed, when available.
+    error: { type: string }
+    code: { type: string }
+    permanent:
+      type: boolean
+      description: True for a permanent (non-retryable) failure, e.g. a quota rejection.
+
 SerenityPromptsJobAccepted:
   type: object
   description: |
@@ -12277,7 +12340,11 @@ SerenityUpdatePromptRequest:
     languageCode:
       type: string
       pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$'
-    text: { type: string }
+    text:
+      type: string
+      maxLength: 10000
+      description: >
+        PLACEHOLDER limit (LLMO-7533 §6) — see SerenityPromptInput.text.
     tagIds:
       type: array
       items: { type: string }
