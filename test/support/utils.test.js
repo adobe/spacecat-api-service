@@ -1463,14 +1463,17 @@ describe('utils', () => {
       baseURL = 'https://example.com',
       authoringType = CS,
       deliveryType = AEM_CS,
-      deliveryConfig = { programId: 'p1', environmentId: 'e1' },
+      deliveryConfig: initialDeliveryConfig = { programId: 'p1', environmentId: 'e1' },
     } = {}) {
+      let deliveryConfig = initialDeliveryConfig;
       return {
         getId: () => id,
         getBaseURL: () => baseURL,
         getAuthoringType: () => authoringType,
         getDeliveryType: () => deliveryType,
         getDeliveryConfig: () => deliveryConfig,
+        setDeliveryConfig: (newConfig) => { deliveryConfig = newConfig; },
+        save: async () => Promise.resolve(),
       };
     }
 
@@ -1715,6 +1718,84 @@ describe('utils', () => {
         ),
       ).to.be.rejectedWith('SQS down');
       expect(context.log.error).to.have.been.calledOnce;
+    });
+
+    it('sets asoOverlayRedirectAutofixEnabled and appends broken-backlinks when site is valid for redirects', async () => {
+      const site = makeSite();
+      await queueDeliveryConfigWriter(
+        { site, baseURL: 'https://example.com', slackContext: {} },
+        context,
+      );
+      expect(site.getDeliveryConfig()).to.deep.equal({
+        programId: 'p1',
+        environmentId: 'e1',
+        asoOverlayRedirectAutofixEnabled: true,
+        mysticatLegacyAutofixBridgeOpportunities: ['broken-backlinks'],
+      });
+    });
+
+    it('does not touch deliveryConfig when site is not valid for redirects', async () => {
+      const site = makeSite({ authoringType: NON_CS, deliveryType: 'AEM_AMS' });
+      await queueDeliveryConfigWriter(
+        { site, baseURL: 'https://example.com', slackContext: {} },
+        context,
+      );
+      expect(site.getDeliveryConfig()).to.deep.equal({ programId: 'p1', environmentId: 'e1' });
+    });
+
+    it('preserves and dedupes pre-existing mysticatLegacyAutofixBridgeOpportunities entries', async () => {
+      const site = makeSite({
+        deliveryConfig: {
+          programId: 'p1',
+          environmentId: 'e1',
+          mysticatLegacyAutofixBridgeOpportunities: ['alt-text', 'broken-backlinks'],
+        },
+      });
+      await queueDeliveryConfigWriter(
+        { site, baseURL: 'https://example.com', slackContext: {} },
+        context,
+      );
+      expect(site.getDeliveryConfig().mysticatLegacyAutofixBridgeOpportunities).to.deep.equal([
+        'alt-text',
+        'broken-backlinks',
+      ]);
+    });
+
+    it('logs an error and leaves mysticatLegacyAutofixBridgeOpportunities untouched when it is not an array', async () => {
+      const site = makeSite({
+        deliveryConfig: {
+          programId: 'p1',
+          environmentId: 'e1',
+          mysticatLegacyAutofixBridgeOpportunities: 'not-an-array',
+        },
+      });
+      const result = await queueDeliveryConfigWriter(
+        { site, baseURL: 'https://example.com', slackContext: {} },
+        context,
+      );
+      expect(result).to.deep.equal({ ok: true });
+      expect(site.getDeliveryConfig()).to.deep.equal({
+        programId: 'p1',
+        environmentId: 'e1',
+        mysticatLegacyAutofixBridgeOpportunities: 'not-an-array',
+        asoOverlayRedirectAutofixEnabled: true,
+      });
+      expect(context.log.error).to.have.been.calledWithMatch(
+        'mysticatLegacyAutofixBridgeOpportunities is not an array',
+      );
+    });
+
+    it('logs and returns a warning without derailing when site.save() rejects', async () => {
+      const site = makeSite();
+      site.save = sandbox.stub().rejects(new Error('optimistic lock conflict'));
+      const result = await queueDeliveryConfigWriter(
+        { site, baseURL: 'https://example.com', slackContext: {} },
+        context,
+      );
+      expect(result.ok).to.be.true;
+      expect(result.warning).to.include('optimistic lock conflict');
+      expect(context.log.error).to.have.been.calledWithMatch('Failed to save site');
+      expect(sqsStub.sendMessage).to.have.been.calledOnce;
     });
   });
 

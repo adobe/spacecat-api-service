@@ -1857,12 +1857,36 @@ export async function queueDeliveryConfigWriter(
 
     const siteId = site.getId();
     let redirectParams = {};
+    let dbWriteWarning;
 
     // update-redirects is optional for onboarding, skip if the site is not eligible
     const {
       validForRedirects, skipMessage, programId, environmentId,
     } = validateSiteForRedirects(site);
     if (validForRedirects) {
+      const currentDeliveryConfig = site.getDeliveryConfig();
+      const existingBridge = currentDeliveryConfig?.mysticatLegacyAutofixBridgeOpportunities;
+      const newDeliveryConfig = {
+        ...currentDeliveryConfig,
+        asoOverlayRedirectAutofixEnabled: true,
+      };
+      if (existingBridge !== undefined && !Array.isArray(existingBridge)) {
+        log.error(
+          '[delivery-config-writer] mysticatLegacyAutofixBridgeOpportunities is not an array '
+          + `(got ${typeof existingBridge}) for site ${siteId}; skipping bridge opportunities write.`,
+        );
+      } else {
+        newDeliveryConfig.mysticatLegacyAutofixBridgeOpportunities = [
+          ...new Set([...(existingBridge || []), 'broken-backlinks']),
+        ];
+      }
+      site.setDeliveryConfig(newDeliveryConfig);
+      try {
+        await site.save();
+      } catch (error) {
+        log.error(`[delivery-config-writer] Failed to save site ${siteId}: ${error.message}`);
+        dbWriteWarning = `Delivery config save failed for site ${siteId}: ${error.message}`;
+      }
       redirectParams = {
         programId: String(programId),
         environmentId: String(environmentId),
@@ -1896,7 +1920,7 @@ export async function queueDeliveryConfigWriter(
     }
 
     await sqs.sendMessage(env.AUDIT_JOBS_QUEUE_URL, payload);
-    return { ok: true };
+    return { ok: true, ...(dbWriteWarning ? { warning: dbWriteWarning } : {}) };
   } catch (error) {
     log.error(error);
     throw error;
