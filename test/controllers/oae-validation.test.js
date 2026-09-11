@@ -22,6 +22,7 @@ use(sinonChai);
 describe('OaeValidation Controller', () => {
   const sandbox = sinon.createSandbox();
   const siteId = '123e4567-e89b-12d3-a456-426614174000';
+  const otherSiteId = '923e4567-e89b-12d3-a456-426614174009';
   const suggestionId1 = '223e4567-e89b-12d3-a456-426614174001';
   const suggestionId2 = '323e4567-e89b-12d3-a456-426614174002';
   const jobId = '423e4567-e89b-12d3-a456-426614174003';
@@ -50,7 +51,12 @@ describe('OaeValidation Controller', () => {
     dataAccess = {
       Configuration: { findLatest: sandbox.stub().resolves(configuration) },
       OaeValidation: { allByJobId: sandbox.stub() },
-      Suggestion: { findById: sandbox.stub() },
+      Suggestion: {
+        findById: sandbox.stub(),
+        batchGetByKeys: sandbox.stub().callsFake(async (keys) => ({
+          data: keys.map(() => ({ getOpportunityId: () => opportunityId })),
+        })),
+      },
       Opportunity: { findById: sandbox.stub() },
       Site: { findById: sandbox.stub().resolves({ getId: () => siteId }) },
     };
@@ -87,17 +93,74 @@ describe('OaeValidation Controller', () => {
   describe('createValidationJob', () => {
     let authCtx;
     beforeEach(() => {
-      authCtx = { dataAccess, attributes: { authInfo: { type: 'jwt' } }, pathInfo: { headers: {} } };
+      authCtx = {
+        params: { siteId },
+        dataAccess,
+        attributes: { authInfo: { type: 'jwt' } },
+        pathInfo: { headers: {} },
+      };
     });
 
-    it('returns 400 when data is missing', async () => {
-      const response = await controller.createValidationJob({ data: undefined });
+    it('returns 400 when siteId param is missing', async () => {
+      const response = await controller.createValidationJob({
+        params: {},
+        data: {
+          opportunityId, type: 'routing', suggestionIds: [suggestionId1],
+        },
+      });
       expect(response.status).to.equal(400);
     });
 
-    it('returns 400 when siteId is not a valid UUID', async () => {
+    it('returns 400 when siteId param is not a valid UUID', async () => {
       const response = await controller.createValidationJob({
-        data: { siteId: 'not-a-uuid', type: 'routing', suggestionIds: [suggestionId1] },
+        params: { siteId: 'not-a-uuid' },
+        data: {
+          opportunityId, type: 'routing', suggestionIds: [suggestionId1],
+        },
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 403 when the caller does not have access to the site', async () => {
+      AccessControlUtil.prototype.hasAccess.resolves(false);
+
+      const response = await controller.createValidationJob({
+        ...authCtx,
+        data: {
+          opportunityId, type: 'routing', suggestionIds: [suggestionId1],
+        },
+      });
+
+      expect(response.status).to.equal(403);
+      expect(sqs.sendMessage).to.not.have.been.called;
+    });
+
+    it('returns 403 when the site cannot be found', async () => {
+      dataAccess.Site.findById.resolves(undefined);
+
+      const response = await controller.createValidationJob({
+        ...authCtx,
+        data: {
+          opportunityId, type: 'routing', suggestionIds: [suggestionId1],
+        },
+      });
+
+      expect(response.status).to.equal(403);
+      expect(sqs.sendMessage).to.not.have.been.called;
+    });
+
+    it('returns 400 when opportunityId is missing', async () => {
+      const response = await controller.createValidationJob({
+        ...authCtx,
+        data: { type: 'routing', suggestionIds: [suggestionId1] },
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when opportunityId is not a valid UUID', async () => {
+      const response = await controller.createValidationJob({
+        ...authCtx,
+        data: { opportunityId: 'not-a-uuid', type: 'routing', suggestionIds: [suggestionId1] },
       });
       expect(response.status).to.equal(400);
     });
@@ -105,7 +168,7 @@ describe('OaeValidation Controller', () => {
     it('returns 400 when type is missing', async () => {
       const response = await controller.createValidationJob({
         ...authCtx,
-        data: { siteId, suggestionIds: [suggestionId1] },
+        data: { opportunityId, suggestionIds: [suggestionId1] },
       });
       expect(response.status).to.equal(400);
     });
@@ -113,7 +176,7 @@ describe('OaeValidation Controller', () => {
     it('returns 400 when type is not a recognized validation type', async () => {
       const response = await controller.createValidationJob({
         ...authCtx,
-        data: { siteId, type: 'bogus-type', suggestionIds: [suggestionId1] },
+        data: { opportunityId, type: 'bogus-type', suggestionIds: [suggestionId1] },
       });
       expect(response.status).to.equal(400);
     });
@@ -121,7 +184,7 @@ describe('OaeValidation Controller', () => {
     it('returns 400 when suggestionIds is missing', async () => {
       const response = await controller.createValidationJob({
         ...authCtx,
-        data: { siteId, type: 'routing' },
+        data: { opportunityId, type: 'routing' },
       });
       expect(response.status).to.equal(400);
     });
@@ -129,7 +192,9 @@ describe('OaeValidation Controller', () => {
     it('returns 400 when suggestionIds is empty', async () => {
       const response = await controller.createValidationJob({
         ...authCtx,
-        data: { siteId, type: 'routing', suggestionIds: [] },
+        data: {
+          opportunityId, type: 'routing', suggestionIds: [],
+        },
       });
       expect(response.status).to.equal(400);
     });
@@ -137,15 +202,43 @@ describe('OaeValidation Controller', () => {
     it('returns 400 when a suggestionId is not a valid UUID', async () => {
       const response = await controller.createValidationJob({
         ...authCtx,
-        data: { siteId, type: 'routing', suggestionIds: ['not-a-uuid'] },
+        data: { opportunityId, type: 'routing', suggestionIds: ['not-a-uuid'] },
       });
       expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when a suggestionId does not belong to opportunityId', async () => {
+      dataAccess.Suggestion.batchGetByKeys.resolves({
+        data: [{ getOpportunityId: () => 'some-other-opportunity-id' }],
+      });
+
+      const response = await controller.createValidationJob({
+        ...authCtx,
+        data: { opportunityId, type: 'routing', suggestionIds: [suggestionId1] },
+      });
+
+      expect(response.status).to.equal(400);
+      expect(sqs.sendMessage).to.not.have.been.called;
+    });
+
+    it('returns 400 when a suggestionId no longer resolves at all', async () => {
+      dataAccess.Suggestion.batchGetByKeys.resolves({ data: [] });
+
+      const response = await controller.createValidationJob({
+        ...authCtx,
+        data: { opportunityId, type: 'routing', suggestionIds: [suggestionId1] },
+      });
+
+      expect(response.status).to.equal(400);
+      expect(sqs.sendMessage).to.not.have.been.called;
     });
 
     it('sends one SQS message and returns 202 with a generated jobId', async () => {
       const response = await controller.createValidationJob({
         ...authCtx,
-        data: { siteId, type: 'routing', suggestionIds: [suggestionId1, suggestionId2] },
+        data: {
+          opportunityId, type: 'routing', suggestionIds: [suggestionId1, suggestionId2],
+        },
       });
 
       expect(response.status).to.equal(202);
@@ -164,45 +257,46 @@ describe('OaeValidation Controller', () => {
       );
     });
 
+    it('ignores a stale siteId in the body, always using the URL param', async () => {
+      const response = await controller.createValidationJob({
+        ...authCtx,
+        data: {
+          siteId: otherSiteId, opportunityId, type: 'routing', suggestionIds: [suggestionId1],
+        },
+      });
+
+      expect(response.status).to.equal(202);
+      expect(sqs.sendMessage).to.have.been.calledWith(
+        'https://sqs.example.com/imports',
+        sinon.match({ siteId }),
+      );
+    });
+
     it('returns 500 when sending the SQS message fails', async () => {
       sqs.sendMessage.rejects(new Error('SQS unavailable'));
 
       const response = await controller.createValidationJob({
         ...authCtx,
-        data: { siteId, type: 'routing', suggestionIds: [suggestionId1] },
+        data: { opportunityId, type: 'routing', suggestionIds: [suggestionId1] },
       });
 
       expect(response.status).to.equal(500);
     });
-
-    it('returns 403 when the caller does not have access to the site', async () => {
-      AccessControlUtil.prototype.hasAccess.resolves(false);
-
-      const response = await controller.createValidationJob({
-        ...authCtx,
-        data: { siteId, type: 'routing', suggestionIds: [suggestionId1] },
-      });
-
-      expect(response.status).to.equal(403);
-      expect(sqs.sendMessage).to.not.have.been.called;
-    });
-
-    it('returns 403 when the site cannot be found', async () => {
-      dataAccess.Site.findById.resolves(undefined);
-
-      const response = await controller.createValidationJob({
-        ...authCtx,
-        data: { siteId, type: 'routing', suggestionIds: [suggestionId1] },
-      });
-
-      expect(response.status).to.equal(403);
-      expect(sqs.sendMessage).to.not.have.been.called;
-    });
   });
 
   describe('getValidationJob', () => {
+    let validParams;
+    beforeEach(() => {
+      validParams = { jobId, siteId };
+    });
+
     it('returns 400 when jobId is not a valid UUID', async () => {
-      const response = await controller.getValidationJob({ params: { jobId: 'not-a-uuid' } });
+      const response = await controller.getValidationJob({ params: { jobId: 'not-a-uuid', siteId } });
+      expect(response.status).to.equal(400);
+    });
+
+    it('returns 400 when siteId param is not a valid UUID', async () => {
+      const response = await controller.getValidationJob({ params: { jobId, siteId: 'not-a-uuid' } });
       expect(response.status).to.equal(400);
     });
 
@@ -210,7 +304,7 @@ describe('OaeValidation Controller', () => {
       dataAccess.OaeValidation.allByJobId.resolves([]);
 
       const response = await controller.getValidationJob({
-        params: { jobId },
+        params: validParams,
         dataAccess,
         attributes: { authInfo: { type: 'jwt' } },
         pathInfo: { headers: {} },
@@ -240,7 +334,7 @@ describe('OaeValidation Controller', () => {
       dataAccess.Site.findById.resolves({ getId: () => siteId });
 
       const response = await controller.getValidationJob({
-        params: { jobId },
+        params: validParams,
         dataAccess,
         attributes: { authInfo: { type: 'jwt' } },
         pathInfo: { headers: {} },
@@ -275,7 +369,7 @@ describe('OaeValidation Controller', () => {
       dataAccess.Suggestion.findById.resolves(undefined);
 
       const response = await controller.getValidationJob({
-        params: { jobId },
+        params: validParams,
         dataAccess,
         attributes: { authInfo: { type: 'jwt' } },
         pathInfo: { headers: {} },
@@ -297,7 +391,7 @@ describe('OaeValidation Controller', () => {
       dataAccess.Opportunity.findById.resolves(undefined);
 
       const response = await controller.getValidationJob({
-        params: { jobId },
+        params: validParams,
         dataAccess,
         attributes: { authInfo: { type: 'jwt' } },
         pathInfo: { headers: {} },
@@ -320,7 +414,30 @@ describe('OaeValidation Controller', () => {
       dataAccess.Site.findById.resolves(undefined);
 
       const response = await controller.getValidationJob({
-        params: { jobId },
+        params: validParams,
+        dataAccess,
+        attributes: { authInfo: { type: 'jwt' } },
+        pathInfo: { headers: {} },
+      });
+
+      expect(response.status).to.equal(404);
+      expect(AccessControlUtil.prototype.hasAccess).to.not.have.been.called;
+    });
+
+    it('returns 404 when the job\'s real site does not match the URL\'s siteId', async () => {
+      dataAccess.OaeValidation.allByJobId.resolves([{
+        getSuggestionId: () => suggestionId1,
+        getStatus: () => 'COMPLETE',
+        getOutcome: () => 'true',
+        getCompletedAt: () => '2026-01-01T00:00:00.000Z',
+        getMetadata: () => ({}),
+      }]);
+      dataAccess.Suggestion.findById.resolves({ getOpportunityId: () => opportunityId });
+      dataAccess.Opportunity.findById.resolves({ getSiteId: () => otherSiteId });
+      dataAccess.Site.findById.resolves({ getId: () => otherSiteId });
+
+      const response = await controller.getValidationJob({
+        params: validParams,
         dataAccess,
         attributes: { authInfo: { type: 'jwt' } },
         pathInfo: { headers: {} },
@@ -344,7 +461,7 @@ describe('OaeValidation Controller', () => {
       AccessControlUtil.prototype.hasAccess.resolves(false);
 
       const response = await controller.getValidationJob({
-        params: { jobId },
+        params: validParams,
         dataAccess,
         attributes: { authInfo: { type: 'jwt' } },
         pathInfo: { headers: {} },
@@ -357,7 +474,7 @@ describe('OaeValidation Controller', () => {
       dataAccess.OaeValidation.allByJobId.rejects(new Error('DB unavailable'));
 
       const response = await controller.getValidationJob({
-        params: { jobId },
+        params: validParams,
         dataAccess,
         attributes: { authInfo: { type: 'jwt' } },
         pathInfo: { headers: {} },

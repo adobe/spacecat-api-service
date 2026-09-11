@@ -162,8 +162,8 @@ const routeFacsCapabilities = {
     'POST /sites/:siteId/prompt-suggestion-schedules', // authorizeWrite (admin || S2S cap)
     // OAE validation jobs — triggered internally (e.g. the edge-deploy flow) or by other
     // spacecat services, not a customer-facing FACS surface.
-    'POST /oae-validation/jobs',
-    'GET /oae-validation/jobs/:jobId',
+    'POST /sites/:siteId/llmo/oae-validation/jobs',
+    'GET /sites/:siteId/llmo/oae-validation/jobs/:jobId',
     'POST /projects', // hasAdminAccess
     'DELETE /projects/:projectId', // hasAdminAccess
     'POST /organizations', // hasAdminAccess

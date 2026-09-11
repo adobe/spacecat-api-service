@@ -488,6 +488,9 @@ describe('Suggestions Controller', () => {
       }),
       getFixEntitiesBySuggestionId: sandbox.stub(),
       saveMany: sandbox.stub().resolves(),
+      batchGetByKeys: sandbox.stub().callsFake(async (keys) => ({
+        data: keys.map(() => ({ getOpportunityId: () => OPPORTUNITY_ID })),
+      })),
     };
 
     mockSuggestionGrant = {

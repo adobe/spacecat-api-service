@@ -2532,6 +2532,7 @@ function SuggestionsController(ctx, sqs, env) {
             );
             const { jobId: oaeValidationJobId } = await oaeValidationController.createJob({
               siteId,
+              opportunityId,
               type: ROUTING_VALIDATOR_TYPE,
               suggestionIds: metadataBase.highImpactSuggestionIds,
             });
