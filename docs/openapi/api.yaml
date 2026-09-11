@@ -279,6 +279,10 @@ paths:
     $ref: './preflight-api.yaml#/preflight-jobs'
   /preflight/jobs/{jobId}:
     $ref: './preflight-api.yaml#/preflight-job-status'
+  /oae-validation/jobs:
+    $ref: './oae-validation-api.yaml#/oae-validation-jobs'
+  /oae-validation/jobs/{jobId}:
+    $ref: './oae-validation-api.yaml#/oae-validation-job-status'
   /sites/detect/jobs:
     $ref: './site-detection-api.yaml#/site-detection-jobs'
   /sites/detect/jobs/{jobId}:

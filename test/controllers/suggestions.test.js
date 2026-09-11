@@ -8525,7 +8525,7 @@ describe('Suggestions Controller', () => {
         expect(mockSqs.sendMessage).to.not.have.been.called;
         const createArg = mockSuggestionDataAccess.GeoExperiment.create.firstCall.args[0];
         expect(createArg.metadata.oaeValidationJobs).to.equal(undefined);
-        expect(context.log.warn).to.have.been.calledWithMatch(/failed to queue OAE routing-validation job/);
+        expect(context.log.error).to.have.been.calledWithMatch(/failed to queue OAE routing-validation job/);
       });
 
       it('does not create a routing-validation job when highImpactSuggestionIds is absent', async () => {
