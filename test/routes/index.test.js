@@ -678,6 +678,10 @@ describe('getRouteHandlers', () => {
     getValidationJob: sinon.stub(),
   };
 
+  const mockLaunchDarklyController = {
+    getFlags: sinon.stub(),
+  };
+
   it('segregates static and dynamic routes', () => {
     const { staticRoutes, dynamicRoutes } = getRouteHandlers(
       mockAuditsController,
@@ -749,6 +753,7 @@ describe('getRouteHandlers', () => {
       mockAuditPolicyController,
       mockPromptSuggestionSchedulesController,
       mockOaeValidationController,
+      mockLaunchDarklyController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -779,6 +784,7 @@ describe('getRouteHandlers', () => {
       'POST /tools/api-keys',
       'GET /tools/api-keys',
       'GET /tools/proxy',
+      'GET /tools/launchdarkly/flags',
       'GET /monitoring/drs-bp-pg-audit',
       'GET /state/access-mappings',
       'GET /state/access-mappings/history',
@@ -885,6 +891,7 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['POST /tools/api-keys']).to.equal(mockApiKeyController.createApiKey);
     expect(staticRoutes['GET /tools/api-keys']).to.equal(mockApiKeyController.getApiKeys);
     expect(staticRoutes['GET /tools/proxy']).to.equal(mockProxyController.getPreview);
+    expect(staticRoutes['GET /tools/launchdarkly/flags']).to.equal(mockLaunchDarklyController.getFlags);
     expect(staticRoutes['GET /monitoring/drs-bp-pg-audit']).to.equal(mockDrsBpPgAuditController.getProjectionAudit);
     expect(staticRoutes['POST /consent-banner']).to.equal(mockConsentBannerController.takeScreenshots);
     expect(staticRoutes['POST /tools/scrape/jobs']).to.equal(mockScrapeJobController.createScrapeJob);

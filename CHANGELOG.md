@@ -1,3 +1,10 @@
+# [1.809.0](https://github.com/adobe/spacecat-api-service/compare/v1.808.0...v1.809.0) (2026-09-11)
+
+
+### Features
+
+* **launchdarkly:** add admin-only flags summary endpoint ([#3236](https://github.com/adobe/spacecat-api-service/issues/3236)) ([97a7ba2](https://github.com/adobe/spacecat-api-service/commit/97a7ba20d78e9bc4af8edb7764f385b58f8a8abb))
+
 # [1.808.0](https://github.com/adobe/spacecat-api-service/compare/v1.807.1...v1.808.0) (2026-09-11)
 
 
