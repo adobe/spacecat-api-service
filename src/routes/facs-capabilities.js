@@ -203,7 +203,7 @@ const routeFacsCapabilities = {
     // Internal proxy tool
     'GET /tools/proxy', // internal preview proxy (no external auth required)
 
-    // LaunchDarkly raw flag passthrough — admin-only, no site/org scope, not a FACS surface
+    // LaunchDarkly flags summary — admin-only, no site/org scope, not a FACS surface
     'GET /tools/launchdarkly/flags',
 
     // Monitoring / admin telemetry

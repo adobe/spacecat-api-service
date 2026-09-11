@@ -96,7 +96,7 @@ describe('LaunchDarklyController', () => {
 
       expect(global.fetch).to.have.been.calledOnce;
       const [url, options] = global.fetch.firstCall.args;
-      expect(url).to.equal('https://app.launchdarkly.com/api/v2/flags/experience-success-studio?limit=50');
+      expect(url.toString()).to.equal('https://app.launchdarkly.com/api/v2/flags/experience-success-studio?limit=50');
       expect(options.headers.Authorization).to.equal('test-token');
       expect(resp.status).to.equal(STATUS_OK);
       const body = await resp.json();
@@ -128,7 +128,7 @@ describe('LaunchDarklyController', () => {
       const resp = await controller.getFlags(baseCtx);
 
       expect(fetchStub).to.have.been.calledTwice;
-      expect(fetchStub.secondCall.args[0]).to.equal(
+      expect(fetchStub.secondCall.args[0].toString()).to.equal(
         'https://app.launchdarkly.com/api/v2/flags/experience-success-studio?limit=50&offset=50',
       );
       const body = await resp.json();
@@ -136,7 +136,7 @@ describe('LaunchDarklyController', () => {
       expect(body.items.map((i) => i.key)).to.deep.equal(['flag-1', 'flag-2']);
     });
 
-    it('handles a flag with no variations without throwing', async () => {
+    it('returns value: null for a flag with no variations', async () => {
       sandbox.stub(global, 'fetch').resolves({
         ok: true,
         status: 200,
@@ -144,8 +144,7 @@ describe('LaunchDarklyController', () => {
       });
       const resp = await controller.getFlags(baseCtx);
       const body = await resp.json();
-      // JSON serialization drops the `value` key entirely when it's undefined.
-      expect(body.items).to.deep.equal([{ key: 'FF_no-variations' }]);
+      expect(body.items).to.deep.equal([{ key: 'FF_no-variations', value: null }]);
     });
 
     it('rejects a pagination link that escapes the expected flags path', async () => {
@@ -155,6 +154,20 @@ describe('LaunchDarklyController', () => {
         json: async () => ldPage(
           [{ key: 'flag-1', variations: [{ value: true }] }],
           'https://evil.example.com/steal-token',
+        ),
+      });
+      const resp = await controller.getFlags(baseCtx);
+      expect(resp.status).to.equal(STATUS_INTERNAL_SERVER_ERROR);
+      expect(baseCtx.log.error).to.have.been.calledWithMatch(/Unexpected LaunchDarkly pagination path/);
+    });
+
+    it('rejects a same-origin pagination link that traverses outside the flags path', async () => {
+      sandbox.stub(global, 'fetch').resolves({
+        ok: true,
+        status: 200,
+        json: async () => ldPage(
+          [{ key: 'flag-1', variations: [{ value: true }] }],
+          '/api/v2/flags/experience-success-studio/../../admin-secrets',
         ),
       });
       const resp = await controller.getFlags(baseCtx);

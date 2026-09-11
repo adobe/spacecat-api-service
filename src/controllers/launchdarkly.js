@@ -35,11 +35,11 @@ const MAX_PAGES = 50;
  */
 async function fetchAllFlags(apiToken, log) {
   const items = [];
-  let path = `${LD_FLAGS_PATH}?limit=${LD_PAGE_LIMIT}`;
+  let url = new URL(`${LD_FLAGS_PATH}?limit=${LD_PAGE_LIMIT}`, LD_API_BASE_URL);
 
-  for (let page = 0; path && page < MAX_PAGES; page += 1) {
+  for (let page = 0; url && page < MAX_PAGES; page += 1) {
     // eslint-disable-next-line no-await-in-loop
-    const response = await fetch(`${LD_API_BASE_URL}${path}`, {
+    const response = await fetch(url, {
       method: 'GET',
       headers: { Authorization: apiToken },
     });
@@ -60,16 +60,24 @@ async function fetchAllFlags(apiToken, log) {
     // the no-underscore-dangle lint rule for this external, non-negotiable name.
     const { _links: links } = body;
     const nextHref = links?.next?.href ?? null;
-    // Defense-in-depth: only follow a pagination link that stays within the flags
-    // path we requested. The LD API token would otherwise be sent to whatever
-    // path a tampered/unexpected response pointed at.
-    if (nextHref && !nextHref.startsWith(LD_FLAGS_PATH)) {
-      throw new Error(`Unexpected LaunchDarkly pagination path: ${nextHref}`);
+    url = null;
+    if (nextHref) {
+      // Defense-in-depth: resolve the link against our own base and check the
+      // *resolved* origin/pathname, not the raw string. A naive `startsWith`
+      // prefix check on the raw href would miss a `../` path-traversal segment
+      // or an absolute different-origin URL, either of which would leak the LD
+      // API token to an unexpected destination via the Authorization header.
+      const resolvedNext = new URL(nextHref, LD_API_BASE_URL);
+      const isAllowed = resolvedNext.origin === LD_API_BASE_URL
+        && resolvedNext.pathname.startsWith(LD_FLAGS_PATH);
+      if (!isAllowed) {
+        throw new Error(`Unexpected LaunchDarkly pagination path: ${nextHref}`);
+      }
+      url = resolvedNext;
     }
-    path = nextHref;
   }
 
-  if (path) {
+  if (url) {
     log.warn(`LaunchDarkly flags pagination stopped at ${MAX_PAGES} pages with more remaining for project ${LD_FF_PROJECT_NAME}`);
   }
 
@@ -89,7 +97,9 @@ async function fetchAllFlags(apiToken, log) {
 function toFlagSummary(flag) {
   return {
     key: flag.key,
-    value: flag.variations?.[0]?.value,
+    // `?? null` keeps the response shape uniform (`value` is always present,
+    // never silently dropped by JSON.stringify) for a flag with no variations.
+    value: flag.variations?.[0]?.value ?? null,
   };
 }
 
