@@ -18,6 +18,7 @@ import {
   normalizeGeoTargetId,
   isValidTagIdFormat,
   MAX_TAG_ID_LEN,
+  hasDisallowedControlChars,
 } from '../../../src/support/serenity/validation.js';
 
 /**
@@ -150,5 +151,30 @@ describe('serenity/validation — isValidTagIdFormat', () => {
     expect(isValidTagIdFormat(`tag${String.fromCharCode(1)}abc`)).to.equal(false);
     expect(isValidTagIdFormat(`tag${String.fromCharCode(31)}abc`)).to.equal(false);
     expect(isValidTagIdFormat(`tag${String.fromCharCode(127)}abc`)).to.equal(false);
+  });
+});
+
+describe('serenity/validation — hasDisallowedControlChars (LLMO-7533 §6)', () => {
+  it('returns false for ordinary prompt text', () => {
+    expect(hasDisallowedControlChars('What is your return policy?')).to.equal(false);
+  });
+
+  it('does NOT reject TAB, LF, or CR — ordinary whitespace in prompt text', () => {
+    expect(hasDisallowedControlChars('line one\nline two')).to.equal(false);
+    expect(hasDisallowedControlChars('line one\r\nline two')).to.equal(false);
+    expect(hasDisallowedControlChars('col1\tcol2')).to.equal(false);
+  });
+
+  it('does not reject unicode/multi-byte text (emoji, accents)', () => {
+    expect(hasDisallowedControlChars('café naïve 🎉🚀')).to.equal(false);
+  });
+
+  it('rejects a C0 control character other than TAB/LF/CR', () => {
+    expect(hasDisallowedControlChars(`before${String.fromCharCode(1)}after`)).to.equal(true);
+    expect(hasDisallowedControlChars(`before${String.fromCharCode(31)}after`)).to.equal(true);
+  });
+
+  it('rejects DEL', () => {
+    expect(hasDisallowedControlChars(`before${String.fromCharCode(127)}after`)).to.equal(true);
   });
 });

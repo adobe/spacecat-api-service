@@ -326,6 +326,7 @@ const routeRequiredCapabilities = {
   'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/bulk-tags': 'organization:write',
   'PATCH /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/:semrushPromptId': 'organization:write',
   'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/bulk-delete': 'organization:write',
+  'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/finalize': 'organization:write',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets': 'organization:read',
   'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets': 'organization:write',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode': 'organization:read',

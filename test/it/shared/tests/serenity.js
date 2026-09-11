@@ -241,6 +241,16 @@ export default function serenityTests(
       expect(res.body.error).to.equal('invalidRequest');
     });
 
+    // LLMO-7533 / serenity-docs#472 §4 — the finalize endpoint's own route/auth/
+    // brand-resolution wiring, proven the same way every sibling write route above
+    // is: a real request that passes auth + brand resolution and fails at the
+    // handler's own body validation.
+    it('POST /serenity/prompts/finalize 400s on an empty slices array', async () => {
+      const res = await getHttpClient().admin.post(`${base}/prompts/finalize`, { slices: [] });
+      expect(res.status).to.equal(400);
+      expect(res.body.error).to.equal('invalidRequest');
+    });
+
     it('PATCH /serenity/prompts/:id 400s when text/tags are missing', async () => {
       const res = await getHttpClient().admin.patch(`${base}/prompts/some-prompt-id`, {});
       expect(res.status).to.equal(400);
@@ -1105,6 +1115,51 @@ export default function serenityTests(
       expect(third.status).to.equal(200);
       expect(third.body.updated).to.have.lengthOf(1);
       expect(await categoriesOf()).to.deep.equal(['Features & Pricing']);
+    });
+
+    // LLMO-7533 / serenity-docs#472 §4 — the finalize endpoint's happy path against
+    // the live mock: a deferred prompt write reaches the mock, finalize resolves
+    // the slice through the same auth/project resolution prompt creation uses and
+    // reports a non-failed outcome, and calling it twice is stable. Deliberately
+    // does NOT assert that the deferred prompt becomes visible via GET /prompts
+    // afterward — an earlier version of this test did, and failed against the live
+    // mock in CI: the mock's publish_status does not visibly transition to
+    // live_with_unpublished_updates the same way a tag create does (tags.js's
+    // republish comment documents that transition for tags specifically; it does
+    // not hold for a deferred prompt write against this mock), so that assertion
+    // was pinning mock behavior this endpoint's own design doesn't control.
+    it('POST /serenity/prompts/finalize resolves the slice and reports a stable, '
+      + 'non-failed outcome across repeated calls', async () => {
+      await createUsMarket();
+      const tagId = await createCategory('Finalize');
+      const text = 'What is your return policy?';
+
+      const create = await getHttpClient().admin.post(`${base}/prompts`, {
+        deferPublish: true,
+        prompts: [{
+          text, tagIds: [tagId], geoTargetId: US_GEO, languageCode: 'en',
+        }],
+      });
+      expect(create.status).to.equal(200);
+      expect(create.body.created).to.have.lengthOf(1);
+      expect(create.body.published).to.equal(false);
+
+      const finalize = await getHttpClient().admin.post(`${base}/prompts/finalize`, {
+        slices: [{ geoTargetId: US_GEO, languageCode: 'en' }],
+      });
+      expect(finalize.status).to.equal(200);
+      expect(finalize.body.slices).to.have.lengthOf(1);
+      expect(finalize.body.slices[0]).to.include({ geoTargetId: US_GEO, languageCode: 'en' });
+      expect(finalize.body.slices[0].outcome).to.not.equal('failed');
+
+      // Idempotent: calling finalize again against the same slice is safe and
+      // still non-failed, whether the first call already confirmed it live,
+      // left it pending, or found nothing to do.
+      const again = await getHttpClient().admin.post(`${base}/prompts/finalize`, {
+        slices: [{ geoTargetId: US_GEO, languageCode: 'en' }],
+      });
+      expect(again.status).to.equal(200);
+      expect(again.body.slices[0].outcome).to.not.equal('failed');
     });
 
     // In-place edit (serenity-docs#63, gate G1): PATCH edits the prompt via the

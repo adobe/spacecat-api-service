@@ -162,6 +162,8 @@ paths:
     $ref: './prompts-v2-api.yaml#/v2-prompts-by-brand-bulk-delete'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/prompts:
     $ref: './serenity-api.yaml#/v2-serenity-prompts'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/prompts/finalize:
+    $ref: './serenity-api.yaml#/v2-serenity-prompts-finalize'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/prompts/{semrushPromptId}:
     $ref: './serenity-api.yaml#/v2-serenity-prompt-by-id'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/prompts/bulk-delete:
