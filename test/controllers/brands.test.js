@@ -200,6 +200,57 @@ describe('Brands Controller', () => {
     expect(() => BrandsController(context, loggerStub)).to.throw('Environment object required');
   });
 
+  describe('resumeBrandProvisioning (LLMO-7369)', () => {
+    const validOrg = '0d1fbce6-8b4e-4e01-9e28-2365d38ab78d';
+    const validBrand = '01a06c3a-38b6-76ba-afd1-6a09d89b2bad';
+
+    it('302-redirects to the elmo-ui brand-approval flow (default base) without reading the brand', async () => {
+      // No brand is mocked — a 302 regardless proves the redirect is dumb and
+      // non-leaking (it never checks whether the brand exists).
+      const response = await brandsController.resumeBrandProvisioning({
+        params: { spaceCatId: validOrg, brandId: validBrand },
+      });
+      expect(response.status).to.equal(302);
+      expect(response.headers.get('location')).to.equal(
+        `https://experience.adobe.com/org/${validOrg}/brands-management`,
+      );
+    });
+
+    it('uses LLMO_UI_BASE_URL when configured (trailing slash trimmed)', async () => {
+      const ctrl = BrandsController(context, loggerStub, { ...mockEnv, LLMO_UI_BASE_URL: 'https://ui.example.com/' });
+      const response = await ctrl.resumeBrandProvisioning({
+        params: { spaceCatId: validOrg, brandId: validBrand },
+      });
+      expect(response.status).to.equal(302);
+      expect(response.headers.get('location')).to.equal(
+        `https://ui.example.com/org/${validOrg}/brands-management`,
+      );
+    });
+
+    it('never reflects caller-supplied content into the destination (no open redirect)', async () => {
+      const response = await brandsController.resumeBrandProvisioning({
+        params: { spaceCatId: validOrg, brandId: validBrand },
+        // A hostile query string must not influence the Location.
+        pathInfo: { headers: {} },
+        data: { next: 'https://evil.example.com' },
+      });
+      expect(response.headers.get('location')).to.equal(
+        `https://experience.adobe.com/org/${validOrg}/brands-management`,
+      );
+    });
+
+    it('returns 400 for an invalid organization or brand id', async () => {
+      const bad1 = await brandsController.resumeBrandProvisioning({
+        params: { spaceCatId: 'not-a-uuid', brandId: validBrand },
+      });
+      expect(bad1.status).to.equal(400);
+      const bad2 = await brandsController.resumeBrandProvisioning({
+        params: { spaceCatId: validOrg, brandId: 'not-a-uuid' },
+      });
+      expect(bad2.status).to.equal(400);
+    });
+  });
+
   describe('getBrandsForOrganization', () => {
     it('returns brands for a valid organization', async () => {
       const mockBrands = [{ id: 'brand1' }, { id: 'brand2' }];
