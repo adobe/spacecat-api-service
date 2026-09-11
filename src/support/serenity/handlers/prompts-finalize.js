@@ -144,7 +144,7 @@ function outcomeFromConfirm(confirm, log) {
     return {
       outcome: FINALIZE_OUTCOME.FAILED,
       publishStatus,
-      error: confirm.status || 'initial_publish_failed',
+      error: publishStatus || 'initial_publish_failed',
     };
   }
   // PENDING — accepted (or already publishing), not confirmed live within budget.
