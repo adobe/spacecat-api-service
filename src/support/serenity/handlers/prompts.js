@@ -655,7 +655,13 @@ export async function resolveFacetedTagFilter(
   snapshot,
 ) {
   if (tagIds.length === 0) {
-    return { groups: [], candidateIds: [], compatibilityById: new Map() };
+    return {
+      groups: [],
+      candidateIds: [],
+      compatibilityById: new Map(
+        snapshot?.items.map((item) => [item.id, item.compatibility]) ?? [],
+      ),
+    };
   }
   const tree = snapshot
     ?? await readTagTreeSnapshot(transport, semrushWorkspaceId, projectId, log);
@@ -785,12 +791,16 @@ export async function listFacetedPrompts(
   },
   log,
 ) {
+  // Load the complete taxonomy even without selected facets: every tag returned
+  // by this compatibility-mode list must be classified from the same snapshot.
+  const snapshot = await readTagTreeSnapshot(transport, semrushWorkspaceId, projectId, log);
   const resolved = await resolveFacetedTagFilter(
     transport,
     semrushWorkspaceId,
     projectId,
     tagIds,
     log,
+    snapshot,
   );
   const all = await listAllProjectPrompts(transport, semrushWorkspaceId, projectId, {
     tagIds: resolved.candidateIds,
