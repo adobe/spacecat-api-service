@@ -114,6 +114,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} redirectsController - ASO dispatcher redirect-overlay controller.
  * @param {Object} auditPolicyController - Audit policy + audit scope controller.
  * @param {Object} promptSuggestionSchedulesController - LLMO prompt-suggestion schedule controller.
+ * @param {Object} oaeValidationController - The OAE validation controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -185,6 +186,7 @@ export default function getRouteHandlers(
   redirectsController,
   auditPolicyController,
   promptSuggestionSchedulesController,
+  oaeValidationController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -639,6 +641,10 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/llmo/edge-optimize-status': llmoController.checkEdgeOptimizeStatus,
     'GET /sites/:siteId/llmo/probes/edge-optimize': llmoController.checkWafConnectivity,
     'PUT /sites/:siteId/llmo/opportunities-reviewed': llmoController.markOpportunitiesReviewed,
+    // OAE validation jobs — triggered internally (e.g. the edge-deploy flow) or by other
+    // spacecat services, not a customer-facing FACS surface.
+    'POST /sites/:siteId/llmo/oae-validation/jobs': oaeValidationController.createValidationJob,
+    'GET /sites/:siteId/llmo/oae-validation/jobs/:jobId': oaeValidationController.getValidationJob,
 
     // LLMO Cloudflare Onboarding Routes
     'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/config': llmoCloudflareController.getCloudflareConfig,

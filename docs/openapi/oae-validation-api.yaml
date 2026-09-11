@@ -1,0 +1,86 @@
+oae-validation-jobs:
+  post:
+    tags:
+      - oae-validation
+    security:
+      - api_key: [ ]
+      - session_token: [ ]
+    summary: Create a new OAE validation job
+    description: |
+      Creates a new OAE (on-site experiment/on-site edge) validation job for a set of
+      suggestions and dispatches it to `spacecat-import-worker` for asynchronous processing.
+      Use the returned `jobId` to poll for results via
+      `GET /oae-validation/jobs/{jobId}`.
+    operationId: createOaeValidationJob
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/CreateOaeValidationJobRequest'
+    responses:
+      '202':
+        description: Job accepted and queued for processing
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/CreateOaeValidationJobResponse'
+      '400':
+        description: |
+          Invalid request — e.g. missing/invalid `siteId`, missing/unrecognized `type`, or
+          missing/invalid `suggestionIds`.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+      '401':
+        $ref: './responses.yaml#/401'
+      '500':
+        $ref: './responses.yaml#/500'
+oae-validation-job-status:
+  parameters:
+    - $ref: './parameters.yaml#/jobId'
+  get:
+    tags:
+      - oae-validation
+    security:
+      - api_key: [ ]
+      - session_token: [ ]
+    summary: Get OAE validation job status and results
+    description: |
+      Retrieves the per-suggestion status and outcome for an OAE validation job. The caller
+      must have access to the site that owns the job's suggestions; a job belonging to a
+      site the caller cannot access is reported as not found.
+    operationId: getOaeValidationJobStatus
+    responses:
+      '200':
+        description: Job status and per-suggestion results
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/OaeValidationJobResponse'
+      '400':
+        description: Invalid jobId format
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        description: Job not found (or the caller does not have access to its site)
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+      '500':
+        $ref: './responses.yaml#/500'
