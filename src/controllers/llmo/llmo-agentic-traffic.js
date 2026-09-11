@@ -77,6 +77,37 @@ const PLATFORM_CODE_TO_DB = {
   amazon: 'Amazon',
 };
 
+// A comma in the `platform` param signals a multi-select (Serenity). Returns the
+// trimmed non-empty tokens, or null when the value is a single value / absent —
+// which keeps the single-platform path byte-identical to before.
+function splitPlatformList(raw) {
+  if (typeof raw !== 'string' || !raw.includes(',')) {
+    return null;
+  }
+  return raw.split(',').map((t) => t.trim()).filter(Boolean);
+}
+
+// Resolves the `platform` param into exactly one of two shapes:
+//   single  → { platform: <db value|null>, platforms: null }   (unchanged, fail-open)
+//   multi   → { platform: null, platforms: <db values[]|null> } (comma list; 'all' → no filter)
+// Unknown codes are silently dropped (matches the project-wide whitelist-filter
+// convention: `platform`/`successRate` silent-drop rather than 400 — see #2290). A
+// fully-unknown list therefore collapses to null (all platforms), same as a single
+// unknown value. The scalar and array RPC params AND-intersect, so a multi selection
+// nulls the scalar to avoid narrowing.
+function parsePlatforms(raw) {
+  const tokens = splitPlatformList(raw);
+  if (!tokens) {
+    return { platform: PLATFORM_CODE_TO_DB[raw] ?? null, platforms: null };
+  }
+  // An explicit 'all' anywhere in the list means "no platform filter".
+  if (tokens.includes('all')) {
+    return { platform: null, platforms: null };
+  }
+  const mapped = [...new Set(tokens.map((t) => PLATFORM_CODE_TO_DB[t]).filter(Boolean))];
+  return { platform: null, platforms: mapped.length ? mapped : null };
+}
+
 // Re-exported for existing imports.
 export { parseAgentTypes };
 
@@ -113,10 +144,13 @@ function sanitizeDateString(value, fallback) {
 function parseAgenticTrafficParams(context) {
   const q = context.data || {};
   const defaults = defaultDateRange();
+  const { platform, platforms } = parsePlatforms(q.platform);
   return {
     startDate: sanitizeDateString(q.startDate || q.start_date, defaults.startDate),
     endDate: sanitizeDateString(q.endDate || q.end_date, defaults.endDate),
-    platform: PLATFORM_CODE_TO_DB[q.platform] ?? null,
+    platform,
+    // Additive multi-select inclusion list (Serenity). null → single/absent.
+    platforms,
     categoryName: sanitizeFilterString(q.categoryName || q.category_name),
     agentType: sanitizeFilterString(q.agentType || q.agent_type),
     // Additive inclusion list, orthogonal to single-value `agentType`. Used by URL Inspector.
@@ -132,7 +166,7 @@ function parseAgenticTrafficParams(context) {
 }
 
 function buildRpcParams(siteId, parsed) {
-  return {
+  const params = {
     p_site_id: siteId,
     p_start_date: parsed.startDate,
     p_end_date: parsed.endDate,
@@ -143,6 +177,12 @@ function buildRpcParams(siteId, parsed) {
     p_content_type: parsed.contentType,
     p_success_rate: parsed.successRate,
   };
+  // Only attach the array param for a multi-select, so single-platform requests
+  // stay byte-identical (and keep working against the pre-migration RPC signature).
+  if (parsed.platforms) {
+    params.p_platforms = parsed.platforms;
+  }
+  return params;
 }
 
 function canonicalizeExportPayload(siteId, parsed) {
@@ -155,6 +195,7 @@ function canonicalizeExportPayload(siteId, parsed) {
     startDate: parsed.startDate,
     endDate: parsed.endDate,
     platform: parsed.platform,
+    platforms: parsed.platforms,
     categoryName: parsed.categoryName,
     agentType: parsed.agentType,
     userAgent: parsed.userAgent,
@@ -1217,6 +1258,11 @@ export function createAgenticTrafficUrlBrandPresenceHandler(getSiteAndValidateAc
           p_model: parsed.platform || null,
           p_site_id: siteId,
         };
+        // Multi-select drill-down: pass the model inclusion list; keep p_model null
+        // (they AND-intersect). Only attached for multi so single stays byte-identical.
+        if (parsed.platforms) {
+          rpcParams.p_models = parsed.platforms;
+        }
 
         const { data, error } = await client.rpc(
           'rpc_brand_presence_url_detail',
