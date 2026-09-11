@@ -24,6 +24,7 @@ scripts/*
 !scripts/generate-insomnia-collection.mjs
 !scripts/reconcile-org-identity-integrity.mjs
 !scripts/reconcile-prompt-suggestion-schedules.mjs
+!scripts/reconcile-semrush-provisioning.mjs
 !scripts/serenity-job-runner-ops.mjs
 !scripts/serenity-retype-backfill.mjs
 docs/index.html
