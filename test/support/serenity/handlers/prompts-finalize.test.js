@@ -103,8 +103,24 @@ describe('finalizeProjectPublish (LLMO-7533 / serenity-docs#472 §4)', () => {
     expect(result.error).to.equal('initial_publish_failed');
     expect(errorLog).to.have.been.calledWithMatch(
       sinon.match.string,
-      sinon.match({ failedReason: 'raw upstream secret detail' }),
+      sinon.match({
+        failedReason: 'raw upstream secret detail',
+        failedReasonLength: 'raw upstream secret detail'.length,
+      }),
     );
+  });
+
+  it('bounds an oversized publishStatus value echoed back to the caller', async () => {
+    const hugeStatus = `draft-${'x'.repeat(500)}`;
+    const transport = {
+      getProjectStatus: sinon.stub().resolves({ publish_status: hugeStatus }),
+      publishProject: sinon.stub().resolves(),
+    };
+    const result = await finalizeProjectPublish(transport, WS, 'proj-1', {
+      confirmAttempts: 1, log: noopLog,
+    });
+    expect(result.publishStatus).to.have.lengthOf(200);
+    expect(result.publishStatus).to.equal(hugeStatus.slice(0, 200));
   });
 
   it('does NOT resend publish for a project already publishing — polls instead', async () => {

@@ -116,27 +116,39 @@ function assertSlices(rawSlices) {
  * @param {any} [log]
  */
 function outcomeFromConfirm(confirm, log) {
+  // `confirm.status` is Semrush's raw `publish_status` string, echoed to the
+  // caller as diagnostic context (the ticket's acceptance criteria explicitly
+  // calls for surfacing "the observed upstream status", so this deliberately
+  // is NOT collapsed to a closed enum the way `outcome` already is) — length-
+  // bounded the same way an unresolvable slice's caller-supplied fields are,
+  // since it is still upstream-controlled content.
+  const publishStatus = typeof confirm.status === 'string'
+    ? confirm.status.slice(0, MAX_ECHO_LEN)
+    : confirm.status;
   if (confirm.outcome === PUBLISH_OUTCOME.PUBLISHED) {
-    return { outcome: FINALIZE_OUTCOME.PUBLISHED, publishStatus: confirm.status };
+    return { outcome: FINALIZE_OUTCOME.PUBLISHED, publishStatus };
   }
   if (confirm.outcome === PUBLISH_OUTCOME.FAILED) {
     // `confirm.failedReason` is Semrush's raw `publishing_failed_reason` text —
     // logged server-side only, never returned to the caller verbatim (matches
     // the redaction discipline `finalizeProjectPublish`'s other failure branches
-    // use via redactUpstreamMessage).
+    // use via redactUpstreamMessage). Length is logged alongside it so an
+    // unusually large upstream payload is visible without printing it.
     if (confirm.failedReason) {
       log?.error?.('finalizeProjectPublish: publish reported failed by upstream', {
-        publishStatus: confirm.status, failedReason: confirm.failedReason,
+        publishStatus,
+        failedReason: confirm.failedReason,
+        failedReasonLength: confirm.failedReason.length,
       });
     }
     return {
       outcome: FINALIZE_OUTCOME.FAILED,
-      publishStatus: confirm.status,
+      publishStatus,
       error: confirm.status || 'initial_publish_failed',
     };
   }
   // PENDING — accepted (or already publishing), not confirmed live within budget.
-  return { outcome: FINALIZE_OUTCOME.PENDING, publishStatus: confirm.status };
+  return { outcome: FINALIZE_OUTCOME.PENDING, publishStatus };
 }
 
 /**
