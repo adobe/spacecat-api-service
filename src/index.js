@@ -71,6 +71,7 @@ import TrafficController from './controllers/paid/traffic.js';
 import SuggestionsController from './controllers/suggestions.js';
 import BrandsController from './controllers/brands.js';
 import PreflightController from './controllers/preflight.js';
+import OaeValidationController from './controllers/oae-validation.js';
 import SiteDetectionController from './controllers/site-detection.js';
 import DemoController from './controllers/demo.js';
 import ConsentBannerController from './controllers/consentBanner.js';
@@ -259,6 +260,7 @@ async function run(request, context) {
     const topPaidOpportunitiesController = TopPaidOpportunitiesController(context, context.env);
     const trafficController = TrafficController(context, log, context.env);
     const preflightController = PreflightController(context, log, context.env);
+    const oaeValidationController = OaeValidationController(context, log, context.env);
     const siteDetectionController = SiteDetectionController(context, log, context.env);
     const demoController = DemoController(context);
     const consentBannerController = ConsentBannerController(context);
@@ -378,6 +380,7 @@ async function run(request, context) {
       redirectsController,
       auditPolicyController,
       promptSuggestionSchedulesController,
+      oaeValidationController,
       launchDarklyController,
     );
 

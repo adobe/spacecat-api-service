@@ -1,3 +1,29 @@
+# [1.808.0](https://github.com/adobe/spacecat-api-service/compare/v1.807.1...v1.808.0) (2026-09-11)
+
+
+### Bug Fixes
+
+* preserve prompt tag compatibility without filters ([#3264](https://github.com/adobe/spacecat-api-service/issues/3264)) ([bd63d2d](https://github.com/adobe/spacecat-api-service/commit/bd63d2de85e95e76ef617ceccf667f1f83ebf0e3))
+
+
+### Features
+
+* add Parallel.ai, Manus, and Keenable.ai to platform code map (LLMO-7325) ([#3263](https://github.com/adobe/spacecat-api-service/issues/3263)) ([49053e7](https://github.com/adobe/spacecat-api-service/commit/49053e79b06f13e512d5eb3e27d77f076dfa8102)), closes [spacecat-audit-worker#2950](https://github.com/spacecat-audit-worker/issues/2950) [project-elmo-ui#3095](https://github.com/project-elmo-ui/issues/3095) [adobe/project-elmo-ui#3154](https://github.com/adobe/project-elmo-ui/issues/3154)
+
+## [1.807.1](https://github.com/adobe/spacecat-api-service/compare/v1.807.0...v1.807.1) (2026-09-11)
+
+
+### Bug Fixes
+
+* **serenity:** forward browser promise token to async jobs ([#3204](https://github.com/adobe/spacecat-api-service/issues/3204)) ([e551703](https://github.com/adobe/spacecat-api-service/commit/e551703e3d19a4cf0b77b762463174b09fea1e4a))
+
+# [1.807.0](https://github.com/adobe/spacecat-api-service/compare/v1.806.0...v1.807.0) (2026-09-11)
+
+
+### Features
+
+* add OAE validation jobs endpoint ([#3234](https://github.com/adobe/spacecat-api-service/issues/3234)) ([8710653](https://github.com/adobe/spacecat-api-service/commit/871065340471bb6dd436d5efc67fbaaedf954345))
+
 # [1.806.0](https://github.com/adobe/spacecat-api-service/compare/v1.805.0...v1.806.0) (2026-09-11)
 
 

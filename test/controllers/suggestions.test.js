@@ -17,6 +17,7 @@ import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import esmock from 'esmock';
+import { isValidUUID } from '@adobe/spacecat-shared-utils';
 
 import {
   ValidationError,
@@ -487,6 +488,9 @@ describe('Suggestions Controller', () => {
       }),
       getFixEntitiesBySuggestionId: sandbox.stub(),
       saveMany: sandbox.stub().resolves(),
+      batchGetByKeys: sandbox.stub().callsFake(async (keys) => ({
+        data: keys.map(() => ({ getOpportunityId: () => OPPORTUNITY_ID })),
+      })),
     };
 
     mockSuggestionGrant = {
@@ -8471,6 +8475,79 @@ describe('Suggestions Controller', () => {
       const body = await response.json();
       expect(body.metadata.success).to.equal(0);
       expect(body.metadata.failed).to.equal(1);
+    });
+
+    describe('OAE routing-validation job on deploy', () => {
+      it('queues a routing-validation job scoped to highImpactSuggestionIds and records the jobId', async () => {
+        mockConfiguration.findLatest.resolves({
+          getQueues: () => ({ imports: 'https://imports-queue' }),
+        });
+
+        const response = await suggestionsController.deploySuggestionToEdge({
+          ...context,
+          params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+          data: {
+            suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]],
+            metadata: { highImpactSuggestionIds: [SUGGESTION_IDS[0]] },
+          },
+          env: asyncExperimentEnv,
+        });
+
+        expect(response.status).to.equal(207);
+
+        expect(mockSqs.sendMessage).to.have.been.calledWith(
+          'https://imports-queue',
+          sinon.match({
+            type: 'oae-validation',
+            siteId: SITE_ID,
+            validationType: 'routing',
+            suggestionIds: [SUGGESTION_IDS[0]],
+          }),
+        );
+        const sqsPayload = mockSqs.sendMessage.firstCall.args[1];
+        expect(isValidUUID(sqsPayload.jobId)).to.equal(true);
+
+        const createArg = mockSuggestionDataAccess.GeoExperiment.create.firstCall.args[0];
+        expect(createArg.metadata.oaeValidationJobs.routing).to.deep.equal([sqsPayload.jobId]);
+      });
+
+      it('does not block the deploy when queuing the routing-validation job fails', async () => {
+        mockConfiguration.findLatest.rejects(new Error('configuration lookup failed'));
+
+        const response = await suggestionsController.deploySuggestionToEdge({
+          ...context,
+          params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+          data: {
+            suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]],
+            metadata: { highImpactSuggestionIds: [SUGGESTION_IDS[0]] },
+          },
+          env: asyncExperimentEnv,
+        });
+
+        expect(response.status).to.equal(207);
+        expect(mockSqs.sendMessage).to.not.have.been.called;
+        const createArg = mockSuggestionDataAccess.GeoExperiment.create.firstCall.args[0];
+        expect(createArg.metadata.oaeValidationJobs).to.equal(undefined);
+        expect(context.log.error).to.have.been.calledWithMatch(/failed to queue OAE routing-validation job/);
+      });
+
+      it('does not create a routing-validation job when highImpactSuggestionIds is absent', async () => {
+        mockConfiguration.findLatest.resolves({
+          getQueues: () => ({ imports: 'https://imports-queue' }),
+        });
+
+        const response = await suggestionsController.deploySuggestionToEdge({
+          ...context,
+          params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+          data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]] },
+          env: asyncExperimentEnv,
+        });
+
+        expect(response.status).to.equal(207);
+        expect(mockSqs.sendMessage).to.not.have.been.called;
+        const createArg = mockSuggestionDataAccess.GeoExperiment.create.firstCall.args[0];
+        expect(createArg.metadata.oaeValidationJobs).to.equal(undefined);
+      });
     });
 
     describe('subpath scope guard', () => {

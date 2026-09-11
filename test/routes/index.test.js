@@ -673,6 +673,11 @@ describe('getRouteHandlers', () => {
     createSchedules: sinon.stub(),
   };
 
+  const mockOaeValidationController = {
+    createValidationJob: sinon.stub(),
+    getValidationJob: sinon.stub(),
+  };
+
   const mockLaunchDarklyController = {
     getFlags: sinon.stub(),
   };
@@ -747,6 +752,7 @@ describe('getRouteHandlers', () => {
       mockRedirectsController,
       mockAuditPolicyController,
       mockPromptSuggestionSchedulesController,
+      mockOaeValidationController,
       mockLaunchDarklyController,
     );
 
@@ -1348,6 +1354,8 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/llmo/strategy',
       'PUT /sites/:siteId/llmo/strategy',
       'PUT /sites/:siteId/llmo/opportunities-reviewed',
+      'POST /sites/:siteId/llmo/oae-validation/jobs',
+      'GET /sites/:siteId/llmo/oae-validation/jobs/:jobId',
       'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/config',
       'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/accounts',
       'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/zones',
