@@ -201,6 +201,7 @@ const routeFacsCapabilities = {
     'POST /hooks/site-detection/rum/:hookSecret', // hookSecret in path
     'POST /webhooks/github', // HMAC-signed webhook
     'POST /slack/events', // Slack signature verification (slackSignatureWrapper)
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/resume', // LLMO-7369 anonymous backend-owned redirect (no FACS)
     'POST /slack/channels/invite-by-user-id', // Slack-internal
     'GET /trigger', // internal scheduler
 

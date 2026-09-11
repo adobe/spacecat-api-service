@@ -39,6 +39,7 @@ import {
 import { upsertFeatureFlag } from '../../support/feature-flags-storage.js';
 import { detectCdnForDomain } from '../../support/cdn-detection.js';
 import { upsertBrand } from '../../support/brands-storage.js';
+import { isSerenityActiveForOrg } from '../../support/serenity/serenity-active.js';
 import { assertSiteOrgReassignmentSafe } from '../../support/site-org-reassignment.js';
 import {
   PROMPT_SUGGESTION_PIPELINES,
@@ -1409,6 +1410,11 @@ export async function activateBrandAndGeneratePrompts({
   let promptGenerationError = null;
   let promptSuggestionSchedules = null;
   let promptSuggestionSchedulesTimedOut = false;
+  // LLMO-7369: signals for the Slack/HTTP caller so it can distinguish a fully
+  // onboarded brand from a Serenity brand that still needs IMS-authenticated
+  // Semrush provisioning (and build the authenticated resume hand-off).
+  let semrushProvisioningPending = false;
+  let provisionedBrandId = null;
 
   if (onboardingMode === LLMO_ONBOARDING_MODE_V2) {
     const postgrestClient = context.dataAccess?.services?.postgrestClient;
@@ -1427,7 +1433,7 @@ export async function activateBrandAndGeneratePrompts({
     try {
       const { data: existingBrand, error: lookupError } = await postgrestClient
         .from('brands')
-        .select('id, site_id')
+        .select('id, site_id, status')
         .eq('organization_id', organization.getId())
         .eq('name', brandName.trim())
         .maybeSingle();
@@ -1452,11 +1458,22 @@ export async function activateBrandAndGeneratePrompts({
         // DEFAULT_BRAND_REGION placeholder (consistent with the V2 config +
         // brandAliases, both overwritten by Brandalf's async result).
         const stubRegions = onboardingStubRegions(region);
-        await upsertBrand({
+        // LLMO-7369: for a Serenity-active org the Semrush sub-workspace/project
+        // cannot be provisioned from this context (Slack/webhook carries no IMS
+        // identity), so a NET-NEW (or not-yet-active) brand must NOT be presented
+        // as a complete active brand. Persist it as `pending` — a durable,
+        // resumable, reconcilable "awaiting IMS provisioning" record that a
+        // Serenity human completes via the authenticated /serenity/activate path.
+        // An already-active brand is left active (never demoted here — that would
+        // hit the demotion guard; the reconcile path repairs stuck actives).
+        // Non-Serenity orgs keep the historical `active` write (no Semrush).
+        const serenityActive = await isSerenityActiveForOrg(context, organization.getId(), log);
+        const brandStatus = (serenityActive && existingBrand?.status !== 'active') ? 'pending' : 'active';
+        const upserted = await upsertBrand({
           organizationId: organization.getId(),
           brand: {
             name: brandName.trim(),
-            status: 'active',
+            status: brandStatus,
             baseSiteId: site.getId(),
             region: stubRegions,
             urls: [{ value: baseURL, type: 'base' }],
@@ -1466,7 +1483,10 @@ export async function activateBrandAndGeneratePrompts({
           updatedBy: 'llmo-onboarding',
           log,
         });
+        provisionedBrandId = upserted?.id ?? existingBrand?.id ?? null;
+        semrushProvisioningPending = brandStatus === 'pending';
         log.info(`Created initial brand "${brandName}" in normalized table for site ${site.getId()}`);
+        log.info(`Initial brand "${brandName}" status=${brandStatus} (semrushProvisioningPending=${semrushProvisioningPending})`);
       }
     } catch (brandError) {
       log.warn(`Failed to create initial brand in normalized table: ${brandError.message}`);
@@ -1654,6 +1674,9 @@ export async function activateBrandAndGeneratePrompts({
     promptSuggestionSchedules,
     promptSuggestionSchedulesTimedOut,
     requiredWorkFailed,
+    // LLMO-7369
+    semrushProvisioningPending,
+    brandId: provisionedBrandId,
   };
 }
 

@@ -457,17 +457,44 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
     // already streamed to this thread in real time as they happened; this final banner must
     // not override that with an unconditional checkmark when required work actually failed.
     const requiredWorkFailed = result.brandActivation?.requiredWorkFailed ?? false;
+    // LLMO-7369: for a Serenity-active org the brand was created `pending` because
+    // Semrush provisioning needs an IMS identity this context does not have.
+    const semrushPending = result.brandActivation?.semrushProvisioningPending ?? false;
+    const pendingBrandId = result.brandActivation?.brandId ?? null;
+    const spaceCatOrgId = site.getOrganizationId?.();
+    // Backend-owned authenticated resume hand-off: link to the spacecat resume
+    // endpoint (which 302s to the elmo-ui brand-approval flow) so no elmo-ui URL
+    // contract is hardcoded in Slack.
+    const apiBase = env.SPACECAT_API_BASE_URL;
+    const resumeLink = (semrushPending && pendingBrandId && spaceCatOrgId && apiBase)
+      ? `${apiBase.replace(/\/$/, '')}/v2/orgs/${spaceCatOrgId}/brands/${pendingBrandId}/resume`
+      : null;
     const regionLine = region ? `\n:globe_with_meridians: *Region:* ${region}` : '';
-    const statusLine = requiredWorkFailed
-      ? ':warning: *LLMO onboarding completed with warnings* — see the messages above for what needs manual follow-up.'
-      : ':white_check_mark: *LLMO onboarding completed successfully!*';
+    let statusLine;
+    if (requiredWorkFailed) {
+      statusLine = ':warning: *LLMO onboarding completed with warnings* — see the messages above for what needs manual follow-up.';
+    } else if (semrushPending) {
+      // LLMO-7369 AC3: must not claim Semrush-backed onboarding is complete when it is not.
+      statusLine = ':hourglass_flowing_sand: *Brandalf/DRS onboarding submitted — Semrush provisioning still required.*';
+    } else {
+      statusLine = ':white_check_mark: *LLMO onboarding completed successfully!*';
+    }
+    // LLMO-7369 AC3/AC4: tell the operator Semrush is not yet provisioned and hand
+    // off to the authenticated UI to complete it as themselves.
+    const semrushBlock = semrushPending
+      ? `\n\n:hourglass_flowing_sand: *Semrush provisioning is pending* — this brand is *not yet usable* in Brand Visibility (no Semrush sub-workspace/project yet), because the Slack context has no IMS identity to provision one.${
+        resumeLink
+          ? `\n:arrow_right: *Complete provisioning (sign-in required):* ${resumeLink}\nOpen the link while signed in, then *Approve* the pending brand to provision Semrush as yourself.`
+          : '\n:arrow_right: Complete provisioning from the authenticated Brands UI: open Brand Visibility while signed in and *Approve* the pending brand.'
+      }`
+      : '';
     const message = `${statusLine}
 
 :link: *Site:* ${baseURL}
 :identification_card: *Site ID:* ${siteId}
 :file_folder: *Data Folder:* ${dataFolder}
 :label: *Brand:* ${brandName}
-:identification_card: *IMS Org ID:* ${imsOrgId}${regionLine}
+:identification_card: *IMS Org ID:* ${imsOrgId}${regionLine}${semrushBlock}
 
 The LLMO Customer Analysis handler has been triggered. It will take a few minutes to complete.`;
 

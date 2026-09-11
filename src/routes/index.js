@@ -242,6 +242,9 @@ export default function getRouteHandlers(
     'PATCH /v2/orgs/:spaceCatId/brands/:brandId/status': brandsController.transitionBrandStatusForOrg,
     'DELETE /v2/orgs/:spaceCatId/brands/:brandId': brandsController.deleteBrandForOrg,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/activate': brandsController.activateBrandForOrg,
+    // LLMO-7369: anonymous backend-owned hand-off (see anonymousEndpoints in index.js).
+    // Redirects a Slack-clicked link to the authenticated elmo-ui brand-approval flow.
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/resume': brandsController.resumeBrandProvisioning,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts': serenityController.listPrompts,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts': serenityController.createPrompts,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/bulk-tags': serenityController.bulkTagPrompts,

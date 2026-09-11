@@ -3063,7 +3063,38 @@ function BrandsController(ctx, log, env) {
     }
   };
 
+  /**
+   * LLMO-7369 — GET /v2/orgs/:spaceCatId/brands/:brandId/resume
+   *
+   * Backend-owned, anonymous (clicked from a Slack message, which carries no IMS
+   * auth) fixed-destination redirect to the authenticated elmo-ui brand-approval
+   * flow, where a signed-in Serenity user completes Semrush provisioning as
+   * themselves via POST /serenity/activate.
+   *
+   * Deliberately side-effect-free and non-leaking: it does NOT read the brand
+   * (so it reveals nothing about whether the brand exists), never reflects any
+   * caller-supplied query/content into the destination (no open-redirect),
+   * validates the ids, and is idempotent (safe to click before or after
+   * provisioning). All real authorization happens at the elmo-ui + /serenity/
+   * activate step. The elmo-ui route contract lives ONLY here (one place),
+   * keyed off the configured base — Slack never encodes a UI URL.
+   */
+  const resumeBrandProvisioning = async (context) => {
+    const { spaceCatId, brandId } = context.params || {};
+    if (!isValidUUID(spaceCatId) || !isValidUUID(brandId)) {
+      return badRequest('Invalid organization or brand id.');
+    }
+    // Destination built purely from a configured base + validated ids — never
+    // from request-supplied content. Set LLMO_UI_BASE_URL to the elmo-ui app base
+    // for the environment (falls back to EXPERIENCE_URL).
+    const base = (env.LLMO_UI_BASE_URL || env.EXPERIENCE_URL || 'https://experience.adobe.com')
+      .replace(/\/$/, '');
+    const destination = `${base}/org/${spaceCatId}/brands-management`;
+    return createResponse('', 302, { location: destination });
+  };
+
   return {
+    resumeBrandProvisioning,
     getBrandsForOrganization,
     getBrandGuidelinesForSite,
     getBrandForOrg,

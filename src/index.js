@@ -506,7 +506,7 @@ const wrappedMain = wrap(run)
     // `anonymousEndpoints` is picked up. Declaring it now is forward-safe, not a behaviour
     // change: the option replaces only the exact-match route list -- the unconditional OPTIONS
     // and `POST /hooks/site-detection/*` bypasses are separate clauses it does not touch.
-    anonymousEndpoints: ['POST /slack/events'],
+    anonymousEndpoints: ['POST /slack/events', 'GET /v2/orgs/:spaceCatId/brands/:brandId/resume'],
   })
   .with(s2sAuthWrapper, { routeCapabilities: routeRequiredCapabilities });
 

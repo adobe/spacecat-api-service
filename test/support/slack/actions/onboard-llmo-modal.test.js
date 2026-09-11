@@ -510,6 +510,60 @@ describe('onboard-llmo-modal', () => {
       expect(triggerBrandProfileAgentStub).to.have.been.calledOnce;
     });
 
+    it('LLMO-7369: posts the Semrush-pending hand-off (not a success banner) with a resume link for a Serenity org', async () => {
+      const mockSite = createDefaultMockSite(sandbox);
+      const lambdaCtx = createDefaultMockLambdaCtx(sandbox, { mockSite });
+      lambdaCtx.env.SPACECAT_API_BASE_URL = 'https://api.example.com';
+      const slackCtx = createDefaultMockSlackCtx(sandbox);
+      const sayStub = slackCtx.say;
+
+      const performLlmoOnboardingStub = sandbox.stub().resolves({
+        site: mockSite,
+        siteId: 'site123',
+        organizationId: 'org123',
+        baseURL: 'https://example.com',
+        dataFolder: 'example-com',
+        message: 'LLMO onboarding completed successfully',
+        brandActivation: {
+          requiredWorkFailed: false,
+          semrushProvisioningPending: true,
+          brandId: 'brand-123',
+        },
+      });
+
+      const modalPending = await esmock('../../../../src/support/slack/actions/onboard-llmo-modal.js', {
+        '../../../../src/controllers/llmo/llmo-onboarding.js': {
+          performLlmoOnboarding: performLlmoOnboardingStub,
+          validateSiteNotOnboarded: sandbox.stub().resolves({ isValid: true }),
+          generateDataFolder: sandbox.stub().returns('example-com'),
+        },
+        '../../../../src/utils/slack/base.js': sharedSlackMock,
+        '../../../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: (...args) => triggerBrandProfileAgentStub(...args),
+        },
+      });
+
+      await modalPending.onboardSite(
+        {
+          baseURL: 'https://example.com',
+          brandName: 'Test Brand',
+          imsOrgId: 'ABC123@AdobeOrg',
+          deliveryType: 'aem_edge',
+        },
+        lambdaCtx,
+        slackCtx,
+      );
+
+      // AC3: must NOT claim complete; must show the pending hand-off variant.
+      expect(sayStub).to.not.have.been.calledWith(sinon.match(':white_check_mark: *LLMO onboarding completed successfully!*'));
+      expect(sayStub).to.have.been.calledWith(sinon.match('Semrush provisioning still required'));
+      expect(sayStub).to.have.been.calledWith(sinon.match('Semrush provisioning is pending'));
+      // AC4: backend-owned authenticated resume link.
+      expect(sayStub).to.have.been.calledWith(sinon.match(
+        'https://api.example.com/v2/orgs/org123/brands/brand-123/resume',
+      ));
+    });
+
     it('should surface region in the success message when supplied (LLMO-4683)', async () => {
       const input = {
         baseURL: 'https://example.com',

@@ -306,6 +306,12 @@ describe('LLMO Onboarding Functions', () => {
     deps['../../../src/support/brands-storage.js'] = {
       upsertBrand: options.mockUpsertBrand || sinon.stub().resolves({ id: 'brand-123', name: 'Test Brand' }),
     };
+    // LLMO-7369: default to non-Serenity (brand created `active`, historical
+    // behavior). Override via options.mockIsSerenityActiveForOrg to exercise the
+    // Serenity `pending` (awaiting-provisioning) path.
+    deps['../../../src/support/serenity/serenity-active.js'] = {
+      isSerenityActiveForOrg: options.mockIsSerenityActiveForOrg || sinon.stub().resolves(false),
+    };
 
     deps['../../../src/support/cdn-detection.js'] = {
       detectCdnForDomain: options.mockDetectCdnForDomain || sinon.stub().resolves(null),
@@ -6581,6 +6587,45 @@ describe('LLMO Onboarding Functions', () => {
       expect(errorLog).to.include('status=503');
       // Onboarding still completed (Brandalf fired, resolve did not throw).
       expect(instance.submitJob).to.have.been.calledOnce;
+    });
+
+    it('LLMO-7369: creates the brand as pending for a Serenity-active org and signals provisioning pending', async () => {
+      const mockUpsertBrand = sandbox.stub().resolves({ id: 'brand-123', name: 'Test Brand' });
+      const { activateBrandAndGeneratePrompts } = await esmockOnboarding(
+        createCommonEsmockDependencies({
+          mockDrsClient: createMockDrsClient(sandbox),
+          mockUpsertBrand,
+          mockIsSerenityActiveForOrg: sandbox.stub().resolves(true),
+        }),
+      );
+
+      const context = buildV2Context();
+      const result = await activateBrandAndGeneratePrompts(buildV2Params(context));
+
+      // Brand persisted as `pending` (awaiting IMS provisioning), never a
+      // misleading complete `active` brand with no Semrush sub-workspace.
+      expect(mockUpsertBrand).to.have.been.calledOnce;
+      expect(mockUpsertBrand.firstCall.args[0].brand).to.include({ status: 'pending' });
+      // Signals for the Slack authenticated hand-off.
+      expect(result.semrushProvisioningPending).to.equal(true);
+      expect(result.brandId).to.equal('brand-123');
+    });
+
+    it('LLMO-7369: creates the brand as active (no provisioning-pending) for a non-Serenity org', async () => {
+      const mockUpsertBrand = sandbox.stub().resolves({ id: 'brand-123', name: 'Test Brand' });
+      const { activateBrandAndGeneratePrompts } = await esmockOnboarding(
+        createCommonEsmockDependencies({
+          mockDrsClient: createMockDrsClient(sandbox),
+          mockUpsertBrand,
+          mockIsSerenityActiveForOrg: sandbox.stub().resolves(false),
+        }),
+      );
+
+      const context = buildV2Context();
+      const result = await activateBrandAndGeneratePrompts(buildV2Params(context));
+
+      expect(mockUpsertBrand.firstCall.args[0].brand).to.include({ status: 'active' });
+      expect(result.semrushProvisioningPending).to.equal(false);
     });
 
     it('does not abort onboarding when DrsClient.createFrom throws (best-effort contract)', async () => {
