@@ -628,6 +628,62 @@ describe('handlers/prompts.js — handleListPrompts', () => {
     );
   });
 
+  it('loads one complete taxonomy and returns authoritative compatibility without selected facets', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-faceted-empty-tags', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(project);
+    const levels = dimensionTreeLevels();
+    levels[TAG_IDS.categoryRoot] = [
+      ...levels[TAG_IDS.categoryRoot],
+      {
+        id: 'read-only-category',
+        name: 'Read__Only',
+        parent_id: TAG_IDS.categoryRoot,
+        path: [{ id: TAG_IDS.categoryRoot, name: 'category' }],
+      },
+    ];
+    const listProjectTags = makeListProjectTagsStub(levels);
+    const transport = {
+      listProjectTags,
+      listPromptsByTags: sinon.stub().resolves({
+        items: [{
+          id: 'sem-1',
+          name: 'prompt',
+          tags: [
+            {
+              id: TAG_IDS.categoryRunningShoes,
+              name: 'Running Shoes',
+              parent_id: TAG_IDS.categoryRoot,
+              path: [{ id: TAG_IDS.categoryRoot, name: 'category' }],
+            },
+            {
+              id: 'read-only-category',
+              name: 'Read__Only',
+              parent_id: TAG_IDS.categoryRoot,
+              path: [{ id: TAG_IDS.categoryRoot, name: 'category' }],
+            },
+          ],
+        }],
+      }),
+    };
+
+    const result = await handleListPrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      geoTargetId: 2840,
+      languageCode: 'en',
+      tagFilterMode: 'faceted-v1',
+    });
+
+    expect(result.items[0].tags.map((tag) => tag.compatibility)).to.deep.equal([
+      { state: 'canonical', reason: null },
+      { state: 'readOnly', reason: 'separatorInName' },
+    ]);
+    // One complete snapshot walks each populated tree level once. The fixture
+    // has roots, category, intent, origin, type, and one category child level.
+    expect(listProjectTags).to.have.callCount(6);
+  });
+
   it('buildTagsOf: skips null/non-object entries and objects without name; coerces numeric id', async () => {
     const project = makeProject({
       semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
