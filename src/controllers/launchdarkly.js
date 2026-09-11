@@ -18,6 +18,7 @@ import AccessControlUtil from '../support/access-control-util.js';
 const LD_FF_PROJECT_NAME = 'experience-success-studio';
 const LD_API_TOKEN_ENV_VAR = 'LD_EXPERIENCE_SUCCESS_API_TOKEN';
 const LD_API_BASE_URL = 'https://app.launchdarkly.com';
+const LD_FLAGS_PATH = `/api/v2/flags/${encodeURIComponent(LD_FF_PROJECT_NAME)}`;
 // LD's default page size is 20; ask for the max per page to minimize round trips.
 const LD_PAGE_LIMIT = 50;
 // Safety bound on pagination follow — LD projects here run in the low hundreds
@@ -29,11 +30,12 @@ const MAX_PAGES = 50;
  * Fetches every flag for the project, following LaunchDarkly's `_links.next`
  * pagination until exhausted (LD paginates "list flags" at 20/page by default).
  * @param {string} apiToken - LaunchDarkly API token
+ * @param {object} log - Logger
  * @returns {Promise<object[]>} All flag objects across all pages
  */
-async function fetchAllFlags(apiToken) {
+async function fetchAllFlags(apiToken, log) {
   const items = [];
-  let path = `/api/v2/flags/${encodeURIComponent(LD_FF_PROJECT_NAME)}?limit=${LD_PAGE_LIMIT}`;
+  let path = `${LD_FLAGS_PATH}?limit=${LD_PAGE_LIMIT}`;
 
   for (let page = 0; path && page < MAX_PAGES; page += 1) {
     // eslint-disable-next-line no-await-in-loop
@@ -41,20 +43,34 @@ async function fetchAllFlags(apiToken) {
       method: 'GET',
       headers: { Authorization: apiToken },
     });
-    // eslint-disable-next-line no-await-in-loop
-    const body = await response.json();
 
     if (!response.ok) {
+      // Error bodies aren't guaranteed to be JSON (e.g. an upstream 502 HTML page),
+      // so don't risk a JSON.parse failure masking the real HTTP status.
       const error = new Error(`LaunchDarkly API error: ${response.status} ${response.statusText}`);
       error.status = response.status;
       throw error;
     }
 
+    // eslint-disable-next-line no-await-in-loop
+    const body = await response.json();
     items.push(...(body.items ?? []));
+
     // LD's response envelope names this field `_links` — destructure-rename sidesteps
     // the no-underscore-dangle lint rule for this external, non-negotiable name.
     const { _links: links } = body;
-    path = links?.next?.href ?? null;
+    const nextHref = links?.next?.href ?? null;
+    // Defense-in-depth: only follow a pagination link that stays within the flags
+    // path we requested. The LD API token would otherwise be sent to whatever
+    // path a tampered/unexpected response pointed at.
+    if (nextHref && !nextHref.startsWith(LD_FLAGS_PATH)) {
+      throw new Error(`Unexpected LaunchDarkly pagination path: ${nextHref}`);
+    }
+    path = nextHref;
+  }
+
+  if (path) {
+    log.warn(`LaunchDarkly flags pagination stopped at ${MAX_PAGES} pages with more remaining for project ${LD_FF_PROJECT_NAME}`);
   }
 
   return items;
@@ -108,7 +124,7 @@ function LaunchDarklyController(ctx) {
     }
 
     try {
-      const flags = await fetchAllFlags(apiToken);
+      const flags = await fetchAllFlags(apiToken, log);
       return ok({ items: flags.map(toFlagSummary), totalCount: flags.length });
     } catch (e) {
       log.error(`Error fetching LaunchDarkly flags for project ${LD_FF_PROJECT_NAME}: ${e.message}`);

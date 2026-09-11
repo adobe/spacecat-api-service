@@ -54,7 +54,7 @@ describe('LaunchDarklyController', () => {
 
     baseCtx = {
       env: { LD_EXPERIENCE_SUCCESS_API_TOKEN: 'test-token' },
-      log: { error: sandbox.stub() },
+      log: { error: sandbox.stub(), warn: sandbox.stub() },
       attributes: { authInfo: { isAdmin: () => true } },
     };
     controller = LaunchDarklyController(baseCtx);
@@ -146,6 +146,40 @@ describe('LaunchDarklyController', () => {
       const body = await resp.json();
       // JSON serialization drops the `value` key entirely when it's undefined.
       expect(body.items).to.deep.equal([{ key: 'FF_no-variations' }]);
+    });
+
+    it('rejects a pagination link that escapes the expected flags path', async () => {
+      sandbox.stub(global, 'fetch').resolves({
+        ok: true,
+        status: 200,
+        json: async () => ldPage(
+          [{ key: 'flag-1', variations: [{ value: true }] }],
+          'https://evil.example.com/steal-token',
+        ),
+      });
+      const resp = await controller.getFlags(baseCtx);
+      expect(resp.status).to.equal(STATUS_INTERNAL_SERVER_ERROR);
+      expect(baseCtx.log.error).to.have.been.calledWithMatch(/Unexpected LaunchDarkly pagination path/);
+    });
+
+    it('stops after the page cap and logs a warning when more pages remain', async () => {
+      const fetchStub = sandbox.stub(global, 'fetch').callsFake(() => Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => ldPage(
+          [{ key: 'flag', variations: [{ value: true }] }],
+          '/api/v2/flags/experience-success-studio?limit=50&offset=next',
+        ),
+      }));
+
+      const resp = await controller.getFlags(baseCtx);
+
+      // Matches MAX_PAGES in src/controllers/launchdarkly.js.
+      expect(fetchStub.callCount).to.equal(50);
+      expect(resp.status).to.equal(STATUS_OK);
+      const body = await resp.json();
+      expect(body.totalCount).to.equal(50);
+      expect(baseCtx.log.warn).to.have.been.calledWithMatch(/pagination stopped at 50 pages/);
     });
 
     it('returns 500 when LaunchDarkly responds with an error status', async () => {
