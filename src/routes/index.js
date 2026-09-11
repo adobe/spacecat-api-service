@@ -115,6 +115,7 @@ function isStaticRoute(routePattern) {
  * @param {Object} auditPolicyController - Audit policy + audit scope controller.
  * @param {Object} promptSuggestionSchedulesController - LLMO prompt-suggestion schedule controller.
  * @param {Object} oaeValidationController - The OAE validation controller.
+ * @param {Object} launchDarklyController - Admin-only LaunchDarkly flags summary controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -187,6 +188,7 @@ export default function getRouteHandlers(
   auditPolicyController,
   promptSuggestionSchedulesController,
   oaeValidationController,
+  launchDarklyController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -517,6 +519,7 @@ export default function getRouteHandlers(
     'DELETE /tools/api-keys/:id': apiKeyController.deleteApiKey,
     'GET /tools/api-keys': apiKeyController.getApiKeys,
     'GET /tools/proxy': proxyController.getPreview,
+    'GET /tools/launchdarkly/flags': launchDarklyController.getFlags,
     'GET /monitoring/drs-bp-pg-audit': drsBpPgAuditController.getProjectionAudit,
 
     // Hybrid permission model — state-layer management + capability
