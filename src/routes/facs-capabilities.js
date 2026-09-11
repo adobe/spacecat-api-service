@@ -198,6 +198,8 @@ const routeFacsCapabilities = {
     'POST /webhooks/github', // HMAC-signed webhook
     'POST /slack/events', // Slack signature verification (slackSignatureWrapper)
     'GET /v2/orgs/:spaceCatId/brands/:brandId/resume', // LLMO-7369 anonymous backend-owned redirect (no FACS)
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/authorize', // LLMO-7369 Path A anonymous authorize-start (no FACS)
+    'GET /auth/ims/callback', // LLMO-7369 Path A anonymous IMS OAuth callback (no FACS)
     'POST /slack/channels/invite-by-user-id', // Slack-internal
     'GET /trigger', // internal scheduler
 

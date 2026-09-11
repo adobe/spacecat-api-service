@@ -24,6 +24,7 @@ import {
   enableImports,
 } from '../../../controllers/llmo/llmo-onboarding.js';
 import { triggerBrandProfileAgent } from '../../brand-profile-trigger.js';
+import { isOnestopAuthEnabled } from '../../ims-oauth.js';
 import { assertSiteOrgReassignmentSafe } from '../../site-org-reassignment.js';
 
 // LLMO-4683: ISO 3166-1 alpha-2 region for the onboarding modal.
@@ -462,13 +463,21 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
     const semrushPending = result.brandActivation?.semrushProvisioningPending ?? false;
     const pendingBrandId = result.brandActivation?.brandId ?? null;
     const spaceCatOrgId = site.getOrganizationId?.();
-    // Backend-owned authenticated resume hand-off: link to the spacecat resume
-    // endpoint (which 302s to the elmo-ui brand-approval flow) so no elmo-ui URL
-    // contract is hardcoded in Slack.
+    // Backend-owned authenticated hand-off. When Path A (interactive IMS OAuth) is enabled,
+    // link to the one-stop `/authorize` endpoint (sign in once -> auto-provision -> result in
+    // Slack). Otherwise link to the `/resume` redirect (two-step: complete in the elmo-ui
+    // brand-approval flow). Either way no elmo-ui URL contract is hardcoded in Slack.
     const apiBase = env.SPACECAT_API_BASE_URL;
-    const resumeLink = (semrushPending && pendingBrandId && spaceCatOrgId && apiBase)
-      ? `${apiBase.replace(/\/$/, '')}/v2/orgs/${spaceCatOrgId}/brands/${pendingBrandId}/resume`
-      : null;
+    const onestop = isOnestopAuthEnabled(env);
+    let resumeLink = null;
+    if (semrushPending && pendingBrandId && spaceCatOrgId && apiBase) {
+      const b = apiBase.replace(/\/$/, '');
+      resumeLink = onestop
+        ? `${b}/v2/orgs/${spaceCatOrgId}/brands/${pendingBrandId}/authorize`
+          + `?channel=${encodeURIComponent(slackCtx.channelId || '')}`
+          + `&thread=${encodeURIComponent(slackCtx.threadTs || '')}`
+        : `${b}/v2/orgs/${spaceCatOrgId}/brands/${pendingBrandId}/resume`;
+    }
     const regionLine = region ? `\n:globe_with_meridians: *Region:* ${region}` : '';
     let statusLine;
     if (requiredWorkFailed) {
@@ -483,9 +492,14 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
     // off to the authenticated UI to complete it as themselves.
     const semrushBlock = semrushPending
       ? `\n\n:hourglass_flowing_sand: *Semrush provisioning is pending* — this brand is *not yet usable* in Brand Visibility (no Semrush sub-workspace/project yet), because the Slack context has no IMS identity to provision one.${
-        resumeLink
-          ? `\n:arrow_right: *Complete provisioning (sign-in required):* ${resumeLink}\nOpen the link while signed in, then *Approve* the pending brand to provision Semrush as yourself.`
-          : '\n:arrow_right: Complete provisioning from the authenticated Brands UI: open Brand Visibility while signed in and *Approve* the pending brand.'
+        (() => {
+          if (!resumeLink) {
+            return '\n:arrow_right: Complete provisioning from the authenticated Brands UI: open Brand Visibility while signed in and *Approve* the pending brand.';
+          }
+          return onestop
+            ? `\n:arrow_right: *Authorize & provision (sign-in):* ${resumeLink}\nSign in once; provisioning runs automatically and the result is posted here.`
+            : `\n:arrow_right: *Complete provisioning (sign-in required):* ${resumeLink}\nOpen the link while signed in, then *Approve* the pending brand to provision Semrush as yourself.`;
+        })()
       }`
       : '';
     const message = `${statusLine}

@@ -251,6 +251,67 @@ describe('Brands Controller', () => {
     });
   });
 
+  describe('Path A OAuth: startBrandProvisioningAuth / handleImsOnboardingCallback (LLMO-7369)', () => {
+    const validOrg = '0d1fbce6-8b4e-4e01-9e28-2365d38ab78d';
+    const validBrand = '01a06c3a-38b6-76ba-afd1-6a09d89b2bad';
+    const enabledEnv = {
+      ...mockEnv,
+      IMS_OAUTH_CLIENT_ID: 'client-abc',
+      IMS_OAUTH_CLIENT_SECRET: 'secret-xyz',
+      IMS_OAUTH_STATE_SECRET: 'state-secret',
+      SPACECAT_API_BASE_URL: 'https://api.example.com',
+    };
+    const withQuery = (raw) => ({ invocation: { event: { rawQueryString: raw } } });
+
+    it('startBrandProvisioningAuth: 404 when Path A is disabled (default, no OAuth client)', async () => {
+      const res = await brandsController.startBrandProvisioningAuth({
+        params: { spaceCatId: validOrg, brandId: validBrand },
+      });
+      expect(res.status).to.equal(404);
+    });
+
+    it('startBrandProvisioningAuth: 302 to the IMS authorize URL when enabled', async () => {
+      const ctrl = BrandsController(context, loggerStub, enabledEnv);
+      const res = await ctrl.startBrandProvisioningAuth({
+        params: { spaceCatId: validOrg, brandId: validBrand },
+        ...withQuery('channel=C123&thread=1.2'),
+      });
+      expect(res.status).to.equal(302);
+      const loc = res.headers.get('location');
+      expect(loc).to.include('https://ims-na1.adobelogin.com/ims/authorize/v2');
+      expect(loc).to.include('client_id=client-abc');
+      expect(loc).to.include('code_challenge_method=S256');
+      expect(loc).to.include('state=');
+    });
+
+    it('startBrandProvisioningAuth: 400 on a bad id when enabled', async () => {
+      const ctrl = BrandsController(context, loggerStub, enabledEnv);
+      const res = await ctrl.startBrandProvisioningAuth({
+        params: { spaceCatId: 'nope', brandId: validBrand },
+      });
+      expect(res.status).to.equal(400);
+    });
+
+    it('handleImsOnboardingCallback: 404 when disabled', async () => {
+      const res = await brandsController.handleImsOnboardingCallback(withQuery('code=x&state=y'));
+      expect(res.status).to.equal(404);
+    });
+
+    it('handleImsOnboardingCallback: 400 HTML when the user cancelled (error param)', async () => {
+      const ctrl = BrandsController(context, loggerStub, enabledEnv);
+      const res = await ctrl.handleImsOnboardingCallback(withQuery('error=access_denied'));
+      expect(res.status).to.equal(400);
+      expect(res.headers.get('content-type')).to.include('text/html');
+    });
+
+    it('handleImsOnboardingCallback: 400 HTML for an invalid/expired/tampered state', async () => {
+      const ctrl = BrandsController(context, loggerStub, enabledEnv);
+      const res = await ctrl.handleImsOnboardingCallback(withQuery('code=abc&state=tampered'));
+      expect(res.status).to.equal(400);
+      expect(res.headers.get('content-type')).to.include('text/html');
+    });
+  });
+
   describe('getBrandsForOrganization', () => {
     it('returns brands for a valid organization', async () => {
       const mockBrands = [{ id: 'brand1' }, { id: 'brand2' }];
