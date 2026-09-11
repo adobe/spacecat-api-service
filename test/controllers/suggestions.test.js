@@ -167,6 +167,8 @@ describe('Suggestions Controller', () => {
     'getAllForOpportunity',
     'getAllForOpportunityPaged',
     'deploySuggestionToEdge',
+    'applySuggestionToAem',
+    'applySuggestionViaMcp',
     'getEdgeDeployedUrls',
     'listGeoExperiments',
     'getGeoExperiment',

@@ -30,6 +30,9 @@ import {
   isValidUrl,
   isWithinSiteScope,
   isPathPatternWithinSiteScope,
+  tracingFetch,
+  determineAEMCSPageId,
+  prependSchema,
 } from '@adobe/spacecat-shared-utils';
 
 import {
@@ -80,6 +83,7 @@ import { getImsTokenFromPromiseToken } from '../support/edge-routing-auth.js';
 import { isImsGroupMember } from '../support/ims-group.js';
 import { postSlackMessage } from '../utils/slack/base.js';
 import { createAtomicStrategy, deleteAtomicStrategy } from '../support/atomic-strategy-helper.js';
+import { createAemContentMcpSession } from '../support/aem-content-mcp-client.js';
 import { PLG_OPPORTUNITY_TYPES } from './plg/plg-onboarding/displacement.js';
 
 const VALIDATION_ERROR_NAME = 'ValidationError';
@@ -285,6 +289,209 @@ async function postPlgSuggestionSkipAlert(site, opportunity, suggestion, context
     });
   }
 }
+
+const AEM_CONTENT_API_BASE = '/adobe/experimental/aspm-expires-20251231/pages';
+
+/**
+ * Derives an AEM CS author host from a page's publish URL, for when a site has no
+ * explicit deliveryConfig.authorURL. AEM CS hosts mirror publish<->author:
+ * publish-p<prog>-e<env>.adobeaemcloud.(com|net) -> author-p<prog>-e<env>...
+ * Returns null for anything that isn't an AEM CS publish host (e.g. a custom
+ * domain), where the author host genuinely can't be inferred.
+ * @param {string} pageUrl
+ * @returns {string|null}
+ */
+const deriveAuthorUrlFromPublishUrl = (pageUrl) => {
+  try {
+    const u = new URL(pageUrl.startsWith('http') ? pageUrl : `https://${pageUrl}`);
+    const m = u.hostname.match(/^publish-(p\d+-e\d+)\.(adobeaemcloud\.(?:com|net))$/i);
+    return m ? `https://author-${m[1]}.${m[2]}` : null;
+  } catch {
+    return null;
+  }
+};
+
+// A capi-key ("0:1:0") is a colon-joined array-index path into the page content
+// tree; JSON Patch needs the same path as "/items/0/items/1/items/0".
+const capiKeyToPath = (capiKey) => `/items/${capiKey.split(':').join('/items/')}`;
+
+const parentPathAndIndex = (path) => {
+  const at = path.lastIndexOf('/');
+  return { parentPath: path.slice(0, at), index: Number(path.slice(at + 1)) };
+};
+
+const toSlug = (text) => (text || '')
+  .toLowerCase()
+  .replace(/[^0-9a-z]+/g, '-')
+  .replace(/^-+|-+$/g, '');
+
+// True for a heading/title component in EITHER content model: Franklin
+// (core/franklin/components/title/v1/title) or classic AEM Sites/WCM
+// (e.g. wknd/components/title, core/wcm/components/title/v3/title). Both carry a
+// 'title' path segment, so a segment check matches both without hardcoding a vendor.
+const isTitleComponent = (node) => (node?.componentType || '').split('/').includes('title');
+
+// A title component's heading level lives in `type` (classic WCM) or `titleType`
+// (Franklin); its display text in `jcr:title` (classic) or `title` (Franklin).
+const titleLevelOf = (node) => (node?.properties?.type || node?.properties?.titleType || 'h1');
+const titleTextOf = (node) => (node?.properties?.['jcr:title'] ?? node?.properties?.title);
+
+/**
+ * Resolves the component vocabulary (types + property names) from the page tree's
+ * own root componentType, so a patch inserts nodes native to that page's model:
+ *  - Franklin/EDS crosswalk  -> core/franklin/components/{text,title} (title text in
+ *    `title`, level in `titleType`, plain text body).
+ *  - Classic AEM Sites/WCM   -> <project>/components/{text,title} derived from the
+ *    page's own namespace (e.g. wknd/components/page -> wknd/components/text|title),
+ *    title text in `jcr:title`, level in `type`, rich-text body (textIsRich).
+ * @param {object} root - The page content tree root node.
+ * @returns {object} vocab describing node types and property names to emit.
+ */
+const componentVocab = (root) => {
+  const pageType = root?.componentType || '';
+  if (pageType.includes('core/franklin')) {
+    return {
+      textType: 'core/franklin/components/text/v1/text',
+      titleType: 'core/franklin/components/title/v1/title',
+      titleTextProp: 'title',
+      titleLevelProp: 'titleType',
+      rich: false,
+    };
+  }
+  // Classic WCM: strip the page's last path segment to get the project component
+  // namespace (wknd/components/page -> wknd/components), fall back to the AEM
+  // foundation namespace if the shape is unexpected.
+  const base = pageType.includes('/') ? pageType.slice(0, pageType.lastIndexOf('/')) : 'wcm/foundation/components';
+  return {
+    textType: `${base}/text`,
+    titleType: `${base}/title`,
+    titleTextProp: 'jcr:title',
+    titleLevelProp: 'type',
+    rich: true,
+  };
+};
+
+/**
+ * Best-effort resolution of a CSS-like selector (a bare tag, e.g. "h1", or
+ * "tag#id") against an AEM page content tree. Only matches title/heading
+ * components — the only element kind these suggestions currently target — in
+ * both the Franklin and classic WCM content models. Returns null (never guesses
+ * a fallback position) when the selector doesn't parse or nothing matches, so the
+ * caller can report "not applicable" instead of writing to the wrong place — e.g.
+ * a compound CSS selector or one naming a script-injected element that has no
+ * corresponding content-tree node.
+ * @param {object} root - The page content tree root.
+ * @param {string} selector - A "tag" or "tag#id" selector.
+ * @returns {object|null} The matched content-tree node, or null.
+ */
+const findNodeBySelector = (root, selector) => {
+  const match = /^([a-z0-9]+)(?:#([a-z0-9-]+))?$/i.exec((selector || '').trim());
+  if (!match) {
+    return null;
+  }
+  const [, tag, id] = match;
+
+  let found = null;
+  const walk = (node) => {
+    if (found || !node) {
+      return;
+    }
+    if (isTitleComponent(node)) {
+      const nodeTag = titleLevelOf(node).toLowerCase();
+      const nodeId = toSlug(titleTextOf(node));
+      if (nodeTag === tag.toLowerCase() && (!id || nodeId === id.toLowerCase())) {
+        found = node;
+        return;
+      }
+    }
+    (node.items || []).forEach(walk);
+  };
+  walk(root);
+  return found;
+};
+
+/**
+ * Builds the single JSON Patch operation for a suggestion's transformRules
+ * action against its resolved content-tree node.
+ *
+ * Two distinct shapes of transformRules, both seen in real suggestion data:
+ *  - No `tag`: `selector` names the node being acted on directly (e.g. Summarization's
+ *    "insertAfter h1" — the h1 already exists, the new text goes next to it).
+ *  - `tag` present (e.g. a "missing heading" fix): `selector` only names an anchor
+ *    node that already exists; the thing that doesn't exist yet is a NEW element of
+ *    the given `tag`, created relative to the anchor. `replace` with a `tag` replaces
+ *    the anchor's own heading-ness (titleType + text) rather than a generic text prop.
+ *
+ * @param {object} target - The anchor/target node returned by {@link findNodeBySelector}.
+ * @param {string} action - One of insertAfter | insertBefore | appendChild | replace.
+ * @param {string|undefined} tag - Heading tag (e.g. "h1") when a new element must be
+ * created, e.g. for a "missing heading" fix. Undefined when `selector` already names
+ * an existing element to act on directly.
+ * @param {string} content - The suggestion's content: HTML markup when `tag` is
+ * unset (goes into a text component), plain text when `tag` is set (goes into a
+ * title component's `title` property, which is not HTML).
+ * @returns {Array<object>|null} A JSON Patch document, or null for an unknown action.
+ */
+/**
+ * Converts a suggestion's raw content into what buildJsonPatch expects: plain text
+ * (markdown bold stripped) when a heading `tag` is being created, HTML (markdown
+ * bold converted to `<strong>`) otherwise. Returns undefined for empty content.
+ * @param {string|undefined} rawContent
+ * @param {string|undefined} tag
+ * @returns {string|undefined}
+ */
+const resolveSuggestionContent = (rawContent, tag) => {
+  if (!hasText(rawContent)) {
+    return undefined;
+  }
+  if (tag) {
+    return rawContent.replace(/\*\*(.+?)\*\*/g, '$1');
+  }
+  return `<p>${rawContent.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')}</p>`;
+};
+
+const buildJsonPatch = (target, action, tag, content, vocab) => {
+  const path = capiKeyToPath(target['capi-key']);
+  // A `tag` means create a heading; otherwise a text/paragraph component. Node
+  // types + property names come from the page's own model vocabulary (see
+  // componentVocab), so classic WCM pages get wknd/... nodes and Franklin pages
+  // get core/franklin/... nodes.
+  const textProps = vocab.rich ? { text: content, textIsRich: true } : { text: content };
+  const newNode = tag
+    ? {
+      componentType: vocab.titleType,
+      properties: { [vocab.titleLevelProp]: tag, [vocab.titleTextProp]: content },
+      items: [],
+    }
+    : {
+      componentType: vocab.textType,
+      properties: textProps,
+      items: [],
+    };
+
+  switch (action) {
+    case 'insertAfter': {
+      const { parentPath, index } = parentPathAndIndex(path);
+      return [{ op: 'add', path: `${parentPath}/${index + 1}`, value: newNode }];
+    }
+    case 'insertBefore':
+      return [{ op: 'add', path, value: newNode }];
+    case 'appendChild':
+      return [{ op: 'add', path: `${path}/items/-`, value: newNode }];
+    case 'replace': {
+      if (tag) {
+        return [
+          { op: 'replace', path: `${path}/properties/${vocab.titleLevelProp}`, value: tag },
+          { op: 'replace', path: `${path}/properties/${vocab.titleTextProp}`, value: content },
+        ];
+      }
+      const propName = isTitleComponent(target) ? vocab.titleTextProp : 'text';
+      return [{ op: 'replace', path: `${path}/properties/${propName}`, value: content }];
+    }
+    default:
+      return null;
+  }
+};
 
 /**
  * Suggestions controller.
@@ -2733,6 +2940,473 @@ function SuggestionsController(ctx, sqs, env) {
   };
 
   /**
+   * Applies suggestions' transformRules directly to an AEM page's own content tree
+   * (JCR/xwalk), editing the human-facing page — unlike deploySuggestionToEdge,
+   * which only ever writes a bot-targeted overlay at the Tokowaka CDN edge and
+   * never touches AEM.
+   *
+   * For each suggestion: reads the page content tree for its ETag, resolves
+   * transformRules.selector against it (see findNodeBySelector), builds the JSON
+   * Patch for transformRules.action (see buildJsonPatch), and PATCHes it back.
+   * Forwards the caller's own bearer token to AEM — the same pattern the
+   * `content-api-access` autofix-check probe already uses against this API.
+   *
+   * @param {Object} context of the request
+   * @returns {Promise<Response>} Per-suggestion apply results (207 multi-status)
+   */
+  const applySuggestionToAem = async (context) => {
+    const siteId = context.params?.siteId;
+    const opportunityId = context.params?.opportunityId;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+    if (!isValidUUID(opportunityId)) {
+      return badRequest('Opportunity ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('User does not belong to the organization');
+    }
+    if (!accessControlUtil.isLLMOAdministrator()) {
+      return forbidden('Only LLMO administrators can apply suggestions to AEM');
+    }
+
+    const opportunity = await Opportunity.findById(opportunityId);
+    if (!opportunity || opportunity.getSiteId() !== siteId) {
+      return notFound('Opportunity not found');
+    }
+
+    if (!isNonEmptyObject(context.data)) {
+      return badRequest('No data provided');
+    }
+    const { suggestionIds: rawSuggestionIds } = context.data;
+    if (!isArray(rawSuggestionIds) || rawSuggestionIds.length === 0) {
+      return badRequest('Request body must contain a non-empty array of suggestionIds');
+    }
+
+    if (site.getDeliveryType() !== 'aem_cs') {
+      return badRequest('Applying suggestions directly to AEM is only supported for AEM CS sites');
+    }
+    const deliveryConfig = site.getDeliveryConfig();
+    // Prefer the site's configured authorURL (required for custom domains, where the
+    // author host can't be inferred). When absent, we derive it per-suggestion from
+    // the page's own publish URL below — so the apply button works out-of-the-box for
+    // AEM CS adobeaemcloud hosts without a separate config step.
+    const configuredAuthorURL = deliveryConfig?.authorURL;
+
+    const authorization = context.pathInfo?.headers?.authorization;
+    if (!authorization) {
+      return badRequest('Missing authorization header');
+    }
+
+    const suggestionIds = [...new Set(rawSuggestionIds)];
+    const allSuggestions = await Suggestion.allByOpportunityId(opportunityId);
+    const suggestionById = new Map(allSuggestions.map((s) => [s.getId(), s]));
+
+    const results = [];
+
+    for (let i = 0; i < suggestionIds.length; i += 1) {
+      const suggestionId = suggestionIds[i];
+      const suggestion = suggestionById.get(suggestionId);
+
+      if (!suggestion) {
+        results.push({
+          uuid: suggestionId, index: i, statusCode: 404, message: 'Suggestion not found',
+        });
+        continue; // eslint-disable-line no-continue
+      }
+
+      const data = suggestion.getData() || {};
+      const { selector, action, tag } = data.transformRules || {};
+      // `recommendedAction` is the content field for a "create the missing element"
+      // fix (e.g. a missing heading); `summarizationText` for a Summarization fix.
+      const rawContent = data.summarizationText || data.recommendedAction;
+      // A `tag` means we're creating a heading: its `title` property is plain text,
+      // not HTML. Otherwise the content lands in a text component's HTML property.
+      const content = resolveSuggestionContent(rawContent, tag);
+
+      if (!hasText(selector) || !hasText(action) || !hasText(content)) {
+        results.push({
+          uuid: suggestionId,
+          index: i,
+          statusCode: 422,
+          message: 'Suggestion is missing transformRules or content to apply',
+        });
+        continue; // eslint-disable-line no-continue
+      }
+
+      // Use the configured authorURL, else derive it from this page's publish URL
+      // (publish-pNNN-eNNN.adobeaemcloud.* -> author-pNNN-eNNN.adobeaemcloud.*).
+      const authorURL = configuredAuthorURL || deriveAuthorUrlFromPublishUrl(data.url);
+      if (!authorURL) {
+        results.push({
+          uuid: suggestionId,
+          index: i,
+          statusCode: 422,
+          message: `Site has no authorURL configured and it could not be derived from URL: ${data.url}`,
+        });
+        continue; // eslint-disable-line no-continue
+      }
+
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        const pageId = await determineAEMCSPageId(
+          prependSchema(data.url),
+          authorURL,
+          authorization,
+          // Resolve the content-page-ref via the Content API (/adobe/pages/resolve),
+          // not the legacy PSS path (/adobe/experimental/pss/...), which is restricted
+          // (403) on these instances. Default true; a site can still opt out via config.
+          deliveryConfig?.preferContentApi ?? true,
+          context.log,
+        );
+        if (!pageId) {
+          results.push({
+            uuid: suggestionId, index: i, statusCode: 404, message: `Could not resolve AEM page for URL: ${data.url}`,
+          });
+          continue; // eslint-disable-line no-continue
+        }
+        const contentUrl = `${authorURL}${AEM_CONTENT_API_BASE}/${pageId}/content`;
+
+        // eslint-disable-next-line no-await-in-loop
+        const current = await tracingFetch(contentUrl, {
+          headers: { Authorization: authorization },
+        });
+        if (!current.ok) {
+          results.push({
+            uuid: suggestionId, index: i, statusCode: current.status, message: 'Failed to read page content',
+          });
+          continue; // eslint-disable-line no-continue
+        }
+        // eslint-disable-next-line no-await-in-loop
+        const tree = await current.json();
+        const etag = current.headers.get('etag');
+
+        const target = findNodeBySelector(tree, selector);
+        if (!target) {
+          results.push({
+            uuid: suggestionId,
+            index: i,
+            statusCode: 404,
+            message: `Selector not found in page content tree: ${selector}`,
+          });
+          continue; // eslint-disable-line no-continue
+        }
+
+        const patch = buildJsonPatch(target, action, tag, content, componentVocab(tree));
+        if (!patch) {
+          results.push({
+            uuid: suggestionId, index: i, statusCode: 422, message: `Unsupported transformRules action: ${action}`,
+          });
+          continue; // eslint-disable-line no-continue
+        }
+
+        // eslint-disable-next-line no-await-in-loop
+        const patchRes = await tracingFetch(contentUrl, {
+          method: 'PATCH',
+          headers: {
+            Authorization: authorization,
+            'Content-Type': 'application/json-patch+json',
+            'If-Match': etag,
+          },
+          body: JSON.stringify(patch),
+        });
+
+        if (!patchRes.ok) {
+          results.push({
+            uuid: suggestionId, index: i, statusCode: patchRes.status, message: 'Failed to apply patch to AEM',
+          });
+          continue; // eslint-disable-line no-continue
+        }
+
+        // Best-effort: fetch the page object for its author preview/edit links so the
+        // UI can link straight to the edited (author) page. The change lives on author
+        // until published, so the publish URL won't reflect it yet. Never fail the
+        // apply if this lookup fails — the patch already succeeded.
+        let previewUrl;
+        let editUrl;
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          const pageRes = await tracingFetch(`${authorURL}${AEM_CONTENT_API_BASE}/${pageId}`, {
+            headers: { Authorization: authorization },
+          });
+          if (pageRes.ok) {
+            // eslint-disable-next-line no-await-in-loop
+            const pageObj = await pageRes.json();
+            // eslint-disable-next-line no-underscore-dangle
+            const links = pageObj?._links || {};
+            previewUrl = links.preview?.href || links.preview;
+            editUrl = links.edit?.href || links.edit;
+          }
+        } catch (linkErr) {
+          context.log.info(`[aem-apply] could not resolve preview link for ${suggestionId}: ${linkErr.message}`);
+        }
+
+        results.push({
+          uuid: suggestionId, index: i, statusCode: 200, previewUrl, editUrl,
+        });
+      } catch (error) {
+        context.log.error(`[aem-apply-failed] site: ${siteId}, suggestion ${suggestionId}: ${error.message}`);
+        results.push({
+          uuid: suggestionId, index: i, statusCode: 500, message: error.message,
+        });
+      }
+    }
+
+    const success = results.filter((r) => r.statusCode >= 200 && r.statusCode < 300).length;
+    const failed = results.length - success;
+
+    return createResponse({
+      suggestions: results,
+      metadata: { total: results.length, success, failed },
+    }, 207);
+  };
+
+  /**
+   * Same outcome as applySuggestionToAem (edits the human-facing AEM page from a
+   * suggestion's transformRules), but drives the change through the **AEM Content
+   * MCP server** instead of calling the AEM Content REST API directly. This is the
+   * button → backend → MCP-tool path (deterministic, no LLM): per suggestion it
+   * resolves the pageId, then calls the MCP tools get-aem-page-content →
+   * patch-aem-page-content → get-aem-page-preview-url, and returns the author
+   * preview URL. The caller's IMS user token is forwarded as the MCP bearer.
+   *
+   * Reuses the same selector-resolution and JSON-Patch builders as the REST path
+   * (findNodeBySelector / buildJsonPatch / componentVocab), so behaviour ("insertAfter
+   * h1" etc.) is identical — only the transport differs.
+   *
+   * @param {Object} context of the request
+   * @returns {Promise<Response>} Per-suggestion apply results incl. previewUrl (207)
+   */
+  const applySuggestionViaMcp = async (context) => {
+    const siteId = context.params?.siteId;
+    const opportunityId = context.params?.opportunityId;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+    if (!isValidUUID(opportunityId)) {
+      return badRequest('Opportunity ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('User does not belong to the organization');
+    }
+    if (!accessControlUtil.isLLMOAdministrator()) {
+      return forbidden('Only LLMO administrators can apply suggestions to AEM');
+    }
+
+    const opportunity = await Opportunity.findById(opportunityId);
+    if (!opportunity || opportunity.getSiteId() !== siteId) {
+      return notFound('Opportunity not found');
+    }
+
+    if (!isNonEmptyObject(context.data)) {
+      return badRequest('No data provided');
+    }
+    const { suggestionIds: rawSuggestionIds, imsToken } = context.data;
+    if (!isArray(rawSuggestionIds) || rawSuggestionIds.length === 0) {
+      return badRequest('Request body must contain a non-empty array of suggestionIds');
+    }
+
+    // AEM auth for the MCP is an IMS *user* access token (distinct from the SpaceCat
+    // session token in the `Authorization` header). Preferred path — OBO: the UI sends
+    // a promise token (`x-promise-token` / `promiseToken` cookie) which we exchange,
+    // on-behalf-of the user, for an AEM-scoped IMS token via the promise-pair consumer
+    // credential (same mechanism as the REST apply path + fixes.js). This is what
+    // removes the hand-supplied token: the standalone ABV session has no AEM scopes.
+    // Fallback — a body-supplied `imsToken` (manual/demo) when no promise token is sent,
+    // so the existing demo flow keeps working during the OBO rollout.
+    let authorization;
+    try {
+      const imsUserToken = await getImsTokenFromPromiseToken(context);
+      authorization = `Bearer ${imsUserToken}`;
+    } catch (tokenErr) {
+      if (hasText(imsToken)) {
+        authorization = imsToken.startsWith('Bearer ') ? imsToken : `Bearer ${imsToken}`;
+      } else {
+        return tokenErr?.status === 401
+          ? forbidden('IMS promise-token exchange failed (OBO)')
+          : badRequest('Provide an x-promise-token (OBO) or imsToken for AEM authentication');
+      }
+    }
+
+    const deliveryConfig = site.getDeliveryConfig();
+    const configuredAuthorURL = deliveryConfig?.authorURL;
+
+    const suggestionIds = [...new Set(rawSuggestionIds)];
+    const allSuggestions = await Suggestion.allByOpportunityId(opportunityId);
+    const suggestionById = new Map(allSuggestions.map((s) => [s.getId(), s]));
+
+    // One MCP session (initialize handshake) reused across all suggestions.
+    let mcp;
+    try {
+      mcp = await createAemContentMcpSession({ authorization, log: context.log });
+    } catch (error) {
+      context.log.error(`[aem-apply-mcp-failed] site: ${siteId}, MCP connect: ${error.message}`);
+      return internalServerError(`Could not connect to the AEM Content MCP: ${error.message}`);
+    }
+
+    const results = [];
+    for (let i = 0; i < suggestionIds.length; i += 1) {
+      const suggestionId = suggestionIds[i];
+      const suggestion = suggestionById.get(suggestionId);
+      if (!suggestion) {
+        results.push({
+          uuid: suggestionId, index: i, statusCode: 404, message: 'Suggestion not found',
+        });
+        continue; // eslint-disable-line no-continue
+      }
+
+      const data = suggestion.getData() || {};
+      const { selector, action, tag } = data.transformRules || {};
+      const rawContent = data.summarizationText || data.recommendedAction;
+      const content = resolveSuggestionContent(rawContent, tag);
+      if (!hasText(selector) || !hasText(action) || !hasText(content)) {
+        results.push({
+          uuid: suggestionId, index: i, statusCode: 422, message: 'Suggestion is missing transformRules or content to apply',
+        });
+        continue; // eslint-disable-line no-continue
+      }
+
+      // Tolerate stray whitespace in the stored suggestion URL: a leading/trailing
+      // space breaks both URL parsing and the publish->author hostname derivation.
+      const pageUrl = (data.url || '').trim();
+      const authorURL = configuredAuthorURL || deriveAuthorUrlFromPublishUrl(pageUrl);
+      if (!authorURL) {
+        results.push({
+          uuid: suggestionId, index: i, statusCode: 422, message: `Site has no authorURL configured and it could not be derived from URL: ${data.url}`,
+        });
+        continue; // eslint-disable-line no-continue
+      }
+
+      try {
+        // Resolve the pageId THROUGH the MCP (get-aem-pages by publishPath), not the
+        // author-direct determineAEMCSPageId: the caller's IMS token is accepted by the
+        // MCP gateway but rejected calling the author instance directly, so every step
+        // must go through the MCP. publishPath is the URL pathname minus a trailing
+        // `.html` (AEM CS delivery path), e.g. https://host/us/en.html -> /us/en.
+        let publishPath;
+        try {
+          publishPath = new URL(prependSchema(pageUrl)).pathname.replace(/\.html$/, '') || '/';
+        } catch {
+          publishPath = null;
+        }
+        if (!publishPath) {
+          results.push({
+            uuid: suggestionId, index: i, statusCode: 422, message: `Invalid suggestion url: ${data.url}`,
+          });
+          continue; // eslint-disable-line no-continue
+        }
+        // eslint-disable-next-line no-await-in-loop
+        const pagesText = await mcp.callTool('get-aem-pages', { authorUrl: authorURL, publishPath, limit: 20 });
+        let pageId;
+        try {
+          const items = JSON.parse(pagesText.slice(pagesText.indexOf('{')))?.items || [];
+          // A publishPath is not unique: launch copies live under /content/launches/...
+          // but resolve to the same delivery path, so get-aem-pages returns them too
+          // (often first). Target the live page, never a launch copy.
+          const live = items.find((p) => p?.authorPath && !p.authorPath.includes('/content/launches/'));
+          pageId = (live || items[0])?.id;
+        } catch {
+          pageId = undefined;
+        }
+        if (!pageId) {
+          results.push({
+            uuid: suggestionId, index: i, statusCode: 404, message: `Could not resolve AEM page for URL: ${data.url}`,
+          });
+          continue; // eslint-disable-line no-continue
+        }
+
+        // MCP: read current content + ETag. The tool returns a text blob that starts
+        // with "ETag: \"...\"" followed by the JSON content tree.
+        // eslint-disable-next-line no-await-in-loop
+        const contentText = await mcp.callTool('get-aem-page-content', { authorUrl: authorURL, pageId });
+        const etagMatch = contentText.match(/ETag:\s*("[^"]*")/i);
+        const treeStart = contentText.indexOf('{');
+        if (!etagMatch || treeStart < 0) {
+          results.push({
+            uuid: suggestionId, index: i, statusCode: 502, message: 'Unexpected get-aem-page-content response from MCP',
+          });
+          continue; // eslint-disable-line no-continue
+        }
+        const eTag = etagMatch[1];
+        const tree = JSON.parse(contentText.slice(treeStart));
+
+        const target = findNodeBySelector(tree, selector);
+        if (!target) {
+          results.push({
+            uuid: suggestionId, index: i, statusCode: 404, message: `Selector not found in page content tree: ${selector}`,
+          });
+          continue; // eslint-disable-line no-continue
+        }
+
+        const patch = buildJsonPatch(target, action, tag, content, componentVocab(tree));
+        if (!patch) {
+          results.push({
+            uuid: suggestionId, index: i, statusCode: 422, message: `Unsupported transformRules action: ${action}`,
+          });
+          continue; // eslint-disable-line no-continue
+        }
+
+        // eslint-disable-next-line no-await-in-loop
+        const patchText = await mcp.callTool('patch-aem-page-content', {
+          authorUrl: authorURL, pageId, eTag, jsonPatch: JSON.stringify(patch),
+        });
+        let patchStatus;
+        try {
+          patchStatus = JSON.parse(patchText.slice(patchText.indexOf('{')))?.status;
+        } catch {
+          patchStatus = undefined;
+        }
+        if (patchStatus !== 'page_patched') {
+          results.push({
+            uuid: suggestionId, index: i, statusCode: 502, message: `MCP patch did not confirm page_patched: ${patchText.slice(0, 200)}`,
+          });
+          continue; // eslint-disable-line no-continue
+        }
+
+        // Preview URL for the edited (author) page.
+        let previewUrl;
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          const previewText = await mcp.callTool('get-aem-page-preview-url', { authorUrl: authorURL, pageId });
+          const urlMatch = previewText.match(/https?:\/\/\S+/);
+          previewUrl = urlMatch ? urlMatch[0].replace(/["')\]}]+$/, '') : undefined;
+        } catch (previewErr) {
+          context.log.info(`[aem-apply-mcp] preview URL unavailable for ${suggestionId}: ${previewErr.message}`);
+        }
+
+        results.push({
+          uuid: suggestionId, index: i, statusCode: 200, previewUrl,
+        });
+      } catch (error) {
+        context.log.error(`[aem-apply-mcp-failed] site: ${siteId}, suggestion ${suggestionId}: ${error.message}`);
+        results.push({
+          uuid: suggestionId, index: i, statusCode: 500, message: error.message,
+        });
+      }
+    }
+
+    const success = results.filter((r) => r.statusCode >= 200 && r.statusCode < 300).length;
+    const failed = results.length - success;
+    return createResponse({
+      suggestions: results,
+      metadata: { total: results.length, success, failed },
+    }, 207);
+  };
+
+  /**
    * Returns the URLs already deployed to the edge by the site's non-prerender ELMO
    * ("Tokowaka") opportunities, as `[{ url, sources: [opportunityType] }]`.
    *
@@ -3734,6 +4408,8 @@ function SuggestionsController(ctx, sqs, env) {
     autofixSuggestions,
     createSuggestions,
     deploySuggestionToEdge,
+    applySuggestionToAem,
+    applySuggestionViaMcp,
     getEdgeDeployedUrls,
     listGeoExperiments,
     getGeoExperiment,
