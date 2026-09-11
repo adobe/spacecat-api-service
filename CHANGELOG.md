@@ -1,3 +1,10 @@
+# [1.807.0](https://github.com/adobe/spacecat-api-service/compare/v1.806.0...v1.807.0) (2026-09-11)
+
+
+### Features
+
+* add OAE validation jobs endpoint ([#3234](https://github.com/adobe/spacecat-api-service/issues/3234)) ([8710653](https://github.com/adobe/spacecat-api-service/commit/871065340471bb6dd436d5efc67fbaaedf954345))
+
 # [1.806.0](https://github.com/adobe/spacecat-api-service/compare/v1.805.0...v1.806.0) (2026-09-11)
 
 
