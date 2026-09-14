@@ -211,7 +211,9 @@ describe('serenity-prompt-classification worker entry', () => {
   });
 
   it('dispatches serenity-create-market to createMarketJobHandler (PR-C, LLMO-7352/LLMO-7418)', async () => {
-    const job = makeJob();
+    // Stored jobType must match the message type: the runner drops a mismatched delivery, so a
+    // job built with the default classify type would never reach the handler at all.
+    const job = makeJob('IN_PROGRESS', 'serenity-create-market');
     const context = makeContext(job);
     exchangeAndPersistStub.resolves('access-token');
 
@@ -254,7 +256,7 @@ describe('serenity-prompt-classification worker entry', () => {
   });
 
   it('does not invalidate the promise token when the handler chained a follow-up job (PR-C, LLMO-7418)', async () => {
-    const job = makeJob();
+    const job = makeJob('IN_PROGRESS', 'serenity-provision-workspace');
     const context = makeContext(job);
     exchangeAndPersistStub.resolves('access-token');
     provisionWorkspaceHandlerStub.resolves({ provisioningStatus: 'ready', chainedJobId: 'chained-job-1' });

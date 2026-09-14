@@ -21,6 +21,7 @@ import Ajv from 'ajv';
 import addFormats from 'ajv-formats';
 
 import { loadBundledSpec, operationsForTag } from './_lib/openapi-loader.js';
+import { ErrorWithStatusCode } from '../../src/support/utils.js';
 // Real class (not a mock) so the elements esmock block can pass it through without
 // adding a second class to this file (max-classes-per-file).
 import { SerenityTransportError } from '../../src/support/serenity/rest-transport.js';
@@ -31,6 +32,11 @@ use(sinonChai);
 const ORG = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
 const BRAND = '11111111-2222-3333-4444-555555555555';
 const WORKSPACE = '22222222-3333-4444-5555-666666666666';
+// The brand's linked base site — market-generation jobs carry this in metadata.siteId
+// (the producer resolves it from getBrandBaseSiteId). loadJobScopedToCaller, hardened
+// fail-closed in #3232, denies a resolver-supplied job with NO siteId, so the fixtures
+// must carry one and the Site lookup below must resolve.
+const SITE = '33333333-4444-5555-6666-777777777777';
 
 function fakeLog() {
   return {
@@ -47,9 +53,17 @@ function fakeContext({ params = {}, data = undefined, query = {} } = {}) {
     env: {},
     request: { url: `https://api.example.com/serenity${search ? `?${search}` : ''}` },
     pathInfo: { headers: { authorization: 'Bearer ims-token' } },
-    attributes: { authInfo: { getType: () => 'ims' } },
+    // getScopes → admin so the REAL AccessControlUtil inside loadJobScopedToCaller
+    // (the #3232 fail-closed site-ownership check; not the esmock-mocked instance the
+    // controller's own authorize uses) admits the legitimate owner for the two
+    // market-generation-job fixtures. Inert for every other fixture (they never reach
+    // the unmocked primitive).
+    attributes: { authInfo: { getType: () => 'ims', getScopes: () => [{ name: 'admin' }] } },
     dataAccess: {
       Organization: { findById: sinon.stub().resolves({ getId: () => ORG }) },
+      // The market-generation job's owning site — loadJobScopedToCaller resolves it
+      // (metadata.siteId) and enforces ownership via the mocked AccessControlUtil.
+      Site: { findById: sinon.stub().resolves({ getId: () => SITE }) },
       Brand: {
         findById: sinon.stub().resolves({
           getId: () => BRAND,
@@ -161,6 +175,31 @@ const FIXTURES = {
       }],
     },
   },
+  finalizeSerenityPrompts: {
+    expectedStatus: 200,
+    controllerMethod: 'finalizePrompts',
+    handlerName: 'handleFinalizePrompts',
+    handlerResult: {
+      slices: [
+        {
+          geoTargetId: 2840, languageCode: 'en', outcome: 'published', publishStatus: 'live',
+        },
+        {
+          geoTargetId: 2276,
+          languageCode: 'de',
+          outcome: 'failed',
+          error: 'No market for slice',
+          code: 'marketNotFound',
+        },
+      ],
+    },
+    data: {
+      slices: [
+        { geoTargetId: 2840, languageCode: 'en' },
+        { geoTargetId: 2276, languageCode: 'de' },
+      ],
+    },
+  },
   getSerenityPromptsJobStatus: {
     expectedStatus: 200,
     controllerMethod: 'getPromptsJobStatus',
@@ -185,6 +224,81 @@ const FIXTURES = {
       }),
       getError: () => null,
       getMetadata: () => ({ brandId: BRAND }),
+    },
+  },
+  getSerenityMarketGenerationJobStatus: {
+    expectedStatus: 200,
+    controllerMethod: 'getSemrushMarketGenerationJobStatus',
+    // No handler: the controller loads the AsyncJob via loadJobScopedToCaller and
+    // projects the token-safe DTO. Pin a COMPLETED, brand-owned, SITELESS generation
+    // job so the documented { jobId, jobType, status, result, error } shape (ship
+    // verdict) is exercised. metadata.jobType MUST be in the endpoint's allowlist and
+    // metadata.brandId MUST match auth.brandUuid (BRAND) or the controller 404s.
+    params: { jobId: '00000000-0000-4000-8000-000000000001' },
+    asyncJob: {
+      getId: () => '00000000-0000-4000-8000-000000000001',
+      getStatus: () => 'COMPLETED',
+      getResult: () => ({
+        promptCount: 12,
+        projectId: 'proj-1',
+        published: true,
+        verdict: 'ship',
+      }),
+      getError: () => null,
+      getCreatedAt: () => '2026-09-10T00:00:00.000Z',
+      getUpdatedAt: () => '2026-09-10T00:05:00.000Z',
+      getMetadata: () => ({
+        jobType: 'serenity-generate-semrush-market',
+        brandId: BRAND,
+        siteId: SITE,
+      }),
+    },
+  },
+  reauthSerenityMarketGenerationJob: {
+    expectedStatus: 202,
+    controllerMethod: 'reauthSemrushMarketGenerationJob',
+    // Drives the full 202 happy path. loadJobScopedToCaller admits the job by its
+    // metadata.jobType; the STRICT identity check requires the caller's stable
+    // user_id claim to equal metadata.imsUserId (both pinned to 'ims-user-1' via the
+    // reauth wiring below). resolvePromisePair/getIMSPromiseToken/claimJobForReauth
+    // are stubbed in the shared esmock block (inert for every other fixture — only
+    // this reauth method calls them). The job flips FAILED+NEEDS_REAUTH → IN_PROGRESS
+    // so the documented { jobId, jobType, status: IN_PROGRESS } accepted shape is
+    // returned.
+    reauth: true,
+    params: { jobId: '00000000-0000-4000-8000-000000000002' },
+    asyncJob: (() => {
+      let status = 'FAILED';
+      return {
+        getId: () => '00000000-0000-4000-8000-000000000002',
+        getStatus: () => status,
+        setStatus: (s) => { status = s; },
+        getError: () => ({ code: 'NEEDS_REAUTH', message: 'token expired', retryable: true }),
+        setError: () => {},
+        getMetadata: () => ({
+          jobType: 'serenity-generate-semrush-market',
+          brandId: BRAND,
+          siteId: SITE,
+          imsUserId: 'ims-user-1',
+        }),
+        setMetadata: () => {},
+        save: () => Promise.resolve(),
+      };
+    })(),
+  },
+  getSerenityJobStatus: {
+    expectedStatus: 200,
+    controllerMethod: 'getPromptsJobStatus',
+    // Job-type-agnostic alias of the prompts-named path — SAME controller method, which never
+    // inspects the job's type, only its brandId. metadata.brandId MUST match auth.brandUuid
+    // (BRAND) or the controller 404s (jobs are never leaked across brands).
+    params: { jobId: '00000000-0000-4000-8000-000000000000' },
+    asyncJob: {
+      getId: () => '00000000-0000-4000-8000-000000000000',
+      getStatus: () => 'COMPLETED',
+      getResult: () => ({ status: 201, body: { brandId: BRAND, geoTargetId: 2840, languageCode: 'en' } }),
+      getError: () => null,
+      getMetadata: () => ({ brandId: BRAND, jobType: 'serenity-provision-workspace' }),
     },
   },
   updateSerenityPrompt: {
@@ -235,6 +349,9 @@ const FIXTURES = {
       tagIds: ['tag-1'],
       filter: { tagIds: [], tagFilterMode: 'faceted-v1' },
     },
+    promiseToken: 'raw-bulk-tags-token',
+    promiseAudience: 'semrush',
+    expectPromiseForwarding: true,
   },
   listSerenityMarkets: {
     expectedStatus: 200,
@@ -392,13 +509,10 @@ const FIXTURES = {
   activateSerenityBrand: {
     expectedStatus: 200,
     controllerMethod: 'activate',
-    // activate orchestrates per-market subworkspace creates; stubbing the subworkspace
-    // market handler is enough to drive the documented 200 (≥1 live) shape.
-    handlerName: 'handleCreateMarketSubworkspace',
-    handlerResult: {
-      status: 201,
-      body: { brandId: BRAND, geoTargetId: 2840, languageCode: 'en' },
-    },
+    // activate's batch now lives in activate-markets-orchestration.js (PR-C,
+    // LLMO-7352/LLMO-7418), a DIRECT import of serenity.js — esmock cannot reach
+    // handleCreateMarketSubworkspace transitively through it, so the module that owns the
+    // response shape is stubbed instead (see the childmock below).
     data: {
       brandDomain: 'adobe.com',
       brandNames: ['Adobe'],
@@ -527,8 +641,16 @@ const FIXTURES = {
     serviceMethod: 'getSentimentOverview',
     // startDate/endDate are required + validated by the controller before the
     // service is called (see listSentimentOverview) — supply them via query.
-    query: { startDate: '2026-06-01', endDate: '2026-07-16' },
+    query: { startDate: '2026-06-01', endDate: '2026-07-16', metric: 'mentions' },
+    // Pins the controller->service half of the `metric` seam (LLMO-7457). The
+    // service->transform half is covered in elements-service.test.js, but nothing
+    // otherwise asserts the controller WRITES the key it reads: `metric:` at
+    // elements.js:1321 is inside a `c8 ignore` block, so renaming it or dropping
+    // the line would leave `?metric=mentions` a permanent silent no-op with green
+    // CI — the failure this PR's production A/B depends on not having.
+    expectServiceParams: { metric: 'mentions' },
     handlerResult: {
+      metric: 'prompts',
       weeklyTrends: [{
         week: '2026-W24',
         weekNumber: 24,
@@ -538,6 +660,9 @@ const FIXTURES = {
           { name: 'Neutral', value: 39, color: '#4B5563' },
           { name: 'Negative', value: 8, color: '#B91C1C' },
         ],
+        mentionCounts: { positive: 12043, neutral: 8871, negative: 1819 },
+        promptCounts: { positive: 4866, neutral: 3581, negative: 734 },
+        sentimentTotal: 9181,
         totalPrompts: 5261,
         promptsWithSentiment: 9181,
         mentions: 0,
@@ -552,31 +677,25 @@ const FIXTURES = {
     usesElementsController: true,
     controllerMethod: 'listResponseFeed',
     serviceMethod: 'getResponseFeed',
-    // from/to are optional (they default to the last 7 days ending yesterday), but are
-    // supplied here so the fixture is deterministic rather than clock-dependent.
-    query: { from: '2026-08-23', to: '2026-08-24' },
-    // getResponseFeed returns the joined shape; the controller maps it through
-    // ResponseFeedDto.toEnvelopeJSON before ok().
+    query: { geoTargetId: '2840', languageCode: 'en', date: '2026-08-24' },
     handlerResult: {
-      records: [{
-        projectId: 'cb4f6443-e01f-4075-a586-85511f136e31',
+      data: [{
+        projectId: 'proj-1',
         prompt: 'best running shoes for flat feet',
-        model: 'chatgpt-paid',
-        date: '2026-08-24',
         response: 'For flat feet, look for stability shoes with firm midsoles.',
-        sources: [{
-          url: 'https://www.runnersworld.com/gear/best-running-shoes',
-          source: 'runnersworld.com',
-          position: 1,
-          domainType: 'Earned',
-        }],
-        sourceRowCount: 1,
+        date: '2026-08-24',
+        model: 'search-gpt',
+        responses: 1,
+        sources: ['https://www.runnersworld.com/gear/best-running-shoes'],
+        tags: ['$abv_tags$intent__commercial'],
       }],
-      days: ['2026-08-23', '2026-08-24'],
-      projectIds: ['cb4f6443-e01f-4075-a586-85511f136e31'],
-      pageSize: 5000,
-      truncated: false,
-      unmatchedSourceKeyCount: 0,
+      page: {
+        offset: 0,
+        pageSize: 500,
+        returned: 1,
+        rowCount: 1,
+        nextOffset: null,
+      },
     },
   },
   listSerenityBrandPresenceSubreddits: {
@@ -871,6 +990,12 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
       expect(op, `operation ${operationId} not found in spec`).to.exist;
 
       if (fx.usesElementsController) {
+        // Hoisted so a fixture can assert on what the controller actually handed
+        // the service. The controller->service param seam is otherwise untested:
+        // handlers like listSentimentOverview sit inside `c8 ignore` blocks, so a
+        // renamed key (e.g. `sentimentMetric:` instead of `metric:`) would ship
+        // green as a silent no-op. See `expectServiceParams` below.
+        const serviceMethodStub = sinon.stub().resolves(fx.handlerResult);
         const ElementsController = (await esmock(
           '../../src/controllers/elements.js',
           {
@@ -901,7 +1026,7 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
             },
             '../../src/support/elements/elements-service.js': {
               createElementsService: () => ({
-                [fx.serviceMethod]: sinon.stub().resolves(fx.handlerResult),
+                [fx.serviceMethod]: serviceMethodStub,
                 resolveRegionProjectId: sinon.stub().resolves(null),
                 // Only consumed by getUrlInspectorStats's aggregate (no-region)
                 // path — without at least one project, it 404s before ever
@@ -932,6 +1057,18 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
         const response = await controller[fx.controllerMethod](ctx);
 
         expect(response.status).to.equal(fx.expectedStatus);
+
+        // Optional per-fixture assertion on the params the controller built and
+        // passed to the service — the only place that seam is exercised, since
+        // the handlers themselves are coverage-ignored.
+        if (fx.expectServiceParams) {
+          expect(serviceMethodStub, `${operationId}: service was not called`).to.have.been.called;
+          const [, actualParams] = serviceMethodStub.firstCall.args;
+          Object.entries(fx.expectServiceParams).forEach(([key, value]) => {
+            expect(actualParams, `${operationId}: params.${key}`)
+              .to.have.property(key, value);
+          });
+        }
 
         const responseSchema = op.responseSchema(fx.expectedStatus);
         expect(responseSchema, `no ${fx.expectedStatus} schema for ${operationId}`).to.exist;
@@ -967,6 +1104,7 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
         handleUpdateModels: sinon.stub(),
         handleCreateMarketSubworkspace: sinon.stub(),
         handleListMarketsSubworkspace: sinon.stub(),
+        handleFinalizePrompts: sinon.stub(),
         ensureSubworkspace: sinon.stub().resolves(WORKSPACE),
         decommissionBrandWorkspace: sinon.stub(),
         listGlobalModelCatalog: sinon.stub(),
@@ -985,6 +1123,25 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
           '../../src/support/serenity/rest-transport.js': {
             createSerenityTransport: () => ({}),
             SerenityTransportError: class extends Error {},
+          },
+          '../../src/support/utils.js': {
+            ErrorWithStatusCode,
+            resolveSemrushImsToken: () => Promise.resolve('ims-token'),
+            getRawPromiseToken: (ctx) => ctx?.pathInfo?.headers?.['x-promise-token'],
+            // resolvePromisePair returns the Semrush pair ('SEMRUSH') for both the
+            // browser-token exchange path and the reauth fixture (which 400s on the
+            // promise-pair guard otherwise).
+            resolvePromisePair: () => 'SEMRUSH',
+            getSemrushPair: () => 'SEMRUSH',
+            exchangePromiseTokenResponse: () => Promise.resolve({
+              access_token: 'ims-token',
+              promise_token: 'rotated-bulk-tags-token',
+              promise_token_expires_in: 14399,
+              token_type: 'bearer',
+            }),
+            // Reauth-only: reauthSemrushMarketGenerationJob mints a fresh token here
+            // (inert for every other fixture — nothing else calls getIMSPromiseToken).
+            getIMSPromiseToken: () => Promise.resolve({ token: 'fresh-promise-token' }),
           },
           '../../src/support/serenity/workspace-resolver.js': {
             resolveWorkspaceId: () => Promise.resolve(WORKSPACE),
@@ -1054,6 +1211,10 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
             handleUpdatePromptSubworkspace: sinon.stub(),
             handleBulkDeletePromptsSubworkspace: sinon.stub(),
           },
+          '../../src/support/serenity/handlers/prompts-finalize.js': {
+            handleFinalizePrompts: handlerStubs.handleFinalizePrompts,
+            handleFinalizePromptsSubworkspace: sinon.stub(),
+          },
           '../../src/support/serenity/workspace-lifecycle.js': {
             ensureSubworkspace: handlerStubs.ensureSubworkspace,
             decommissionBrandWorkspace: handlerStubs.decommissionBrandWorkspace,
@@ -1067,10 +1228,7 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
           // activate reads brand-level aliases/URLs/competitors once per batch, and
           // persists the active-flip + primary site (brands.site_id) via updateBrand;
           // stub them so the contract test doesn't hit the fake postgrest client and
-          // exercises the documented 200 (full-success) shape. PR-C (LLMO-7352/LLMO-7418):
-          // the synchronous (async absent/false) branch also runs
-          // guardAgainstConcurrentProvisioning before dispatching — stub it as a no-op (no
-          // concurrent async attempt) for the same reason.
+          // exercises the documented 200 (full-success) shape.
           '../../src/support/brands-storage.js': {
             getBrandAliases: () => Promise.resolve([]),
             getBrandUrlSources: () => Promise.resolve({
@@ -1078,25 +1236,20 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
             }),
             getBrandCompetitors: () => Promise.resolve([]),
             updateBrand: () => Promise.resolve({ getId: () => 'brand-x' }),
+            // PR-C (LLMO-7352/LLMO-7418): activate's synchronous branch now guards against a
+            // concurrent async provisioning attempt before touching Semrush. It reads the
+            // provisioning columns through the postgrest client, which this file fakes only far
+            // enough for the calls it already made — stub the guard itself rather than widen the
+            // fake, matching how every other storage call here is handled.
             guardAgainstConcurrentProvisioning: () => Promise.resolve(),
+            getBrandProvisioningState: () => Promise.resolve(null),
+            cancelProvisioningAttempt: () => Promise.resolve(true),
           },
           // activate's all-or-nothing flip REQUIRES the brand_sites mirror to
           // succeed; stub it to a site id so the documented 200 (full success)
           // shape is exercised rather than the 207/502 partial-failure paths. Must
           // be a valid UUID — it is now also written as the brand's baseSiteId,
           // which the response schema types as format: uuid.
-          '../../src/support/serenity/site-linkage.js': {
-            ensureMarketSite: () => Promise.resolve('00000000-0000-4000-8000-000000000000'),
-          },
-          // PR-C (LLMO-7352/LLMO-7418): activate's whole project-activation batch (the
-          // ensureSubworkspace-once, per-market handleCreateMarketSubworkspace loop, brand
-          // alias/URL/competitor prefetch, and the all-or-nothing site-link + status flip)
-          // moved into this module. It is a DIRECT import of serenity.js (unlike the
-          // brands-storage.js/site-linkage.js functions above, which it now calls internally
-          // one level deeper — a childmock cannot reach those transitively, only a direct
-          // import of the entry module), so stubbing IT is both correct and sufficient: it's
-          // the same "stub the deepest business function" pattern every other fixture in this
-          // file already uses, just at the layer that now actually owns the response shape.
           '../../src/support/serenity/handlers/activate-markets-orchestration.js': {
             orchestrateActivateMarkets: () => Promise.resolve({
               status: 200,
@@ -1111,7 +1264,17 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
                   body: { brandId: BRAND, geoTargetId: 2840, languageCode: 'en' },
                 }],
               },
+              generationInputs: [],
             }),
+          },
+          '../../src/support/serenity/site-linkage.js': {
+            ensureMarketSite: () => Promise.resolve('00000000-0000-4000-8000-000000000000'),
+          },
+          // Reauth-only: the atomic CAS claim (inert for every other fixture — only
+          // reauthSemrushMarketGenerationJob calls claimJobForReauth). esmock passes
+          // through the unlisted exports of the module.
+          '../../src/support/serenity/job-lease.js': {
+            claimJobForReauth: () => Promise.resolve(true),
           },
         },
       )).default;
@@ -1121,15 +1284,38 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
         data: fx.data,
         query: fx.query || {},
       });
+      if (fx.promiseToken) {
+        ctx.pathInfo.headers['x-promise-token'] = fx.promiseToken;
+        ctx.pathInfo.headers['x-promise-audience'] = fx.promiseAudience;
+      }
       // Ops that read an AsyncJob directly (no handler) get their job pinned here.
       if (fx.asyncJob) {
         ctx.dataAccess.AsyncJob = { findById: sinon.stub().resolves(fx.asyncJob) };
+      }
+      // Reauth drives the token-bearing 202 path: the STRICT identity check reads the
+      // caller's stable user_id claim (must equal the job's metadata.imsUserId), and
+      // the success path re-enqueues onto the dedicated market-jobs queue.
+      if (fx.reauth) {
+        ctx.attributes.authInfo.getProfile = () => ({ user_id: 'ims-user-1' });
+        ctx.sqs = { sendMessage: sinon.stub().resolves() };
+        ctx.env = { ...ctx.env, SERENITY_MARKET_JOBS_QUEUE_URL: 'https://sqs.example/market-jobs' };
       }
 
       const controller = SerenityController(ctx, fakeLog());
       const response = await controller[fx.controllerMethod](ctx);
 
       expect(response.status).to.equal(fx.expectedStatus);
+      if (fx.expectPromiseForwarding) {
+        expect(handlerStubs.handleBulkTags).to.have.been.calledOnce;
+        expect(handlerStubs.handleBulkTags.firstCall.args.slice(-2)).to.deep.equal([
+          {
+            promise_token: 'rotated-bulk-tags-token',
+            expires_in: 14399,
+            token_type: 'bearer',
+          },
+          'SEMRUSH',
+        ]);
+      }
 
       // 204 No Content → no body to validate. The contract is just the status.
       if (fx.expectedStatus === 204) {
