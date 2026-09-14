@@ -144,6 +144,7 @@ describe('Brands Controller', () => {
         postgrestClient: {
           from: sinon.stub().returns({
             select: sinon.stub().returnsThis(),
+            limit: sinon.stub().returnsThis(),
             eq: sinon.stub().returnsThis(),
             maybeSingle: sinon.stub().resolves({ data: null, error: null }),
             upsert: sinon.stub().resolves({ error: null }),
@@ -653,6 +654,7 @@ describe('Brands Controller', () => {
             select: sandbox.stub().returnsThis(),
             eq: sandbox.stub().returnsThis(),
             neq: sandbox.stub().returnsThis(),
+            limit: sandbox.stub().returnsThis(),
             order: sandbox.stub().returnsThis(),
             update: sandbox.stub().returnsThis(),
             or: sandbox.stub().returnsThis(),
@@ -810,6 +812,7 @@ describe('Brands Controller', () => {
           select: sandbox.stub().returnsThis(),
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
           update: sandbox.stub().returnsThis(),
           or: sandbox.stub().returnsThis(),
@@ -882,6 +885,7 @@ describe('Brands Controller', () => {
         select: sandbox.stub().returnsThis(),
         eq: sandbox.stub().returnsThis(),
         neq: sandbox.stub().returnsThis(),
+        limit: sandbox.stub().returnsThis(),
         order: sandbox.stub().returnsThis(),
         range: sandbox.stub().resolves({ data: [], error: null, count: 0 }),
         maybeSingle: sandbox.stub().callsFake(() => {
@@ -915,6 +919,7 @@ describe('Brands Controller', () => {
           select: sandbox.stub().returnsThis(),
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
           update: sandbox.stub().returnsThis(),
           range: sandbox.stub().resolves({ data: [], error: null, count: 0 }),
@@ -991,6 +996,7 @@ describe('Brands Controller', () => {
         }
         const chain = {
           select: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           eq: sandbox.stub().returnsThis(),
           maybeSingle: sandbox.stub().resolves({ data: null, error: null }),
         };
@@ -1037,6 +1043,7 @@ describe('Brands Controller', () => {
         }
         const chain = {
           select: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           eq: sandbox.stub().returnsThis(),
           maybeSingle: sandbox.stub().resolves({ data: { id: BRAND_UUID }, error: null }),
         };
@@ -1084,6 +1091,7 @@ describe('Brands Controller', () => {
         }
         const chain = {
           select: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           eq: sandbox.stub().returnsThis(),
           maybeSingle: sandbox.stub().resolves({ data: { id: BRAND_UUID }, error: null }),
         };
@@ -1132,6 +1140,7 @@ describe('Brands Controller', () => {
         }
         const chain = {
           select: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           eq: sandbox.stub().returnsThis(),
           maybeSingle: sandbox.stub().resolves({ data: { id: BRAND_UUID }, error: null }),
         };
@@ -1176,6 +1185,7 @@ describe('Brands Controller', () => {
         }
         const chain = {
           select: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           eq: sandbox.stub().returnsThis(),
           maybeSingle: sandbox.stub().resolves({ data: { id: BRAND_UUID }, error: null }),
         };
@@ -1213,6 +1223,7 @@ describe('Brands Controller', () => {
         }
         const chain = {
           select: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           eq: sandbox.stub().returnsThis(),
           maybeSingle: sandbox.stub().resolves({ data: { id: BRAND_UUID }, error: null }),
         };
@@ -1252,6 +1263,7 @@ describe('Brands Controller', () => {
         }
         const chain = {
           select: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           eq: sandbox.stub().returnsThis(),
           maybeSingle: sandbox.stub().resolves({ data: { id: BRAND_UUID }, error: null }),
         };
@@ -1296,6 +1308,7 @@ describe('Brands Controller', () => {
         }
         const chain = {
           select: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           eq: sandbox.stub().returnsThis(),
           maybeSingle: sandbox.stub().resolves({ data: { id: BRAND_UUID }, error: null }),
         };
@@ -1344,6 +1357,7 @@ describe('Brands Controller', () => {
           }
           const chain = {
             select: sandbox.stub().returnsThis(),
+            limit: sandbox.stub().returnsThis(),
             eq: sandbox.stub().returnsThis(),
             maybeSingle: sandbox.stub().resolves({ data: { id: BRAND_UUID }, error: null }),
           };
@@ -1414,6 +1428,7 @@ describe('Brands Controller', () => {
         }
         const chain = {
           select: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           eq: sandbox.stub().returnsThis(),
           maybeSingle: sandbox.stub().resolves({ data: { id: BRAND_UUID }, error: null }),
         };
@@ -1461,6 +1476,7 @@ describe('Brands Controller', () => {
         }
         const chain = {
           select: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           eq: sandbox.stub().returnsThis(),
           maybeSingle: sandbox.stub().resolves({ data: { id: BRAND_UUID }, error: null }),
         };
@@ -1594,6 +1610,7 @@ describe('Brands Controller', () => {
         select: sandbox.stub().returnsThis(),
         eq: sandbox.stub().returnsThis(),
         neq: sandbox.stub().returnsThis(),
+        limit: sandbox.stub().returnsThis(),
         order: sandbox.stub().returnsThis(),
         update: sandbox.stub().returnsThis(),
         range: sandbox.stub().resolves({ data: [], error: null, count: 0 }),
@@ -1662,6 +1679,7 @@ describe('Brands Controller', () => {
         select: sandbox.stub().returnsThis(),
         eq: sandbox.stub().returnsThis(),
         neq: sandbox.stub().returnsThis(),
+        limit: sandbox.stub().returnsThis(),
         order: sandbox.stub().returnsThis(),
         update: sandbox.stub().returnsThis(),
         range: sandbox.stub().resolves({ data: [], error: null, count: 0 }),
@@ -1696,6 +1714,7 @@ describe('Brands Controller', () => {
           select: sandbox.stub().returnsThis(),
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
           update: sandbox.stub().returnsThis(),
           range: sandbox.stub().resolves({ data: [], error: null, count: 0 }),
@@ -1733,6 +1752,7 @@ describe('Brands Controller', () => {
           select: sandbox.stub().returnsThis(),
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
           update: sandbox.stub().returnsThis(),
           range: sandbox.stub().resolves({ data: [], error: null, count: 0 }),
@@ -1792,6 +1812,7 @@ describe('Brands Controller', () => {
           select: sandbox.stub().returnsThis(),
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
           ilike: sandbox.stub().returnsThis(),
           maybeSingle: sandbox.stub().resolves({ data: null, error: null }),
@@ -1883,6 +1904,7 @@ describe('Brands Controller', () => {
           select: sandbox.stub().returnsThis(),
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
           ilike: sandbox.stub().returnsThis(),
           maybeSingle: sandbox.stub().resolves({ data: null, error: null }),
@@ -1971,6 +1993,7 @@ describe('Brands Controller', () => {
           select: sandbox.stub().returnsThis(),
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
           ilike: sandbox.stub().returnsThis(),
           maybeSingle: sandbox.stub().resolves({ data: null, error: null }),
@@ -2070,6 +2093,7 @@ describe('Brands Controller', () => {
           select: sandbox.stub().returnsThis(),
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
           ilike: sandbox.stub().returnsThis(),
           maybeSingle: sandbox.stub().resolves({ data: null, error: null }),
@@ -2162,6 +2186,7 @@ describe('Brands Controller', () => {
           select: sandbox.stub().returnsThis(),
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
           ilike: sandbox.stub().returnsThis(),
           maybeSingle: sandbox.stub().resolves({ data: null, error: null }),
@@ -2188,6 +2213,7 @@ describe('Brands Controller', () => {
             select: sandbox.stub().returnsThis(),
             eq: sandbox.stub().returnsThis(),
             neq: sandbox.stub().returnsThis(),
+            limit: sandbox.stub().returnsThis(),
             order: sandbox.stub().returnsThis(),
             update: sandbox.stub().returnsThis(),
             range: sandbox.stub().resolves({ data: [], error: null, count: 0 }),
@@ -2319,6 +2345,7 @@ describe('Brands Controller', () => {
           select: sandbox.stub().returnsThis(),
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
           update: sandbox.stub().returnsThis(),
           ilike: sandbox.stub().returnsThis(),
@@ -2424,6 +2451,7 @@ describe('Brands Controller', () => {
             select: sandbox.stub().returnsThis(),
             eq: sandbox.stub().returnsThis(),
             neq: sandbox.stub().returnsThis(),
+            limit: sandbox.stub().returnsThis(),
             order: sandbox.stub().returnsThis(),
             range: sandbox.stub().resolves({ data: [], error: null, count: 0 }),
             maybeSingle: sandbox.stub().callsFake(() => {
@@ -2627,6 +2655,7 @@ describe('Brands Controller', () => {
       mockDataAccess.services.postgrestClient.from = sandbox.stub().callsFake((table) => {
         const chain = {
           select: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
           ilike: sandbox.stub().returnsThis(),
@@ -2730,6 +2759,7 @@ describe('Brands Controller', () => {
       mockDataAccess.services.postgrestClient = {
         from: sandbox.stub().callsFake((table) => ({
           select: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           eq: sandbox.stub().returnsThis(),
           maybeSingle: sandbox.stub().callsFake(() => {
             if (table === 'brands') {
@@ -2815,6 +2845,7 @@ describe('Brands Controller', () => {
     it('returns 404 when brand is not found', async () => {
       mockDataAccess.services.postgrestClient.from = sandbox.stub().callsFake(() => ({
         select: sandbox.stub().returnsThis(),
+        limit: sandbox.stub().returnsThis(),
         eq: sandbox.stub().returnsThis(),
         maybeSingle: sandbox.stub().resolves({ data: null, error: null }),
       }));
@@ -2862,6 +2893,7 @@ describe('Brands Controller', () => {
           select: sandbox.stub().returnsThis(),
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
           ilike: sandbox.stub().returnsThis(),
           maybeSingle: sandbox.stub().resolves({ data: [], error: null }),
@@ -3071,6 +3103,7 @@ describe('Brands Controller', () => {
           select: sandbox.stub().returnsThis(),
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
           ilike: sandbox.stub().returnsThis(),
           maybeSingle: sandbox.stub().resolves({
@@ -3158,6 +3191,7 @@ describe('Brands Controller', () => {
           select: sandbox.stub().returnsThis(),
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
           ilike: sandbox.stub().returnsThis(),
           maybeSingle: sandbox.stub().resolves({ data: null, error: null }),
@@ -3185,6 +3219,7 @@ describe('Brands Controller', () => {
           select: sandbox.stub().returnsThis(),
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
           ilike: sandbox.stub().returnsThis(),
           maybeSingle: maybeSingleStub,
@@ -3258,6 +3293,7 @@ describe('Brands Controller', () => {
           select: sandbox.stub().returnsThis(),
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
           ilike: sandbox.stub().returnsThis(),
           maybeSingle: sandbox.stub().resolves({ data: { id: BRAND_UUID }, error: null }),
@@ -3379,6 +3415,7 @@ describe('Brands Controller', () => {
           select: sandbox.stub().returnsThis(),
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
           ilike: sandbox.stub().returnsThis(),
           maybeSingle: sandbox.stub().resolves({ data: null, error: null }),
@@ -3696,6 +3733,7 @@ describe('Brands Controller', () => {
           select: sandbox.stub().returnsThis(),
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
           then: (resolve) => resolve({ data: [], error: null }),
         })),
@@ -3824,6 +3862,7 @@ describe('Brands Controller', () => {
       mockDataAccess.services.postgrestClient = {
         from: sandbox.stub().callsFake(() => ({
           select: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
           ilike: sandbox.stub().returnsThis(),
@@ -3971,6 +4010,7 @@ describe('Brands Controller', () => {
       mockDataAccess.services.postgrestClient = {
         from: sandbox.stub().callsFake(() => ({
           select: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
           ilike: sandbox.stub().returnsThis(),
@@ -4006,6 +4046,7 @@ describe('Brands Controller', () => {
       mockDataAccess.services.postgrestClient = {
         from: sandbox.stub().callsFake(() => ({
           select: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
           ilike: sandbox.stub().returnsThis(),
@@ -4061,6 +4102,7 @@ describe('Brands Controller', () => {
       mockDataAccess.services.postgrestClient = {
         from: sandbox.stub().callsFake(() => ({
           select: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
           ilike: sandbox.stub().returnsThis(),
@@ -4116,6 +4158,7 @@ describe('Brands Controller', () => {
           select: sandbox.stub().returnsThis(),
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
           update: sandbox.stub().returnsThis(),
           maybeSingle: sandbox.stub().resolves({
@@ -4220,6 +4263,7 @@ describe('Brands Controller', () => {
           select: sandbox.stub().returnsThis(),
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
           update: sandbox.stub().returnsThis(),
           maybeSingle: sandbox.stub().resolves({ data: null, error: null }),
@@ -4284,6 +4328,7 @@ describe('Brands Controller', () => {
           select: sandbox.stub().returnsThis(),
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
           update: sandbox.stub().returnsThis(),
           maybeSingle: sandbox.stub().resolves({
@@ -4320,6 +4365,7 @@ describe('Brands Controller', () => {
           select: sandbox.stub().returnsThis(),
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
           update: sandbox.stub().returnsThis(),
           maybeSingle: sandbox.stub().resolves({ data: { id: 'cat-uuid' }, error: null }),
@@ -4404,6 +4450,7 @@ describe('Brands Controller', () => {
           select: sandbox.stub().returnsThis(),
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
           update: sandbox.stub().returnsThis(),
           maybeSingle: sandbox.stub().resolves({ data: null, error: null }),
@@ -4464,6 +4511,7 @@ describe('Brands Controller', () => {
           select: sandbox.stub().returnsThis(),
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
           then: (resolve) => resolve({ data: [], error: null }),
         })),
@@ -4594,6 +4642,7 @@ describe('Brands Controller', () => {
           select: sandbox.stub().returnsThis(),
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
           upsert: sandbox.stub().returnsThis(),
           single: sandbox.stub().resolves({ data: topicRow, error: null }),
@@ -4726,6 +4775,7 @@ describe('Brands Controller', () => {
           select: sandbox.stub().returnsThis(),
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
           upsert: sandbox.stub().returnsThis(),
           single: sandbox.stub().resolves({
@@ -4766,6 +4816,7 @@ describe('Brands Controller', () => {
           select: sandbox.stub().returnsThis(),
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
           update: sandbox.stub().returnsThis(),
           maybeSingle: sandbox.stub().resolves({
@@ -4861,6 +4912,7 @@ describe('Brands Controller', () => {
           select: sandbox.stub().returnsThis(),
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
           update: sandbox.stub().returnsThis(),
           maybeSingle: sandbox.stub().resolves({ data: null, error: null }),
@@ -4924,6 +4976,7 @@ describe('Brands Controller', () => {
           select: sandbox.stub().returnsThis(),
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
           update: sandbox.stub().returnsThis(),
           maybeSingle: sandbox.stub().resolves({ data: { id: 'topic-uuid' }, error: null }),
@@ -4999,6 +5052,7 @@ describe('Brands Controller', () => {
           select: sandbox.stub().returnsThis(),
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
           update: sandbox.stub().returnsThis(),
           maybeSingle: sandbox.stub().resolves({ data: null, error: null }),
@@ -5077,6 +5131,7 @@ describe('Brands Controller', () => {
             select: sandbox.stub().returnsThis(),
             eq: sandbox.stub().returnsThis(),
             neq: sandbox.stub().returnsThis(),
+            limit: sandbox.stub().returnsThis(),
             order: sandbox.stub().returnsThis(),
             update: sandbox.stub().returnsThis(),
             or: sandbox.stub().returnsThis(),
@@ -5160,6 +5215,7 @@ describe('Brands Controller', () => {
               return chain;
             }),
             neq: sandbox.stub().returnsThis(),
+            limit: sandbox.stub().returnsThis(),
             order: sandbox.stub().returnsThis(),
             or: sandbox.stub().returnsThis(),
             contains: sandbox.stub().returnsThis(),
@@ -5203,6 +5259,7 @@ describe('Brands Controller', () => {
       mockDataAccess.services.postgrestClient = {
         from: sandbox.stub().callsFake(() => ({
           select: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
           in: sandbox.stub().returnsThis(),
@@ -5257,6 +5314,7 @@ describe('Brands Controller', () => {
       mockDataAccess.services.postgrestClient = {
         from: sandbox.stub().callsFake(() => ({
           select: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
           in: sandbox.stub().returnsThis(),
@@ -6242,6 +6300,7 @@ describe('Brands Controller', () => {
       mockDataAccess.services.postgrestClient = {
         from: sandbox.stub().callsFake(() => ({
           select: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
           in: sandbox.stub().returnsThis(),
@@ -6342,6 +6401,7 @@ describe('Brands Controller', () => {
         return {
           from: sinon.stub().callsFake(() => ({
             select: sinon.stub().returnsThis(),
+            limit: sinon.stub().returnsThis(),
             eq: sinon.stub().returnsThis(),
             maybeSingle: sinon.stub().resolves({ data: targetSite, error: null }),
           })),
@@ -6858,6 +6918,7 @@ describe('Brands Controller', () => {
       // pending brand too — no PATCH can (re)populate the column on any brand.
       mockDataAccess.services.postgrestClient.from = sandbox.stub().callsFake(() => ({
         select: sandbox.stub().returnsThis(),
+        limit: sandbox.stub().returnsThis(),
         eq: sandbox.stub().returnsThis(),
         maybeSingle: sandbox.stub().resolves({ data: { status: 'pending' }, error: null }),
       }));
@@ -6893,6 +6954,7 @@ describe('Brands Controller', () => {
       // PATCH that sets status:'active' must not also carry a staging stash.
       mockDataAccess.services.postgrestClient.from = sandbox.stub().callsFake(() => ({
         select: sandbox.stub().returnsThis(),
+        limit: sandbox.stub().returnsThis(),
         eq: sandbox.stub().returnsThis(),
         maybeSingle: sandbox.stub().resolves({ data: { status: 'pending' }, error: null }),
       }));
@@ -7776,6 +7838,7 @@ describe('Brands Controller', () => {
       mockDataAccess.services.postgrestClient = {
         from: sandbox.stub().callsFake(() => ({
           select: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
           in: sandbox.stub().returnsThis(),
@@ -7886,6 +7949,7 @@ describe('Brands Controller', () => {
       mockDataAccess.services.postgrestClient = {
         from: sandbox.stub().callsFake(() => ({
           select: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
           in: sandbox.stub().returnsThis(),
@@ -8003,6 +8067,7 @@ describe('Brands Controller', () => {
           select: sandbox.stub().returnsThis(),
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
           update: sandbox.stub().returnsThis(),
           ilike: sandbox.stub().returnsThis(),
@@ -8027,8 +8092,11 @@ describe('Brands Controller', () => {
         data: { id: BRAND_UUID },
         error: null,
       });
-      // Second call: updateBrand returns null (brand update returns no data)
+      // Second call: LLMO-7284 pre-read of the current row for the rename (null → no
+      // dup scan; this brand is being treated as absent).
       maybeSingleStub.onSecondCall().resolves({ data: null, error: null });
+      // Third call: updateBrand's UPDATE returns null (brand update returns no data)
+      maybeSingleStub.onThirdCall().resolves({ data: null, error: null });
 
       mockDataAccess.services.postgrestClient = {
         from: sandbox.stub().callsFake(() => ({
@@ -8036,6 +8104,7 @@ describe('Brands Controller', () => {
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           update: sandbox.stub().returnsThis(),
           ilike: sandbox.stub().returnsThis(),
           maybeSingle: maybeSingleStub,
@@ -9531,6 +9600,7 @@ describe('Brands Controller', () => {
       mockDataAccess.services.postgrestClient = {
         from: sandbox.stub().callsFake(() => ({
           select: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
           not: sandbox.stub().returnsThis(),
@@ -9610,6 +9680,7 @@ describe('Brands Controller', () => {
           select: sandbox.stub().returnsThis(),
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
           update: sandbox.stub().returnsThis(),
           ilike: sandbox.stub().returnsThis(),
@@ -9638,6 +9709,7 @@ describe('Brands Controller', () => {
           select: sandbox.stub().returnsThis(),
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
           update: sandbox.stub().returnsThis(),
           ilike: sandbox.stub().returnsThis(),
@@ -9700,6 +9772,7 @@ describe('Brands Controller', () => {
       mockDataAccess.services.postgrestClient = {
         from: sandbox.stub().callsFake(() => ({
           select: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
           in: sandbox.stub().returnsThis(),
@@ -9820,6 +9893,7 @@ describe('Brands Controller', () => {
           select: sandbox.stub().returnsThis(),
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
           update: sandbox.stub().returnsThis(),
           ilike: sandbox.stub().returnsThis(),
@@ -9841,8 +9915,12 @@ describe('Brands Controller', () => {
       const maybeSingleStub = sandbox.stub();
       // resolveBrandUuid succeeds...
       maybeSingleStub.onFirstCall().resolves({ data: { id: BRAND_UUID }, error: null });
-      // ...but the status update is filtered out by .neq('status','deleted') → no row.
+      // LLMO-7284 pre-transition read (status→active): the soft-deleted brand is
+      // excluded by .neq('status','deleted'), so it reads back as null and the
+      // duplicate-active check is skipped.
       maybeSingleStub.onSecondCall().resolves({ data: null, error: null });
+      // ...then the status update is filtered out by .neq('status','deleted') → no row.
+      maybeSingleStub.onThirdCall().resolves({ data: null, error: null });
 
       mockDataAccess.services.postgrestClient = {
         from: sandbox.stub().callsFake(() => ({
@@ -9850,6 +9928,7 @@ describe('Brands Controller', () => {
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           update: sandbox.stub().returnsThis(),
           ilike: sandbox.stub().returnsThis(),
           maybeSingle: maybeSingleStub,
@@ -9895,8 +9974,11 @@ describe('Brands Controller', () => {
       const maybeSingleStub = sandbox.stub();
       // resolveBrandUuid resolves the UUID...
       maybeSingleStub.onFirstCall().resolves({ data: { id: BRAND_UUID }, error: null });
+      // LLMO-7284 pre-transition read (status→active): a pending brand with a
+      // unique name, so the duplicate-active check passes and the write proceeds.
+      maybeSingleStub.onSecondCall().resolves({ data: { name: 'Test Brand', status: 'pending' }, error: null });
       // ...then setBrandStatus hits the DB constraint on the update.
-      maybeSingleStub.onSecondCall().resolves({
+      maybeSingleStub.onThirdCall().resolves({
         data: null,
         error: {
           code: '23514',
@@ -9910,6 +9992,7 @@ describe('Brands Controller', () => {
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           update: sandbox.stub().returnsThis(),
           ilike: sandbox.stub().returnsThis(),
           maybeSingle: maybeSingleStub,

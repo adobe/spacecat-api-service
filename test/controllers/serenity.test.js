@@ -16,7 +16,7 @@ import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import esmock from 'esmock';
 import { ProjectEngineApiError } from '@adobe/spacecat-shared-project-engine-client';
-import { ErrorWithStatusCode } from '../../src/support/utils.js';
+import { ErrorWithStatusCode, getSemrushPair } from '../../src/support/utils.js';
 import {
   ERROR_CODES,
   MainBrandBenchmarkInvariantError,
@@ -117,6 +117,7 @@ function fakeContext({
   brand = makeBrandModel(),
   env = {},
   promiseToken = undefined,
+  promiseAudience = undefined,
   headers = {},
 } = {}) {
   return {
@@ -125,6 +126,7 @@ function fakeContext({
       headers: {
         ...(bearer ? { authorization: `Bearer ${bearer}` } : {}),
         ...(promiseToken ? { 'x-promise-token': promiseToken } : {}),
+        ...(promiseAudience ? { 'x-promise-audience': promiseAudience } : {}),
         ...headers,
       },
     },
@@ -218,6 +220,7 @@ describe('SerenityController', () => {
   let orchestrateCreateMarketSubworkspaceStub;
   let orchestrateActivateMarketsStub;
   let exchangePromiseTokenStub;
+  let exchangePromiseTokenResponseStub;
   let linkSiteToLiveRowsStub;
   let linkSiteToRowStub;
   let tombstoneAllForBrandStub;
@@ -279,6 +282,15 @@ describe('SerenityController', () => {
     // synchronous orchestration call.
     orchestrateActivateMarketsStub = sinon.stub();
     exchangePromiseTokenStub = sinon.stub().resolves('exchanged-ims-token');
+    // #3204/#3214: bulk-tag now exchanges the caller's promise token for the FULL response
+    // (rotated promise token included), not just an access token. Unmocked, it reaches the real
+    // exchange and 401s.
+    exchangePromiseTokenResponseStub = sinon.stub().resolves({
+      access_token: 'bulk-tags-ims-token',
+      promise_token: 'rotated-promise-token',
+      promise_token_expires_in: 14399,
+      token_type: 'bearer',
+    });
     linkSiteToLiveRowsStub = sinon.stub().resolves();
     linkSiteToRowStub = sinon.stub().resolves();
     tombstoneAllForBrandStub = sinon.stub().resolves();
@@ -393,6 +405,32 @@ describe('SerenityController', () => {
         resolveSemrushImsToken: makeResolveSemrushImsTokenStub(
           (...args) => exchangePromiseTokenStub(...args),
         ),
+        // #3204/#3214: the controller now forwards the CALLER's raw promise token and pair to
+        // async jobs instead of minting a fresh one on the (unprovisioned) emitter pair. These
+        // three mirror main's own fixture so that forwarding is exercised rather than 400'd.
+        getRawPromiseToken: (ctx) => {
+          const token = ctx?.pathInfo?.headers?.['x-promise-token'];
+          if (!token) {
+            return undefined;
+          }
+          try {
+            return decodeURIComponent(token);
+          } catch {
+            return token;
+          }
+        },
+        resolvePromisePair: (ctx) => {
+          const audience = ctx?.pathInfo?.headers?.['x-promise-audience'];
+          if (!audience) {
+            return undefined;
+          }
+          if (audience.trim().toLowerCase() === 'semrush') {
+            return getSemrushPair();
+          }
+          throw new ErrorWithStatusCode(`Unknown promise audience: ${audience}`, 400);
+        },
+        getSemrushPair,
+        exchangePromiseTokenResponse: exchangePromiseTokenResponseStub,
       },
       '../../src/support/serenity/mapping-rows.js': {
         linkSiteToLiveRows: linkSiteToLiveRowsStub,
@@ -1442,6 +1480,8 @@ describe('SerenityController', () => {
       const ctx = fakeContext({
         data,
         headers: { 'iDeMpOtEnCy-KeY': 'flat-key' },
+        promiseToken: 'promise-token-xyz',
+        promiseAudience: 'semrush',
       });
 
       const response = await controller.bulkTagPrompts(ctx);
@@ -2113,7 +2153,12 @@ describe('SerenityController', () => {
           name.toLowerCase() === 'idempotency-key' ? 'headers-key' : null
         )),
       };
-      const ctx = fakeContext({ data, headers });
+      // Same #3204/#3214 requirement as the flat case. These go in as plain properties, which
+      // is what getRawPromiseToken reads — the Headers-like `get` stub above is deliberately
+      // narrow (idempotency-key only), and that narrowness is the point of this test.
+      const ctx = fakeContext({
+        data, headers, promiseToken: 'promise-token-xyz', promiseAudience: 'semrush',
+      });
 
       const response = await controller.bulkTagPrompts(ctx);
 
@@ -2768,6 +2813,8 @@ describe('SerenityController', () => {
         }];
         const response = await controller.createPrompts(fakeContext({
           data: { async: true, prompts },
+          promiseToken: 'promise-token-xyz',
+          promiseAudience: 'semrush',
         }));
 
         expect(response.status).to.equal(202);
@@ -2778,6 +2825,11 @@ describe('SerenityController', () => {
         expect(createAndEnqueueJobStub).to.have.been.calledOnce;
         const [, enqueueArgs] = createAndEnqueueJobStub.firstCall.args;
         expect(enqueueArgs.jobType).to.equal('serenity-classify-prompts');
+        // Regression guard for the async-500 bug: the controller forwards the
+        // caller's raw promise token + SEMRUSH pair to the worker instead of
+        // minting a new one via the (unprovisioned) EMITTER pair.
+        expect(enqueueArgs.promiseToken).to.deep.equal({ promise_token: 'promise-token-xyz' });
+        expect(enqueueArgs.promisePair).to.equal(getSemrushPair());
         expect(enqueueArgs.metadata).to.deep.equal({
           // callerId captured at enqueue time (LLMO-6289) — no auth profile on the
           // test context, so it resolves to the `unknown` sentinel. The default
@@ -2795,6 +2847,7 @@ describe('SerenityController', () => {
         });
         // The synchronous path never runs.
         expect(handlers.handleCreatePrompts).to.not.have.been.called;
+        expect(exchangePromiseTokenStub).to.not.have.been.called;
       });
 
       it('enqueues a serenity-classify-prompts job and returns 202 for subworkspace-mode async import, carrying authMode + parentWorkspaceId', async () => {
@@ -2807,6 +2860,8 @@ describe('SerenityController', () => {
         }];
         const response = await controller.createPrompts(fakeContext({
           data: { async: true, prompts },
+          promiseToken: 'promise-token-xyz',
+          promiseAudience: 'semrush',
         }));
 
         expect(response.status).to.equal(202);
@@ -2817,6 +2872,8 @@ describe('SerenityController', () => {
         expect(createAndEnqueueJobStub).to.have.been.calledOnce;
         const [, enqueueArgs] = createAndEnqueueJobStub.firstCall.args;
         expect(enqueueArgs.jobType).to.equal('serenity-classify-prompts');
+        expect(enqueueArgs.promiseToken).to.deep.equal({ promise_token: 'promise-token-xyz' });
+        expect(enqueueArgs.promisePair).to.equal(getSemrushPair());
         expect(enqueueArgs.metadata).to.deep.equal({
           mode: 'create',
           brandId: BRAND,
@@ -2858,6 +2915,7 @@ describe('SerenityController', () => {
         await controller.createPrompts(fakeContext({
           authType: 'api-key',
           promiseToken: 'promise-token',
+          promiseAudience: 'semrush',
           data: {
             async: true,
             prompts: [{ text: 'generated prompt', geoTargetId: 2840, languageCode: 'en' }],
