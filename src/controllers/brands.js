@@ -1918,7 +1918,7 @@ function BrandsController(ctx, log, env) {
               brandDomain,
               primaryUrl: provisionedBrandPrimaryUrl,
               modelIds,
-              generateTopics: generatePrompts,
+              generateTopics: generatePrompts && !asyncGenBrand,
               brandAliases,
               brandUrlSources,
               // Competitors ("other brands to track") are merged into the initial
