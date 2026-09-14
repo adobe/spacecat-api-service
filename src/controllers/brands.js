@@ -1829,9 +1829,9 @@ function BrandsController(ctx, log, env) {
       // Opt-in by header, so no existing caller changes behaviour: send no key and this is
       // exactly today's random-id create. Send the same key twice and both requests resolve to
       // the same row.
-      const idempotencyKey = headerValue(context?.pathInfo?.headers, 'idempotency-key');
+      const idempotencyKey = headerValue(context?.pathInfo?.headers, 'idempotency-key') ?? '';
       const idempotentBrandId = hasText(idempotencyKey)
-        ? deriveIdempotentBrandId(spaceCatId, /** @type {string} */ (idempotencyKey))
+        ? deriveIdempotentBrandId(spaceCatId, idempotencyKey)
         : null;
       if (idempotentBrandId) {
         // The replay check. A brand already sitting at this id means the earlier request DID
