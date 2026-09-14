@@ -403,6 +403,13 @@ describe('grpc-utils', () => {
       expect(normalizeAiVisibilityTarget(null)).to.equal('');
       expect(normalizeAiVisibilityTarget(undefined)).to.equal('');
     });
+    it('rejects a scheme with an empty host', () => {
+      expect(normalizeAiVisibilityTarget('http://')).to.equal('');
+    });
+    it('rejects percent-encoded traversal sequences (no literal .. after one decode layer)', () => {
+      expect(normalizeAiVisibilityTarget('nba.com/%2e%2e/secret')).to.equal('');
+      expect(normalizeAiVisibilityTarget('nba.com%2Fx')).to.equal('');
+    });
     it('rejects a non-http scheme', () => {
       // eslint-disable-next-line no-script-url -- deliberately testing rejection of a script: URL
       expect(normalizeAiVisibilityTarget('javascript:alert(1)')).to.equal('');

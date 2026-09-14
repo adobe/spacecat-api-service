@@ -265,7 +265,7 @@ export const MAX_AI_VISIBILITY_TARGET_LEN = 2048;
  * `report:read` per-domain binding hardening item.
  */
 // eslint-disable-next-line no-control-regex
-const INVALID_TARGET_RE = /[\s@\\<>"'`?#:\x00-\x1f\x7f]|\/\/|\.\./;
+const INVALID_TARGET_RE = /[\s@\\<>"'`?#:%\x00-\x1f\x7f]|\/\/|\.\./;
 
 /**
  * Canonicalize a raw `domain` query-param value into the Semrush target string
