@@ -119,6 +119,14 @@ export function isRetryableJobError(error) {
 
 const REAUTH_STATUS_PATTERN = /status: (401|403)\b/;
 
+// AWS SQS's own hard cap on a single message's `DelaySeconds` (15 minutes) — a caller
+// requesting more than this would otherwise silently get clamped by AWS to some value
+// the caller didn't ask for; clamping explicitly here makes that ceiling visible in this
+// code instead of discovered against a real queue. Named for grep-ability alongside the
+// identical constant/pattern already used for delayed SQS sends elsewhere in this service
+// (src/support/slack/commands/backfill-llmo.js).
+export const SQS_MAX_DELAY_SECONDS = 900;
+
 /**
  * Creates an AsyncJob carrying the caller's promise token and enqueues its id to the
  * runner's SQS queue. The message body is intentionally minimal — `{ jobId, type }` —
@@ -153,6 +161,10 @@ const REAUTH_STATUS_PATTERN = /status: (401|403)\b/;
  *   A token-bearing Semrush-write job passes its own dedicated queue
  *   (`env.SERENITY_MARKET_JOBS_QUEUE_URL`, spacecat-infrastructure#780) whose DLQ
  *   is deliberately NOT auto-redriven — recovery is the lease-aware runbook.
+ * @param {number} [params.delaySeconds] - Per-message SQS delivery delay (LLMO-7418: the
+ *   async provisioning worker's bounded backoff on a `not ready` poll result). Clamped to
+ *   `SQS_MAX_DELAY_SECONDS`. Omitted/undefined sends immediately, matching every existing
+ *   caller's behavior unchanged.
  * @returns {Promise<object>} The created job (an AsyncJob instance).
  * @throws On SQS send failure, after rolling back the created job record; on an
  *   unresolvable required pair (`PROMISE_PAIR_REQUIRED`); on a non-typed token
@@ -162,6 +174,7 @@ export async function createAndEnqueueJob(
   context,
   {
     jobType, metadata = {}, promiseToken, promisePair, jobId, requirePair, queueUrl,
+    delaySeconds,
   },
 ) {
   const {
@@ -203,10 +216,17 @@ export async function createAndEnqueueJob(
   });
 
   try {
+    // No messageGroupId (undefined): this queue is not FIFO — confirmed by every existing
+    // caller already sending without one against a live, working queue.
+    const sendOptions = typeof delaySeconds === 'number' && Number.isInteger(delaySeconds)
+      ? { delaySeconds: Math.min(delaySeconds, SQS_MAX_DELAY_SECONDS) }
+      : undefined;
+    // `targetQueueUrl`, not the shared queue directly: main routed token-bearing Semrush-write
+    // jobs onto their own queue, and the provisioning chain is exactly that kind of job.
     await sqs.sendMessage(targetQueueUrl, {
       jobId: job.getId(),
       type: jobType,
-    });
+    }, undefined, sendOptions);
   } catch (error) {
     log.error(`[serenity-job-runner] Failed to enqueue job ${job.getId()}: ${error.message}, rolling back`);
     await job.remove().catch(async (removeError) => {
