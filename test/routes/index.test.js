@@ -377,6 +377,7 @@ describe('getRouteHandlers', () => {
     plan: () => null,
     getPermissions: () => null,
     getTemplate: () => null,
+    rollback: () => null,
   };
 
   const mockLlmoAkamaiController = {
@@ -1352,6 +1353,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/llmo/cdn-onboard/cloudfront/template',
       'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/log-delivery',
       'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/log-rescan',
+      'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/rollback',
       'GET /sites/:siteId/llmo/edge-optimize-status',
       'GET /sites/:siteId/llmo/probes/edge-optimize',
       'GET /sites/:siteId/llmo/strategy',
