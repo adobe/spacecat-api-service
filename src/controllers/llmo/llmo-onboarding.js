@@ -1759,11 +1759,27 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
       // audits scrape (www vs apex), but can run ~10s (dozens of SEO calls) and push
       // the synchronous response past the CDN first-byte timeout (~15s) → client 503
       // even though onboarding succeeded. On timeout/error we skip it. (LLMO-5606.)
-      const overrideBaseURL = await settleWithin(
+      const detectedOverrideBaseURL = await settleWithin(
         determineOverrideBaseURL(baseURL, context),
         OVERRIDE_DETECT_TIMEOUT_MS,
         null,
       );
+
+      // Path-preservation fallback (LLMO-7458): the downstream wwwUrlResolver is
+      // hostname-only (RUM domainkeys are keyed per host), so for any baseURL with
+      // a non-root path it returns just the hostname unless overrideBaseURL is set —
+      // silently dropping the path and auditing the apex domain. A null detection
+      // (timeout, error, or "no override needed") therefore strips a path-based
+      // site's path. When detection yields nothing for a non-root path, pin baseURL
+      // itself so the path survives. The host form (www vs apex) is taken as
+      // onboarded and is NOT canonically verified here, so ops is alerted to confirm.
+      let overrideBaseURL = detectedOverrideBaseURL;
+      const pathPreservingFallback = !overrideBaseURL
+        && new URL(baseURL).pathname !== '/';
+      if (pathPreservingFallback) {
+        overrideBaseURL = baseURL;
+      }
+
       if (overrideBaseURL) {
         siteConfig.updateFetchConfig({
           ...currentFetchConfig,
@@ -1771,6 +1787,18 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
         });
         log.info(`Set overrideBaseURL to ${overrideBaseURL} for site ${site.getId()}`);
         say(`:arrows_counterclockwise: Set overrideBaseURL to ${overrideBaseURL}`);
+        if (pathPreservingFallback) {
+          await postLlmoAlert(
+            ':warning: *overrideBaseURL set by path-preserving fallback* — SEO host '
+            + 'detection returned no override, so the onboarded URL was pinned to keep '
+            + 'its path. The www-vs-apex host was NOT verified; please confirm it is '
+            + 'canonical.\n\n'
+            + `• Site: \`${baseURL}\`\n`
+            + `• overrideBaseURL: \`${overrideBaseURL}\`\n`
+            + `• Site ID: \`${site.getId()}\``,
+            context,
+          );
+        }
       }
     } else {
       log.info(`Site ${site.getId()} already has overrideBaseURL: ${currentFetchConfig.overrideBaseURL}, skipping auto-detection`);
