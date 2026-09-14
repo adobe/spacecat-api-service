@@ -4315,6 +4315,126 @@ describe('LLMO Onboarding Functions', () => {
       expect(alertMessage).to.include('https://example.com/hongkong/island');
     });
 
+    it('does NOT use the path-preserving fallback when detection returns an override for a path-based site (path preserved by detection; no alert)', async () => {
+      const mockOrganization = {
+        getId: sinon.stub().returns('org123'),
+        getImsOrgId: sinon.stub().returns('ABC123@AdobeOrg'),
+      };
+
+      const mockSiteConfig = {
+        updateLlmoBrand: sinon.stub(),
+        updateLlmoDataFolder: sinon.stub(),
+        getImports: sinon.stub().returns([]),
+        enableImport: sinon.stub(),
+        getFetchConfig: sinon.stub().returns({}),
+        updateFetchConfig: sinon.stub(),
+      };
+
+      const mockSite = {
+        getId: sinon.stub().returns('site123'),
+        getConfig: sinon.stub().returns(mockSiteConfig),
+        setConfig: sinon.stub(),
+        save: sinon.stub().resolves(),
+      };
+
+      const mockConfiguration = {
+        enableHandlerForSite: sinon.stub(),
+        disableHandlerForSite: sinon.stub(),
+        isHandlerEnabledForSite: sinon.stub().returns(false),
+        getEnabledSiteIdsForHandler: sinon.stub().returns([]),
+        save: sinon.stub().resolves(),
+        getQueues: sinon.stub().returns({ audits: 'audit-queue' }),
+      };
+
+      mockDataAccess.Organization.findByImsOrgId.resolves(mockOrganization);
+      mockDataAccess.Site.findByBaseURL.resolves(null);
+      mockDataAccess.Site.create.resolves(mockSite);
+      mockDataAccess.Configuration.findLatest.resolves(mockConfiguration);
+
+      // Path-based site: base path fails SEO, its www variant succeeds — detection
+      // returns the www variant WITH the path preserved (via toggleWWW), so the
+      // fallback must NOT fire and no alert is posted.
+      const mockSeoClient = {
+        getTopPages: sinon.stub(),
+      };
+      mockSeoClient.getTopPages
+        .withArgs('https://example.com/hongkong', { limit: 1 })
+        .resolves({ result: { pages: [] } });
+      mockSeoClient.getTopPages
+        .withArgs('https://www.example.com/hongkong', { limit: 1 })
+        .resolves({ result: { pages: [{ url: 'https://www.example.com/hongkong/p1' }] } });
+
+      const mockConfig = createMockConfig();
+      const mockTierClient = createMockTierClient();
+      const mockTracingFetch = createMockTracingFetch();
+      const mockComposeBaseURL = createMockComposeBaseURL();
+      const { mockClient: sharePointClient } = createMockSharePointClient(
+        sinon,
+        { folderExists: false },
+      );
+      const mockOctokit = createMockOctokit();
+      const mockPostSlackMessage = sinon.stub().resolves();
+
+      const { performLlmoOnboarding: performLlmoOnboardingWithMocks } = await esmock(
+        '../../../src/controllers/llmo/llmo-onboarding.js',
+        {
+          ...createCommonEsmockDependencies({
+            mockTierClient,
+            mockTracingFetch,
+            mockConfig,
+            mockComposeBaseURL,
+            mockSharePointClient: sharePointClient,
+            mockOctokit,
+          }),
+          '@adobe/mysticat-shared-seo-client': {
+            default: {
+              createFrom: sinon.stub().returns(mockSeoClient),
+            },
+          },
+          '../../../src/utils/slack/base.js': {
+            postSlackMessage: mockPostSlackMessage,
+          },
+        },
+      );
+
+      const context = {
+        dataAccess: mockDataAccess,
+        log: mockLog,
+        env: {
+          ...mockEnv,
+          AHREFS_API_BASE_URL: 'https://api.ahrefs.com',
+          AHREFS_API_KEY: 'test-ahrefs-key',
+          SLACK_LLMO_ALERTS_CHANNEL_ID: 'test-alert-channel',
+          SLACK_BOT_TOKEN: 'test-slack-token',
+        },
+        sqs: {
+          sendMessage: sinon.stub().resolves(),
+        },
+      };
+
+      const params = {
+        domain: 'example.com/hongkong',
+        brandName: 'Test Brand',
+        imsOrgId: 'ABC123@AdobeOrg',
+      };
+
+      const result = await performLlmoOnboardingWithMocks(params, context);
+
+      expect(result).to.exist;
+      expect(result.siteId).to.equal('site123');
+
+      // Override comes from detection (www variant WITH the path), not the fallback.
+      expect(mockSiteConfig.updateFetchConfig).to.have.been.called;
+      const updateFetchConfigCall = mockSiteConfig.updateFetchConfig.getCall(0);
+      expect(updateFetchConfigCall.args[0]).to.have.property(
+        'overrideBaseURL',
+        'https://www.example.com/hongkong',
+      );
+
+      // The fallback did not fire, so no ops alert is posted.
+      expect(mockPostSlackMessage).to.not.have.been.called;
+    });
+
     it('should not set overrideBaseURL when Ahrefs determines it is not needed', async () => {
       // Mock organization
       const mockOrganization = {

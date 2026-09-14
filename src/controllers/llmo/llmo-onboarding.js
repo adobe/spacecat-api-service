@@ -107,6 +107,13 @@ const SCHEDULE_REGISTRATION_TIMEOUT_MS = 8000;
 // recurring, fleet-wide Fargate schedule.
 const TIER_LOOKUP_TIMEOUT_MS = 5000;
 
+// Cap for the best-effort ops alert posted when the path-preserving overrideBaseURL
+// fallback fires (LLMO-7458). postLlmoAlert makes a Slack HTTP call on the synchronous
+// onboarding path, so a slow/hung Slack API must not push the response past the CDN
+// first-byte timeout. The durable outcome is the persisted overrideBaseURL; the alert
+// is advisory, so on timeout we stop waiting.
+const ALERT_POST_TIMEOUT_MS = 2000;
+
 /**
  * Awaits `promise`, but resolves to `fallback` if it rejects or doesn't settle
  * within `timeoutMs`. The underlying promise is left running and any late
@@ -1774,9 +1781,9 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
       // itself so the path survives. The host form (www vs apex) is taken as
       // onboarded and is NOT canonically verified here, so ops is alerted to confirm.
       let overrideBaseURL = detectedOverrideBaseURL;
-      const pathPreservingFallback = !overrideBaseURL
+      const isPathPreservingFallback = !overrideBaseURL
         && new URL(baseURL).pathname !== '/';
-      if (pathPreservingFallback) {
+      if (isPathPreservingFallback) {
         overrideBaseURL = baseURL;
       }
 
@@ -1787,16 +1794,25 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
         });
         log.info(`Set overrideBaseURL to ${overrideBaseURL} for site ${site.getId()}`);
         say(`:arrows_counterclockwise: Set overrideBaseURL to ${overrideBaseURL}`);
-        if (pathPreservingFallback) {
-          await postLlmoAlert(
-            ':warning: *overrideBaseURL set by path-preserving fallback* — SEO host '
-            + 'detection returned no override, so the onboarded URL was pinned to keep '
-            + 'its path. The www-vs-apex host was NOT verified; please confirm it is '
-            + 'canonical.\n\n'
-            + `• Site: \`${baseURL}\`\n`
-            + `• overrideBaseURL: \`${overrideBaseURL}\`\n`
-            + `• Site ID: \`${site.getId()}\``,
-            context,
+        if (isPathPreservingFallback) {
+          // Durable, Splunk-queryable signal independent of the best-effort Slack
+          // alert below (which no-ops when unconfigured and swallows its own errors).
+          log.warn(`Path-preserving fallback (LLMO-7458): pinned overrideBaseURL=${overrideBaseURL} for site ${site.getId()}; SEO detection returned no alternate host, www-vs-apex form not canonically verified`);
+          // Best-effort, time-bounded: postLlmoAlert makes a Slack call on the
+          // synchronous onboarding path, so cap it (LLMO-5606 time budget).
+          await settleWithin(
+            postLlmoAlert(
+              ':warning: *overrideBaseURL set by path-preserving fallback* — SEO host '
+              + 'detection did not return an alternate host (no override needed, or it '
+              + 'timed out/failed), so the onboarded URL was pinned to preserve its '
+              + 'path. The host form (www vs apex) may not be canonical; please verify.\n\n'
+              + `• Site: \`${baseURL}\`\n`
+              + `• overrideBaseURL: \`${overrideBaseURL}\`\n`
+              + `• Site ID: \`${site.getId()}\``,
+              context,
+            ),
+            ALERT_POST_TIMEOUT_MS,
+            undefined,
           );
         }
       }
