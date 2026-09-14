@@ -124,6 +124,7 @@ import {
 } from '../support/brands-storage.js';
 import {
   ErrorWithStatusCode,
+  headerValue,
   resolveSemrushImsToken as resolveImsTokenViaPromise,
   getIMSPromiseToken,
   resolvePromisePair,
@@ -152,19 +153,6 @@ const MAX_MARKETS = 50;
  */
 function safeError(msg) {
   return cleanupHeaderValue(String(msg || '')).slice(0, MAX_ERR_MSG_LEN);
-}
-
-function headerValue(headers, name) {
-  if (!headers || typeof headers !== 'object') {
-    return undefined;
-  }
-  if (typeof headers.get === 'function') {
-    return headers.get(name) ?? undefined;
-  }
-  const wanted = name.toLowerCase();
-  const entry = Object.entries(headers)
-    .find(([key]) => key.toLowerCase() === wanted);
-  return entry?.[1];
 }
 
 /**
