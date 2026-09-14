@@ -122,6 +122,38 @@ export function resolveElementModel(value) {
 /* c8 ignore stop */
 
 /**
+ * Multi-model variant of {@link resolveElementModel}. Resolves a `model`/`platform`
+ * query value that MAY be a comma-separated subset list into an array of valid Semrush
+ * Elements models (LLMO-7553).
+ *
+ *  - A single value (no comma) → a 1-element array `[resolveElementModel(value)]`. This
+ *    is the BACKWARD-COMPATIBLE case: paired with {@link buildModelOrFilter} it yields
+ *    the exact one-member `CBF_model` OR the single-model path produced before subset
+ *    multi-model support.
+ *  - A comma value (e.g. `openai,gemini`) → split, trim, drop blanks, resolve each via
+ *    {@link resolveElementModel}, then dedupe (order-preserving). Duplicate entries and
+ *    distinct UI codes that resolve to the same Semrush model collapse to one member.
+ *
+ * Like {@link resolveElementModel} it does NOT understand the `'all'` sentinel — a caller
+ * that supports "all models" MUST check {@link isAllPlatforms}/{@link isAllModelsFilter}
+ * first, exactly as before (an `'all'` value here resolves to a 1-element
+ * `[DEFAULT_ELEMENT_MODEL]`, matching {@link resolveElementModel}). Always returns at
+ * least one member, so callers never emit an empty `CBF_model` OR.
+ *
+ * @param {string} [value] - Raw `model`/`platform` value, optionally comma-separated.
+ * @returns {string[]} Non-empty array of {@link ELEMENT_MODELS} members.
+ */
+export function resolveElementModels(value) {
+  const split = typeof value === 'string' && value.includes(',')
+    ? value.split(',').map((v) => v.trim()).filter((v) => v.length > 0)
+    : [value];
+  // A comma value that trims to nothing (e.g. `","`) falls back to the raw value so the
+  // resolve step still produces DEFAULT_ELEMENT_MODEL rather than an empty array.
+  const parts = split.length > 0 ? split : [value];
+  return [...new Set(parts.map((p) => resolveElementModel(p)))];
+}
+
+/**
  * Builds the single-model `CBF_model` advanced filter for a brand-presence element, or
  * returns `null` when the request is an all-models aggregate ({@link isAllModelsFilter} —
  * param absent or the `'all'` sentinel), so the caller simply omits the filter and Semrush
@@ -155,6 +187,26 @@ export function buildModelFilter(requestedModel, { wrap = true } = {}) {
   }
   const eq = { op: 'eq', val: resolveElementModel(requestedModel), col: 'CBF_model' };
   return wrap ? { op: 'or', filters: [eq] } : eq;
+}
+
+/**
+ * Builds an N-member `CBF_model` OR filter from an array of resolved Semrush models
+ * (see {@link resolveElementModels}), for the subset multi-model surfaces (LLMO-7553).
+ *
+ * A 1-element array yields the identical one-member
+ * `{ op: 'or', filters: [{ op: 'eq', val, col: 'CBF_model' }] }` the single-model wrap
+ * path (`resolveElementModel` + manual `or` wrap) produced before subset multi-model
+ * support — the backward-compatibility guarantee. ≥2 models emit one `eq` per model under
+ * the same `or`; Semrush dedupes such an OR server-side, so no caller-side dedup is needed.
+ *
+ * @param {string[]} models - Resolved Semrush model names (non-empty).
+ * @returns {{op: 'or', filters: object[]}} The `CBF_model` OR node.
+ */
+export function buildModelOrFilter(models) {
+  return {
+    op: 'or',
+    filters: models.map((m) => ({ op: 'eq', val: m, col: 'CBF_model' })),
+  };
 }
 
 /**

@@ -10,7 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
-import { resolveElementModel } from '../constants.js';
+import { resolveElementModels, buildModelOrFilter } from '../constants.js';
 import { dateToIsoWeek } from '../week-utils.js';
 import { buildFacetedTagFilters } from './prompts.js';
 
@@ -27,7 +27,8 @@ import { buildFacetedTagFilters } from './prompts.js';
  * `domain_type='Owned'` selection is applied client-side in the transform.
  *
  * @param {object} params
- * @param {string} [params.model] - AI model (Semrush engine or UI platform code).
+ * @param {string} [params.model] - AI model (Semrush engine or UI platform code), or a
+ *   comma-separated subset (`a,b`) → an N-member CBF_model OR (LLMO-7553).
  * @param {string} [params.platform] - Legacy alias for `model`; `model` wins.
  * @param {string} params.startDate - ISO date (YYYY-MM-DD).
  * @param {string} params.endDate - ISO date (YYYY-MM-DD).
@@ -38,9 +39,13 @@ import { buildFacetedTagFilters } from './prompts.js';
 export function buildOwnedUrlsStatsPayload({
   model, platform, startDate, endDate, category, tagPaths, projectId,
 } = {}) {
-  const resolvedModel = resolveElementModel(model || platform);
+  // `model`/`platform` may be a comma-separated subset (LLMO-7553); a single value yields
+  // the same one-member CBF_model OR as before. STATS_PER_URL sums per (URL, project) for
+  // a multi-member OR — transformOwnedUrlsResponse's per-project sum already produces the
+  // correct subset aggregate, so no caller-side dedup is added.
+  const models = resolveElementModels(model || platform);
   const advancedFilters = [
-    { op: 'or', filters: [{ op: 'eq', val: resolvedModel, col: 'CBF_model' }] },
+    buildModelOrFilter(models),
     { op: 'gte', val: startDate, col: 'CBF_date__start' },
     { op: 'lte', val: endDate, col: 'CBF_date__end' },
   ];
@@ -68,9 +73,12 @@ export function buildOwnedUrlsStatsPayload({
 export function buildOwnedUrlsTrendPayload({
   model, platform, startDate, endDate, category, tagPaths, projectId,
 } = {}) {
-  const resolvedModel = resolveElementModel(model || platform);
+  // Multi-model subset support mirrors buildOwnedUrlsStatsPayload (LLMO-7553); single value
+  // is byte-identical. Kept in lockstep so the weekly sparklines and the aggregate totals
+  // share the same CBF_model filter set.
+  const models = resolveElementModels(model || platform);
   const advancedFilters = [
-    { op: 'or', filters: [{ op: 'eq', val: resolvedModel, col: 'CBF_model' }] },
+    buildModelOrFilter(models),
     { op: 'gte', val: startDate, col: 'CBF_date__start' },
     { op: 'lte', val: endDate, col: 'CBF_date__end' },
   ];

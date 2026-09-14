@@ -1569,7 +1569,8 @@ export default function ElementsController(context, log, env) {
    * Pagination is client-side; `totalCount` is the full count.
    *
    * Query params: `url` (required, the cited URL), `startDate`/`endDate` (required,
-   * YYYY-MM-DD), `model`/`platform` (optional, default search-gpt), `projectId`
+   * YYYY-MM-DD), `model`/`platform` (optional, default search-gpt; accepts a
+   * comma-separated subset `a,b` → an N-member CBF_model OR, LLMO-7553), `projectId`
    * (optional, CSV of Semrush project ids — the market filter; each must be owned by the
    * brand, and the payload fans out per project, see {@link buildUrlPromptsPayload}) and
    * `category`/`categoryId` (optional, full `category__<label>` tag → `CBF_tags`). `siteId`

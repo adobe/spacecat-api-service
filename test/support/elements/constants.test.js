@@ -13,9 +13,12 @@
 import { expect } from 'chai';
 import {
   ALL_PLATFORMS,
+  DEFAULT_ELEMENT_MODEL,
   isAllPlatforms,
   isAllModelsFilter,
   buildModelFilter,
+  buildModelOrFilter,
+  resolveElementModels,
   buildAdvancedFilters,
 } from '../../../src/support/elements/constants.js';
 
@@ -98,6 +101,76 @@ describe('elements constants', () => {
       expect(buildModelFilter('not-a-real-model')).to.deep.equal({
         op: 'or',
         filters: [{ op: 'eq', val: 'search-gpt', col: 'CBF_model' }],
+      });
+    });
+  });
+
+  describe('resolveElementModels (subset multi-model, LLMO-7553)', () => {
+    it('resolves a single value (no comma) to a 1-element array', () => {
+      expect(resolveElementModels('search-gpt')).to.deep.equal(['search-gpt']);
+    });
+
+    it('translates a single UI platform code, same as resolveElementModel', () => {
+      expect(resolveElementModels('openai')).to.deep.equal(['chatgpt-paid']);
+    });
+
+    it('coerces absent / unrecognized single values to the default model', () => {
+      expect(resolveElementModels(undefined)).to.deep.equal([DEFAULT_ELEMENT_MODEL]);
+      expect(resolveElementModels('')).to.deep.equal([DEFAULT_ELEMENT_MODEL]);
+      expect(resolveElementModels('not-a-real-model')).to.deep.equal([DEFAULT_ELEMENT_MODEL]);
+    });
+
+    it('treats the `all` sentinel as a single default model (caller must guard it first)', () => {
+      expect(resolveElementModels('all')).to.deep.equal([DEFAULT_ELEMENT_MODEL]);
+    });
+
+    it('splits a comma value, trimming each and translating UI codes', () => {
+      expect(resolveElementModels('openai,gemini')).to.deep.equal(['chatgpt-paid', 'gemini-2.5-flash']);
+      expect(resolveElementModels('  openai , gemini ')).to.deep.equal(['chatgpt-paid', 'gemini-2.5-flash']);
+    });
+
+    it('dedupes members (repeated ids and codes resolving to the same model collapse)', () => {
+      expect(resolveElementModels('openai,openai')).to.deep.equal(['chatgpt-paid']);
+      // chatgpt -> search-gpt, and search-gpt -> search-gpt, so both collapse to one member.
+      expect(resolveElementModels('chatgpt,search-gpt')).to.deep.equal(['search-gpt']);
+    });
+
+    it('drops blank members from a comma value', () => {
+      expect(resolveElementModels('openai,,gemini,')).to.deep.equal(['chatgpt-paid', 'gemini-2.5-flash']);
+    });
+
+    it('never returns an empty array, even for an all-blank comma value', () => {
+      expect(resolveElementModels(',')).to.deep.equal([DEFAULT_ELEMENT_MODEL]);
+    });
+  });
+
+  describe('buildModelOrFilter (subset multi-model, LLMO-7553)', () => {
+    it('a 1-element array yields the SAME one-member or as the single-model wrap path', () => {
+      // Backward-compatibility guarantee: identical to buildModelFilter('search-gpt').
+      expect(buildModelOrFilter(['search-gpt'])).to.deep.equal({
+        op: 'or',
+        filters: [{ op: 'eq', val: 'search-gpt', col: 'CBF_model' }],
+      });
+      expect(buildModelOrFilter(['search-gpt'])).to.deep.equal(buildModelFilter('search-gpt'));
+    });
+
+    it('builds one eq per model under a single or for a multi-member list', () => {
+      expect(buildModelOrFilter(['chatgpt-paid', 'gemini-2.5-flash'])).to.deep.equal({
+        op: 'or',
+        filters: [
+          { op: 'eq', val: 'chatgpt-paid', col: 'CBF_model' },
+          { op: 'eq', val: 'gemini-2.5-flash', col: 'CBF_model' },
+        ],
+      });
+    });
+
+    it('composes with resolveElementModels end-to-end for a comma value', () => {
+      expect(buildModelOrFilter(resolveElementModels('openai,gemini'))).to.deep.equal({
+        op: 'or',
+        filters: [
+          { op: 'eq', val: 'chatgpt-paid', col: 'CBF_model' },
+          { op: 'eq', val: 'gemini-2.5-flash', col: 'CBF_model' },
+        ],
       });
     });
   });
