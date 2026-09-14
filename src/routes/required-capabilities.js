@@ -100,6 +100,7 @@ export const INTERNAL_ROUTES = [
   'GET /sites/:siteId/llmo/cdn-onboard/cloudfront/template',
   'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/log-delivery',
   'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/log-rescan',
+  'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/rollback',
   'PUT /sites/:siteId/llmo/opportunities-reviewed',
 
   // LLMO Cloudflare onboarding - not S2S (uses a caller-supplied x-cloudflare-token,
