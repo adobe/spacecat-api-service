@@ -38,7 +38,7 @@ const MAX_TOPICS_ON_CREATE = 5;
 /**
  * @typedef {{
  *   geoTargetId: number, languageCode: string|null, workspaceId: string,
- *   promptCount?: number,
+ *   promptCount?: number, projectId?: string,
  * }} MarketCreateSuccessBody
  */
 
@@ -86,7 +86,8 @@ const MAX_TOPICS_ON_CREATE = 5;
  *   explicit override is REQUIRED for a brand's very first market: at that point there are no
  *   existing markets yet for `resolveDefaultModelIds` to mirror, so without one a caller's chosen
  *   models would silently be replaced by the generic net-new default set.
- * @returns {Promise<{status: number, body: object}>} the same shape
+ * @returns {Promise<{status: number, body: object, generationInputs: object|null}>} the same
+ *   `{ status, body }` shape
  *   {@link handleCreateMarketSubworkspace} itself returns.
  */
 export async function orchestrateCreateMarketSubworkspace({
