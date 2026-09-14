@@ -66,6 +66,33 @@ v2-brands-for-org:
     security:
       - session_token: []
       - api_key: []
+    parameters:
+      - name: Idempotency-Key
+        in: header
+        required: false
+        description: |
+          Optional caller-supplied key making this create idempotent
+          (LLMO-7352/LLMO-7418). Retrying with the SAME key returns the brand the
+          first request created, together with the provisioning job it is already
+          running under, instead of creating a second brand and a second Semrush
+          sub-workspace. This matters most on the async path: a lost `202`
+          (an edge timeout, a dropped connection) is indistinguishable from a
+          failed create to the client, and retrying without a key produced a
+          duplicate brand whenever the brand had no primary site to collide on.
+
+          The replay answers with the SAME status the original did — `202` with the
+          original `jobId` while provisioning is still in flight, `201` once it has
+          settled — so a client that lost its first response can simply repeat the
+          request and carry on polling.
+
+          Keys are scoped to the organization and are opaque to the caller: the key
+          is hashed with the organization id to derive the brand's row id, so it
+          cannot be used to choose a row id or to address another organization's
+          brand. Omit the header for the previous behaviour (a fresh brand per
+          request).
+        schema:
+          type: string
+          maxLength: 255
     requestBody:
       required: true
       content:
@@ -81,13 +108,14 @@ v2-brands-for-org:
               $ref: './schemas.yaml#/V2Brand'
       '202':
         description: |
-          PR-C (LLMO-7352/LLMO-7418): the request set `async: true` alongside
-          `semrushMarket`. The brand row is persisted immediately (visible,
+          The request set `async: true` (PR-C, LLMO-7352/LLMO-7418, alongside
+          `semrushMarket`; or Phase 4, same epic, on a bare create with no
+          market). The brand row is persisted immediately (visible,
           non-active — "Setting up", no workspace pointer yet); the
-          sub-workspace ready-check and the initial market's project create/
-          publish are enqueued to a background job chain instead of running
-          inline. Poll the returned `jobId` at `GET .../serenity/jobs/{jobId}`
-          for status + result.
+          sub-workspace ready-check — and, when `semrushMarket` was supplied,
+          the initial market's project create/publish — are enqueued to a
+          background job chain instead of running inline. Poll the returned
+          `jobId` at `GET .../serenity/jobs/{jobId}` for status + result.
         content:
           application/json:
             schema:
@@ -122,6 +150,7 @@ v2-brands-for-org:
             whitespace-insensitive) in this organization
             (`code: brand_duplicate_active_name`).
           - (PR-C, `async: true` only) a provisioning attempt is already in flight
+          - (`async: true` only) a provisioning attempt is already in flight
             for this brand (`error: semrushProvisioningInProgress`).
         headers:
           X-Error:

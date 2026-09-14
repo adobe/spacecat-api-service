@@ -178,6 +178,20 @@ export const ERROR_CODES = Object.freeze({
   // main_brand:true) could not be established. Surfaced via
   // MainBrandBenchmarkInvariantError, below.
   MAIN_BRAND_BENCHMARK_INVARIANT: 'mainBrandBenchmarkInvariant',
+  // Async sub-workspace provisioning (LLMO-7352/LLMO-7418). Both are 409s, and both are raised
+  // from BOTH serenity.js and brands.js, so they live here rather than as string literals at each
+  // throw site -- the two controllers previously spelled the in-progress one two different ways
+  // (`semrush_provisioning_in_progress` vs `semrushProvisioningInProgress`) and published both
+  // spellings in their respective OpenAPI documents, which no client could branch on reliably.
+  //
+  // They are NOT interchangeable, which is why there are two:
+  //   IN_PROGRESS  -- an attempt is live right now. RETRYABLE: wait and retry, it will converge.
+  //   INCOMPLETE   -- provisioning is pending or has FAILED, so the brand has no sub-workspace of
+  //                   its own to write into. NOT retryable on its own; the brand's provisioning
+  //                   has to complete (or be retried) first.
+  // A client that collapses them shows "please retry shortly" on a brand that will never converge.
+  SEMRUSH_PROVISIONING_IN_PROGRESS: 'semrushProvisioningInProgress',
+  SEMRUSH_PROVISIONING_INCOMPLETE: 'semrushProvisioningIncomplete',
 });
 
 /**
