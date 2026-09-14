@@ -22,6 +22,7 @@ import TokowakaClient, {
   verifyRouting as verifyAwsRouting,
   CloudFrontEdgeClient,
 } from '@adobe/spacecat-shared-tokowaka-client';
+import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import AccessControlUtil from '../../support/access-control-util.js';
 import { createCdnLogDelivery, buildDeliveryDestinationArn } from '../../support/cdn-log-delivery.js';
 import { hasSubpath } from '../../support/edge-routing-utils.js';
@@ -1459,6 +1460,108 @@ function LlmoCloudFrontController(ctx) {
     }
   };
 
+  /**
+   * POST /sites/{siteId}/llmo/cdn-onboard/cloudfront/rollback
+   * Reverts Edge Optimize's CloudFront routing for a connected account — a trust feature so a
+   * customer can always undo what Adobe wired in, on demand. The frontend does not (and cannot)
+   * track which distribution/behavior was deployed to (the wizard only persists the account id
+   * across sessions), so this self-discovers: it scans the account's distributions (same
+   * list + bounded-batch pattern as rescanCdnLogDelivery) and strips ONLY the routing associations
+   * (`edgeoptimize-routing` viewer-request CloudFront Function + `edgeoptimize-origin`
+   * origin-request/response Lambda@Edge) that deploy/applyAssociations added.
+   *
+   * Deliberately NOT a teardown: the Lambda@Edge function, its execution role, the cache policy,
+   * the EO origin, and the connector role itself are all left untouched, so a later re-deploy
+   * recreates nothing. On any successful revert, marks the site's edgeOptimizeConfig disabled
+   * (Adobe-side state only) so the rest of the UI stops reporting Edge Optimize as active.
+   * @param {object} context - Request context
+   * @returns {Promise<Response>} { reverted, scanned, failed, distributions } summary.
+   */
+  const rollback = async (context) => {
+    const {
+      log, dataAccess, env,
+    } = context;
+    const { siteId } = context.params;
+    const { Site } = dataAccess;
+    const roleName = env?.EDGE_OPTIMIZE_ROLE_NAME || undefined;
+
+    const { accountId, error: credError } = validateCloudfrontCredentials(context);
+    if (credError) {
+      return credError;
+    }
+
+    try {
+      const { error, site, externalId } = await gateEdgeOptimizeWizard(siteId, Site, 'roll back CloudFront routing');
+      if (error) {
+        return error;
+      }
+
+      log.info(auditLine(context, 'rollback', 'started', { siteId, accountId }));
+
+      const { cloudFrontClient } = await assumeCloudFrontClient({
+        accountId, externalId, roleName,
+      });
+
+      const allDistributions = await cloudFrontClient.listDistributions();
+      const maxDists = Number(env?.CDN_LOG_RESCAN_MAX_DISTRIBUTIONS) || 0;
+      const truncated = maxDists > 0 && allDistributions.length > maxDists;
+      const distributions = truncated ? allDistributions.slice(0, maxDists) : allDistributions;
+
+      const results = [];
+      for (let i = 0; i < distributions.length; i += CDN_LOG_RESCAN_CONCURRENCY) {
+        const batch = distributions.slice(i, i + CDN_LOG_RESCAN_CONCURRENCY);
+        // eslint-disable-next-line no-await-in-loop
+        const batchResults = await Promise.allSettled(
+          batch.map((dist) => cloudFrontClient.removeEdgeOptimizeRouting(dist.id)),
+        );
+        results.push(...batchResults);
+      }
+
+      const summary = distributions.map((dist, i) => {
+        const outcome = results[i];
+        if (outcome.status === 'fulfilled') {
+          return { distributionId: dist.id, ...outcome.value };
+        }
+        // Report only the AWS error category — never the raw message, which can leak ARNs/roles.
+        return { distributionId: dist.id, error: outcome.reason?.name || 'unknown error' };
+      });
+
+      const revertedCount = summary.filter((r) => r.reverted).length;
+      const failed = summary.filter((r) => r.error).length;
+
+      // Adobe-side status honesty: routing is gone, so stop reporting Edge Optimize as active.
+      // AWS-side is untouched — no Lambda/role/cache-policy/connector-role teardown.
+      if (revertedCount > 0) {
+        const currentConfig = site.getConfig();
+        const existingEdgeConfig = currentConfig.getEdgeOptimizeConfig() || {};
+        currentConfig.updateEdgeOptimizeConfig({ ...existingEdgeConfig, enabled: false });
+        site.setConfig(Config.toDynamoItem(currentConfig));
+        try {
+          await site.save();
+        } catch (saveError) {
+          log.error(`Failed to mark edge optimize disabled after rollback for site ${siteId}: ${saveError.message}`);
+        }
+      }
+
+      log.info(auditLine(context, 'rollback', 'done', {
+        siteId, accountId, scanned: distributions.length, reverted: revertedCount, failed,
+      }));
+
+      return ok({
+        reverted: revertedCount,
+        scanned: distributions.length,
+        failed,
+        ...(truncated && { truncated: true, totalFound: allDistributions.length }),
+        distributions: summary,
+      });
+    } catch (error) {
+      log.error(auditLine(context, 'rollback', 'error', {
+        severity: 'error', siteId, accountId, error: error.message,
+      }));
+      return mutationErrorResponse(error, 'Failed to roll back CloudFront routing, please try again');
+    }
+  };
+
   return {
     createBootstrapUrl,
     connect,
@@ -1479,6 +1582,7 @@ function LlmoCloudFrontController(ctx) {
     getTemplate,
     enableCdnLogDelivery,
     rescanCdnLogDelivery,
+    rollback,
   };
 }
 

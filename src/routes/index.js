@@ -642,6 +642,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/llmo/cdn-onboard/cloudfront/template': llmoCloudFrontController.getTemplate,
     'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/log-delivery': llmoCloudFrontController.enableCdnLogDelivery,
     'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/log-rescan': llmoCloudFrontController.rescanCdnLogDelivery,
+    'POST /sites/:siteId/llmo/cdn-onboard/cloudfront/rollback': llmoCloudFrontController.rollback,
     'GET /sites/:siteId/llmo/strategy': llmoController.getStrategy,
     'PUT /sites/:siteId/llmo/strategy': llmoController.saveStrategy,
     'GET /sites/:siteId/llmo/edge-optimize-status': llmoController.checkEdgeOptimizeStatus,

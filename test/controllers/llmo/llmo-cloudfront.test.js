@@ -88,6 +88,7 @@ describe('LlmoCloudFrontController', () => {
   let createLambdaAtEdgeStub;
   let getLambdaAtEdgeStatusStub;
   let applyAssociationsStub;
+  let removeEdgeOptimizeRoutingStub;
   let verifyRoutingStub;
   let runDeployStepStub;
   let planDeployStub;
@@ -171,6 +172,11 @@ describe('LlmoCloudFrontController', () => {
         this.region,
       );
     };
+    CloudFrontEdgeClient.prototype.removeEdgeOptimizeRouting = function removeEdgeOptimizeRouting(
+      distributionId,
+    ) {
+      return removeEdgeOptimizeRoutingStub(this.credentials, distributionId, this.region);
+    };
     CloudFrontEdgeClient.prototype.runDeployStep = function runDeployStep(params) {
       return runDeployStepStub(this.credentials, params, this.region);
     };
@@ -188,6 +194,7 @@ describe('LlmoCloudFrontController', () => {
       createLambdaAtEdge: (...args) => createLambdaAtEdgeStub(...args),
       getLambdaAtEdgeStatus: (...args) => getLambdaAtEdgeStatusStub(...args),
       applyAssociations: (...args) => applyAssociationsStub(...args),
+      removeEdgeOptimizeRouting: (...args) => removeEdgeOptimizeRoutingStub(...args),
       verifyRouting: (...args) => verifyRoutingStub(...args),
       runDeployStep: (...args) => runDeployStepStub(...args),
       planDeploy: (...args) => planDeployStub(...args),
@@ -221,6 +228,9 @@ describe('LlmoCloudFrontController', () => {
       createCdnLogDelivery: (...args) => createCdnLogDeliveryStub(...args),
       buildDeliveryDestinationArn: (...args) => buildDeliveryDestinationArnStub(...args),
     },
+    '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
+      Config: { toDynamoItem: sinon.stub().returnsArg(0) },
+    },
     '../../../src/support/access-control-util.js': accessControlMock,
   });
 
@@ -235,6 +245,7 @@ describe('LlmoCloudFrontController', () => {
     createLambdaAtEdgeStub = sinon.stub();
     getLambdaAtEdgeStatusStub = sinon.stub();
     applyAssociationsStub = sinon.stub();
+    removeEdgeOptimizeRoutingStub = sinon.stub();
     verifyRoutingStub = sinon.stub();
     runDeployStepStub = sinon.stub();
     planDeployStub = sinon.stub();
@@ -262,6 +273,7 @@ describe('LlmoCloudFrontController', () => {
     createLambdaAtEdgeStub = sinon.stub();
     getLambdaAtEdgeStatusStub = sinon.stub();
     applyAssociationsStub = sinon.stub();
+    removeEdgeOptimizeRoutingStub = sinon.stub();
     verifyRoutingStub = sinon.stub();
     runDeployStepStub = sinon.stub();
     planDeployStub = sinon.stub();
@@ -275,7 +287,10 @@ describe('LlmoCloudFrontController', () => {
       error: sinon.stub(),
       debug: sinon.stub(),
     };
-    mockConfig = { getEdgeOptimizeConfig: sinon.stub().returns({}) };
+    mockConfig = {
+      getEdgeOptimizeConfig: sinon.stub().returns({}),
+      updateEdgeOptimizeConfig: sinon.stub(),
+    };
     mockOrganization = {
       getId: sinon.stub().returns('test-org-id'),
       getImsOrgId: sinon.stub().returns(TEST_IMS_ORG_ID),
@@ -283,6 +298,8 @@ describe('LlmoCloudFrontController', () => {
     mockSite = {
       getId: sinon.stub().returns(TEST_SITE_ID),
       getConfig: sinon.stub().returns(mockConfig),
+      setConfig: sinon.stub(),
+      save: sinon.stub().resolves(),
       getBaseURL: sinon.stub().returns('https://www.example.com'),
       getOrganization: sinon.stub().resolves(mockOrganization),
       getOrganizationId: sinon.stub().returns('test-org-id'),
@@ -2743,6 +2760,189 @@ describe('LlmoCloudFrontController', () => {
       expect(body.truncated).to.equal(true);
       expect(body.totalFound).to.equal(3);
       expect(createCdnLogDeliveryStub.callCount).to.equal(2);
+    });
+  });
+
+  describe('rollback', () => {
+    let rollbackContext;
+
+    beforeEach(() => {
+      assumeConnectorRoleStub.resolves({
+        roleArn: 'arn:aws:iam::120569600543:role/AdobeLLMOptimizerCloudFrontConnectorRole',
+        accountId: '120569600543',
+        credentials: { accessKeyId: 'AKIA', secretAccessKey: 'secret', sessionToken: 'token' },
+      });
+      listDistributionsStub.resolves([{ id: 'E2EXAMPLE001' }, { id: 'E2EXAMPLE002' }]);
+      removeEdgeOptimizeRoutingStub.resolves({ reverted: true, behaviors: ['default'] });
+      rollbackContext = {
+        ...mockContext,
+        params: { siteId: TEST_SITE_ID },
+        data: { accountId: '120569600543' },
+      };
+    });
+
+    it('reverts routing on every distribution that has it and marks edge optimize disabled', async () => {
+      const result = await controller.rollback(rollbackContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.scanned).to.equal(2);
+      expect(body.reverted).to.equal(2);
+      expect(body.failed).to.equal(0);
+      expect(body.distributions).to.have.length(2);
+      expect(assumeConnectorRoleStub.calledOnce).to.equal(true);
+      expect(listDistributionsStub.calledOnce).to.equal(true);
+      expect(removeEdgeOptimizeRoutingStub.callCount).to.equal(2);
+      expect(mockConfig.updateEdgeOptimizeConfig
+        .calledWith(sinon.match({ enabled: false }))).to.equal(true);
+      expect(mockSite.setConfig.calledOnce).to.equal(true);
+      expect(mockSite.save.calledOnce).to.equal(true);
+    });
+
+    it('does not mark edge optimize disabled when nothing was reverted', async () => {
+      removeEdgeOptimizeRoutingStub.resolves({ reverted: false, behaviors: [] });
+
+      const result = await controller.rollback(rollbackContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.reverted).to.equal(0);
+      expect(mockSite.save.called).to.equal(false);
+    });
+
+    it('processes more distributions than the concurrency cap in order', async () => {
+      const ids = Array.from({ length: 7 }, (_, i) => `E2DIST${String(i).padStart(6, '0')}`);
+      listDistributionsStub.resolves(ids.map((id) => ({ id })));
+
+      const result = await controller.rollback(rollbackContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.scanned).to.equal(7);
+      expect(body.reverted).to.equal(7);
+      expect(removeEdgeOptimizeRoutingStub.callCount).to.equal(7);
+      expect(body.distributions.map((d) => d.distributionId)).to.deep.equal(ids);
+    });
+
+    it('records failures per distribution (error category only) without aborting', async () => {
+      removeEdgeOptimizeRoutingStub.onFirstCall().resolves({ reverted: true, behaviors: ['default'] });
+      removeEdgeOptimizeRoutingStub.onSecondCall().rejects(
+        Object.assign(new Error('not authorized for arn:aws:cloudfront:...'), { name: 'AccessDeniedException' }),
+      );
+
+      const result = await controller.rollback(rollbackContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.scanned).to.equal(2);
+      expect(body.reverted).to.equal(1);
+      expect(body.failed).to.equal(1);
+      expect(body.distributions[1].error).to.equal('AccessDeniedException');
+      // At least one distribution WAS reverted, so the site is still marked disabled.
+      expect(mockSite.save.calledOnce).to.equal(true);
+    });
+
+    it('falls back to "unknown error" when a rejection has no error name', async () => {
+      removeEdgeOptimizeRoutingStub.onFirstCall().resolves({ reverted: true, behaviors: ['default'] });
+      removeEdgeOptimizeRoutingStub.onSecondCall().rejects(Object.assign(new Error('boom'), { name: '' }));
+
+      const result = await controller.rollback(rollbackContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.distributions[1].error).to.equal('unknown error');
+    });
+
+    it('uses a custom role name when EDGE_OPTIMIZE_ROLE_NAME is set', async () => {
+      const ctx = { ...rollbackContext, env: { EDGE_OPTIMIZE_ROLE_NAME: 'CustomConnectorRole' } };
+
+      const result = await controller.rollback(ctx);
+
+      expect(result.status).to.equal(200);
+      expect(assumeConnectorRoleStub.firstCall.args[0].roleName).to.equal('CustomConnectorRole');
+    });
+
+    it('returns 400 for an invalid account id', async () => {
+      const result = await controller.rollback({
+        ...rollbackContext,
+        data: { accountId: '123' },
+      });
+
+      expect(result.status).to.equal(400);
+      expect((await result.json()).message).to.include('12-digit');
+    });
+
+    it('returns 400 when the site organization has no IMS org id', async () => {
+      mockOrganization.getImsOrgId.returns(undefined);
+
+      const result = await controller.rollback(rollbackContext);
+
+      expect(result.status).to.equal(400);
+      expect((await result.json()).message).to.include('IMS org');
+    });
+
+    it('returns 404 when the site is not found', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+
+      const result = await controller.rollback(rollbackContext);
+
+      expect(result.status).to.equal(404);
+    });
+
+    it('returns 403 when the user lacks access to the site', async () => {
+      const result = await controllerWithAccessDenied(mockContext).rollback(rollbackContext);
+
+      expect(result.status).to.equal(403);
+    });
+
+    it('returns 500 when an unexpected error is thrown', async () => {
+      listDistributionsStub.rejects(new Error('NetworkError'));
+
+      const result = await controller.rollback(rollbackContext);
+
+      expect(result.status).to.equal(500);
+      expect((await result.json()).message)
+        .to.equal('Failed to roll back CloudFront routing, please try again');
+    });
+
+    it('returns an empty distribution list when the account has no distributions', async () => {
+      listDistributionsStub.resolves([]);
+
+      const result = await controller.rollback(rollbackContext);
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.scanned).to.equal(0);
+      expect(body.reverted).to.equal(0);
+      expect(body.distributions).to.deep.equal([]);
+      expect(removeEdgeOptimizeRoutingStub.called).to.equal(false);
+    });
+
+    it('caps distributions at CDN_LOG_RESCAN_MAX_DISTRIBUTIONS and sets truncated flag', async () => {
+      listDistributionsStub.resolves([
+        { id: 'E2DIST000001' }, { id: 'E2DIST000002' }, { id: 'E2DIST000003' },
+      ]);
+
+      const result = await controller.rollback({
+        ...rollbackContext,
+        env: { CDN_LOG_RESCAN_MAX_DISTRIBUTIONS: '2' },
+      });
+
+      expect(result.status).to.equal(200);
+      const body = await result.json();
+      expect(body.scanned).to.equal(2);
+      expect(body.truncated).to.equal(true);
+      expect(body.totalFound).to.equal(3);
+      expect(removeEdgeOptimizeRoutingStub.callCount).to.equal(2);
+    });
+
+    it('logs but does not fail the request when saving the disabled config errors', async () => {
+      mockSite.save.rejects(new Error('DB write failed'));
+
+      const result = await controller.rollback(rollbackContext);
+
+      expect(result.status).to.equal(200);
+      expect(mockLog.error.called).to.equal(true);
     });
   });
 });
