@@ -334,11 +334,33 @@ describe('llmo-agentic-traffic', () => {
       });
     });
 
-    it('dedupes codes that map to the same DB value', async () => {
+    it('dedupes within a multi list (chatgpt+openai→ChatGPT, +gemini → 2 distinct, stays multi)', async () => {
       const client = createMockClient({ rpc_agentic_traffic_kpis: { data: [], error: null } });
-      const ctx = makeContext({ client, data: { startDate: '2026-01-01', endDate: '2026-01-28', platform: 'chatgpt,openai' } });
+      const ctx = makeContext({ client, data: { startDate: '2026-01-01', endDate: '2026-01-28', platform: 'chatgpt,openai,gemini' } });
       await createAgenticTrafficKpisHandler(stubbedValidateAccess)(ctx);
-      expect(client.rpc.getCall(0).args[1].p_platforms).to.deep.equal(['ChatGPT']);
+      expect(client.rpc.getCall(0).args[1].p_platforms).to.deep.equal(['ChatGPT', 'Gemini']);
+    });
+
+    it('collapses a ≤1-platform list back to the single path (byte-identical)', async () => {
+      // Trailing comma, self-dup, and unknown-heavy list all reduce to one real platform,
+      // which must behave exactly like `platform=chatgpt`: scalar p_platform, no p_platforms.
+      await Promise.all(['chatgpt,', 'chatgpt,chatgpt', 'chatgpt,bogus'].map(async (platform) => {
+        const client = createMockClient({ rpc_agentic_traffic_kpis: { data: [], error: null } });
+        const ctx = makeContext({ client, data: { startDate: '2026-01-01', endDate: '2026-01-28', platform } });
+        await createAgenticTrafficKpisHandler(stubbedValidateAccess)(ctx);
+        const params = client.rpc.getCall(0).args[1];
+        expect(params.p_platform, platform).to.equal('ChatGPT');
+        expect(params, platform).to.not.have.property('p_platforms');
+      }));
+    });
+
+    it('does not resolve a prototype key to a Function (Object.hasOwn guard)', async () => {
+      const client = createMockClient({ rpc_agentic_traffic_kpis: { data: [], error: null } });
+      const ctx = makeContext({ client, data: { startDate: '2026-01-01', endDate: '2026-01-28', platform: 'toString' } });
+      await createAgenticTrafficKpisHandler(stubbedValidateAccess)(ctx);
+      const params = client.rpc.getCall(0).args[1];
+      expect(params.p_platform).to.equal(null);
+      expect(params).to.not.have.property('p_platforms');
     });
 
     it("treats 'all' within a list as no platform filter", async () => {
@@ -350,12 +372,12 @@ describe('llmo-agentic-traffic', () => {
       expect(params).to.not.have.property('p_platforms');
     });
 
-    it('silently drops an unknown platform in a multi list, keeping the valid subset', async () => {
-      // Matches the project-wide whitelist-filter convention (silent-drop, not 400).
+    it('drops an unknown token but keeps a ≥2 valid subset (still multi)', async () => {
+      // Silent-drop convention (not 400); ≥2 valid remain so it stays a multi request.
       const client = createMockClient({ rpc_agentic_traffic_kpis: { data: [], error: null } });
-      const ctx = makeContext({ client, data: { startDate: '2026-01-01', endDate: '2026-01-28', platform: 'chatgpt,bogus' } });
+      const ctx = makeContext({ client, data: { startDate: '2026-01-01', endDate: '2026-01-28', platform: 'chatgpt,gemini,bogus' } });
       await createAgenticTrafficKpisHandler(stubbedValidateAccess)(ctx);
-      expect(client.rpc.getCall(0).args[1].p_platforms).to.deep.equal(['ChatGPT']);
+      expect(client.rpc.getCall(0).args[1].p_platforms).to.deep.equal(['ChatGPT', 'Gemini']);
     });
 
     it('drops a fully-unknown multi list to no platform filter (all platforms)', async () => {
@@ -1517,6 +1539,29 @@ describe('llmo-agentic-traffic', () => {
       expect(message.data.filters.platform).to.equal('ChatGPT');
       expect(message.data.s3Key).to.include(`/v1c1/${body.exportId}/urls.csv`);
       expect(message.data.requestedBy).to.equal('user@example.com');
+    });
+
+    it('forwards a multi-select platform list in the export payload', async () => {
+      const ctx = makeExportContext({ data: { platform: 'chatgpt,gemini' } });
+      const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
+      await handler(ctx);
+      const { filters } = ctx.sqs.sendMessage.firstCall.args[1].data;
+      expect(filters.platform).to.equal(null);
+      expect(filters.platforms).to.deep.equal(['ChatGPT', 'Gemini']);
+    });
+
+    it('single platform omits platforms and hashes identically to a trailing-comma variant', async () => {
+      const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
+      const ctxSingle = makeExportContext({ data: { platform: 'chatgpt' } });
+      const idSingle = (await (await handler(ctxSingle)).json()).exportId;
+      const { filters } = ctxSingle.sqs.sendMessage.firstCall.args[1].data;
+      expect(filters.platform).to.equal('ChatGPT');
+      expect(filters).to.not.have.property('platforms');
+      // Collapse (#1): a 1-element list must produce the SAME export hash as the scalar,
+      // so it lands on the same S3 key / RPC shape rather than forking the export.
+      const ctxComma = makeExportContext({ data: { platform: 'chatgpt,' } });
+      const idComma = (await (await handler(ctxComma)).json()).exportId;
+      expect(idComma).to.equal(idSingle);
     });
 
     it('does not queue another job while an export is already processing', async () => {
