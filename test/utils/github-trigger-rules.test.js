@@ -96,6 +96,20 @@ describe('github-trigger-rules', () => {
         const reason = getSkipReason(data, 'review_requested', REVIEWER);
         expect(reason).to.include('DRS Team');
       });
+
+      it('falls back to "unknown" when the team has neither slug nor name', () => {
+        // Defensive fallback: an identifiable-but-empty team object must not
+        // reintroduce the same "undefined" ambiguity this fix exists to
+        // eliminate.
+        const data = {
+          ...baseData,
+          action: 'review_requested',
+          requested_team: {},
+        };
+        const reason = getSkipReason(data, 'review_requested', REVIEWER);
+        expect(reason).to.include('unknown');
+        expect(reason).to.not.include('undefined');
+      });
     });
 
     describe('labeled trigger (disabled)', () => {

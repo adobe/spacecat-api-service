@@ -55,7 +55,8 @@ export function getSkipReason(data, action, reviewerLogin) {
     // Name it explicitly instead: team-based triggers are a real, distinct,
     // unsupported case, not a wrong-reviewer no-op.
     if (data.requested_team) {
-      return `review requested via team ${data.requested_team.slug ?? data.requested_team.name} - team-based triggers not supported`;
+      const teamName = data.requested_team.slug ?? data.requested_team.name ?? 'unknown';
+      return `review requested via team ${teamName} - team-based triggers not supported`;
     }
     const reviewer = data.requested_reviewer?.login;
     if (reviewer !== reviewerLogin) {
