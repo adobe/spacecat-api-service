@@ -1,3 +1,10 @@
+# [1.811.0](https://github.com/adobe/spacecat-api-service/compare/v1.810.0...v1.811.0) (2026-09-14)
+
+
+### Features
+
+* **agentic-traffic:** multi-select platform list on agentic endpoints | LLMO-7553 ([#3265](https://github.com/adobe/spacecat-api-service/issues/3265)) ([cf47b31](https://github.com/adobe/spacecat-api-service/commit/cf47b319abffeb4d05062a4dda6717cce953f426)), closes [#2290](https://github.com/adobe/spacecat-api-service/issues/2290) [#1052](https://github.com/adobe/spacecat-api-service/issues/1052) [#1052](https://github.com/adobe/spacecat-api-service/issues/1052) [#3158](https://github.com/adobe/spacecat-api-service/issues/3158)
+
 # [1.810.0](https://github.com/adobe/spacecat-api-service/compare/v1.809.0...v1.810.0) (2026-09-14)
 
 
