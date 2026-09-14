@@ -169,6 +169,10 @@ export function boundCatalogueSeeds(rawTopics, {
  * @param {number} [params.count] - desired prompt count.
  * @param {number} [params.topicCap] - seed cap.
  * @param {string} [params.callerId] - resolved caller id for authorship stamping.
+ * @param {object} [params.promiseToken] - pre-minted promise token, for an enqueue with no HTTP
+ *   request behind it (the async provisioning chain reaches here from inside the SQS worker,
+ *   where `getIMSPromiseToken` has no Authorization header to read). Omitted from a request,
+ *   which mints as before.
  * @param {string|null} [params.imsUserId] - the ORIGINAL caller's stable IMS user id
  *   (`user_id` claim only), stored so the reauth endpoint can strict-match the
  *   re-authenticating caller against it (Gap 6). May be null; reauth then fails closed.
@@ -247,6 +251,12 @@ export async function enqueueSemrushMarketGeneration(context, params) {
     requirePair: PROMISE_PAIR_SEMRUSH,
     promisePair: PROMISE_PAIR_SEMRUSH,
     queueUrl: context.env?.[SEMRUSH_MARKET_JOBS_QUEUE_ENV],
+    // Optional pre-minted token, for an enqueue with no HTTP request behind it. The async
+    // provisioning chain (LLMO-7352/LLMO-7418) reaches here from inside the SQS worker, where
+    // `getIMSPromiseToken` has no Authorization header to read; the worker forwards the token it
+    // already holds for the job it is processing, exactly as the chain's own hops do. Undefined
+    // from a request, which mints as before.
+    ...(params.promiseToken ? { promiseToken: params.promiseToken } : {}),
     metadata: {
       brandId,
       siteId,

@@ -98,6 +98,109 @@ async function cleanupIfOwned(transport, candidate, parentWorkspaceId, log, phas
   }
 }
 
+// LLMO-7418 external-review Finding 12: bounded retry for the chained-job enqueue below — one
+// transient SQS blip must not permanently strand an otherwise-successful attempt (brand active
+// and ready, but no market and nothing left to ever retry it). 3 attempts total, short backoff;
+// this is fire-and-forget-adjacent (awaited inline, but genuinely brief) so a couple of quick
+// retries covers the common transient case without meaningfully extending this hop's runtime.
+export const CHAINED_JOB_ENQUEUE_ATTEMPTS = 3;
+const CHAINED_JOB_ENQUEUE_RETRY_DELAYS_MS = [250, 750];
+const defaultSleep = (ms) => new Promise((resolve) => {
+  setTimeout(resolve, ms);
+});
+
+/**
+ * Enqueues the follow-up job named in `metadata.chainedJobType` (PR-C, LLMO-7352/LLMO-7418) once
+ * the sub-workspace this attempt was provisioning is confirmed `ready` — e.g. the
+ * `serenity-create-market` job that runs {@link orchestrateCreateMarketSubworkspace} against the
+ * now-ready workspace. Absent `chainedJobType`, this is a no-op (the bare-workspace-only callers
+ * never set it).
+ *
+ * Retries a bounded number of times (LLMO-7418 external-review Finding 12) before giving up —
+ * still swallows the failure after that, rather than letting it propagate: the workspace IS
+ * genuinely ready and already durably promoted by the time this runs, so a failure here must
+ * NEVER be mistaken for a provisioning failure (the outer catch's best-effort `failed` write
+ * would incorrectly try to un-ready a brand that is, in fact, fine) — it only means the
+ * follow-up work never got scheduled. Logged at `error` so it is not silently lost.
+ *
+ * @param {object} context
+ * @param {object} metadata - the CURRENT job's metadata (`chainedJobType`/`chainedJobMetadata`).
+ * @param {string} workspaceId - the just-confirmed-ready workspace id, merged into the chained
+ *   job's own metadata under the same key the async worker itself uses.
+ * @param {object} log
+ * @param {(ms: number) => Promise<void>} [sleep] - injectable delay (tests pass a no-op).
+ * @returns {Promise<string|null>} the chained job's id, or null if none was configured or every
+ *   enqueue attempt failed.
+ */
+async function enqueueChainedJobIfConfigured(
+  context,
+  metadata,
+  workspaceId,
+  log,
+  sleep = defaultSleep,
+) {
+  if (!metadata.chainedJobType) {
+    return null;
+  }
+  let lastError;
+  for (let attempt = 0; attempt < CHAINED_JOB_ENQUEUE_ATTEMPTS; attempt += 1) {
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      const chainedJob = await createAndEnqueueJob(context, {
+        jobType: metadata.chainedJobType,
+        // Forward the SAME token this attempt already exchanged — the chained job has no HTTP
+        // context to mint its own, identical to every other self-requeue in this file.
+        promiseToken: metadata.promiseToken,
+        promisePair: metadata.promisePair,
+        metadata: { ...metadata.chainedJobMetadata, workspaceId },
+      });
+      log?.info?.('provision-workspace-job: chained job enqueued after ready promotion', {
+        chainedJobType: metadata.chainedJobType,
+        chainedJobId: chainedJob.getId(),
+        workspaceId,
+        attempt,
+      });
+      return chainedJob.getId();
+    } catch (error) {
+      lastError = error;
+      const isLastAttempt = attempt === CHAINED_JOB_ENQUEUE_ATTEMPTS - 1;
+      log?.warn?.('provision-workspace-job: chained job enqueue attempt failed', {
+        chainedJobType: metadata.chainedJobType,
+        workspaceId,
+        attempt,
+        error: error?.message,
+        willRetry: !isLastAttempt,
+      });
+      if (!isLastAttempt) {
+        // eslint-disable-next-line no-await-in-loop
+        await sleep(CHAINED_JOB_ENQUEUE_RETRY_DELAYS_MS[attempt]);
+      }
+    }
+  }
+  log?.error?.(
+    'provision-workspace-job: failed to enqueue the chained job after all retries; workspace '
+    + 'IS ready, but no follow-up job was scheduled',
+    {
+      chainedJobType: metadata.chainedJobType,
+      workspaceId,
+      attempts: CHAINED_JOB_ENQUEUE_ATTEMPTS,
+      error: lastError?.message,
+    },
+  );
+  // LLMO-7418 external-review Finding 12: a configured chain that could NOT be enqueued is a
+  // real failure of the operation the caller requested (a market / activation), NOT the plain
+  // bare-workspace success that `return null` would signal. Returning null here made the handler
+  // answer `{ provisioningStatus: 'ready' }`, the runner mark the job COMPLETED, and the client
+  // poll back a green success while no market was ever created and nothing would retry it. Throw
+  // instead so the job goes FAILED and the caller learns the chained work did not run. The
+  // workspace promotion is already durable (the brand stays ready/active — failBestEffort's CAS
+  // no longer matches a non-pending row), and the caller can safely re-issue the request.
+  /** @type {Error & { code?: string }} */
+  const err = new Error('chained provisioning job could not be enqueued after retries');
+  err.code = 'chained_job_enqueue_failed';
+  throw err;
+}
+
 /**
  * Best-effort terminal-failure promotion for the generic catch-all below: never lets a
  * secondary failure here (the CAS itself erroring, or already being superseded) mask the
@@ -125,11 +228,21 @@ async function failBestEffort({
 
 /**
  * Async Semrush sub-workspace provisioning worker (LLMO-7352/LLMO-7418). One invocation does
- * AT MOST one create-or-adopt call and one status poll — it never loops or sleeps in-Lambda;
- * a `not ready` result self-requeues a brand-new job with a delayed `DelaySeconds` instead
- * (see {@link computeProvisioningBackoffSeconds}), and every terminal write is an
- * attempt-id-scoped compare-and-set so a stale/superseded attempt (a newer retry, or a late
- * at-least-once SQS redelivery racing a subsequent hop) can never clobber a newer winner.
+ * AT MOST one create-or-adopt-or-existing-pointer call and one status poll — it never loops or
+ * sleeps in-Lambda; a `not ready` result self-requeues a brand-new job with a delayed
+ * `DelaySeconds` instead (see {@link computeProvisioningBackoffSeconds}), and every terminal
+ * write is an attempt-id-scoped compare-and-set so a stale/superseded attempt (a newer retry, or
+ * a late at-least-once SQS redelivery racing a subsequent hop) can never clobber a newer winner.
+ *
+ * Existing-pointer fast path (PR-C): when the brand ALREADY has a canonical
+ * `semrush_sub_workspace_id` (e.g. an already-active brand starting an Add-Market attempt), that
+ * pointer is polled directly instead of create-or-adopting a second workspace — mirrors
+ * `ensureSubworkspace`'s own existing-pointer branch, just non-blocking (one status read per hop,
+ * not `pollUntilCreated`'s in-Lambda loop). A pointer that has since gone terminally `failed` is
+ * detected the same way a fresh create's failure is (see the terminal-failure branch below); the
+ * canonical pointer itself is left untouched on failure — quarantining/clearing a dead pointer is
+ * the reconciliation sweep's job (LLMO-7418 AC), not this worker's, consistent with Phase 1's
+ * synchronous `pollUntilCreated` behavior for the same case.
  *
  * Candidate provenance (`freshlyCreated`) is threaded through the SELF-REQUEUE METADATA, not
  * re-derived from the DB on each hop (adversarial-review finding, LLMO-7418): the DB's candidate
@@ -138,15 +251,24 @@ async function failBestEffort({
  * only reliable record of "did THIS attempt's chain create this workspace" is the metadata this
  * same chain has been carrying forward since the hop that resolved it.
  *
+ * `chainedJobType`/`chainedJobMetadata` (PR-C, LLMO-7352/LLMO-7418): a caller that needs MORE
+ * than a bare sub-workspace (e.g. a market-creating endpoint) sets these on the FIRST hop's
+ * metadata; once `ready` is confirmed, this handler enqueues that job type with the resolved
+ * `workspaceId` merged into `chainedJobMetadata`, and returns its id as `chainedJobId` so the
+ * outer runner keeps the promise token alive for it (same mechanism as `requeuedJobId`). Absent
+ * entirely, behavior is unchanged from the bare-workspace-only contract.
+ *
  * @param {object} context - worker context (`dataAccess`, `sqs`, `env`, `log`).
  * @param {object} job - the current `AsyncJob` being processed. `job.getMetadata()` carries
  *   `{ brandId, attemptId, parentWorkspaceId, title, requeueDepth?, candidateWorkspaceId?,
- *   freshlyCreated? }` plus the promise token.
+ *   freshlyCreated?, chainedJobType?, chainedJobMetadata? }` plus the promise token.
  * @param {string} accessToken - already-exchanged Semrush access token (the runner's `run()`
  *   exchanges this before dispatch, per the spec's binding ordering rule).
  * @returns {Promise<object>} a small result object; `{ requeuedJobId }` when this hop
  *   self-requeued (the runner's dispatch loop keeps the promise token alive for that case),
- *   otherwise `{ provisioningStatus: 'ready'|'failed'|'superseded' }`.
+ *   otherwise `{ provisioningStatus: 'ready', chainedJobId? }` (chainedJobId present only when a
+ *   chain was configured AND enqueued successfully) or
+ *   `{ provisioningStatus: 'failed'|'superseded' }`.
  * @throws on any unexpected error, AFTER best-effort recording `semrush_provisioning_status:
  *   'failed'` on the brand row — so the row can no longer be stranded at `pending` forever with
  *   no further job ever revisiting it (the outer runner still marks the AsyncJob FAILED and
@@ -180,6 +302,10 @@ export async function provisionWorkspaceHandler(context, job, accessToken) {
   // already cleans up `candidate` before rethrowing — avoids a harmless but noisy double
   // cleanupIfOwned call from the outer catch below for that specific path.
   let candidateAlreadyCleanedUp = false;
+  // Set once promoteProvisioningReady succeeds: `candidate` is now the brand's CANONICAL, live
+  // workspace, not an orphan. If the chained-job enqueue then throws (Finding 12), the outer
+  // catch must NOT clean it up — emptying the canonical workspace would delete live data.
+  let candidatePromoted = false;
 
   // Declared above the try (LLMO-7418 external-review Finding 5) so the catch below can reach it
   // for cleanupIfOwned — but ASSIGNED inside the try (external-review Finding N3): its
@@ -234,32 +360,46 @@ export async function provisionWorkspaceHandler(context, job, accessToken) {
     }
 
     if (!candidate) {
-      // LLMO-7418 external-review Finding 4: every known caller now supplies `title` at enqueue
-      // time, but this is the worker's own last line of defense — a future HTTP call site that
-      // forgets it (exactly the bug this finding found, in 2 of the 4 `activate` async branches)
-      // must fail loudly here rather than silently asking Semrush to create an UNTITLED
-      // sub-workspace, which can never be found again by title-based adoption.
-      if (!hasText(title)) {
-        throw new Error(`provision-workspace-job: metadata.title is required to create a sub-workspace (brandId=${brandId})`);
-      }
-      const claim = { brandCollection: dataAccess.Brand, selfBrandId: brandId };
-      candidate = await createOrAdoptSubworkspaceCandidate(
-        transport,
-        parentWorkspaceId,
-        title,
-        log,
-        claim,
-      );
-      const persisted = await persistProvisioningCandidate({
-        brandId, attemptId, candidateWorkspaceId: candidate.workspaceId, postgrestClient,
-      });
-      if (!persisted) {
-        // Superseded (or a concurrent redelivery of this SAME hop already persisted its own
-        // candidate first — persistProvisioningCandidate's CAS also requires the candidate
-        // column to still be NULL, so at most one of two racing deliveries ever lands here with
-        // `persisted: true`). Clean up only if we own it — an adopted workspace is never ours.
-        await cleanupIfOwned(transport, candidate, parentWorkspaceId, log, 'provision-worker-superseded-pre-poll');
-        return { provisioningStatus: 'superseded' };
+      // Existing-pointer fast path (PR-C, LLMO-7352/LLMO-7418): mirrors `ensureSubworkspace`'s
+      // own existing-pointer branch (workspace-lifecycle.js). A converted caller like
+      // `/serenity/markets` runs on a brand that is ALREADY active and (almost always) already
+      // has a canonical, healthy workspace — create-or-adopting here would provision a SECOND
+      // workspace for a brand that doesn't need one, exactly the kind of duplicate this whole
+      // redesign exists to prevent. When the canonical pointer is already set, poll it directly
+      // (one status read per hop, same bounded self-requeue as the create-or-adopt path below —
+      // never `pollUntilCreated`'s blocking loop, which would sleep in-Lambda) instead of
+      // create-or-adopting a new candidate. `freshlyCreated: false` — this worker did not create
+      // it, so it must never be torn down as an orphan on a lost race below.
+      if (hasText(state.semrushSubWorkspaceId)) {
+        candidate = { workspaceId: state.semrushSubWorkspaceId, freshlyCreated: false };
+      } else {
+        // LLMO-7418 external-review Finding 4: every known caller now supplies `title` at
+        // enqueue time, but this is the worker's own last line of defense — a future HTTP call
+        // site that forgets it (exactly the bug this finding found, in 2 of the 4 `activate`
+        // async branches) must fail loudly here rather than silently asking Semrush to create an
+        // UNTITLED sub-workspace, which can never be found again by title-based adoption.
+        if (!hasText(title)) {
+          throw new Error(`provision-workspace-job: metadata.title is required to create a sub-workspace (brandId=${brandId})`);
+        }
+        const claim = { brandCollection: dataAccess.Brand, selfBrandId: brandId };
+        candidate = await createOrAdoptSubworkspaceCandidate(
+          transport,
+          parentWorkspaceId,
+          title,
+          log,
+          claim,
+        );
+        const persisted = await persistProvisioningCandidate({
+          brandId, attemptId, candidateWorkspaceId: candidate.workspaceId, postgrestClient,
+        });
+        if (!persisted) {
+          // Superseded (or a concurrent redelivery of this SAME hop already persisted its own
+          // candidate first — persistProvisioningCandidate's CAS also requires the candidate
+          // column to still be NULL, so at most one of two racing deliveries ever lands here with
+          // `persisted: true`). Clean up only if we own it — an adopted workspace is never ours.
+          await cleanupIfOwned(transport, candidate, parentWorkspaceId, log, 'provision-worker-superseded-pre-poll');
+          return { provisioningStatus: 'superseded' };
+        }
       }
     }
 
@@ -319,7 +459,20 @@ export async function provisionWorkspaceHandler(context, job, accessToken) {
       log?.info?.('provision-workspace-job: promoted to ready', {
         brandId, attemptId, semrushWorkspaceId: candidate.workspaceId,
       });
-      return { provisioningStatus: 'ready' };
+      // From here the candidate is the canonical workspace — never an orphan to clean up.
+      candidatePromoted = true;
+      const chainedJobId = await enqueueChainedJobIfConfigured(
+        context,
+        metadata,
+        candidate.workspaceId,
+        log,
+      );
+      // Omit chainedJobId entirely when no chain was configured — preserves the exact
+      // `{ provisioningStatus: 'ready' }` shape for the bare-workspace-only callers that never
+      // set `chainedJobType` (activate's skip-mode branches).
+      return chainedJobId
+        ? { provisioningStatus: 'ready', chainedJobId }
+        : { provisioningStatus: 'ready' };
     }
 
     if (isWorkspaceTerminalFailure(status)) {
@@ -369,6 +522,13 @@ export async function provisionWorkspaceHandler(context, job, accessToken) {
         requeueDepth: nextDepth,
         candidateWorkspaceId: candidate.workspaceId,
         freshlyCreated: candidate.freshlyCreated,
+        // Threaded forward so a chain configured on hop 0 survives every backoff hop —
+        // otherwise a market-creating conversion endpoint's attempt would silently degrade
+        // into a workspace-only one the moment it needed even a single requeue.
+        ...(metadata.chainedJobType ? {
+          chainedJobType: metadata.chainedJobType,
+          chainedJobMetadata: metadata.chainedJobMetadata,
+        } : {}),
       },
       delaySeconds: nextDelaySeconds,
     });
@@ -427,10 +587,18 @@ export async function provisionWorkspaceHandler(context, job, accessToken) {
     // it itself. Without this, an unexpected error anywhere before that point (a Postgres read
     // failure, create-or-adopt throwing mid-flow, ...) left a freshly-created candidate an
     // orphan: this attempt is about to be marked failed, so nothing else will ever revisit it.
-    if (transport && candidate && !requeueEnqueued && !candidateAlreadyCleanedUp) {
+    if (transport && candidate && !requeueEnqueued && !candidateAlreadyCleanedUp
+      && !candidatePromoted) {
       await cleanupIfOwned(transport, candidate, parentWorkspaceId, log, 'provision-worker-unexpected-error');
     }
-    await failBestEffort({ brandId, attemptId, postgrestClient }, log);
+    // Skip the failure-record when the attempt already reached `ready` (Finding 12): the only way
+    // to land here after promotion is a chained-job enqueue failure, and the brand is genuinely
+    // ready/active — its provisioning attempt SUCCEEDED. Marking it `failed` would be wrong
+    // intent (its CAS no-ops on a non-pending row anyway). Re-throw so the JOB goes FAILED and
+    // the caller learns the chained work did not run, without defacing the ready brand.
+    if (!candidatePromoted) {
+      await failBestEffort({ brandId, attemptId, postgrestClient }, log);
+    }
     throw error;
   }
 }
