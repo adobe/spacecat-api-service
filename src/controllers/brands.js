@@ -12,7 +12,7 @@
 
 // @ts-check
 
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 
 import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
 import BrandClient, { BrandGovernanceClient } from '@adobe/spacecat-shared-brand-client';
@@ -33,7 +33,9 @@ import {
   siteIdentityFromUrlString,
 } from '@adobe/spacecat-shared-utils';
 
-import { ErrorWithStatusCode, getImsUserToken, resolveSemrushImsToken } from '../support/utils.js';
+import {
+  ErrorWithStatusCode, getImsUserToken, headerValue, resolveSemrushImsToken,
+} from '../support/utils.js';
 import { hostnameFromUrlString } from '../support/url-utils.js';
 import { BRAND_GUIDANCE_MAX_LENGTH, codePointLength } from '../support/brand-guidance.js';
 import {
@@ -61,6 +63,7 @@ import {
   deleteBrand,
   setBrandStatus,
   getBrandById,
+  getBrandProvisioningState,
   getBrandBySite,
   getBrandCompetitors,
   getBrandAliases,
@@ -1709,6 +1712,48 @@ function BrandsController(ctx, log, env) {
     }
   };
 
+  /**
+   * Derives a STABLE brand id from the organization and the caller's `Idempotency-Key`.
+   *
+   * Create Brand had no idempotency of any kind: every request minted a fresh random id, so a
+   * client that retried after a lost response -- the edge timing out on a 202 is the realistic
+   * case, and the async path widens that window rather than narrowing it -- got a second brand
+   * AND a second Semrush sub-workspace. The only thing that ever caught a duplicate was the
+   * partial unique index on the primary site, which skips NULLs, leaving a bare create entirely
+   * unguarded.
+   *
+   * Deriving the id rather than storing the key means no schema change and no second source of
+   * truth to keep consistent: the same key always lands on the same row, so the replay check is
+   * a plain read, and even a genuinely concurrent duplicate collides on the primary key instead
+   * of creating a sibling.
+   *
+   * Hashed rather than used raw because the key is caller-supplied: this has to yield a valid
+   * UUID whatever the client sends, and must not let a client choose a row id directly. The
+   * organization is mixed in for the same reason -- a key minted by one organization can never
+   * address another's brand. SHA-256 truncated and stamped with the RFC 4122 version/variant
+   * nibbles, i.e. the shape of a v5 UUID; the hash is for distribution and opacity, not secrecy.
+   *
+   * @param {string} organizationId
+   * @param {string} idempotencyKey
+   * @returns {string} a deterministic UUID
+   */
+  function deriveIdempotentBrandId(organizationId, idempotencyKey) {
+    const digest = createHash('sha256')
+      .update(`brand:${organizationId}:${idempotencyKey}`)
+      .digest('hex');
+    const version = `5${digest.slice(13, 16)}`;
+    // Variant nibble must be one of 8/9/a/b.
+    const variantNibble = ['8', '9', 'a', 'b'][parseInt(digest[16], 16) % 4];
+    const variant = `${variantNibble}${digest.slice(17, 20)}`;
+    return [
+      digest.slice(0, 8),
+      digest.slice(8, 12),
+      version,
+      variant,
+      digest.slice(20, 32),
+    ].join('-');
+  }
+
   // ── Brand CRUD (v2) ──
 
   const createBrandForOrg = async (context) => {
@@ -1776,6 +1821,50 @@ function BrandsController(ctx, log, env) {
 
       const { postgrestClient } = context.dataAccess.services;
       const updatedBy = context.attributes?.authInfo?.profile?.email || 'system';
+
+      // ---- Idempotent create (LLMO-7352 acceptance criteria) ----
+      // "Duplicate Create Brand submissions for the same affected Semrush brand return the
+      // existing brand/current provisioning attempt rather than creating duplicate brands or
+      // workspaces, including when the original 202 response is lost."
+      //
+      // Opt-in by header, so no existing caller changes behaviour: send no key and this is
+      // exactly today's random-id create. Send the same key twice and both requests resolve to
+      // the same row.
+      const idempotencyKey = headerValue(context?.pathInfo?.headers, 'idempotency-key');
+      const idempotentBrandId = hasText(idempotencyKey)
+        ? deriveIdempotentBrandId(spaceCatId, /** @type {string} */ (idempotencyKey))
+        : null;
+      if (idempotentBrandId) {
+        // The replay check. A brand already sitting at this id means the earlier request DID
+        // land, even though its response never reached the client. Return that brand and
+        // whatever provisioning is currently attached to it, instead of starting a second brand
+        // and a second Semrush sub-workspace for one user action.
+        const existing = await getBrandById(spaceCatId, idempotentBrandId, postgrestClient);
+        if (existing) {
+          const provisioning = await getBrandProvisioningState(idempotentBrandId, postgrestClient)
+            .catch(() => null); // a state-read blip must not turn a correct replay into a duplicate
+          const serenityScopes = await readSerenityFlagScopes(spaceCatId, postgrestClient);
+          log.info('brands: idempotent create replay - returning the existing brand', {
+            spaceCatId,
+            brandId: idempotentBrandId,
+            provisioningStatus: provisioning?.provisioningStatus ?? null,
+          });
+          // Mirrors the original response rather than inventing one: 202 with the job id while
+          // provisioning is still in flight, so a replaying client polls the SAME job it was
+          // already handed, and 201 once there is nothing left to wait for. A 200 here would
+          // read as "your create did not happen".
+          const isStillProvisioning = provisioning?.provisioningStatus === 'pending';
+          return createResponse(
+            {
+              ...withSerenityState(existing, serenityScopes),
+              ...(isStillProvisioning && hasText(provisioning?.provisioningJobId)
+                ? { jobId: provisioning.provisioningJobId }
+                : {}),
+            },
+            isStillProvisioning ? 202 : 201,
+          );
+        }
+      }
 
       // Semrush-prompts mode (serenity dual-mode): the UI sends an initial market
       // (location + language). Provision the brand's Semrush sub-workspace +
@@ -1905,7 +1994,7 @@ function BrandsController(ctx, log, env) {
             if (!parentWorkspaceId || !hasText(parentWorkspaceId)) {
               return badRequest('Organization has no Semrush workspace configured');
             }
-            provisionedBrandId = randomUUID();
+            provisionedBrandId = idempotentBrandId ?? randomUUID();
             asyncMarketProvisioning = {
               market, languageCode, modelIds, parentWorkspaceId,
             };
@@ -1930,7 +2019,7 @@ function BrandsController(ctx, log, env) {
               socialAccounts: brandData.socialAccounts,
               earnedContent: brandData.earnedContent,
             };
-            provisionedBrandId = randomUUID();
+            provisionedBrandId = idempotentBrandId ?? randomUUID();
             const provisioned = await provisionBrandSubworkspace(context, {
               spaceCatId,
               brandId: provisionedBrandId,
@@ -2022,14 +2111,14 @@ function BrandsController(ctx, log, env) {
           if (!parentWorkspaceId || !hasText(parentWorkspaceId)) {
             return badRequest('Organization has no Semrush workspace configured');
           }
-          provisionedBrandId = randomUUID();
+          provisionedBrandId = idempotentBrandId ?? randomUUID();
           asyncBareProvisioning = { parentWorkspaceId };
         } else {
           // B (LLMO-6405): sub-workspace-only active create — no market supplied, so
           // no project is provisioned. Markets are added afterwards from the Markets
           // tab. The brand is anchored by its primary site (baseSiteId, persisted by
           // upsertBrand below) AND by its Semrush sub-workspace.
-          provisionedBrandId = randomUUID();
+          provisionedBrandId = idempotentBrandId ?? randomUUID();
           const bare = await provisionBrandSubworkspaceBare(context, {
             spaceCatId,
             brandId: provisionedBrandId,

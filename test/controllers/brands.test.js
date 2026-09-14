@@ -5387,6 +5387,11 @@ describe('Brands Controller', () => {
         // LLMO-7418 external-review Finding 15: kill switch off by default (async available);
         // specific tests override it to resolve(true) to exercise the 503 gate.
         isAsyncProvisioningKillSwitched = sinon.stub().resolves(false),
+        // LLMO-7352 idempotent create: the replay check reads the brand at the derived id, and
+        // its provisioning state. Default to "nothing there" so every existing test is a first
+        // submission; the replay tests override them.
+        getBrandById = sinon.stub().resolves(null),
+        getBrandProvisioningState = sinon.stub().resolves(null),
       } = {}) {
         const Mocked = await esmock('../../src/controllers/brands.js', {
           '../../src/support/serenity/brand-provisioning.js': {
@@ -5414,10 +5419,175 @@ describe('Brands Controller', () => {
             promoteProvisioningFailed,
             guardAgainstConcurrentProvisioning,
             updateProvisioningJobId,
+            getBrandById,
+            getBrandProvisioningState,
           },
         });
         return Mocked.default(context, loggerStub, mockEnv);
       }
+
+      // ---- Idempotent create (LLMO-7352 acceptance criteria) ----
+      // "Duplicate Create Brand submissions ... return the existing brand/current provisioning
+      // attempt rather than creating duplicate brands or workspaces, including when the original
+      // 202 response is lost." Before this, every request minted a fresh random brand id, so a
+      // retry after a lost 202 produced a second brand AND a second Semrush sub-workspace. The
+      // only guard was the partial unique index on the primary site, which skips NULLs -- so a
+      // bare create was unguarded entirely.
+      describe('idempotent create (Idempotency-Key)', () => {
+        const withKey = (key) => ({
+          ...context,
+          pathInfo: { ...(context.pathInfo || {}), headers: { 'Idempotency-Key': key } },
+          params: { spaceCatId: ORGANIZATION_ID },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+        });
+
+        it('replays a lost 202: returns the EXISTING brand and its in-flight job, creating nothing', async () => {
+          // THE case this exists for. The first request landed; its 202 never reached the client;
+          // the client retried with the same key. The user gets back the brand that already
+          // exists and the job id it is already provisioning under -- so the client polls the
+          // SAME job rather than racing a second sub-workspace against the first.
+          const existingBrand = { id: 'existing-brand', name: 'New Brand', status: 'pending' };
+          const upsertStub = sinon.stub().resolves({ id: 'should-not-be-used' });
+          const enqueueStub = sinon.stub().resolves({ getId: () => 'job-new' });
+          const beginStub = sinon.stub().resolves(true);
+          const controller = await buildController({
+            upsertBrand: upsertStub,
+            createAndEnqueueJob: enqueueStub,
+            beginProvisioningAttempt: beginStub,
+            getBrandById: sinon.stub().resolves(existingBrand),
+            getBrandProvisioningState: sinon.stub().resolves({
+              provisioningStatus: 'pending', provisioningJobId: 'job-original',
+            }),
+          });
+
+          const response = await controller.createBrandForOrg({
+            ...withKey('client-key-1'),
+            data: { ...semrushData },
+          });
+
+          expect(response.status).to.equal(202);
+          const body = await response.json();
+          expect(body.id).to.equal('existing-brand');
+          // The job the caller already had, NOT a newly minted one.
+          expect(body.jobId).to.equal('job-original');
+          // Nothing new: no second brand row, no second attempt, no second workspace job.
+          expect(upsertStub).to.not.have.been.called;
+          expect(beginStub).to.not.have.been.called;
+          expect(enqueueStub).to.not.have.been.called;
+        });
+
+        it('replays a settled create as 201, with no job id to poll', async () => {
+          // Provisioning already finished, so there is nothing left to wait on. 201 (not 200):
+          // a 200 would read as "your create did not happen".
+          const controller = await buildController({
+            getBrandById: sinon.stub().resolves({ id: 'existing-brand', name: 'New Brand', status: 'active' }),
+            getBrandProvisioningState: sinon.stub().resolves({ provisioningStatus: 'ready' }),
+          });
+
+          const response = await controller.createBrandForOrg({
+            ...withKey('client-key-1'),
+            data: { ...semrushData },
+          });
+
+          expect(response.status).to.equal(201);
+          const body = await response.json();
+          expect(body.id).to.equal('existing-brand');
+          expect(body.jobId).to.equal(undefined);
+        });
+
+        it('derives a STABLE brand id, so the same key always addresses the same row', async () => {
+          // The mechanism behind the replay: no stored key, no extra table -- the id itself is
+          // the idempotency record, so even a genuinely concurrent duplicate collides on the
+          // primary key instead of creating a sibling brand.
+          const ids = [];
+          for (const attempt of [1, 2]) {
+            const upsertStub = sinon.stub().resolves({ id: 'forced-id', name: 'New Brand', status: 'pending' });
+            // eslint-disable-next-line no-await-in-loop
+            const controller = await buildController({
+              upsertBrand: upsertStub,
+              beginProvisioningAttempt: sinon.stub().resolves(true),
+              createAndEnqueueJob: sinon.stub().resolves({ getId: () => `job-${attempt}` }),
+            });
+            // eslint-disable-next-line no-await-in-loop
+            await controller.createBrandForOrg({
+              ...withKey('client-key-stable'),
+              data: { ...semrushData },
+            });
+            ids.push(upsertStub.firstCall.args[0].forceBrandId);
+          }
+
+          expect(ids[0]).to.equal(ids[1]);
+          expect(ids[0]).to.match(/^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+        });
+
+        it('scopes the derived id to the organization, so one org\'s key cannot address another\'s brand', async () => {
+          // The key is caller-supplied. Mixing the org in is what stops a client choosing a row
+          // id, and stops a key minted in one organization resolving in another.
+          const idFor = async (orgId) => {
+            const upsertStub = sinon.stub().resolves({ id: 'forced-id', name: 'New Brand', status: 'pending' });
+            const controller = await buildController({
+              upsertBrand: upsertStub,
+              beginProvisioningAttempt: sinon.stub().resolves(true),
+              createAndEnqueueJob: sinon.stub().resolves({ getId: () => 'job-x' }),
+            });
+            await controller.createBrandForOrg({
+              ...withKey('same-key-both-orgs'),
+              params: { spaceCatId: orgId },
+              data: { ...semrushData },
+            });
+            return upsertStub.firstCall.args[0].forceBrandId;
+          };
+
+          const a = await idFor(ORGANIZATION_ID);
+          const b = await idFor('11111111-2222-3333-4444-555555555555');
+          expect(a).to.not.equal(b);
+        });
+
+        it('changes nothing for a caller that sends no key (regression: default behaviour)', async () => {
+          // Opt-in. Without the header there is no replay read at all and the id stays random,
+          // so every existing client is byte-for-byte unaffected.
+          const lookupStub = sinon.stub().resolves(null);
+          const upsertStub = sinon.stub().resolves({ id: 'forced-id', name: 'New Brand', status: 'pending' });
+          const controller = await buildController({
+            upsertBrand: upsertStub,
+            beginProvisioningAttempt: sinon.stub().resolves(true),
+            createAndEnqueueJob: sinon.stub().resolves({ getId: () => 'job-x' }),
+            getBrandById: lookupStub,
+          });
+
+          const response = await controller.createBrandForOrg({
+            ...context,
+            params: { spaceCatId: ORGANIZATION_ID },
+            data: { ...semrushData },
+            dataAccess: mockDataAccess,
+            attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+          });
+
+          expect(response.status).to.equal(202);
+          expect(lookupStub).to.not.have.been.called;
+        });
+
+        it('does not turn a provisioning-state read failure into a duplicate brand', async () => {
+          // The brand demonstrably exists, so a replay is still the right answer even when the
+          // state read blips. Failing open here would create the second brand this whole
+          // mechanism exists to prevent.
+          const upsertStub = sinon.stub().resolves({ id: 'should-not-be-used' });
+          const controller = await buildController({
+            upsertBrand: upsertStub,
+            getBrandById: sinon.stub().resolves({ id: 'existing-brand', name: 'New Brand', status: 'pending' }),
+            getBrandProvisioningState: sinon.stub().rejects(new Error('postgrest blip')),
+          });
+
+          const response = await controller.createBrandForOrg({
+            ...withKey('client-key-1'),
+            data: { ...semrushData },
+          });
+
+          expect(response.status).to.equal(201);
+          expect(upsertStub).to.not.have.been.called;
+        });
+      });
 
       it('runs the SAME synchronous provisionBrandSubworkspace call it always has when async is absent (regression: default behavior unchanged)', async () => {
         const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
