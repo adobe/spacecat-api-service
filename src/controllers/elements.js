@@ -60,6 +60,7 @@ const BRAND_CLAIMS_QUERY_KEYS = new Set([
  * the request into an all-models omit. Diagnosability only (LLMO-7553 review); never throws,
  * and does nothing for the common single-value / exact-subset case.
  */
+/* c8 ignore start -- diagnostic log only; called from the c8-ignored POC handlers */
 function logModelResolution(log, route, requested) {
   if (typeof requested !== 'string' || !requested.includes(',')) {
     return;
@@ -74,6 +75,7 @@ function logModelResolution(log, route, requested) {
     log?.debug?.(`[serenity] ${route} model='${requested}' resolved to ${resolved.length} model(s) [${resolved.join(',')}] - ${rawTokens.length - resolved.length} token(s) dropped/collapsed (typo or duplicate)`);
   }
 }
+/* c8 ignore stop */
 
 /**
  * Maps a BrandSemrushProject model instance to the plain object shape the
