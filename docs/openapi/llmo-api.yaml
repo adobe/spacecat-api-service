@@ -3912,6 +3912,61 @@ site-llmo-cloudfront-log-rescan:
     security:
       - api_key: [ ]
 
+site-llmo-cloudfront-rollback:
+  post:
+    tags:
+      - llmo
+    summary: Roll back Edge Optimize's CloudFront routing for a connected account
+    description: |
+      Reverts what the "Deploy routing" step wired in, so a customer can always undo Adobe's
+      changes on demand. Self-discovering: since the wizard does not track which
+      distribution/behavior was deployed to across sessions, this scans every distribution in
+      the account and strips ONLY the routing associations Edge Optimize added (the
+      `edgeoptimize-routing` viewer-request CloudFront Function and the `edgeoptimize-origin`
+      origin-request/origin-response Lambda@Edge) — each distribution is attempted
+      independently, one failure never aborts the rest. This is deliberately not a teardown: the
+      Lambda@Edge function, its execution role, the cache policy, the Edge Optimize origin, and
+      the connector role itself are all left untouched, so a later re-deploy recreates nothing.
+    operationId: rollbackLlmoCloudFront
+    parameters:
+      - $ref: './parameters.yaml#/siteId'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/cloudfront-connector-request'
+    responses:
+      '200':
+        description: Summary of the routing rollback across all distributions.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                scanned:
+                  type: integer
+                reverted:
+                  type: integer
+                failed:
+                  type: integer
+                distributions:
+                  type: array
+                  items:
+                    type: object
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
+
 cloudfront-connector-request:
   type: object
   required:
