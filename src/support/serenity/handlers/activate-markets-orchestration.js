@@ -15,6 +15,8 @@
 import { hasText } from '@adobe/spacecat-shared-utils';
 import { ErrorWithStatusCode } from '../../utils.js';
 import { handleCreateMarketSubworkspace } from './markets-subworkspace.js';
+import { isAsyncPromptGenEnabled, resolveBrandName } from '../async-prompt-gen.js';
+import { collectAliasNames } from '../brand-aliases.js';
 import { resolveDefaultModelIds } from '../default-models.js';
 import { ensureSubworkspace } from '../workspace-lifecycle.js';
 import { ensureMarketSite } from '../site-linkage.js';
@@ -95,7 +97,12 @@ export async function orchestrateActivateMarkets({
   const postgrestClient = dataAccess?.services?.postgrestClient;
 
   const { brandDomain } = requestBody;
-  const generatePrompts = requestBody.generatePrompts === true;
+  const generateRequested = requestBody.generatePrompts === true;
+  // #3194/#3252: see create-market-orchestration.js for the full rationale. This module owns the
+  // activate batch for BOTH the synchronous controller and the async job chain, so the flag has
+  // to be read here or the two paths generate prompts differently.
+  const asyncGenActivate = isAsyncPromptGenEnabled(env) && generateRequested;
+  const generatePrompts = generateRequested && !asyncGenActivate;
   const brandDomainFallback = hasText(brandDomain) ? brandDomain : null;
   const brandPrimaryUrl = hasText(requestBody.primaryUrl)
     ? requestBody.primaryUrl
@@ -147,6 +154,8 @@ export async function orchestrateActivateMarkets({
     log,
   );
   const results = [];
+  /** @type {object[]} */
+  const generationInputs = [];
   for (const m of markets) {
     const createBody = {
       market: m.market,
@@ -228,6 +237,23 @@ export async function orchestrateActivateMarkets({
       status: r.status,
       body: r.body,
     });
+    // Per-market handoff for the DRS producer. Only markets this call actually CREATED: a 409
+    // means the slice was already live, and generating into somebody else's existing project is
+    // not this request's business.
+    if (asyncGenActivate && r.status === 201 && r.body?.projectId) {
+      generationInputs.push({
+        market: m.market,
+        languageCode: r.body.languageCode ?? m.languageCode,
+        brandId: brandUuid,
+        siteId: undefined,
+        workspaceId: r.body.workspaceId ?? workspaceId,
+        geoTargetId: r.body.geoTargetId,
+        brandDomain,
+        baseUrl: brandPrimaryUrl ?? brandDomain,
+        brand: resolveBrandName(requestBody),
+        aliases: collectAliasNames(brandAliases, m.market),
+      });
+    }
   }
 
   // ALL-OR-NOTHING activation. The brand flips to 'active' ONLY when the
@@ -371,6 +397,7 @@ export async function orchestrateActivateMarkets({
         baseSiteId: linkedSiteId,
         markets: results,
       },
+      generationInputs,
     };
   }
 
@@ -382,5 +409,6 @@ export async function orchestrateActivateMarkets({
   return {
     status: 207,
     body: { brandId: brandUuid, status: 'active', markets: results },
+    generationInputs,
   };
 }

@@ -14,6 +14,7 @@
 
 import { createSerenityTransport } from '../rest-transport.js';
 import { orchestrateActivateMarkets } from './activate-markets-orchestration.js';
+import { enqueueMarketGenerations } from '../async-prompt-gen.js';
 
 /**
  * Job type dispatched to {@link activateMarketsJobHandler} by the runner
@@ -57,7 +58,7 @@ export async function activateMarketsJobHandler(context, job, accessToken) {
 
   const transport = createSerenityTransport({ env, imsToken: accessToken });
 
-  return orchestrateActivateMarkets({
+  const result = await orchestrateActivateMarkets({
     dataAccess,
     env,
     orgId,
@@ -69,4 +70,26 @@ export async function activateMarketsJobHandler(context, job, accessToken) {
     preResolvedWorkspaceId: workspaceId,
     callerId,
   });
+
+  // Same handoff the synchronous activate performs, through the SAME helper, so the two paths
+  // cannot drift (#3194/#3252). The token is the one difference: there is no request here to
+  // mint from, so forward the one this job already holds.
+  await enqueueMarketGenerations(
+    { ...context, params: { ...(context.params || {}), spaceCatId: orgId } },
+    {
+      inputs: result.generationInputs,
+      markets: result.body?.markets,
+      transport,
+      brandUuid: brandId,
+      log,
+      promiseToken: metadata.promiseToken,
+      callerId,
+      imsOrgId: orgId,
+    },
+  );
+
+  // Strip the internal handoff before this becomes the AsyncJob's stored result — it is served
+  // verbatim to any client polling the job and carries the brand's workspace id and aliases.
+  const { generationInputs: _, ...jobResult } = result;
+  return jobResult;
 }

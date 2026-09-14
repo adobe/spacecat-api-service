@@ -53,6 +53,7 @@ import {
   callerMayReauth,
   toGenerationJobDto,
   maybeEnqueueMarketGeneration,
+  enqueueMarketGenerations,
 } from '../support/serenity/async-prompt-gen.js';
 import { loadJobScopedToCaller } from '../support/async-job-access.js';
 import { claimJobForReauth } from '../support/serenity/job-lease.js';
@@ -2058,6 +2059,13 @@ function SerenityController(context, log, env) {
         writeDeadline,
         reloadPointer: brandPointerReloader(ctx, auth.brandUuid),
         callerId: resolveCallerId(ctx),
+      });
+      await enqueueMarketGenerations(ctx, {
+        inputs: result.generationInputs,
+        markets: result.body?.markets,
+        transport,
+        brandUuid,
+        log,
       });
       return createResponse(result.body, result.status);
     } catch (e) {

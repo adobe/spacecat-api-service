@@ -191,3 +191,69 @@ export function resolveBrandName(body) {
   }
   return Array.isArray(body?.brandNames) ? (body.brandNames[0] ?? '') : '';
 }
+
+/**
+ * Enqueues the DRS prompt-generation producer for each market an activate batch just created
+ * (#3194/#3252), annotating that market's entry in the response.
+ *
+ * Shared by the synchronous controller and the chained worker because activate hands off PER
+ * MARKET, not once: duplicating this loop in two places is how the two paths drift apart, which
+ * is the exact failure this whole integration exists to prevent.
+ *
+ * Best-effort throughout. Every market here is already created and published upstream; a
+ * producer hiccup must never turn that into a failed activation.
+ *
+ * @param {object} context - a request or worker context (needs sqs/dataAccess/env).
+ * @param {object} params
+ * @param {object[]|undefined} params.inputs - per-market producer inputs from the orchestration.
+ * @param {object[]|undefined} params.markets - the response's market entries, annotated in place.
+ * @param {object} params.transport
+ * @param {string} params.brandUuid
+ * @param {object} params.log
+ * @param {object} [params.promiseToken] - pre-minted token; required off the request path.
+ * @param {string} [params.callerId]
+ * @param {string} [params.imsOrgId]
+ */
+export async function enqueueMarketGenerations(context, {
+  inputs, markets, transport, brandUuid, log, promiseToken, callerId, imsOrgId,
+}) {
+  if (!Array.isArray(inputs) || inputs.length === 0) {
+    return;
+  }
+  let resolvedImsOrgId = imsOrgId;
+  if (!resolvedImsOrgId) {
+    try {
+      const org = await context?.dataAccess?.Organization?.findById?.(context?.params?.spaceCatId);
+      resolvedImsOrgId = org?.getImsOrgId?.() ?? context?.params?.spaceCatId;
+    } catch {
+      resolvedImsOrgId = context?.params?.spaceCatId;
+    }
+  }
+  for (const input of inputs) {
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      const promptGeneration = await maybeEnqueueMarketGeneration(context, {
+        enabled: true,
+        generateRequested: true,
+        producerParams: {
+          ...input,
+          transport,
+          imsOrgId: resolvedImsOrgId,
+          callerId: callerId ?? 'unknown',
+          ...(promiseToken ? { promiseToken } : {}),
+        },
+      });
+      if (promptGeneration && Array.isArray(markets)) {
+        const entry = markets.find((m) => m.market === input.market
+          && m.languageCode === input.languageCode);
+        if (entry) {
+          entry.body = { ...entry.body, promptGeneration };
+        }
+      }
+    } catch (e) {
+      log?.warn?.('serenity activate: async prompt-generation enqueue failed (non-fatal)', {
+        brandId: brandUuid, market: input.market, error: e?.message,
+      });
+    }
+  }
+}
