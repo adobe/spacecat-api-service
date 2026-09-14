@@ -108,6 +108,93 @@ describe('handlers/activate-markets-orchestration.js (PR-C, LLMO-7352/LLMO-7418)
     };
   }
 
+  // ── Async prompt generation: the sync and async activate paths must agree (#3194/#3252) ──
+  // Mirrors create-market-orchestration.js's own matrix, for the same reason: this module owns
+  // the activate batch for BOTH the controller and the job chain, so the flag is read here or
+  // the two paths generate prompts differently. Activate hands off PER MARKET, so the extra
+  // case that matters here is a mixed batch.
+  describe('async prompt generation gate', () => {
+    const withFlags = ({ asyncGen, generatePrompts, markets }) => baseParams({
+      env: asyncGen ? { SERENITY_ASYNC_PROMPT_GEN: 'true' } : {},
+      requestBody: {
+        brandDomain: 'x.com',
+        brandNames: ['X'],
+        generatePrompts,
+        markets: markets ?? [{ market: 'us', languageCode: 'en' }],
+      },
+    });
+    const created = (over = {}) => ({
+      status: 201,
+      body: {
+        projectId: 'P-1', geoTargetId: 2840, languageCode: 'en', workspaceId: 'ws-1', ...over,
+      },
+    });
+
+    it('flag OFF + generatePrompts TRUE: generates inline, hands off nothing', async () => {
+      handleCreateMarketSubworkspaceStub.resolves(created());
+      const { orchestrateActivateMarkets } = await load();
+
+      const result = await orchestrateActivateMarkets(
+        withFlags({ asyncGen: false, generatePrompts: true }),
+      );
+
+      expect(handleCreateMarketSubworkspaceStub.firstCall.args[7].generateTopics).to.equal(true);
+      expect(result.generationInputs).to.deep.equal([]);
+    });
+
+    it('flag ON + generatePrompts TRUE: suppresses inline generation and hands off per market', async () => {
+      handleCreateMarketSubworkspaceStub.resolves(created());
+      const { orchestrateActivateMarkets } = await load();
+
+      const result = await orchestrateActivateMarkets(
+        withFlags({ asyncGen: true, generatePrompts: true }),
+      );
+
+      expect(handleCreateMarketSubworkspaceStub.firstCall.args[7].generateTopics).to.equal(false);
+      expect(result.generationInputs).to.have.length(1);
+      expect(result.generationInputs[0]).to.include({ brandId: BRAND_ID, market: 'us' });
+    });
+
+    it('hands off ONLY the markets this call created, never an already-live 409', async () => {
+      // The case a per-market loop makes possible and a single-market one does not: generating
+      // into a slice that was already live means writing prompts into a project this request
+      // did not create.
+      handleCreateMarketSubworkspaceStub
+        .onFirstCall().resolves(created())
+        // The 409 body names the EXISTING project on purpose: with a project-less body the
+        // `projectId` check alone would carry this test and the status check could be deleted
+        // unnoticed. This makes the status check the thing under test.
+        .onSecondCall().resolves({
+          status: 409,
+          body: {
+            error: 'sliceExists', projectId: 'P-ALREADY-LIVE', geoTargetId: 2276, languageCode: 'de',
+          },
+        });
+      const { orchestrateActivateMarkets } = await load();
+
+      const result = await orchestrateActivateMarkets(withFlags({
+        asyncGen: true,
+        generatePrompts: true,
+        markets: [{ market: 'us', languageCode: 'en' }, { market: 'de', languageCode: 'de' }],
+      }));
+
+      expect(result.generationInputs).to.have.length(1);
+      expect(result.generationInputs[0].market).to.equal('us');
+    });
+
+    it('flag ON + generatePrompts FALSE: the flag alone never conjures generation', async () => {
+      handleCreateMarketSubworkspaceStub.resolves(created());
+      const { orchestrateActivateMarkets } = await load();
+
+      const result = await orchestrateActivateMarkets(
+        withFlags({ asyncGen: true, generatePrompts: false }),
+      );
+
+      expect(handleCreateMarketSubworkspaceStub.firstCall.args[7].generateTopics).to.equal(false);
+      expect(result.generationInputs).to.deep.equal([]);
+    });
+  });
+
   it('throws 500 when Brand data-access is unavailable', async () => {
     const { orchestrateActivateMarkets } = await load();
     await expect(orchestrateActivateMarkets(baseParams({ dataAccess: {} })))
