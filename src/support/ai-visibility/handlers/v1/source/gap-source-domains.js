@@ -50,6 +50,12 @@ export function buildGapSourceDomainsDimensionFilterQl(sp) {
 
 export async function handleGapSourceDomains(sp, clients) {
   const domain = normalizeAiVisibilityTarget(sp.get('domain'));
+  if (!domain) {
+    return {
+      status: 400,
+      body: { error: 'invalid_request', message: 'domain is required' },
+    };
+  }
   const searchType = resolveSearchType(domain);
   const competitorDomains = parseCompetitorDomainsList(sp);
   const competitors = competitorDomains.length > 0

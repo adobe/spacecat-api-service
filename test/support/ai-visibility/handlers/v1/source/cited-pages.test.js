@@ -67,9 +67,10 @@ describe('AI Visibility – v1 cited-pages search_type (LLMO-7015)', () => {
       expect(clients.sourceClient.sources.firstCall.args[0].searchType).to.equal(SEARCH_TYPE_ENUM.DOMAIN);
     });
 
-    it('resolves search_type DOMAIN when the domain is missing', async () => {
-      await handleCitedPages(sp(MISSING), clients);
-      expect(clients.sourceClient.sources.firstCall.args[0].searchType).to.equal(SEARCH_TYPE_ENUM.DOMAIN);
+    it('returns 400 and issues no gRPC call when the domain is missing', async () => {
+      const res = await handleCitedPages(sp(MISSING), clients);
+      expect(res.status).to.equal(400);
+      expect(clients.sourceClient.sources.called).to.equal(false);
     });
   });
 
@@ -89,9 +90,10 @@ describe('AI Visibility – v1 cited-pages search_type (LLMO-7015)', () => {
       expect(clients.sourceClient.ownedSourcesTotal.firstCall.args[0].searchType).to.equal(SEARCH_TYPE_ENUM.DOMAIN);
     });
 
-    it('resolves search_type DOMAIN when the domain is missing', async () => {
-      await handleCitedPagesTotals(sp(MISSING), clients);
-      expect(clients.sourceClient.ownedSourcesTotal.firstCall.args[0].searchType).to.equal(SEARCH_TYPE_ENUM.DOMAIN);
+    it('returns 400 and issues no gRPC call when the domain is missing', async () => {
+      const res = await handleCitedPagesTotals(sp(MISSING), clients);
+      expect(res.status).to.equal(400);
+      expect(clients.sourceClient.ownedSourcesTotal.called).to.equal(false);
     });
   });
 
@@ -111,9 +113,10 @@ describe('AI Visibility – v1 cited-pages search_type (LLMO-7015)', () => {
       expect(clients.sourceClient.sourcesExport.firstCall.args[0].request.searchType).to.equal(SEARCH_TYPE_ENUM.DOMAIN);
     });
 
-    it('resolves search_type DOMAIN when the domain is missing on the nested request', async () => {
-      await handleCitedPagesExport(sp(MISSING), clients);
-      expect(clients.sourceClient.sourcesExport.firstCall.args[0].request.searchType).to.equal(SEARCH_TYPE_ENUM.DOMAIN);
+    it('returns 400 and issues no gRPC call when the domain is missing', async () => {
+      const res = await handleCitedPagesExport(sp(MISSING), clients);
+      expect(res.status).to.equal(400);
+      expect(clients.sourceClient.sourcesExport.called).to.equal(false);
     });
   });
 });

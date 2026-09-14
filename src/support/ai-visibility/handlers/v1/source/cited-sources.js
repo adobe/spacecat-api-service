@@ -46,6 +46,12 @@ export function buildCitedSourcesDimensionFilterQl(sp) {
 
 export async function handleCitedSources(sp, clients) {
   const domain = normalizeAiVisibilityTarget(sp.get('domain'));
+  if (!domain) {
+    return {
+      status: 400,
+      body: { error: 'invalid_request', message: 'domain is required' },
+    };
+  }
   const engine = engineToLlm(sp.get('engine')) || LLM_ENUM.ALL;
   const country = resolveCountry(sp) || COUNTRY_ENUM.WORLDWIDE;
   const sortBy = sp.get('sortBy') || DOMAINS_REQUEST_ORDER_BY_ENUM.PROMPTS_COUNT;

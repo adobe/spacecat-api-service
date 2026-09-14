@@ -32,6 +32,12 @@ import {
 
 export async function handleStatsByLLM(sp, clients) {
   const domain = normalizeAiVisibilityTarget(sp.get('domain'));
+  if (!domain) {
+    return {
+      status: 400,
+      body: { error: 'invalid_request', message: 'domain is required' },
+    };
+  }
   const country = resolveCountry(sp) || COUNTRY_ENUM.US;
   const dateFrom = sp.get('dateFrom');
   const dateTo = sp.get('dateTo');

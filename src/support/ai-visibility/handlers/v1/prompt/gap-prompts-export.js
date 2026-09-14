@@ -45,6 +45,12 @@ import {
 /* c8 ignore start */
 export async function handleGapPromptsExport(sp, clients) {
   const domain = normalizeAiVisibilityTarget(sp.get('domain'));
+  if (!domain) {
+    return {
+      status: 400,
+      body: { error: 'invalid_request', message: 'domain is required' },
+    };
+  }
   const searchType = resolveSearchType(domain);
   const competitorDomains = parseCompetitorDomainsList(sp);
   const competitors = competitorDomains.length > 0

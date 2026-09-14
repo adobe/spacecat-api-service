@@ -46,6 +46,12 @@ import { buildCitedPagesFilterQl } from './cited-pages.js';
 /* c8 ignore start */
 export async function handleCitedPagesExport(sp, clients) {
   const domain = normalizeAiVisibilityTarget(sp.get('domain'));
+  if (!domain) {
+    return {
+      status: 400,
+      body: { error: 'invalid_request', message: 'domain is required' },
+    };
+  }
   const engine = engineToLlm(sp.get('engine')) || LLM_ENUM.ALL;
   const country = resolveCountry(sp) || COUNTRY_ENUM.WORLDWIDE;
   const sortBy = sp.get('sortBy') || SOURCES_REQUEST_ORDER_BY_ENUM.PROMPTS_COUNT;
