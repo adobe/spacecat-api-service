@@ -2190,6 +2190,50 @@ describe('llmo-agentic-traffic', () => {
       const res = await handler(ctx);
       expect(res.status).to.equal(500);
     });
+
+    it('forwards p_models for a multi-select platform list and nulls the scalar p_model', async () => {
+      const client = createMockClient({
+        [RPC]: {
+          data: {
+            totalCitations: 0, totalMentions: 0, uniquePrompts: 0, weeklyTrends: [], prompts: [],
+          },
+          error: null,
+        },
+      });
+      const ctx = makeContext({
+        client,
+        data: {
+          startDate: '2026-01-01', endDate: '2026-01-28', url: 'https://example.com/page', platform: 'chatgpt,gemini',
+        },
+      });
+      const handler = createAgenticTrafficUrlBrandPresenceHandler(stubbedValidateAccess);
+      await handler(ctx);
+      const rpcArgs = client.rpc.firstCall.args[1];
+      expect(rpcArgs.p_model).to.equal(null);
+      expect(rpcArgs.p_models).to.deep.equal(['ChatGPT', 'Gemini']);
+    });
+
+    it('omits p_models entirely for a single platform (byte-identical path)', async () => {
+      const client = createMockClient({
+        [RPC]: {
+          data: {
+            totalCitations: 0, totalMentions: 0, uniquePrompts: 0, weeklyTrends: [], prompts: [],
+          },
+          error: null,
+        },
+      });
+      const ctx = makeContext({
+        client,
+        data: {
+          startDate: '2026-01-01', endDate: '2026-01-28', url: 'https://example.com/page', platform: 'chatgpt',
+        },
+      });
+      const handler = createAgenticTrafficUrlBrandPresenceHandler(stubbedValidateAccess);
+      await handler(ctx);
+      const rpcArgs = client.rpc.firstCall.args[1];
+      expect(rpcArgs.p_model).to.equal('ChatGPT');
+      expect(rpcArgs).to.not.have.property('p_models');
+    });
   });
 
   // ── Has Data ───────────────────────────────────────────────────────────────

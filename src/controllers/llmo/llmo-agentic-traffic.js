@@ -186,7 +186,7 @@ function buildRpcParams(siteId, parsed) {
 }
 
 function canonicalizeExportPayload(siteId, parsed) {
-  return {
+  const payload = {
     kind: EXPORT_KIND,
     v: 1,
     c: EXPORT_CANONICAL_VERSION,
@@ -195,7 +195,6 @@ function canonicalizeExportPayload(siteId, parsed) {
     startDate: parsed.startDate,
     endDate: parsed.endDate,
     platform: parsed.platform,
-    platforms: parsed.platforms,
     categoryName: parsed.categoryName,
     agentType: parsed.agentType,
     userAgent: parsed.userAgent,
@@ -203,6 +202,12 @@ function canonicalizeExportPayload(siteId, parsed) {
     successRate: parsed.successRate,
     urlPathSearch: parsed.urlPathSearch,
   };
+  // Only include the multi-select list when present, so single-platform exports
+  // keep their pre-migration hash (matches buildRpcParams) and stay reachable in S3.
+  if (parsed.platforms) {
+    payload.platforms = parsed.platforms;
+  }
+  return payload;
 }
 
 // RFC 8785 JCS — strict on string/number/boolean/null/array/object. NaN/Infinity throw.
