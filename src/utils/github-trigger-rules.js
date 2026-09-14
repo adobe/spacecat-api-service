@@ -44,6 +44,19 @@ export function getSkipReason(data, action, reviewerLogin) {
   // configured reviewer login (a plain user, EMU user, or App bot - whatever
   // the registry pins per destination).
   if (action === 'review_requested') {
+    // GitHub sends EITHER requested_reviewer (a user/bot) OR requested_team
+    // (a team) on this action - never both. A team-routed request (e.g. a
+    // branch-protection rule or CODEOWNERS entry that names a team Mysticat
+    // happens to be a member of) previously fell through to the reviewer
+    // check below with requested_reviewer entirely absent, producing the
+    // indistinguishable-from-a-real-mismatch "reviewer undefined is not
+    // <login>" - which silently dropped every team-routed request for
+    // hours with no diagnostic signal (adobe/mysticat-github-service#123).
+    // Name it explicitly instead: team-based triggers are a real, distinct,
+    // unsupported case, not a wrong-reviewer no-op.
+    if (data.requested_team) {
+      return `review requested via team ${data.requested_team.slug ?? data.requested_team.name} - team-based triggers not supported`;
+    }
     const reviewer = data.requested_reviewer?.login;
     if (reviewer !== reviewerLogin) {
       return `reviewer ${reviewer} is not ${reviewerLogin}`;
@@ -109,6 +122,9 @@ export function skipReasonLabel(reason) {
   if (reason.startsWith('auto-trigger not yet supported')) {
     return 'auto_trigger';
   }
+  if (reason.startsWith('review requested via team')) {
+    return 'team_reviewer_unsupported';
+  }
   if (reason.startsWith('reviewer ')) {
     return 'wrong_reviewer';
   }
@@ -138,5 +154,10 @@ export function isMysticatTargetedSkip(reason) {
   }
   return reason === 'draft PR'
     || reason === 'bot sender'
-    || reason.startsWith('non-default branch:');
+    || reason.startsWith('non-default branch:')
+    // Unlike a genuine foreign-reviewer skip, a team-routed request is not
+    // known to be uninteresting to Mysticat - the team may well include it,
+    // so this is a real potential miss worth a visible note rather than
+    // silence.
+    || reason.startsWith('review requested via team');
 }

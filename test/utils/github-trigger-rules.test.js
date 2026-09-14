@@ -70,6 +70,32 @@ describe('github-trigger-rules', () => {
         };
         expect(getSkipReason(data, 'review_requested', 'mysticat-bot[bot]')).to.be.null;
       });
+
+      it('returns a team-specific skip reason for a team-routed request, not the generic mismatch', () => {
+        // GitHub sends requested_team instead of requested_reviewer when a
+        // team (not a user/bot) is requested — regression coverage for
+        // adobe/mysticat-github-service#123, where this fell through to
+        // "reviewer undefined is not MysticatBot" and silently dropped the
+        // request with no distinguishable diagnostic.
+        const data = {
+          ...baseData,
+          action: 'review_requested',
+          requested_team: { slug: 'drs-team', name: 'DRS Team' },
+        };
+        const reason = getSkipReason(data, 'review_requested', REVIEWER);
+        expect(reason).to.include('drs-team');
+        expect(reason).to.not.include('undefined');
+      });
+
+      it('falls back to the team name when slug is absent', () => {
+        const data = {
+          ...baseData,
+          action: 'review_requested',
+          requested_team: { name: 'DRS Team' },
+        };
+        const reason = getSkipReason(data, 'review_requested', REVIEWER);
+        expect(reason).to.include('DRS Team');
+      });
     });
 
     describe('labeled trigger (disabled)', () => {
@@ -222,6 +248,16 @@ describe('github-trigger-rules', () => {
         expect(reason).to.include('auto-trigger');
         expect(isMysticatTargetedSkip(reason)).to.be.false;
       });
+
+      it('classifies the team-routed reason as targeted (not silent)', () => {
+        // A team-routed request is a real potential miss, not a known
+        // non-match — it deserves the same visible note as draft PR /
+        // bot sender / non-default branch, unlike a genuine foreign-reviewer
+        // skip.
+        const data = { ...base, requested_team: { slug: 'drs-team' } };
+        const reason = getSkipReason(data, 'review_requested', REVIEWER);
+        expect(isMysticatTargetedSkip(reason)).to.be.true;
+      });
     });
   });
 
@@ -244,6 +280,11 @@ describe('github-trigger-rules', () => {
 
     it('returns wrong_reviewer for reviewer mismatch reason', () => {
       expect(skipReasonLabel('reviewer some-human is not MysticatBot')).to.equal('wrong_reviewer');
+    });
+
+    it('returns team_reviewer_unsupported for a team-routed reason', () => {
+      expect(skipReasonLabel('review requested via team drs-team - team-based triggers not supported'))
+        .to.equal('team_reviewer_unsupported');
     });
 
     it('returns unsupported_action for unsupported action reason', () => {
