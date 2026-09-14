@@ -34,7 +34,8 @@ import {
   reconcilePublishErrors,
   resolveSort,
   buildUpdateMetadata,
-  buildExistingPromptIndex,
+  buildPromptIndexByProject,
+  isIndexError,
   findStoredPrompt,
   applyUpsertTagWrites,
   DEFAULT_PAGE_LIMIT,
@@ -263,22 +264,11 @@ export async function handleCreatePromptsSubworkspace(
       raw, input: value, reason, projectId: project ? String(project.id) : null,
     };
   });
-  /** @type {Map<string, { byText: Map<string, any>, byLower: Map<string, any> }>} */
-  const promptIndexByProject = new Map();
-  await Promise.all(
-    [...new Set(normalizedInputs.map((n) => n.projectId).filter(Boolean))].map(
-      async (projectId) => {
-        promptIndexByProject.set(
-          /** @type {string} */ (projectId),
-          await buildExistingPromptIndex(
-            transport,
-            workspaceId,
-            /** @type {string} */ (projectId),
-            log,
-          ),
-        );
-      },
-    ),
+  const promptIndexByProject = await buildPromptIndexByProject(
+    transport,
+    workspaceId,
+    normalizedInputs.map((n) => n.projectId),
+    log,
   );
 
   const results = await mapLimit(normalizedInputs, BULK_CREATE_CONCURRENCY, async (entry) => {
@@ -300,7 +290,21 @@ export async function handleCreatePromptsSubworkspace(
       };
     }
     const { projectId } = entry;
-    const stored = findStoredPrompt(promptIndexByProject.get(projectId), input.text);
+    const projectIndex = promptIndexByProject.get(projectId);
+    if (isIndexError(projectIndex)) {
+      // serenity-docs#472 §2: the existing-prompt index read failed for this project —
+      // fail only its inputs (itemized, HTTP 200) instead of aborting the whole batch.
+      return {
+        failed: {
+          text: input.text,
+          geoTargetId: input.geoTargetId,
+          languageCode: input.languageCode,
+          status: projectIndex.indexErrorStatus,
+          message: projectIndex.indexError,
+        },
+      };
+    }
+    const stored = findStoredPrompt(projectIndex, input.text);
     try {
       if (stored) {
         // REPLACE the existing prompt's tags; stored authorship rides along.
@@ -493,7 +497,9 @@ export async function handleCreatePromptsSubworkspace(
     updated,
     skipped,
     failed,
-    published: true,
+    // serenity-docs#472 §6 / LLMO-7533: false whenever ANY affected project
+    // failed to publish — see the flat-mode twin handleCreatePrompts.
+    published: publishErrors.length === 0,
   };
 }
 

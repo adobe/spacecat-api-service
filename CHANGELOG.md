@@ -1,3 +1,49 @@
+# [1.810.0](https://github.com/adobe/spacecat-api-service/compare/v1.809.0...v1.810.0) (2026-09-14)
+
+
+### Bug Fixes
+
+* **it:** pin minio image to quay.io (docker.io/minio/minio removed) ([#3270](https://github.com/adobe/spacecat-api-service/issues/3270)) ([502082d](https://github.com/adobe/spacecat-api-service/commit/502082d8e4ce1a34aefbc9c572d662d6ad57d361)), closes [Hi#level](https://github.com/Hi/issues/level) [adobe/spacecat-api-service#3252](https://github.com/adobe/spacecat-api-service/issues/3252) [adobe/spacecat-api-service#3252](https://github.com/adobe/spacecat-api-service/issues/3252)
+* **serenity:** CSV import mixed-result containment, publish truthfulness, finalize endpoint | LLMO-7533 ([#3269](https://github.com/adobe/spacecat-api-service/issues/3269)) ([2564b3f](https://github.com/adobe/spacecat-api-service/commit/2564b3fed9db3bba926890ba0636c52058ca4a0f)), closes [Hi#level](https://github.com/Hi/issues/level)
+
+
+### Features
+
+* **serenity:** async Semrush-market AI-prompt provisioning ([#3194](https://github.com/adobe/spacecat-api-service/issues/3194)) ([#3252](https://github.com/adobe/spacecat-api-service/issues/3252)) ([7ef63eb](https://github.com/adobe/spacecat-api-service/commit/7ef63eb92f541c2f19ddf5d9200efa14420bd0b3)), closes [#3222](https://github.com/adobe/spacecat-api-service/issues/3222) [Hi#level](https://github.com/Hi/issues/level) [adobe-rnd/llmo-data-retrieval-service#3125](https://github.com/adobe-rnd/llmo-data-retrieval-service/issues/3125) [adobe/spacecat-api-service#3222](https://github.com/adobe/spacecat-api-service/issues/3222) [adobe-rnd/llmo-data-retrieval-service#3165](https://github.com/adobe-rnd/llmo-data-retrieval-service/issues/3165) [#3193](https://github.com/adobe/spacecat-api-service/issues/3193) [adobe/project-elmo-ui#3071](https://github.com/adobe/project-elmo-ui/issues/3071) [spacecat-infrastructure#780](https://github.com/spacecat-infrastructure/issues/780) [#786](https://github.com/adobe/spacecat-api-service/issues/786) [infra#780](https://github.com/infra/issues/780) [infra#780](https://github.com/infra/issues/780) [adobe/spacecat-infrastructure#780](https://github.com/adobe/spacecat-infrastructure/issues/780) [adobe-rnd/llmo-data-retrieval-service#3193](https://github.com/adobe-rnd/llmo-data-retrieval-service/issues/3193) [adobe/project-elmo-ui#3071](https://github.com/adobe/project-elmo-ui/issues/3071) [#780](https://github.com/adobe/spacecat-api-service/issues/780) [elmo#3071](https://github.com/elmo/issues/3071) [infra#780](https://github.com/infra/issues/780) [elmo#3071](https://github.com/elmo/issues/3071)
+
+# [1.809.0](https://github.com/adobe/spacecat-api-service/compare/v1.808.0...v1.809.0) (2026-09-11)
+
+
+### Features
+
+* **launchdarkly:** add admin-only flags summary endpoint ([#3236](https://github.com/adobe/spacecat-api-service/issues/3236)) ([97a7ba2](https://github.com/adobe/spacecat-api-service/commit/97a7ba20d78e9bc4af8edb7764f385b58f8a8abb))
+
+# [1.808.0](https://github.com/adobe/spacecat-api-service/compare/v1.807.1...v1.808.0) (2026-09-11)
+
+
+### Bug Fixes
+
+* preserve prompt tag compatibility without filters ([#3264](https://github.com/adobe/spacecat-api-service/issues/3264)) ([bd63d2d](https://github.com/adobe/spacecat-api-service/commit/bd63d2de85e95e76ef617ceccf667f1f83ebf0e3))
+
+
+### Features
+
+* add Parallel.ai, Manus, and Keenable.ai to platform code map (LLMO-7325) ([#3263](https://github.com/adobe/spacecat-api-service/issues/3263)) ([49053e7](https://github.com/adobe/spacecat-api-service/commit/49053e79b06f13e512d5eb3e27d77f076dfa8102)), closes [spacecat-audit-worker#2950](https://github.com/spacecat-audit-worker/issues/2950) [project-elmo-ui#3095](https://github.com/project-elmo-ui/issues/3095) [adobe/project-elmo-ui#3154](https://github.com/adobe/project-elmo-ui/issues/3154)
+
+## [1.807.1](https://github.com/adobe/spacecat-api-service/compare/v1.807.0...v1.807.1) (2026-09-11)
+
+
+### Bug Fixes
+
+* **serenity:** forward browser promise token to async jobs ([#3204](https://github.com/adobe/spacecat-api-service/issues/3204)) ([e551703](https://github.com/adobe/spacecat-api-service/commit/e551703e3d19a4cf0b77b762463174b09fea1e4a))
+
+# [1.807.0](https://github.com/adobe/spacecat-api-service/compare/v1.806.0...v1.807.0) (2026-09-11)
+
+
+### Features
+
+* add OAE validation jobs endpoint ([#3234](https://github.com/adobe/spacecat-api-service/issues/3234)) ([8710653](https://github.com/adobe/spacecat-api-service/commit/871065340471bb6dd436d5efc67fbaaedf954345))
+
 # [1.806.0](https://github.com/adobe/spacecat-api-service/compare/v1.805.0...v1.806.0) (2026-09-11)
 
 

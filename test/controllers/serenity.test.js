@@ -168,6 +168,8 @@ describe('SerenityController', () => {
     handleCreatePromptsSubworkspace: sinon.stub(),
     handleUpdatePromptSubworkspace: sinon.stub(),
     handleBulkDeletePromptsSubworkspace: sinon.stub(),
+    handleFinalizePrompts: sinon.stub(),
+    handleFinalizePromptsSubworkspace: sinon.stub(),
     handleCreateTag: sinon.stub(),
     handleCreateTagSubworkspace: sinon.stub(),
     handleUpdateTag: sinon.stub(),
@@ -202,6 +204,7 @@ describe('SerenityController', () => {
   let linkSiteToRowStub;
   let tombstoneAllForBrandStub;
   let createAndEnqueueJobStub;
+  let maybeEnqueueMarketGenerationStub;
   let MockTransportError;
   let SerenityController;
 
@@ -249,6 +252,10 @@ describe('SerenityController', () => {
     createAndEnqueueJobStub = sinon.stub().resolves({
       getId: () => 'job-abc', getStatus: () => 'IN_PROGRESS',
     });
+    // Default: no async generation handle (flag off / not requested). The async
+    // paths override this per-test. Only this export is overridden; the rest of
+    // async-prompt-gen (isAsyncPromptGenEnabled etc.) stays real via esmock merge.
+    maybeEnqueueMarketGenerationStub = sinon.stub().resolves(null);
     // Alias the REAL SerenityTransportError so instances are recognised by errors.js's
     // isSemrushTransportError (which mapError now delegates to). Same (status, message, body)
     // constructor signature the tests already use.
@@ -302,6 +309,10 @@ describe('SerenityController', () => {
         handleCreatePromptsSubworkspace: handlers.handleCreatePromptsSubworkspace,
         handleUpdatePromptSubworkspace: handlers.handleUpdatePromptSubworkspace,
         handleBulkDeletePromptsSubworkspace: handlers.handleBulkDeletePromptsSubworkspace,
+      },
+      '../../src/support/serenity/handlers/prompts-finalize.js': {
+        handleFinalizePrompts: handlers.handleFinalizePrompts,
+        handleFinalizePromptsSubworkspace: handlers.handleFinalizePromptsSubworkspace,
       },
       '../../src/support/serenity/handlers/tags.js': {
         handleCreateTag: handlers.handleCreateTag,
@@ -377,6 +388,9 @@ describe('SerenityController', () => {
       },
       '../../src/support/serenity/async-job-runner.js': {
         createAndEnqueueJob: createAndEnqueueJobStub,
+      },
+      '../../src/support/serenity/async-prompt-gen.js': {
+        maybeEnqueueMarketGeneration: maybeEnqueueMarketGenerationStub,
       },
       '../../src/support/serenity/handlers/classify-prompts-job.js': {
         CLASSIFY_PROMPTS_JOB_TYPE: 'serenity-classify-prompts',
@@ -1703,6 +1717,53 @@ describe('SerenityController', () => {
       expect(opts).to.include({ organizationId: ORG, brandId: BRAND, domain: 'x.com' });
     });
 
+    describe('createMarket async prompt generation (flag-gated)', () => {
+      const asyncData = {
+        market: 'us', languageCode: 'en', brandDomain: 'x.com', brandNames: ['X'], generatePrompts: true,
+      };
+      const subwsBody = {
+        brandId: BRAND, geoTargetId: 2840, languageCode: 'en', projectId: 'P-NEW', workspaceId: SUBWS,
+      };
+
+      it('flag ON: skips synchronous generateTopics and annotates the 201 with the promptGeneration handle', async () => {
+        handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: { ...subwsBody } });
+        maybeEnqueueMarketGenerationStub.resolves({ jobId: 'gen-1', status: 'provisioning', reused: false });
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const response = await controller.createMarket(fakeContext({
+          env: { SERENITY_ASYNC_PROMPT_GEN: 'true' }, data: asyncData,
+        }));
+        expect(response.status).to.equal(201);
+        // Synchronous generation is skipped — the producer runs async instead.
+        const subwsOpts = handlers.handleCreateMarketSubworkspace.firstCall.args[7];
+        expect(subwsOpts.generateTopics).to.equal(false);
+        expect(maybeEnqueueMarketGenerationStub).to.have.been.calledOnce;
+        const body = await readBody(response);
+        expect(body.promptGeneration).to.deep.equal({ jobId: 'gen-1', status: 'provisioning', reused: false });
+      });
+
+      it('flag ON: an enqueue failure is non-fatal — the created market still returns 201 without a handle', async () => {
+        handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: { ...subwsBody } });
+        maybeEnqueueMarketGenerationStub.rejects(new Error('sqs down'));
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const response = await controller.createMarket(fakeContext({
+          env: { SERENITY_ASYNC_PROMPT_GEN: 'true' }, data: asyncData,
+        }));
+        expect(response.status).to.equal(201);
+        const body = await readBody(response);
+        expect(body.promptGeneration).to.equal(undefined);
+      });
+
+      it('flag OFF: preserves synchronous generateTopics and never enqueues', async () => {
+        handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: { ...subwsBody } });
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const response = await controller.createMarket(fakeContext({ env: {}, data: asyncData }));
+        expect(response.status).to.equal(201);
+        const subwsOpts = handlers.handleCreateMarketSubworkspace.firstCall.args[7];
+        expect(subwsOpts.generateTopics).to.equal(true);
+        expect(maybeEnqueueMarketGenerationStub).to.not.have.been.called;
+      });
+    });
+
     it('createMarket links the mirrored site onto THIS market\'s mapping row on 201', async () => {
       handlers.handleCreateMarketSubworkspace.resolves({
         status: 201,
@@ -2147,6 +2208,19 @@ describe('SerenityController', () => {
       expect(handlers.handleCreatePrompts).to.not.have.been.called;
     });
 
+    it('finalizePrompts routes to the subworkspace handler in subworkspace mode', async () => {
+      handlers.handleFinalizePromptsSubworkspace.resolves({ slices: [] });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.finalizePrompts(fakeContext({
+        data: { slices: [{ geoTargetId: 2840, languageCode: 'en' }] },
+      }));
+      expect(response.status).to.equal(200);
+      expect(handlers.handleFinalizePromptsSubworkspace).to.have.been.calledOnce;
+      expect(handlers.handleFinalizePromptsSubworkspace.firstCall.args[1])
+        .to.equal('subworkspace-ws-1');
+      expect(handlers.handleFinalizePrompts).to.not.have.been.called;
+    });
+
     it('updatePrompt routes to the subworkspace handler in subworkspace mode', async () => {
       handlers.handleUpdatePromptSubworkspace.resolves({ status: 200, body: { semrushPromptId: 'p2' } });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
@@ -2452,6 +2526,41 @@ describe('SerenityController', () => {
       expect(updateBrandStub.firstCall.args[0].updates).to.include({
         status: 'active', baseSiteId: 'site-uuid-1',
       });
+    });
+
+    it('activate async generation: enqueues + annotates only the 201 market, skipping the 409 (already-live) one', async () => {
+      // First market is freshly created (201, carries geoTargetId → annotate + enqueue);
+      // second is already live (409 sliceExists → skipped, no enqueue).
+      handlers.handleCreateMarketSubworkspace.onFirstCall().resolves({
+        status: 201, body: { geoTargetId: 2840, languageCode: 'en', workspaceId: SUBWS },
+      });
+      handlers.handleCreateMarketSubworkspace.onSecondCall().resolves({
+        status: 409, body: { error: 'sliceExists', message: 'already live' },
+      });
+      maybeEnqueueMarketGenerationStub.resolves({ jobId: 'gen-a', status: 'provisioning', reused: false });
+      const brand = makeBrandModel({ getStatus: () => 'active' });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.activate(fakeContext({
+        brand,
+        env: { SERENITY_ASYNC_PROMPT_GEN: 'true' },
+        data: {
+          brandDomain: 'x.com',
+          brandNames: ['X'],
+          generatePrompts: true,
+          markets: [{ market: 'us', languageCode: 'en' }, { market: 'de', languageCode: 'de' }],
+        },
+      }));
+      expect(response.status).to.equal(200);
+      // Only the freshly-created (201) market is enqueued — not the 409.
+      expect(maybeEnqueueMarketGenerationStub).to.have.been.calledOnce;
+      // Async skips synchronous generateTopics on every market create in the batch.
+      const subwsOpts = handlers.handleCreateMarketSubworkspace.firstCall.args[7];
+      expect(subwsOpts.generateTopics).to.equal(false);
+      const body = await readBody(response);
+      const usMarket = body.markets.find((m) => m.market === 'us');
+      const deMarket = body.markets.find((m) => m.market === 'de');
+      expect(usMarket.body.promptGeneration).to.deep.equal({ jobId: 'gen-a', status: 'provisioning', reused: false });
+      expect(deMarket.body.promptGeneration).to.equal(undefined);
     });
 
     it('activate mirrors the brand domain as a Site once (not per market) when any market goes live', async () => {
@@ -3254,6 +3363,19 @@ describe('SerenityController', () => {
       expect(handlers.handleCreatePromptsSubworkspace).not.to.have.been.called;
     });
 
+    it('finalizePrompts routes to handleFinalizePrompts in flat mode and returns ok(result)', async () => {
+      handlers.handleFinalizePrompts.resolves({ slices: [] });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.finalizePrompts(fakeContext({
+        data: { slices: [{ geoTargetId: 2840, languageCode: 'en' }] },
+      }));
+      expect(response.status).to.equal(200);
+      expect(handlers.handleFinalizePrompts).to.have.been.calledOnce;
+      expect(handlers.handleFinalizePrompts.firstCall.args[2]).to.equal(BRAND);
+      expect(handlers.handleFinalizePrompts.firstCall.args[3]).to.equal(WORKSPACE);
+      expect(handlers.handleFinalizePromptsSubworkspace).not.to.have.been.called;
+    });
+
     it('passes ai origin to synchronous creates from a service principal', async () => {
       handlers.handleCreatePrompts.resolves({ created: 1, failed: [] });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
@@ -3315,6 +3437,30 @@ describe('SerenityController', () => {
         });
         // The synchronous path never runs.
         expect(handlers.handleCreatePrompts).to.not.have.been.called;
+        expect(exchangePromiseTokenStub).to.not.have.been.called;
+      });
+
+      it('forwards the browser promise token and audience pair without exchanging it before enqueue', async () => {
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const prompts = [{
+          text: 'What is your return policy?', geoTargetId: 2840, languageCode: 'en', tagIds: ['tag-1'],
+        }];
+        const response = await controller.createPrompts(fakeContext({
+          authType: 'jwt',
+          bearer: 'spacecat-session-jwt',
+          data: { async: true, prompts },
+          promiseToken: 'browser%2Fpromise%2Btoken',
+          promiseAudience: 'semrush',
+        }));
+
+        expect(response.status).to.equal(202);
+        expect(exchangePromiseTokenStub).to.not.have.been.called;
+        expect(createAndEnqueueJobStub).to.have.been.calledOnce;
+        const [, enqueueArgs] = createAndEnqueueJobStub.firstCall.args;
+        expect(enqueueArgs.promiseToken).to.deep.equal({
+          promise_token: 'browser/promise+token',
+        });
+        expect(enqueueArgs.promisePair).to.equal(getSemrushPair());
       });
 
       it('enqueues a serenity-classify-prompts job and returns 202 for subworkspace-mode async import, carrying authMode + parentWorkspaceId', async () => {

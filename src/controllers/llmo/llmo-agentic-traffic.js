@@ -75,6 +75,9 @@ const PLATFORM_CODE_TO_DB = {
   'google-ai-mode': 'Google AI Mode',
   copilot: 'Copilot',
   amazon: 'Amazon',
+  parallel: 'Parallel.ai',
+  manus: 'Manus',
+  keenable: 'Keenable.ai',
 };
 
 // A comma in the `platform` param signals a multi-select (Serenity). Returns the

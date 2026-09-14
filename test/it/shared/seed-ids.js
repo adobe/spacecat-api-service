@@ -128,11 +128,12 @@ export const OPPTY_2_ID = 'aa222222-2222-4222-a222-222222222222'; // SITE_1, bro
 export const OPPTY_3_ID = 'aa333333-3333-4333-b333-333333333333'; // SITE_3 (denied), code-suggestions, NEW
 export const OPPTY_4_ID = 'aa444444-4444-4444-a444-444444444444'; // SITE_1, structured-data, IN_PROGRESS — second oppty with a fix, for site-wide aggregation
 
-// ── Suggestions (all under OPPTY_1) ──
+// ── Suggestions (all under OPPTY_1, unless noted) ──
 
 export const SUGG_1_ID = 'bb111111-1111-4111-b111-111111111111'; // CODE_CHANGE, NEW
 export const SUGG_2_ID = 'bb222222-2222-4222-a222-222222222222'; // REDIRECT_UPDATE, APPROVED
 export const SUGG_3_ID = 'bb333333-3333-4333-b333-333333333333'; // CODE_CHANGE, NEW
+export const SUGG_4_ID = 'bb444444-4444-4444-a444-444444444444'; // under OPPTY_3 (SITE_3, denied), REDIRECT_UPDATE, NEW
 
 // ── FixEntities (all under OPPTY_1) ──
 

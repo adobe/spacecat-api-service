@@ -34,6 +34,7 @@ import { auditUrls } from './seed-data/audit-urls.js';
 import { trialUsers } from './seed-data/trial-users.js';
 import { trialUserActivities } from './seed-data/trial-user-activities.js';
 import { asyncJobs } from './seed-data/async-jobs.js';
+import { oaeValidations } from './seed-data/oae-validations.js';
 import { consumers } from './seed-data/consumers.js';
 import { plgOnboardings } from './seed-data/plg-onboardings.js';
 import { siteImsOrgAccesses } from './seed-data/site-ims-org-accesses.js';
@@ -288,6 +289,7 @@ async function seed() {
   await Promise.all([
     insertRows('fix_entity_suggestions', fixEntitySuggestions),
     insertRows('ticket_suggestions', ticketSuggestions),
+    insertRows('oae_validations', oaeValidations),
   ]);
 }
 

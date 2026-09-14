@@ -114,6 +114,8 @@ function isStaticRoute(routePattern) {
  * @param {Object} redirectsController - ASO dispatcher redirect-overlay controller.
  * @param {Object} auditPolicyController - Audit policy + audit scope controller.
  * @param {Object} promptSuggestionSchedulesController - LLMO prompt-suggestion schedule controller.
+ * @param {Object} oaeValidationController - The OAE validation controller.
+ * @param {Object} launchDarklyController - Admin-only LaunchDarkly flags summary controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -185,6 +187,8 @@ export default function getRouteHandlers(
   redirectsController,
   auditPolicyController,
   promptSuggestionSchedulesController,
+  oaeValidationController,
+  launchDarklyController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -244,10 +248,13 @@ export default function getRouteHandlers(
     'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts': serenityController.createPrompts,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/bulk-tags': serenityController.bulkTagPrompts,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/bulk-delete': serenityController.bulkDeletePrompts,
+    'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/finalize': serenityController.finalizePrompts,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/jobs/:jobId': serenityController.getPromptsJobStatus,
     'PATCH /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/:semrushPromptId': serenityController.updatePrompt,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets': serenityController.listMarkets,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets': serenityController.createMarket,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/generation/jobs/:jobId': serenityController.getSemrushMarketGenerationJobStatus,
+    'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/generation/jobs/:jobId/reauth': serenityController.reauthSemrushMarketGenerationJob,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode': serenityController.getMarket,
     'DELETE /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode': serenityController.deleteMarket,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags': serenityController.listTags,
@@ -515,6 +522,7 @@ export default function getRouteHandlers(
     'DELETE /tools/api-keys/:id': apiKeyController.deleteApiKey,
     'GET /tools/api-keys': apiKeyController.getApiKeys,
     'GET /tools/proxy': proxyController.getPreview,
+    'GET /tools/launchdarkly/flags': launchDarklyController.getFlags,
     'GET /monitoring/drs-bp-pg-audit': drsBpPgAuditController.getProjectionAudit,
 
     // Hybrid permission model — state-layer management + capability
@@ -639,6 +647,10 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/llmo/edge-optimize-status': llmoController.checkEdgeOptimizeStatus,
     'GET /sites/:siteId/llmo/probes/edge-optimize': llmoController.checkWafConnectivity,
     'PUT /sites/:siteId/llmo/opportunities-reviewed': llmoController.markOpportunitiesReviewed,
+    // OAE validation jobs — triggered internally (e.g. the edge-deploy flow) or by other
+    // spacecat services, not a customer-facing FACS surface.
+    'POST /sites/:siteId/llmo/oae-validation/jobs': oaeValidationController.createValidationJob,
+    'GET /sites/:siteId/llmo/oae-validation/jobs/:jobId': oaeValidationController.getValidationJob,
 
     // LLMO Cloudflare Onboarding Routes
     'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/config': llmoCloudflareController.getCloudflareConfig,

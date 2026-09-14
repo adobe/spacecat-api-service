@@ -673,6 +673,15 @@ describe('getRouteHandlers', () => {
     createSchedules: sinon.stub(),
   };
 
+  const mockOaeValidationController = {
+    createValidationJob: sinon.stub(),
+    getValidationJob: sinon.stub(),
+  };
+
+  const mockLaunchDarklyController = {
+    getFlags: sinon.stub(),
+  };
+
   it('segregates static and dynamic routes', () => {
     const { staticRoutes, dynamicRoutes } = getRouteHandlers(
       mockAuditsController,
@@ -743,6 +752,8 @@ describe('getRouteHandlers', () => {
       mockRedirectsController,
       mockAuditPolicyController,
       mockPromptSuggestionSchedulesController,
+      mockOaeValidationController,
+      mockLaunchDarklyController,
     );
 
     expect(staticRoutes).to.have.all.keys(
@@ -773,6 +784,7 @@ describe('getRouteHandlers', () => {
       'POST /tools/api-keys',
       'GET /tools/api-keys',
       'GET /tools/proxy',
+      'GET /tools/launchdarkly/flags',
       'GET /monitoring/drs-bp-pg-audit',
       'GET /state/access-mappings',
       'GET /state/access-mappings/history',
@@ -879,6 +891,7 @@ describe('getRouteHandlers', () => {
     expect(staticRoutes['POST /tools/api-keys']).to.equal(mockApiKeyController.createApiKey);
     expect(staticRoutes['GET /tools/api-keys']).to.equal(mockApiKeyController.getApiKeys);
     expect(staticRoutes['GET /tools/proxy']).to.equal(mockProxyController.getPreview);
+    expect(staticRoutes['GET /tools/launchdarkly/flags']).to.equal(mockLaunchDarklyController.getFlags);
     expect(staticRoutes['GET /monitoring/drs-bp-pg-audit']).to.equal(mockDrsBpPgAuditController.getProjectionAudit);
     expect(staticRoutes['POST /consent-banner']).to.equal(mockConsentBannerController.takeScreenshots);
     expect(staticRoutes['POST /tools/scrape/jobs']).to.equal(mockScrapeJobController.createScrapeJob);
@@ -1010,10 +1023,13 @@ describe('getRouteHandlers', () => {
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/bulk-tags',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/bulk-delete',
+      'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/finalize',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/jobs/:jobId',
       'PATCH /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/:semrushPromptId',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/generation/jobs/:jobId',
+      'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/generation/jobs/:jobId/reauth',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode',
       'DELETE /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags',
@@ -1341,6 +1357,8 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/llmo/strategy',
       'PUT /sites/:siteId/llmo/strategy',
       'PUT /sites/:siteId/llmo/opportunities-reviewed',
+      'POST /sites/:siteId/llmo/oae-validation/jobs',
+      'GET /sites/:siteId/llmo/oae-validation/jobs/:jobId',
       'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/config',
       'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/accounts',
       'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/zones',

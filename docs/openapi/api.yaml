@@ -162,6 +162,8 @@ paths:
     $ref: './prompts-v2-api.yaml#/v2-prompts-by-brand-bulk-delete'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/prompts:
     $ref: './serenity-api.yaml#/v2-serenity-prompts'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/prompts/finalize:
+    $ref: './serenity-api.yaml#/v2-serenity-prompts-finalize'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/prompts/{semrushPromptId}:
     $ref: './serenity-api.yaml#/v2-serenity-prompt-by-id'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/prompts/bulk-delete:
@@ -172,6 +174,10 @@ paths:
     $ref: './serenity-api.yaml#/v2-serenity-prompts-job-by-id'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/markets:
     $ref: './serenity-api.yaml#/v2-serenity-markets'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/markets/generation/jobs/{jobId}:
+    $ref: './serenity-api.yaml#/v2-serenity-market-generation-job-by-id'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/markets/generation/jobs/{jobId}/reauth:
+    $ref: './serenity-api.yaml#/v2-serenity-market-generation-job-reauth'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/markets/{geoTargetId}/{languageCode}:
     $ref: './serenity-api.yaml#/v2-serenity-market-by-slice'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/tags:
@@ -279,6 +285,10 @@ paths:
     $ref: './preflight-api.yaml#/preflight-jobs'
   /preflight/jobs/{jobId}:
     $ref: './preflight-api.yaml#/preflight-job-status'
+  /oae-validation/jobs:
+    $ref: './oae-validation-api.yaml#/oae-validation-jobs'
+  /oae-validation/jobs/{jobId}:
+    $ref: './oae-validation-api.yaml#/oae-validation-job-status'
   /sites/detect/jobs:
     $ref: './site-detection-api.yaml#/site-detection-jobs'
   /sites/detect/jobs/{jobId}:

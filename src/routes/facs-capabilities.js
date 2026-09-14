@@ -160,6 +160,10 @@ const routeFacsCapabilities = {
     // Prompt-suggestion schedule (re-)provisioning — admin-or-S2S (dedicated
     // promptSuggestionSchedule:write capability); not a customer FACS surface.
     'POST /sites/:siteId/prompt-suggestion-schedules', // authorizeWrite (admin || S2S cap)
+    // OAE validation jobs — triggered internally (e.g. the edge-deploy flow) or by other
+    // spacecat services, not a customer-facing FACS surface.
+    'POST /sites/:siteId/llmo/oae-validation/jobs',
+    'GET /sites/:siteId/llmo/oae-validation/jobs/:jobId',
     'POST /projects', // hasAdminAccess
     'DELETE /projects/:projectId', // hasAdminAccess
     'POST /organizations', // hasAdminAccess
@@ -202,6 +206,9 @@ const routeFacsCapabilities = {
 
     // Internal proxy tool
     'GET /tools/proxy', // internal preview proxy (no external auth required)
+
+    // LaunchDarkly flags summary — admin-only, no site/org scope, not a FACS surface
+    'GET /tools/launchdarkly/flags',
 
     // Monitoring / admin telemetry
     'GET /monitoring/drs-bp-pg-audit', // internal monitoring
@@ -674,8 +681,10 @@ const routeFacsCapabilities = {
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts': 'llmo/can_configure',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/bulk-tags': 'llmo/can_configure',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/bulk-delete': 'llmo/can_configure',
+      'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/finalize': 'llmo/can_configure',
       'PATCH /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/:semrushPromptId': 'llmo/can_configure',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets': 'llmo/can_configure',
+      'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/generation/jobs/:jobId/reauth': 'llmo/can_configure',
       'DELETE /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode': 'llmo/can_configure',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags': 'llmo/can_configure',
       'PATCH /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags/:tagId': 'llmo/can_configure',
@@ -885,6 +894,7 @@ const routeFacsCapabilities = {
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/jobs/:jobId': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets': 'llmo/can_view',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/generation/jobs/:jobId': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags/:tagId/impact': 'llmo/can_view',
