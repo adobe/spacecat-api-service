@@ -14,6 +14,8 @@
 
 import { ErrorWithStatusCode } from '../../utils.js';
 import { handleCreateMarketSubworkspace } from './markets-subworkspace.js';
+import { isAsyncPromptGenEnabled, resolveBrandName } from '../async-prompt-gen.js';
+import { collectAliasNames } from '../brand-aliases.js';
 import { resolveDefaultModelIds } from '../default-models.js';
 import {
   ensureMarketSite, resolveMarketIdentity, logMarketCreated,
@@ -154,7 +156,16 @@ export async function orchestrateCreateMarketSubworkspace({
   const competitors = await getBrandCompetitors(brandUuid, postgrestClient);
   // Optional prompt/topic generation for this market, defaulting to off so
   // the endpoint's behavior is unchanged unless the caller opts in.
-  const genMarketTopics = effectiveBody.generatePrompts === true;
+  const generateRequested = effectiveBody.generatePrompts === true;
+  // #3194/#3252: when async prompt generation is ON, prompts are produced by the DRS-backed
+  // worker from the Semrush topic catalogue as SEEDS, instead of the catalogue's example strings
+  // being copied verbatim into the market. This gate is the reason the port matters: this module
+  // owns the market-create body for BOTH the synchronous controller and the async job chain, so
+  // without it the chain would keep generating inline and async-created markets would silently
+  // keep the low-quality prompts that feature exists to remove -- while synchronously-created
+  // ones got the good ones. Same flag, same default (off), same behaviour on both paths.
+  const asyncGenMarket = isAsyncPromptGenEnabled(env) && generateRequested;
+  const genMarketTopics = generateRequested && !asyncGenMarket;
   // An explicit override (brand-create's `semrushModelIds`) always wins — there is no
   // "existing market" for resolveDefaultModelIds to mirror on a brand's very first market, so
   // skipping it here is what lets the caller's own choice survive rather than being silently
@@ -278,5 +289,27 @@ export async function orchestrateCreateMarketSubworkspace({
       });
     }
   }
-  return result;
+  // #3194/#3252: the inputs its DRS producer needs, surfaced rather than enqueued here.
+  // `maybeEnqueueMarketGeneration` wants a full request/worker context (sqs, authInfo,
+  // postgrestClient) that this module deliberately does not take -- it receives a flat param
+  // bag so the same code serves the controller and the worker. Both callers HAVE such a
+  // context, and both already know which one they are, so the enqueue belongs there and the
+  // data belongs here. Null whenever generation is not async-enabled or the market did not
+  // come back created, so a caller can enqueue unconditionally on a non-null value.
+  const successBody = /** @type {MarketCreateSuccessBody} */ (result.body ?? {});
+  const generationInputs = asyncGenMarket && result.status === 201 && successBody.projectId
+    ? {
+      brandId: brandUuid,
+      siteId: suppliedSiteId ?? undefined,
+      workspaceId: successBody.workspaceId ?? workspaceId,
+      geoTargetId: successBody.geoTargetId,
+      languageCode: successBody.languageCode,
+      market: effectiveBody.market,
+      brandDomain: effectiveBody.brandDomain,
+      baseUrl: effectiveBody.primaryUrl ?? effectiveBody.brandDomain,
+      brand: resolveBrandName(effectiveBody),
+      aliases: collectAliasNames(brandAliases, effectiveBody.market),
+    }
+    : null;
+  return { ...result, generationInputs };
 }

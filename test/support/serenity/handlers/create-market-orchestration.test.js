@@ -107,6 +107,112 @@ describe('handlers/create-market-orchestration.js (PR-C, LLMO-7352/LLMO-7418)', 
     };
   }
 
+  // ── Async prompt generation: the sync and async paths must agree (#3194/#3252) ──
+  //
+  // This module owns the market-create body for BOTH the synchronous controller and the async
+  // job chain. That is exactly why the flag has to be read HERE: if only the controller knew
+  // about it, turning async prompt generation on would leave chain-created markets generating
+  // inline -- the low-quality verbatim catalogue prompts that feature exists to remove -- while
+  // synchronously-created markets got the DRS-generated ones. Two prompt qualities in one
+  // product, decided by a code path the user never chose, and reported by nothing.
+  //
+  // All four flag combinations are pinned because the failure is silent in three of them.
+  describe('async prompt generation gate', () => {
+    const withFlags = ({ asyncGen, generatePrompts }) => baseParams({
+      env: asyncGen ? { SERENITY_ASYNC_PROMPT_GEN: 'true' } : {},
+      requestBody: {
+        market: 'us', languageCode: 'en', brandDomain: 'x.com', brandNames: ['X'], generatePrompts,
+      },
+    });
+    const optionsBag = () => handleCreateMarketSubworkspaceStub.firstCall.args[7];
+
+    it('flag OFF + generatePrompts TRUE: generates inline, enqueues nothing', async () => {
+      const { orchestrateCreateMarketSubworkspace } = await load();
+
+      const result = await orchestrateCreateMarketSubworkspace(
+        withFlags({ asyncGen: false, generatePrompts: true }),
+      );
+
+      // Unchanged pre-#3194 behaviour, which is what every caller gets today.
+      expect(optionsBag().generateTopics).to.equal(true);
+      expect(optionsBag().topicCap).to.be.greaterThan(0);
+      expect(result.generationInputs).to.equal(null);
+    });
+
+    it('flag ON + generatePrompts TRUE: suppresses inline generation and hands off instead', async () => {
+      // A real 201 always names its project, and the handoff requires it: the producer generates
+      // INTO a project, so without one there is nothing to generate into (same condition the
+      // synchronous path applies).
+      handleCreateMarketSubworkspaceStub.resolves({
+        status: 201,
+        body: {
+          brandId: BRAND_ID, geoTargetId: 2840, languageCode: 'en', projectId: 'P-NEW', workspaceId: WORKSPACE_ID,
+        },
+      });
+      const { orchestrateCreateMarketSubworkspace } = await load();
+
+      const result = await orchestrateCreateMarketSubworkspace(
+        withFlags({ asyncGen: true, generatePrompts: true }),
+      );
+
+      // Both halves matter. Still generating inline would produce the bad prompts anyway;
+      // producing no handoff would leave the market with no prompts at all.
+      expect(optionsBag().generateTopics).to.equal(false);
+      expect(optionsBag().topicCap).to.equal(0);
+      expect(result.generationInputs).to.not.equal(null);
+      expect(result.generationInputs).to.include({ brandId: BRAND_ID, market: 'us', languageCode: 'en' });
+    });
+
+    it('flag ON + generatePrompts FALSE: generates nothing and hands off nothing', async () => {
+      // The flag alone must never conjure prompt generation the caller did not ask for.
+      const { orchestrateCreateMarketSubworkspace } = await load();
+
+      const result = await orchestrateCreateMarketSubworkspace(
+        withFlags({ asyncGen: true, generatePrompts: false }),
+      );
+
+      expect(optionsBag().generateTopics).to.equal(false);
+      expect(result.generationInputs).to.equal(null);
+    });
+
+    it('hands off nothing when a 201 names no project — there is nothing to generate into', async () => {
+      handleCreateMarketSubworkspaceStub.resolves({
+        status: 201, body: { brandId: BRAND_ID, geoTargetId: 2840, languageCode: 'en' },
+      });
+      const { orchestrateCreateMarketSubworkspace } = await load();
+
+      const result = await orchestrateCreateMarketSubworkspace(
+        withFlags({ asyncGen: true, generatePrompts: true }),
+      );
+
+      expect(result.generationInputs).to.equal(null);
+    });
+
+    it('flag OFF + generatePrompts FALSE: unchanged, nothing happens', async () => {
+      const { orchestrateCreateMarketSubworkspace } = await load();
+
+      const result = await orchestrateCreateMarketSubworkspace(
+        withFlags({ asyncGen: false, generatePrompts: false }),
+      );
+
+      expect(optionsBag().generateTopics).to.equal(false);
+      expect(result.generationInputs).to.equal(null);
+    });
+
+    it('never hands off for a market that did not come back created', async () => {
+      // A 409 (slice already exists) must not enqueue generation for a market this call did not
+      // create -- that would generate prompts into somebody else's existing project.
+      handleCreateMarketSubworkspaceStub.resolves({ status: 409, body: { error: 'exists' } });
+      const { orchestrateCreateMarketSubworkspace } = await load();
+
+      const result = await orchestrateCreateMarketSubworkspace(
+        withFlags({ asyncGen: true, generatePrompts: true }),
+      );
+
+      expect(result.generationInputs).to.equal(null);
+    });
+  });
+
   it('throws 500 when Brand data-access is unavailable', async () => {
     const { orchestrateCreateMarketSubworkspace } = await load();
     await expect(orchestrateCreateMarketSubworkspace(baseParams({ dataAccess: {} })))
@@ -125,7 +231,15 @@ describe('handlers/create-market-orchestration.js (PR-C, LLMO-7352/LLMO-7418)', 
 
     const result = await orchestrateCreateMarketSubworkspace(baseParams());
 
-    expect(result).to.deep.equal({ status: 201, body: { brandId: BRAND_ID, geoTargetId: 2840, languageCode: 'en' } });
+    // `generationInputs` is the module's internal handoff to whichever caller performs the
+    // DRS producer enqueue (#3194/#3252); null here because async prompt generation is off.
+    // Asserted explicitly rather than loosened, so a future change that starts populating it
+    // in the default case fails here instead of silently reaching a client.
+    expect(result).to.deep.equal({
+      status: 201,
+      body: { brandId: BRAND_ID, geoTargetId: 2840, languageCode: 'en' },
+      generationInputs: null,
+    });
     expect(handleCreateMarketSubworkspaceStub).to.have.been.calledOnce;
     expect(handleCreateMarketSubworkspaceStub.firstCall.args[2]).to.equal(PARENT_WS);
   });

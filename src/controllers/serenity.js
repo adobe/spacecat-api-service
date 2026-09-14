@@ -52,6 +52,7 @@ import {
   resolveStableImsUserId,
   callerMayReauth,
   toGenerationJobDto,
+  maybeEnqueueMarketGeneration,
 } from '../support/serenity/async-prompt-gen.js';
 import { loadJobScopedToCaller } from '../support/async-job-access.js';
 import { claimJobForReauth } from '../support/serenity/job-lease.js';
@@ -1274,6 +1275,34 @@ function SerenityController(context, log, env) {
           reloadPointer: brandPointerReloader(ctx, auth.brandUuid),
           callerId: resolveCallerId(ctx),
         });
+        // Async prompt generation (#3194/#3252): enqueue the DRS-backed producer for the market
+        // just created and annotate the response so the UI can poll it. Best-effort by design —
+        // an enqueue hiccup must never fail a market that was already created and published; the
+        // market simply stands without a handle and the user can retry. Same contract as before
+        // this stack, just driven by the inputs the orchestration module now returns rather than
+        // by locals of an inline body.
+        if (result.generationInputs) {
+          try {
+            const org = await ctx.dataAccess.Organization.findById(ctx?.params?.spaceCatId);
+            const promptGeneration = await maybeEnqueueMarketGeneration(ctx, {
+              enabled: true,
+              generateRequested: true,
+              producerParams: {
+                ...result.generationInputs,
+                transport,
+                imsOrgId: org?.getImsOrgId?.() ?? ctx?.params?.spaceCatId,
+                callerId: resolveCallerId(ctx),
+              },
+            });
+            if (promptGeneration) {
+              result.body = /** @type {any} */ ({ ...result.body, promptGeneration });
+            }
+          } catch (e) {
+            log?.warn?.('serenity create-market: async prompt-generation enqueue failed (non-fatal)', {
+              brandId: auth.brandUuid, error: e?.message,
+            });
+          }
+        }
         return createResponse(result.body, result.status);
       }
       // LLMO-7418 external-review (adversarial B1): a brand whose sub-workspace pointer is not yet
