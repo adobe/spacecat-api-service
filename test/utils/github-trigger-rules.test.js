@@ -263,14 +263,13 @@ describe('github-trigger-rules', () => {
         expect(isMysticatTargetedSkip(reason)).to.be.false;
       });
 
-      it('classifies the team-routed reason as targeted (not silent)', () => {
-        // A team-routed request is a real potential miss, not a known
-        // non-match — it deserves the same visible note as draft PR /
-        // bot sender / non-default branch, unlike a genuine foreign-reviewer
-        // skip.
+      it('classifies the team-routed reason as silent (no Slack notification)', () => {
+        // Team-routed skips get a correctly diagnosable log line and metric
+        // label (skipReasonLabel), but deliberately no standalone Slack
+        // note - same silent treatment as a foreign-reviewer skip.
         const data = { ...base, requested_team: { slug: 'drs-team' } };
         const reason = getSkipReason(data, 'review_requested', REVIEWER);
-        expect(isMysticatTargetedSkip(reason)).to.be.true;
+        expect(isMysticatTargetedSkip(reason)).to.be.false;
       });
     });
   });

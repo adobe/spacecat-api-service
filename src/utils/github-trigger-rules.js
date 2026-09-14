@@ -155,10 +155,5 @@ export function isMysticatTargetedSkip(reason) {
   }
   return reason === 'draft PR'
     || reason === 'bot sender'
-    || reason.startsWith('non-default branch:')
-    // Unlike a genuine foreign-reviewer skip, a team-routed request is not
-    // known to be uninteresting to Mysticat - the team may well include it,
-    // so this is a real potential miss worth a visible note rather than
-    // silence.
-    || reason.startsWith('review requested via team');
+    || reason.startsWith('non-default branch:');
 }
