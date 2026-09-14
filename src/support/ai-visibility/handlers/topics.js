@@ -13,16 +13,33 @@
 /* eslint-disable max-statements-per-line, max-len -- AI Visibility handler surface */
 
 import { ORDER_DIRECTION_ENUM } from '@quazar/ai-seo-ts/common/types_pb.js';
-import { TOPICS_BY_FTS_REQUEST_ORDER_BY_ENUM, BRAND_TOPICS_ORDER_BY_ENUM } from '@quazar/ai-seo-ts/v2/topic/enums_pb.js';
-import { PROMPTS_BY_TOPIC_FTS_REQUEST_ORDER_BY_ENUM, PROMPTS_BY_TOPIC_IDS_REQUEST_ORDER_BY_ENUM } from '@quazar/ai-seo-ts/v2/prompt/enums_pb.js';
+import {
+  TOPICS_BY_FTS_REQUEST_ORDER_BY_ENUM,
+  BRAND_TOPICS_ORDER_BY_ENUM,
+} from '@quazar/ai-seo-ts/v2/topic/enums_pb.js';
+import {
+  PROMPTS_BY_TOPIC_FTS_REQUEST_ORDER_BY_ENUM,
+  PROMPTS_BY_TOPIC_IDS_REQUEST_ORDER_BY_ENUM,
+} from '@quazar/ai-seo-ts/v2/prompt/enums_pb.js';
 import { BRANDS_BY_TOPIC_FTS_REQUEST_ORDER_BY_ENUM } from '@quazar/ai-seo-ts/v2/brand/enums_pb.js';
 import { SOURCE_DOMAINS_BY_TOPIC_FTS_REQUEST_ORDER_BY_ENUM } from '@quazar/ai-seo-ts/v2/source/enums_pb.js';
 import {
-  num, brandTarget, parseLimitOffset, resolveCountry, resolveCountryForFts,
-  optionalLlmFromQuery, requiredLlmFromQuery, llmToEngine,
+  num,
+  brandTarget,
+  parseLimitOffset,
+  resolveCountry,
+  resolveCountryForFts,
+  optionalLlmFromQuery,
+  requiredLlmFromQuery,
+  llmToEngine,
   sourceDomainsByTopicFtsRows,
-  LLM_ENUM, FTS_LLMS, TOPIC_INTENT_SLUG,
-  settledValueOrElse, resolveTopicIds, buildTextFilterQl,
+  LLM_ENUM,
+  FTS_LLMS,
+  TOPIC_INTENT_SLUG,
+  settledValueOrElse,
+  resolveTopicIds,
+  buildTextFilterQl,
+  normalizeAiVisibilityTarget,
 } from '../grpc-utils.js';
 
 /* ------------------------------------------------------------------ */
@@ -481,7 +498,7 @@ export async function handleTopicsStats(sp, clients) {
   if (!topicId) {
     return { status: 400, body: { error: 'missing_topic_id', message: 'topicId is required' } };
   }
-  const domain = sp.get('domain')?.trim();
+  const domain = normalizeAiVisibilityTarget(sp.get('domain'));
   if (!domain) { return { status: 400, body: { error: 'missing_domain', message: 'domain is required' } }; }
   const country = resolveCountry(sp);
   const raw = await clients.topicClient.brandTopics({

@@ -27,6 +27,7 @@ import {
   num,
   brandTarget,
   resolveSearchType,
+  normalizeAiVisibilityTarget,
   parseLimitOffset,
   normalizeCountryForGrpc,
   resolveCountry,
@@ -362,6 +363,61 @@ describe('grpc-utils', () => {
     it('normalizes domain to lowercase trimmed', () => {
       expect(brandTarget(' Example.COM ')).to.deep.equal({ domain: 'example.com', name: 'example.com' });
     });
+    it('lowercases the host but preserves path case', () => {
+      expect(brandTarget('https://Coca-Cola.com/US/en/'))
+        .to.deep.equal({ domain: 'coca-cola.com/US/en', name: 'coca-cola.com/US/en' });
+    });
+    it('returns empty target for invalid input', () => {
+      expect(brandTarget('a b.com')).to.deep.equal({ domain: '', name: '' });
+    });
+  });
+
+  describe('normalizeAiVisibilityTarget', () => {
+    // Backward compatibility: historical host-only inputs are unchanged.
+    it('passes through an apex host', () => {
+      expect(normalizeAiVisibilityTarget('nba.com')).to.equal('nba.com');
+    });
+    it('lowercases the host', () => {
+      expect(normalizeAiVisibilityTarget('WWW.Amazon.com')).to.equal('www.amazon.com');
+    });
+    it('does not strip www (matches prior behaviour)', () => {
+      expect(normalizeAiVisibilityTarget('www.nba.com')).to.equal('www.nba.com');
+    });
+    it('strips an http(s) scheme', () => {
+      expect(normalizeAiVisibilityTarget('https://nba.com')).to.equal('nba.com');
+    });
+    // New: subpath support.
+    it('preserves a path and lowercases only the host', () => {
+      expect(normalizeAiVisibilityTarget('https://Coca-Cola.com/US/en/brands/smartwater'))
+        .to.equal('coca-cola.com/US/en/brands/smartwater');
+    });
+    it('drops a trailing slash', () => {
+      expect(normalizeAiVisibilityTarget('nba.com/kings/')).to.equal('nba.com/kings');
+    });
+    it('treats an apex with only a trailing slash as host-only', () => {
+      expect(normalizeAiVisibilityTarget('nba.com/')).to.equal('nba.com');
+    });
+    // Validation (defence-in-depth input control).
+    it('rejects empty/nullish input', () => {
+      expect(normalizeAiVisibilityTarget('')).to.equal('');
+      expect(normalizeAiVisibilityTarget(null)).to.equal('');
+      expect(normalizeAiVisibilityTarget(undefined)).to.equal('');
+    });
+    it('rejects a non-http scheme', () => {
+      // eslint-disable-next-line no-script-url -- deliberately testing rejection of a script: URL
+      expect(normalizeAiVisibilityTarget('javascript:alert(1)')).to.equal('');
+      expect(normalizeAiVisibilityTarget('file:///etc/passwd')).to.equal('');
+      expect(normalizeAiVisibilityTarget('ftp://x.com')).to.equal('');
+    });
+    it('rejects whitespace, @, protocol-relative, traversal, query, fragment, port', () => {
+      ['a b.com', 'user@nba.com', '//nba.com', 'nba.com//x', 'nba.com/../x',
+        'nba.com?q=1', 'nba.com#x', 'nba.com:8080'].forEach((v) => {
+        expect(normalizeAiVisibilityTarget(v), v).to.equal('');
+      });
+    });
+    it('rejects an over-long target', () => {
+      expect(normalizeAiVisibilityTarget(`nba.com/${'a'.repeat(3000)}`)).to.equal('');
+    });
   });
 
   describe('resolveSearchType', () => {
@@ -383,13 +439,29 @@ describe('grpc-utils', () => {
     it('handles multi-part TLDs: subdomain is SUBDOMAIN', () => {
       expect(resolveSearchType('blog.example.co.uk')).to.equal(SEARCH_TYPE_ENUM.SUBDOMAIN);
     });
-    it('ignores scheme and path when present', () => {
-      expect(resolveSearchType('https://quickbooks.intuit.com/foo')).to.equal(SEARCH_TYPE_ENUM.SUBDOMAIN);
+    it('returns SUBDOMAIN for a scheme-prefixed subdomain WITHOUT a path', () => {
+      expect(resolveSearchType('https://quickbooks.intuit.com')).to.equal(SEARCH_TYPE_ENUM.SUBDOMAIN);
     });
-    it('defaults to DOMAIN for empty or unparseable input', () => {
+    // New: path takes precedence -> SUBFOLDER.
+    it('returns SUBFOLDER for an apex with a path', () => {
+      expect(resolveSearchType('nba.com/kings')).to.equal(SEARCH_TYPE_ENUM.SUBFOLDER);
+    });
+    it('returns SUBFOLDER for a deep path', () => {
+      expect(resolveSearchType('https://coca-cola.com/us/en/brands/smartwater'))
+        .to.equal(SEARCH_TYPE_ENUM.SUBFOLDER);
+    });
+    it('returns SUBFOLDER for a subdomain WITH a path (path precedence)', () => {
+      expect(resolveSearchType('store.nba.com/kings')).to.equal(SEARCH_TYPE_ENUM.SUBFOLDER);
+      expect(resolveSearchType('https://quickbooks.intuit.com/foo')).to.equal(SEARCH_TYPE_ENUM.SUBFOLDER);
+    });
+    it('treats an apex with only a trailing slash as DOMAIN, not SUBFOLDER', () => {
+      expect(resolveSearchType('nba.com/')).to.equal(SEARCH_TYPE_ENUM.DOMAIN);
+    });
+    it('defaults to DOMAIN for empty, unparseable, or invalid input', () => {
       expect(resolveSearchType('')).to.equal(SEARCH_TYPE_ENUM.DOMAIN);
       expect(resolveSearchType(null)).to.equal(SEARCH_TYPE_ENUM.DOMAIN);
       expect(resolveSearchType(undefined)).to.equal(SEARCH_TYPE_ENUM.DOMAIN);
+      expect(resolveSearchType('a b.com')).to.equal(SEARCH_TYPE_ENUM.DOMAIN);
     });
   });
 

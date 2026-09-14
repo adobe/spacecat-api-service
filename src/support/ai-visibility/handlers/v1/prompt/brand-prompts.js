@@ -10,7 +10,10 @@
  * governing permissions and limitations under the License.
  */
 
-import { fromJson, toJson } from '@bufbuild/protobuf';
+import {
+  fromJson,
+  toJson,
+} from '@bufbuild/protobuf';
 import {
   COUNTRY_ENUM,
   LLM_ENUM,
@@ -35,6 +38,7 @@ import {
   escapeQlString,
   PROTO_FROM_JSON,
   PROTO_TO_JSON,
+  normalizeAiVisibilityTarget,
 } from '../../../grpc-utils.js';
 
 const TOPIC_HASH_ID_PATTERN = /^\d+$/;
@@ -65,7 +69,7 @@ export function buildBrandPromptsDimensionFilterQl(sp) {
 
 /* c8 ignore start */
 export async function handleBrandPrompts(sp, clients) {
-  const domain = sp.get('domain');
+  const domain = normalizeAiVisibilityTarget(sp.get('domain'));
   const searchType = resolveSearchType(domain);
   const engine = engineToLlm(sp.get('engine')) || LLM_ENUM.ALL;
   const country = resolveCountry(sp) || COUNTRY_ENUM.US;

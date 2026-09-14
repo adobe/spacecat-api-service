@@ -10,7 +10,10 @@
  * governing permissions and limitations under the License.
  */
 
-import { fromJson, toJson } from '@bufbuild/protobuf';
+import {
+  fromJson,
+  toJson,
+} from '@bufbuild/protobuf';
 import {
   COUNTRY_ENUM,
   LLM_ENUM,
@@ -37,6 +40,7 @@ import {
   exactSnapshotDate,
   PROTO_FROM_JSON,
   PROTO_TO_JSON,
+  normalizeAiVisibilityTarget,
 } from '../../../grpc-utils.js';
 import {
   buildGapTopicsDimensionFilterQl,
@@ -45,7 +49,7 @@ import {
 
 /* c8 ignore start */
 export async function handleGapTopicsExport(sp, clients) {
-  const domain = sp.get('domain');
+  const domain = normalizeAiVisibilityTarget(sp.get('domain'));
   const searchType = resolveSearchType(domain);
   const competitorDomains = parseCompetitorDomainsList(sp);
   const engine = engineToLlm(sp.get('engine')) || LLM_ENUM.ALL;

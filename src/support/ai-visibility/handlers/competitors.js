@@ -12,11 +12,17 @@
 
 /* eslint-disable max-statements-per-line, max-len -- AI Visibility handler surface */
 
-import { ConnectError, Code } from '@connectrpc/connect';
+import {
+  ConnectError,
+  Code,
+} from '@connectrpc/connect';
 import { StatsResponseSchema } from '@quazar/ai-seo-ts/ai-cr/messages_pb.js';
 import {
-  brandTarget, resolveCountryForCompetitorsMetrics,
-  engineToLlm, parseCompetitorDomainsList,
+  brandTarget,
+  resolveCountryForCompetitorsMetrics,
+  engineToLlm,
+  parseCompetitorDomainsList,
+  normalizeAiVisibilityTarget,
 } from '../grpc-utils.js';
 import { messageToJson } from '../proto-json.js';
 
@@ -38,7 +44,7 @@ function mapCompetitorsStatsResponse(raw) {
 }
 
 export async function handleCompetitorsMetrics(sp, clients) {
-  const domain = sp.get('domain')?.trim();
+  const domain = normalizeAiVisibilityTarget(sp.get('domain'));
   if (!domain) { return { status: 400, body: { error: 'missing_domain', message: 'domain is required' } }; }
   const compDomains = parseCompetitorDomainsList(sp);
   if (compDomains.length === 0) {

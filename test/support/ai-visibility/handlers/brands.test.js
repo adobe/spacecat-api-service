@@ -1755,6 +1755,18 @@ describe('AI Visibility – brands handlers', () => {
       expect(clients.topicClient.brandTopics.firstCall.args[0].searchType).to.equal(SEARCH_TYPE_ENUM.DOMAIN);
     });
 
+    it('handleBrandTopics resolves search_type SUBFOLDER for a subpath and passes the full path as target', async () => {
+      await handleBrandTopics(
+        new URLSearchParams('domain=coca-cola.com%2Fus%2Fen%2Fbrands%2Fsmartwater'),
+        clients,
+      );
+      const req = clients.topicClient.brandTopics.firstCall.args[0];
+      expect(req.searchType).to.equal(SEARCH_TYPE_ENUM.SUBFOLDER);
+      expect(req.target.domain).to.equal('coca-cola.com/us/en/brands/smartwater');
+      expect(clients.topicClient.brandTopicsTotals.firstCall.args[0].searchType)
+        .to.equal(SEARCH_TYPE_ENUM.SUBFOLDER);
+    });
+
     it('handleBrandCompetitors resolves search_type DOMAIN for an apex domain', async () => {
       await handleBrandCompetitors(new URLSearchParams('domain=intuit.com'), clients);
       expect(clients.competitorClient.brandCompetitors.firstCall.args[0].searchType).to.equal(SEARCH_TYPE_ENUM.DOMAIN);

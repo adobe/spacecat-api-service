@@ -253,24 +253,90 @@ export function num(v) {
   return Number.isFinite(n) ? Math.trunc(n) : 0;
 }
 
+/** Upper bound on a target string (host + path). Rejects absurd inputs. */
+export const MAX_AI_VISIBILITY_TARGET_LEN = 2048;
+
+/**
+ * Characters/sequences that must never appear in an AI-visibility target (checked
+ * AFTER an optional `http(s)://` scheme is stripped). Covers log-injection and
+ * cache-key hygiene, path traversal, protocol-relative/authority tricks, and
+ * query/fragment (not part of a Semrush subfolder target). This is a defence-in-depth
+ * input control, NOT the resource-level authorization gate — see the deferred
+ * `report:read` per-domain binding hardening item.
+ */
+// eslint-disable-next-line no-control-regex
+const INVALID_TARGET_RE = /[\s@\\<>"'`?#:\x00-\x1f\x7f]|\/\/|\.\./;
+
+/**
+ * Canonicalize a raw `domain` query-param value into the Semrush target string
+ * `host[/path]`. Strips an optional `http(s)://` scheme (any other scheme is rejected),
+ * lowercases the HOST only (paths are case-sensitive and preserved), drops a trailing
+ * slash, and validates against {@link INVALID_TARGET_RE} and the length cap.
+ *
+ * Backward compatible for the historical host-only inputs: `AMAZON.COM` → `amazon.com`,
+ * `www.amazon.com` → `www.amazon.com` (www is NOT stripped, matching prior behaviour),
+ * `nba.com` → `nba.com`. Path-bearing inputs are new: `https://coca-cola.com/US/en/`
+ * → `coca-cola.com/US/en`.
+ *
+ * @param {string|null|undefined} raw
+ * @returns {string} canonical `host[/path]`, or `''` when empty or invalid
+ */
+export function normalizeAiVisibilityTarget(raw) {
+  let s = String(raw ?? '').trim();
+  if (!s) {
+    return '';
+  }
+  const schemeMatch = s.match(/^([a-z][a-z0-9+.-]*):\/\//i);
+  if (schemeMatch) {
+    if (!/^https?$/i.test(schemeMatch[1])) {
+      return '';
+    }
+    s = s.slice(schemeMatch[0].length);
+  }
+  if (s.length > MAX_AI_VISIBILITY_TARGET_LEN || INVALID_TARGET_RE.test(s)) {
+    return '';
+  }
+  const slash = s.indexOf('/');
+  const host = (slash === -1 ? s : s.slice(0, slash)).toLowerCase();
+  const path = (slash === -1 ? '' : s.slice(slash + 1)).replace(/\/+$/, '');
+  if (!host) {
+    return '';
+  }
+  return path ? `${host}/${path}` : host;
+}
+
 export function brandTarget(domain) {
-  const d = domain.trim().toLowerCase();
+  const d = normalizeAiVisibilityTarget(domain);
   return { domain: d, name: d };
 }
 
 /**
- * Resolve the Semrush `search_type` for a target domain. When the target carries a
- * non-www subdomain (e.g. `quickbooks.intuit.com`) mentions/citations must be scoped
- * to that subdomain; otherwise Semrush interprets the target as the registrable domain
- * (`intuit.com`) and returns the parent-domain results. Apex domains and bare `www.`
- * hosts resolve to DOMAIN. Uses tldts so multi-part TLDs (`.co.uk`, `.com.au`) are
- * handled correctly. Unparseable input defaults to DOMAIN (preserving prior behaviour).
+ * Resolve the Semrush `search_type` for a target. Precedence:
+ *  - a non-empty path (`nba.com/kings`) → SUBFOLDER (scope to that path and everything
+ *    under it; the whole path is preserved in the target string);
+ *  - else a non-`www` subdomain (`quickbooks.intuit.com`) → SUBDOMAIN;
+ *  - else (apex, bare `www.`, unparseable) → DOMAIN.
  *
- * @param {string|null|undefined} domain target domain/hostname (may include scheme or `www.`)
- * @returns {number} SEARCH_TYPE_ENUM.SUBDOMAIN when a non-www subdomain is present, else DOMAIN
+ * Without this, Semrush interprets a bare host as the registrable domain and a path is
+ * silently dropped, collapsing subfolder/subdomain brands to the parent domain. Uses
+ * tldts for the subdomain check so multi-part TLDs (`.co.uk`, `.com.au`) are handled.
+ * Inference is purely from the target string shape (a documented contract constraint:
+ * a caller cannot request DOMAIN scoping for a path-bearing target, and URL mode is not
+ * reachable through this resolver).
+ *
+ * @param {string|null|undefined} target target host, `host/path`, or full URL
+ * @returns {number} SEARCH_TYPE_ENUM.{SUBFOLDER|SUBDOMAIN|DOMAIN}
  */
-export function resolveSearchType(domain) {
-  const parsed = parseDomain(String(domain ?? ''));
+export function resolveSearchType(target) {
+  const norm = normalizeAiVisibilityTarget(target);
+  if (!norm) {
+    return SEARCH_TYPE_ENUM.DOMAIN;
+  }
+  const slash = norm.indexOf('/');
+  if (slash !== -1 && norm.slice(slash + 1) !== '') {
+    return SEARCH_TYPE_ENUM.SUBFOLDER;
+  }
+  const parsed = parseDomain(norm);
   const subdomain = parsed?.subdomain || '';
   return subdomain !== '' && subdomain !== 'www'
     ? SEARCH_TYPE_ENUM.SUBDOMAIN
