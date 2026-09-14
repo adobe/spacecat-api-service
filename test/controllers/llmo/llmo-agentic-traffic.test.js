@@ -2191,7 +2191,9 @@ describe('llmo-agentic-traffic', () => {
       expect(res.status).to.equal(500);
     });
 
-    it('forwards p_models for a multi-select platform list and nulls the scalar p_model', async () => {
+    it('never forwards p_models — this PG RPC is single-model (Serenity reads Semrush)', async () => {
+      // rpc_brand_presence_url_detail has no p_models param (descoped, LLMO-7553).
+      // A multi-select still nulls the scalar p_model; it must NOT attach p_models.
       const client = createMockClient({
         [RPC]: {
           data: {
@@ -2210,7 +2212,7 @@ describe('llmo-agentic-traffic', () => {
       await handler(ctx);
       const rpcArgs = client.rpc.firstCall.args[1];
       expect(rpcArgs.p_model).to.equal(null);
-      expect(rpcArgs.p_models).to.deep.equal(['ChatGPT', 'Gemini']);
+      expect(rpcArgs).to.not.have.property('p_models');
     });
 
     it('omits p_models entirely for a single platform (byte-identical path)', async () => {
