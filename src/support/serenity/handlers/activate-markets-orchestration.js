@@ -69,7 +69,8 @@ const MAX_TOPICS_ON_CREATE = 5;
  *   chained AFTER provisioning, not before).
  * @param {Function|null} [params.reloadPointer]
  * @param {string} [params.callerId]
- * @returns {Promise<{status: number, body: object}>} the same `{ status, body }` shape the
+ * @returns {Promise<{status: number, body: object, generationInputs: object[]}>} the same
+ *   `{ status, body }` shape the
  *   synchronous endpoint itself has always returned (200/207/409).
  */
 export async function orchestrateActivateMarkets({
@@ -360,6 +361,9 @@ export async function orchestrateActivateMarkets({
             message: 'This site is already the primary URL for another brand',
             markets: results,
           },
+          // Nothing hands off here: the brand stays PENDING on a site conflict, so no market
+          // this call created should get prompts generated against it.
+          generationInputs: [],
         };
       }
       // Divergence seam: markets live + site linked upstream, but persisting
