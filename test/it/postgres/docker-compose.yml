@@ -26,7 +26,10 @@ services:
       retries: 30
 
   minio:
-    image: minio/minio:latest
+    # MinIO removed the community image from Docker Hub (docker.io/minio/minio is
+    # gone entirely, not just :latest), which broke every it-postgres run. Pin to
+    # the still-published quay.io registry MinIO moved to, on an immutable RELEASE tag.
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
     container_name: spacecat-it-minio
     environment:
       MINIO_ROOT_USER: minioadmin
