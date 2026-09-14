@@ -2425,6 +2425,38 @@ describe('llmo-agentic-traffic', () => {
       // missing point.value coerces to 0
       expect(body.rows[1].hitsTrend).to.deep.equal([{ weekStart: '2026-01-05', value: 0 }]);
     });
+
+    it('forwards p_platforms for a multi-select platform list and nulls the scalar p_platform', async () => {
+      const client = createMockClient({
+        rpc_agentic_hits_for_urls: { data: [], error: null },
+      });
+      const ctx = makeContext({
+        client,
+        data: {
+          startDate: '2026-01-01', endDate: '2026-01-28', urls: urlsBody, platform: 'chatgpt,gemini',
+        },
+      });
+      await createAgenticTrafficHitsByUrlsHandler(stubbedValidateAccess)(ctx);
+      const rpcArgs = client.rpc.firstCall.args[1];
+      expect(rpcArgs.p_platform).to.equal(null);
+      expect(rpcArgs.p_platforms).to.deep.equal(['ChatGPT', 'Gemini']);
+    });
+
+    it('omits p_platforms entirely for a single platform (byte-identical path)', async () => {
+      const client = createMockClient({
+        rpc_agentic_hits_for_urls: { data: [], error: null },
+      });
+      const ctx = makeContext({
+        client,
+        data: {
+          startDate: '2026-01-01', endDate: '2026-01-28', urls: urlsBody, platform: 'chatgpt',
+        },
+      });
+      await createAgenticTrafficHitsByUrlsHandler(stubbedValidateAccess)(ctx);
+      const rpcArgs = client.rpc.firstCall.args[1];
+      expect(rpcArgs.p_platform).to.equal('ChatGPT');
+      expect(rpcArgs).to.not.have.property('p_platforms');
+    });
   });
 });
 

@@ -854,6 +854,11 @@ export function createAgenticTrafficHitsByUrlsHandler(getSiteAndValidateAccess) 
           p_user_agent: parsed.userAgent,
           ...buildAgentTypesRpcParam(parsed),
         };
+        // Multi-select: forward the inclusion list (scalar p_platform is already null);
+        // only attached for multi so single-platform requests stay byte-identical.
+        if (parsed.platforms) {
+          rpcParams.p_platforms = parsed.platforms;
+        }
 
         const { data, error } = await client.rpc('rpc_agentic_hits_for_urls', rpcParams);
         if (error) {
