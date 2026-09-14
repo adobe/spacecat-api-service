@@ -25,6 +25,7 @@ import { fetchOwnedUrlsTraffic, mergeOwnedUrlsTraffic } from '../support/element
 import { mapWithConcurrency } from '../support/elements/concurrency.js';
 import { addDaysToDate } from '../support/elements/week-utils.js';
 import { normalizeSentimentMetric, SENTIMENT_METRICS } from '../support/elements/definitions/index.js';
+import { resolveElementModels, containsAllModelsToken } from '../support/elements/constants.js';
 import { resolveBrandWorkspace } from '../support/serenity/workspace-resolver.js';
 import { isSerenityActiveForBrand } from '../support/serenity/serenity-active.js';
 import { createSerenityTransport } from '../support/serenity/rest-transport.js';
@@ -51,6 +52,28 @@ const BRAND_CLAIMS_MAX_OUTBOUND_BYTES = 5 * 1024 * 1024;
 const BRAND_CLAIMS_QUERY_KEYS = new Set([
   'geoTargetId', 'languageCode', 'date', 'offset', 'pageSize',
 ]);
+
+/**
+ * Emits a `debug` log when a requested `model`/`platform` subset does not survive resolution
+ * verbatim — i.e. tokens were dropped/collapsed (a typo'd or duplicate member coerced to the
+ * default, or distinct UI codes resolving to the same Semrush model), or an `all` token turned
+ * the request into an all-models omit. Diagnosability only (LLMO-7553 review); never throws,
+ * and does nothing for the common single-value / exact-subset case.
+ */
+function logModelResolution(log, route, requested) {
+  if (typeof requested !== 'string' || !requested.includes(',')) {
+    return;
+  }
+  if (containsAllModelsToken(requested)) {
+    log?.debug?.(`[serenity] ${route} model='${requested}' contains 'all' - omitting CBF_model (all-models union)`);
+    return;
+  }
+  const rawTokens = requested.split(',').map((t) => t.trim()).filter((t) => t.length > 0);
+  const resolved = resolveElementModels(requested);
+  if (resolved.length !== rawTokens.length) {
+    log?.debug?.(`[serenity] ${route} model='${requested}' resolved to ${resolved.length} model(s) [${resolved.join(',')}] - ${rawTokens.length - resolved.length} token(s) dropped/collapsed (typo or duplicate)`);
+  }
+}
 
 /**
  * Maps a BrandSemrushProject model instance to the plain object shape the
@@ -1632,6 +1655,7 @@ export default function ElementsController(context, log, env) {
       }
 
       const service = await buildService(ctx);
+      logModelResolution(log, 'url-prompts', query.model || query.platform);
       const prompts = await service.getUrlPrompts(workspaceId, {
         url,
         model: query.model || query.platform,
@@ -1730,6 +1754,7 @@ export default function ElementsController(context, log, env) {
         projects = await service.getOwnedUrlProjects(workspaceId, { brandSemrushProjects });
       }
 
+      logModelResolution(log, 'owned-urls', query.model || query.platform);
       const allUrls = await service.getOwnedUrls(workspaceId, {
         projects,
         model: query.model || query.platform,

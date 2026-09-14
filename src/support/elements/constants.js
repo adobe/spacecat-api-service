@@ -48,6 +48,25 @@ export function isAllPlatforms(value) {
 }
 
 /**
+ * True when a `model`/`platform` value carries the {@link ALL_PLATFORMS} sentinel as ANY
+ * member of a comma-separated subset (e.g. `all`, `all,openai`, `openai,all`). Superset of
+ * {@link isAllPlatforms}: `'all'` anywhere in the list means "all models", so a caller that
+ * supports an all-models omit path treats the whole request as all-models rather than
+ * silently degrading the `all` token to {@link DEFAULT_ELEMENT_MODEL} and OR-ing it with the
+ * real members. Mirrors the agentic `parsePlatforms` convention (`tokens.includes('all')`
+ * short-circuits to no filter). LLMO-7553.
+ *
+ * @param {string} [value] - Raw `model`/`platform` value, optionally comma-separated.
+ * @returns {boolean}
+ */
+export function containsAllModelsToken(value) {
+  if (typeof value !== 'string') {
+    return false;
+  }
+  return value.split(',').some((token) => isAllPlatforms(token));
+}
+
+/**
  * True when a brand-presence model/platform filter should aggregate across ALL of the
  * brand's models rather than scope to a single one — i.e. the value is ABSENT (empty /
  * non-string) OR the explicit {@link ALL_PLATFORMS} sentinel. When true, the affected
@@ -199,7 +218,15 @@ export function buildModelFilter(requestedModel, { wrap = true } = {}) {
  * support — the backward-compatibility guarantee. ≥2 models emit one `eq` per model under
  * the same `or`; Semrush dedupes such an OR server-side, so no caller-side dedup is needed.
  *
- * @param {string[]} models - Resolved Semrush model names (non-empty).
+ * ⚠️ Only for the "single-or-subset, no all-models" surfaces (url-prompts, owned-urls). Do
+ * NOT use for the brand-presence family (stats, kpi-headlines, market-tracking-trends,
+ * sentiment-overview) — those need {@link buildModelFilter}, whose absent/`'all'` → `null`
+ * (omit) all-models aggregate semantics this helper does not have. `models` MUST be
+ * non-empty — {@link resolveElementModels} guarantees that (always ≥1 member), so an
+ * all-models request is handled by OMITTING this filter at the call site, never by passing
+ * `[]` here (an empty `or` would emit `{op:'or',filters:[]}`, which Semrush rejects).
+ *
+ * @param {string[]} models - Resolved Semrush model names (non-empty; see above).
  * @returns {{op: 'or', filters: object[]}} The `CBF_model` OR node.
  */
 export function buildModelOrFilter(models) {

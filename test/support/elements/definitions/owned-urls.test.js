@@ -105,5 +105,23 @@ describe('owned-urls definitions', () => {
           ],
         });
     });
+
+    it('dedupes a duplicate subset to a one-member OR (byte-identical to the single case)', () => {
+      // A duplicate/collapsing subset on the trend payload must dedupe to a single member,
+      // exactly like stats, so the sparklines and totals stay on the same CBF_model set.
+      expect(modelOrNode(buildOwnedUrlsTrendPayload({ model: 'openai,openai' })))
+        .to.deep.equal({ op: 'or', filters: [{ op: 'eq', val: 'chatgpt-paid', col: 'CBF_model' }] });
+    });
+  });
+
+  // The stats and trend payloads MUST carry the identical CBF_model set for any subset, or a
+  // category-filtered view's weekly values could exceed its totals (see the trend payload).
+  describe('stats/trend model-filter lockstep (multi-model)', () => {
+    it('stats and trend emit the same 3-member OR for a 3-model subset', () => {
+      const stats = modelOrNode(buildOwnedUrlsStatsPayload({ platform: 'openai,gemini,perplexity' }));
+      const trend = modelOrNode(buildOwnedUrlsTrendPayload({ platform: 'openai,gemini,perplexity' }));
+      expect(stats).to.deep.equal(trend);
+      expect(stats.filters).to.have.length(3);
+    });
   });
 });

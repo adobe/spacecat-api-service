@@ -40,9 +40,12 @@ export function buildOwnedUrlsStatsPayload({
   model, platform, startDate, endDate, category, tagPaths, projectId,
 } = {}) {
   // `model`/`platform` may be a comma-separated subset (LLMO-7553); a single value yields
-  // the same one-member CBF_model OR as before. STATS_PER_URL sums per (URL, project) for
-  // a multi-member OR — transformOwnedUrlsResponse's per-project sum already produces the
-  // correct subset aggregate, so no caller-side dedup is added.
+  // the same one-member CBF_model OR as before. STATS_PER_URL returns one row per
+  // (URL, project, model), so a multi-member OR sums ACROSS MODELS in
+  // transformOwnedUrlsResponse. For `citations` (distinct events) that sum is correct; for
+  // `promptsCited` it is additive-not-distinct across models — see the Major-1 note on
+  // transformOwnedUrlsResponse. Not dedupable here (the element exposes counts, not a
+  // per-prompt list), so no caller-side dedup is added.
   const models = resolveElementModels(model || platform);
   const advancedFilters = [
     buildModelOrFilter(models),
@@ -100,9 +103,21 @@ export function buildOwnedUrlsTrendPayload({
  *
  * Field mapping (verified against live element rows):
  *   url             ← stats.source
- *   citations       ← stats.citations           (summed across a URL's projects)
+ *   citations       ← stats.citations           (summed across a URL's projects AND, for a
+ *                                                multi-model subset, across models — correct,
+ *                                                each citation is a distinct event)
  *   promptsCited    ← stats.prompts_with_citation
  *   contentType     ← stats.domain_type         (used only for the owned filter)
+ *
+ * ⚠️ Major-1 (LLMO-7553, subset multi-model): `promptsCited` is summed across the selected
+ * models, so a prompt that cited this URL under 2 selected models is counted TWICE. This is
+ * additive-not-distinct and is NEW to subset multi-model — it was NOT reachable before this
+ * change, where owned-urls always resolved to exactly ONE model (`resolveElementModel`,
+ * default `search-gpt`; there was no all-models or multi-model path). It is NOT fixable in
+ * this transform: STATS_PER_URL returns aggregate counts, not a per-prompt list to dedupe.
+ * `citations` is unaffected (distinct events). Whether additive-across-models is the intended
+ * `promptsCited` metric is a product question (raised on #3272); the single-model path — the
+ * only one the UI exercises today outside an explicit subset — is unchanged.
  *   regions         ← the region code of each project the URL appears in
  *   weeklyCitations ← trend rows grouped by legend(=url): { week: ISO, value: y__mentions }
  * Gaps with NO Semrush source (stubbed, see LLMO-6086 notes / cf LLMO-6071):

@@ -3058,11 +3058,16 @@ v2-serenity-url-inspector-url-prompts:
       rows, deduped by prompt text.
 
       Model scoping: by default the result is scoped to a single AI model (`model`
-      / `platform`, defaulting to `search-gpt`). The special value `all` OMITS the
-      model filter and returns the deduped cross-model UNION — one row per distinct
-      prompt across every tracked model. This is the one URL Inspector element that
-      supports `all`; the sibling endpoints (stats, owned-urls, cited-domains)
-      resolve `all` to the default single model.
+      / `platform`, defaulting to `search-gpt`). A comma-separated SUBSET
+      (e.g. `model=openai,gemini`) scopes to those models via an N-member `CBF_model`
+      OR — the element dedupes the OR server-side, so the result stays one row per
+      distinct prompt (verified live 2026-09-14: a 2-member OR returned the deduped
+      union, not the additive total). The special value `all` — alone OR anywhere in
+      the list (`all`, `all,openai`) — OMITS the model filter and returns the deduped
+      cross-model UNION across every tracked model. This is the one URL Inspector
+      element that supports `all`; the sibling endpoints (stats, owned-urls,
+      cited-domains) resolve `all` to the default single model (a comma subset there
+      still builds the OR, but an `all` token degrades to the default).
 
       The response envelope (`{ prompts }`) matches the Postgres url-prompts
       contract this endpoint replaces. `category`, `region`, `topics` and
@@ -3103,11 +3108,14 @@ v2-serenity-url-inspector-url-prompts:
         in: query
         required: false
         description: |
-          AI model to scope prompts to. Accepts a Semrush Elements model name
-          directly, or a SpaceCat/UI platform code (translated server-side).
-          Defaults to `search-gpt` when omitted or unrecognized. The special
-          value `all` omits the model filter and returns the deduped cross-model
-          union.
+          AI model(s) to scope prompts to. Accepts a Semrush Elements model name
+          directly, or a SpaceCat/UI platform code (translated server-side), OR a
+          comma-separated SUBSET of either (e.g. `openai,gemini` →
+          `chatgpt-paid` OR `gemini-2.5-flash`; the element dedupes the OR
+          server-side). Duplicate members and distinct codes that resolve to the
+          same Semrush model collapse to one. Defaults to `search-gpt` when omitted
+          or unrecognized. The special value `all` — alone or anywhere in the list —
+          omits the model filter and returns the deduped cross-model union.
         schema:
           type: string
           x-canonical-values:
@@ -3134,7 +3142,7 @@ v2-serenity-url-inspector-url-prompts:
       - name: platform
         in: query
         required: false
-        description: Legacy alias for `model`; `model` takes precedence when both are given. Also accepts the `all` sentinel.
+        description: Legacy alias for `model`; `model` takes precedence when both are given. Accepts the same forms as `model` — a single value, a comma-separated subset, or the `all` sentinel (alone or in the list).
         schema: { type: string }
       - name: projectId
         in: query

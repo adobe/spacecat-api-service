@@ -148,6 +148,51 @@ describe('url-prompts definitions', () => {
         expect(payload.filters.advanced.filters.some((f) => f.col === 'CBF_model' || f.op === 'or'))
           .to.equal(false);
       });
+
+      it('OMITS CBF_model when `all` appears anywhere in a mixed CSV (all,openai)', () => {
+        // `all` anywhere in the list wins → all-models union, NOT search-gpt+openai OR.
+        const payload = buildUrlPromptsPayload({ url: URL, model: 'all,openai' });
+        expect(payload.filters.advanced.filters.some((f) => f.col === 'CBF_model' || f.op === 'or'))
+          .to.equal(false);
+      });
+
+      it('OMITS CBF_model for `all` at the end of a mixed CSV (openai,all)', () => {
+        const payload = buildUrlPromptsPayload({ url: URL, platform: 'openai,all' });
+        expect(payload.filters.advanced.filters.some((f) => f.col === 'CBF_model' || f.op === 'or'))
+          .to.equal(false);
+      });
+
+      it('emits a 3-member CBF_model OR for a 3-model subset (order-preserving)', () => {
+        const payload = buildUrlPromptsPayload({ url: URL, platform: 'openai,gemini,perplexity' });
+        const orNode = payload.filters.advanced.filters.find((f) => f.op === 'or');
+        expect(orNode).to.deep.equal({
+          op: 'or',
+          filters: [
+            { op: 'eq', val: 'chatgpt-paid', col: 'CBF_model' },
+            { op: 'eq', val: 'gemini-2.5-flash', col: 'CBF_model' },
+            { op: 'eq', val: 'perplexity', col: 'CBF_model' },
+          ],
+        });
+      });
+
+      it('unshifts the multi-model OR to the FRONT of advanced.filters alongside a category tag', () => {
+        const payload = buildUrlPromptsPayload({
+          url: URL, platform: 'openai,gemini', category: 'category__Brand',
+        });
+        // The model OR is unshifted to the front; the category tag is pushed after the dates.
+        expect(payload.filters.advanced.filters[0].op).to.equal('or');
+        expect(payload.filters.advanced.filters.some(
+          (f) => f.col === 'CBF_tags' && f.val === 'category__Brand',
+        )).to.equal(true);
+      });
+
+      it('keeps the multi-model OR and scopes the market via top-level project_id', () => {
+        const payload = buildUrlPromptsPayload({
+          url: URL, model: 'openai,gemini', projectId: 'proj-123',
+        });
+        expect(payload.project_id).to.equal('proj-123');
+        expect(payload.filters.advanced.filters.some((f) => f.op === 'or')).to.equal(true);
+      });
     });
 
     it('sends the date window as CBF_date__start (gte) / CBF_date__end (lte) in advanced', () => {

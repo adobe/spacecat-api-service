@@ -16,6 +16,7 @@ import {
   DEFAULT_ELEMENT_MODEL,
   isAllPlatforms,
   isAllModelsFilter,
+  containsAllModelsToken,
   buildModelFilter,
   buildModelOrFilter,
   resolveElementModels,
@@ -36,6 +37,32 @@ describe('elements constants', () => {
       expect(isAllPlatforms('')).to.equal(false);
       expect(isAllPlatforms(undefined)).to.equal(false);
       expect(isAllPlatforms(null)).to.equal(false);
+    });
+  });
+
+  describe('containsAllModelsToken', () => {
+    it('is true for a bare `all` (same as isAllPlatforms), case/whitespace-insensitive', () => {
+      expect(containsAllModelsToken('all')).to.equal(true);
+      expect(containsAllModelsToken('  ALL ')).to.equal(true);
+    });
+
+    it('is true when `all` appears ANYWHERE in a comma-separated list', () => {
+      expect(containsAllModelsToken('all,openai')).to.equal(true);
+      expect(containsAllModelsToken('openai,all')).to.equal(true);
+      expect(containsAllModelsToken('openai, ALL ,gemini')).to.equal(true);
+    });
+
+    it('is false for a subset with no `all` token, and for non-strings', () => {
+      expect(containsAllModelsToken('openai,gemini')).to.equal(false);
+      expect(containsAllModelsToken('search-gpt')).to.equal(false);
+      expect(containsAllModelsToken('')).to.equal(false);
+      expect(containsAllModelsToken(undefined)).to.equal(false);
+      expect(containsAllModelsToken(null)).to.equal(false);
+    });
+
+    it('does not treat a model whose name merely contains "all" as the sentinel', () => {
+      // Defensive: only an exact `all` token counts, not a substring.
+      expect(containsAllModelsToken('small-model')).to.equal(false);
     });
   });
 

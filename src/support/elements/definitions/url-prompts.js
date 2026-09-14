@@ -10,7 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
-import { resolveElementModels, buildModelOrFilter, isAllPlatforms } from '../constants.js';
+import { resolveElementModels, buildModelOrFilter, containsAllModelsToken } from '../constants.js';
 import { buildFacetedTagFilters } from './prompts.js';
 
 /**
@@ -28,12 +28,16 @@ import { buildFacetedTagFilters } from './prompts.js';
  *    (NOT `simple.start_date`, which is what the topic-prompts element uses).
  *  - `CBF_model` (resolved via resolveElementModels) sits in `advanced` as a bare `eq`
  *    for a single model, or an N-member `or` for a comma-separated subset (LLMO-7553 —
- *    the element dedupes the OR server-side, one row per distinct prompt).
- *    The `all` sentinel omits `CBF_model` entirely. VERIFIED live 2026-07-31 (same
- *    sub-workspace, `/sactionals`, 4-week window): the filter-omitted response is a
- *    deduped cross-model UNION — 715 distinct prompt rows (one row per distinct prompt,
- *    no per-model grain), vs 508 for search-gpt alone. So a single-market `model=all`
- *    call needs no extra dedupe beyond what the element already does server-side.
+ *    the element dedupes the OR server-side, one row per distinct prompt). The `all`
+ *    sentinel anywhere in the list omits `CBF_model` entirely.
+ *    EXPLICIT N-MEMBER OR dedup VERIFIED live 2026-09-14 (same sub-workspace, `/sactionals`,
+ *    current 4-week window, single unscoped scope): an explicit 2-member OR of
+ *    `chatgpt-paid`+`gemini-2.5-flash` returned 618 rows = distinct(A∪B) where A=548,
+ *    B=438 — i.e. the deduped cross-model union, NOT the additive 986. So the single-scope
+ *    path (`getUrlPrompts` returns `perProject[0]` with no caller-side merge) is correct:
+ *    Semrush dedupes the explicit OR itself. (Earlier evidence, 2026-07-31, covered only the
+ *    filter-OMITTED `all` case — 715 distinct rows vs 508 for search-gpt alone — which is a
+ *    different code path; this probe confirms the explicit-OR grain the multi-select uses.)
  *  - Brand scoping comes from targeting the brand's sub-workspace (resolved in the
  *    controller). The live MFE also sends `CBF_brand`, but the url-inspector sibling
  *    definitions (owned-urls / domain-urls / cited-domains) do not duplicate it —
@@ -78,11 +82,12 @@ export function buildUrlPromptsPayload({
     { op: 'gte', val: startDate, col: 'CBF_date__start' },
     { op: 'lte', val: endDate, col: 'CBF_date__end' },
   ];
-  // `all` sentinel → omit CBF_model entirely (deduped cross-model union). Checked BEFORE
-  // resolveElementModels, which would otherwise coerce 'all' to DEFAULT_ELEMENT_MODEL.
-  // The AND conjunction is order-independent; unshift (rather than push) only keeps the
-  // single-model payload byte-identical to before this change, to minimize the diff.
-  if (!isAllPlatforms(requestedModel)) {
+  // `all` sentinel (anywhere in a CSV — `all`, `all,openai`, …) → omit CBF_model entirely
+  // (deduped cross-model union). Checked BEFORE resolveElementModels, which would otherwise
+  // coerce a bare `all` to DEFAULT_ELEMENT_MODEL and, in a mixed `all,openai` list, OR that
+  // default with the real members. The AND conjunction is order-independent; unshift (rather
+  // than push) only keeps the single-model payload byte-identical to before this change.
+  if (!containsAllModelsToken(requestedModel)) {
     // `model`/`platform` may be a comma-separated subset (LLMO-7553). A single model stays
     // a bare CBF_model eq (byte-identical to before); ≥2 emit an N-member OR, which the
     // element dedupes server-side (one row per distinct prompt — no caller-side dedup).
