@@ -14,6 +14,7 @@
 
 import { createSerenityTransport } from '../rest-transport.js';
 import { orchestrateCreateMarketSubworkspace } from './create-market-orchestration.js';
+import { maybeEnqueueMarketGeneration } from '../async-prompt-gen.js';
 
 /**
  * Job type dispatched to {@link createMarketJobHandler} by the runner
@@ -64,7 +65,7 @@ export async function createMarketJobHandler(context, job, accessToken) {
 
   const transport = createSerenityTransport({ env, imsToken: accessToken });
 
-  return orchestrateCreateMarketSubworkspace({
+  const result = await orchestrateCreateMarketSubworkspace({
     dataAccess,
     env,
     orgId,
@@ -80,4 +81,48 @@ export async function createMarketJobHandler(context, job, accessToken) {
     callerId,
     modelIds,
   });
+
+  // Async prompt generation (#3194/#3252) for a market created through the CHAIN rather than
+  // in-request. Without this, turning that feature on would leave every async-created market
+  // generating prompts the old inline way -- the low-quality catalogue-string output it exists
+  // to remove -- while synchronously-created markets got the DRS-generated ones. Same product,
+  // two prompt qualities, decided by a code path the user never sees and reported by nothing.
+  //
+  // The token is the reason this cannot simply call the same helper the controller does: there
+  // is no request here, so `getIMSPromiseToken` has no Authorization header to mint from. Pass
+  // the one this job already holds, exactly as the chain's own hops forward it.
+  if (result.generationInputs) {
+    try {
+      const org = await dataAccess.Organization?.findById?.(orgId);
+      const promptGeneration = await maybeEnqueueMarketGeneration(
+        { ...context, params: { ...(context.params || {}), spaceCatId: orgId } },
+        {
+          enabled: true,
+          generateRequested: true,
+          producerParams: {
+            ...result.generationInputs,
+            transport,
+            imsOrgId: org?.getImsOrgId?.() ?? orgId,
+            callerId,
+            promiseToken: metadata.promiseToken,
+          },
+        },
+      );
+      if (promptGeneration) {
+        result.body = { ...result.body, promptGeneration };
+      }
+    } catch (e) {
+      // Best-effort, same as the synchronous path: the market is created and published, and a
+      // producer hiccup must not turn that into a failed job.
+      log?.warn?.('create-market-job: async prompt-generation enqueue failed (non-fatal)', {
+        brandId, error: e?.message,
+      });
+    }
+  }
+  // Strip the internal enqueue inputs before this becomes the AsyncJob's stored result: that
+  // result is served verbatim to any client polling the job, and `generationInputs` carries the
+  // brand's Semrush workspace id and alias set -- internal state this epic is otherwise careful
+  // never to expose (see the job-status endpoint's "secret-free by design" contract).
+  const { generationInputs: _, ...jobResult } = result;
+  return jobResult;
 }
