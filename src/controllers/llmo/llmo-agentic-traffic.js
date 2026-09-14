@@ -1268,11 +1268,9 @@ export function createAgenticTrafficUrlBrandPresenceHandler(getSiteAndValidateAc
           p_model: parsed.platform || null,
           p_site_id: siteId,
         };
-        // Multi-select drill-down: pass the model inclusion list; keep p_model null
-        // (they AND-intersect). Only attached for multi so single stays byte-identical.
-        if (parsed.platforms) {
-          rpcParams.p_models = parsed.platforms;
-        }
+        // Single-model only: this RPC is the PG (Adobe) path and has no p_models param.
+        // Serenity multi-select brand-presence reads the Semrush url-inspector endpoints,
+        // not this RPC; and the PG customer never renders the multi-select. See LLMO-7553.
 
         const { data, error } = await client.rpc(
           'rpc_brand_presence_url_detail',
