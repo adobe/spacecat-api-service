@@ -1396,30 +1396,57 @@ export async function bulkDeletePrompts({
   }
 
   const total = promptIds.length;
+  if (total === 0) {
+    return { metadata: { total: 0, success: 0, failure: 0 }, failures: [] };
+  }
+
+  // Soft-delete the whole batch in ONE round-trip. The loop this replaced issued
+  // one PostgREST UPDATE per id, so a full batch stacked that many serial
+  // request round-trips and — on a large brand's library — pushed
+  // time-to-first-byte past the ~15s Fastly edge timeout, surfacing as a 503 to
+  // the caller (#3279). A single `prompt_id=in.(...)` update is one round-trip:
+  // each id still resolves through uq_prompt_per_brand (brand_id, prompt_id), and
+  // the returning rows tell us exactly which ids matched. The caller caps the
+  // batch at 100 ids, well under PostgREST's 1000-row response ceiling, so no
+  // chunking is needed here.
+  let rows;
+  try {
+    const { data, error } = await postgrestClient
+      .from('prompts')
+      .update({ status: 'deleted', updated_by: updatedBy })
+      .eq('organization_id', organizationId)
+      .eq('brand_id', brandUuid)
+      .in('prompt_id', promptIds)
+      .select('prompt_id');
+
+    if (error) {
+      // A batch-level failure fails every id identically — fan it out per id
+      // so the caller's { metadata, failures } contract is unchanged from the loop.
+      return {
+        metadata: { total, success: 0, failure: total },
+        failures: promptIds.map((promptId) => ({ promptId, reason: error.message })),
+      };
+    }
+    rows = data ?? [];
+  } catch (err) {
+    return {
+      metadata: { total, success: 0, failure: total },
+      failures: promptIds.map((promptId) => ({ promptId, reason: err.message })),
+    };
+  }
+
+  // Diff the returned ids against the input to classify each id. Membership (not
+  // the returned-row count) preserves the loop's semantics for a duplicate id in
+  // the input: an update is idempotent, so a repeated id that exists is still a
+  // success, and total === success + failure always holds.
+  const deleted = new Set(rows.map((row) => row.prompt_id));
   let success = 0;
   const failures = [];
-
   for (const promptId of promptIds) {
-    try {
-      // eslint-disable-next-line no-await-in-loop
-      const { data, error } = await postgrestClient
-        .from('prompts')
-        .update({ status: 'deleted', updated_by: updatedBy })
-        .eq('organization_id', organizationId)
-        .eq('brand_id', brandUuid)
-        .eq('prompt_id', promptId)
-        .select('id')
-        .maybeSingle();
-
-      if (error) {
-        failures.push({ promptId, reason: error.message });
-      } else if (!data) {
-        failures.push({ promptId, reason: 'Prompt not found' });
-      } else {
-        success += 1;
-      }
-    } catch (err) {
-      failures.push({ promptId, reason: err.message });
+    if (deleted.has(promptId)) {
+      success += 1;
+    } else {
+      failures.push({ promptId, reason: 'Prompt not found' });
     }
   }
 
