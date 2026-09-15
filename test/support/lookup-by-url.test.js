@@ -75,6 +75,7 @@ describe('lookup-by-url support', () => {
     siteId: SITE,
     rawUrls: over.rawUrls,
     params: over.params ?? {},
+    log: over.log,
     validStatuses: ['NEW', 'IN_PROGRESS', 'IGNORED', 'RESOLVED'],
     defaultExcludedStatuses: ['IGNORED'],
     fetchEntities: over.fetchEntities ?? fetchFrom([]),
@@ -96,6 +97,7 @@ describe('lookup-by-url support', () => {
     siteId: SITE,
     rawUrls: over.rawUrls,
     params: over.params ?? {},
+    log: over.log,
     validStatuses: ['NEW', 'APPROVED', 'IN_PROGRESS', 'SKIPPED', 'FIXED', 'ERROR', 'OUTDATED', 'PENDING_VALIDATION', 'REJECTED'],
     defaultExcludedStatuses: ['SKIPPED', 'REJECTED', 'OUTDATED'],
     fetchEntities: over.fetchEntities ?? fetchFrom([]),
@@ -128,15 +130,38 @@ describe('lookup-by-url support', () => {
     it('drops non-string/empty entries', () => {
       expect(mod.parseLookupUrls(['a', '', '  ', 3, null, 'b'])).to.deep.equal({ urls: ['a', 'b'] });
     });
+
+    it('drops entries over the max URL length', () => {
+      const tooLong = `https://e.com/${'a'.repeat(mod.MAX_URL_LENGTH)}`;
+      expect(mod.parseLookupUrls(['https://e.com/ok', tooLong])).to.deep.equal({ urls: ['https://e.com/ok'] });
+    });
+
+    it('drops entries containing a raw double-quote or a control character', () => {
+      // a crafted value using these characters is how a PostgREST `.in()` value-quoting gap
+      // could be exploited to widen the filter beyond the intended URL list
+      expect(mod.parseLookupUrls(['https://e.com/ok', 'https://e.com/a",")', 'https://e.com/b']))
+        .to.deep.equal({ urls: ['https://e.com/ok'] });
+    });
+
+    it('keeps legitimate reserved characters (commas, parens) in a URL', () => {
+      const withParens = 'https://en.wikipedia.org/wiki/Rick_(Pawn_Stars)';
+      expect(mod.parseLookupUrls([withParens])).to.deep.equal({ urls: [withParens] });
+    });
   });
 
   describe('parseLookupStatus', () => {
     const valid = ['NEW', 'IGNORED'];
     it('returns [] when absent', () => {
       expect(mod.parseLookupStatus(undefined, valid)).to.deep.equal({ statuses: [] });
+      expect(mod.parseLookupStatus(null, valid)).to.deep.equal({ statuses: [] });
+      expect(mod.parseLookupStatus('', valid)).to.deep.equal({ statuses: [] });
     });
     it('rejects unknown values', () => {
       expect(mod.parseLookupStatus('NEW,BOGUS', valid).error).to.match(/Invalid status/);
+    });
+    it('rejects a non-string value instead of silently treating it as absent', () => {
+      // a JSON-body client sending `status: ['NEW']` must get a 400, not the default-excluded view
+      expect(mod.parseLookupStatus(['NEW'], valid)).to.deep.equal({ error: 'status must be a string' });
     });
     it('parses comma-separated values', () => {
       expect(mod.parseLookupStatus('NEW, IGNORED', valid)).to.deep.equal({ statuses: ['NEW', 'IGNORED'] });
@@ -152,8 +177,16 @@ describe('lookup-by-url support', () => {
       expect(mod.parseLookupPagination({ limit: '101' }).error).to.match(/between 1 and 100/);
       expect(mod.parseLookupPagination({ limit: 'abc' }).error).to.match(/between 1 and 100/);
     });
-    it('accepts a valid limit', () => {
-      expect(mod.parseLookupPagination({ limit: '25' })).to.deep.equal({ limit: 25, cursorKey: null });
+    it('rejects a fractional or partially-numeric limit rather than silently truncating it', () => {
+      expect(mod.parseLookupPagination({ limit: '5.9' }).error).to.match(/between 1 and 100/);
+      expect(mod.parseLookupPagination({ limit: '2abc' }).error).to.match(/between 1 and 100/);
+      expect(mod.parseLookupPagination({ limit: 5.9 }).error).to.match(/between 1 and 100/);
+      expect(mod.parseLookupPagination({ limit: -1 }).error).to.match(/between 1 and 100/);
+    });
+    it('accepts a valid limit as a string or a number', () => {
+      const expected = { limit: 25, cursorKey: null };
+      expect(mod.parseLookupPagination({ limit: '25' })).to.deep.equal(expected);
+      expect(mod.parseLookupPagination({ limit: 25 })).to.deep.equal(expected);
     });
     it('rejects a malformed cursor', () => {
       expect(mod.parseLookupPagination({ cursor: '!!!not-base64!!!' }).error).to.equal('Invalid cursor');
@@ -162,9 +195,14 @@ describe('lookup-by-url support', () => {
       const bad = Buffer.from(JSON.stringify({ x: 1 }), 'utf8').toString('base64url');
       expect(mod.parseLookupPagination({ cursor: bad }).error).to.equal('Invalid cursor');
     });
+    it('rejects a cursor missing the id tie-breaker', () => {
+      const legacy = Buffer.from(JSON.stringify({ k: 'abc' }), 'utf8').toString('base64url');
+      expect(mod.parseLookupPagination({ cursor: legacy }).error).to.equal('Invalid cursor');
+    });
     it('accepts a valid cursor', () => {
-      const good = Buffer.from(JSON.stringify({ k: 'abc' }), 'utf8').toString('base64url');
-      expect(mod.parseLookupPagination({ cursor: good })).to.deep.equal({ limit: 100, cursorKey: { k: 'abc' } });
+      const good = Buffer.from(JSON.stringify({ k: 'abc', id: 'o1' }), 'utf8').toString('base64url');
+      expect(mod.parseLookupPagination({ cursor: good }))
+        .to.deep.equal({ limit: 100, cursorKey: { k: 'abc', id: 'o1' } });
     });
   });
 
@@ -226,6 +264,14 @@ describe('lookup-by-url support', () => {
       expect(error).to.match(/Invalid fields: nope/);
     });
 
+    it('rejects a non-string fields value instead of silently falling back to the default projection', async () => {
+      lookupStub.resolves(rowsFor({ 'https://e.com/a': ['o1'] }));
+      const { error } = await mod.lookupByUrl({}, oppCfg({
+        rawUrls: ['https://e.com/a'], params: { fields: ['id', 'type'] }, fetchEntities: fetchFrom([opp('o1')]),
+      }));
+      expect(error).to.equal('fields must be a string');
+    });
+
     it('paginates over the immutable id key', async () => {
       lookupStub.resolves(rowsFor({ 'https://e.com/a': ['o3', 'o1', 'o2'] }));
       const entities = fetchFrom([opp('o1'), opp('o2'), opp('o3')]);
@@ -283,6 +329,96 @@ describe('lookup-by-url support', () => {
       }));
       expect(response.results).to.have.length(2);
       expect(response.results[0]).to.deep.equal(response.results[1]);
+    });
+
+    it('matches a non-canonical input variant against a canonically-stored index row', async () => {
+      // the index (and rowsFor, mirroring it) stores the canonical form; the caller sends a
+      // scheme/case/www/trailing-slash variant of the same URL and must still get a match,
+      // with the ORIGINAL input string echoed back verbatim
+      lookupStub.resolves(rowsFor({ 'https://example.com/a': ['o1'] }));
+      const variant = 'HTTP://WWW.Example.com/a/';
+      const { response } = await mod.lookupByUrl({}, oppCfg({
+        rawUrls: [variant], fetchEntities: fetchFrom([opp('o1')]),
+      }));
+      expect(response.results).to.deep.equal([{ url: variant, opportunityIds: ['o1'] }]);
+    });
+
+    it('passes the raw (uncanonicalized) urls straight through to the index util', async () => {
+      lookupStub.resolves([]);
+      const raw = ['HTTP://WWW.Example.com/a/', 'https://example.com/b'];
+      await mod.lookupByUrl({}, oppCfg({ rawUrls: raw, fetchEntities: fetchFrom([]) }));
+      expect(lookupStub).to.have.been.calledOnceWith({}, {
+        table: 'opportunity_urls', siteId: SITE, urls: raw,
+      });
+    });
+
+    it('never drops an entity whose sort key ties with another entity (cursor tie-break on id)', async () => {
+      // getSortKey returns the SAME value for all three - only legal because the engine breaks
+      // ties on getId internally; a naive `<`/`>` comparator would drop some of these. Seeded
+      // in both insertion orders so the tie-break comparator is exercised in both directions.
+      lookupStub.resolves(rowsFor({ 'https://e.com/a': ['o2', 'o1', 'o3'] }));
+      const entities = fetchFrom([opp('o3'), opp('o1'), opp('o2')]);
+      const tiedCfg = (over) => ({ ...oppCfg(over), getSortKey: () => 'same-key-for-all' });
+
+      const page1 = await mod.lookupByUrl({}, tiedCfg({
+        rawUrls: ['https://e.com/a'], params: { limit: '1' }, fetchEntities: entities,
+      }));
+      expect(Object.keys(page1.response.opportunities)).to.deep.equal(['o1']);
+      expect(page1.response.pagination.hasMore).to.equal(true);
+
+      const page2 = await mod.lookupByUrl({}, tiedCfg({
+        rawUrls: ['https://e.com/a'], params: { limit: '1', cursor: page1.response.pagination.cursor }, fetchEntities: entities,
+      }));
+      expect(Object.keys(page2.response.opportunities)).to.deep.equal(['o2']);
+      expect(page2.response.pagination.hasMore).to.equal(true);
+
+      const page3 = await mod.lookupByUrl({}, tiedCfg({
+        rawUrls: ['https://e.com/a'], params: { limit: '1', cursor: page2.response.pagination.cursor }, fetchEntities: entities,
+      }));
+      expect(Object.keys(page3.response.opportunities)).to.deep.equal(['o3']);
+      expect(page3.response.pagination.hasMore).to.equal(false);
+    });
+
+    it('rejects a request whose match set exceeds MAX_LOOKUP_MATCHES before hydrating anything', async () => {
+      const rows = Array.from(
+        { length: mod.MAX_LOOKUP_MATCHES + 1 },
+        (_, i) => ({ entity_id: `o${i}`, entity_type: 'cited-analysis', url: canonicalizeUrl('https://e.com/a') }),
+      );
+      lookupStub.resolves(rows);
+      const fetchSpy = sandbox.spy(fetchFrom([]));
+      const { error } = await mod.lookupByUrl({}, oppCfg({
+        rawUrls: ['https://e.com/a'], fetchEntities: fetchSpy,
+      }));
+      expect(error).to.match(/Too many matched entities/);
+      expect(fetchSpy).to.not.have.been.called;
+    });
+
+    it('returns a handled error (not a thrown TypeError) when the index util returns a non-array', async () => {
+      lookupStub.resolves(undefined);
+      const logStub = { error: sandbox.stub(), warn: sandbox.stub(), info: sandbox.stub() };
+      const { error } = await mod.lookupByUrl({}, oppCfg({ rawUrls: ['https://e.com/a'], log: logStub }));
+      expect(error).to.match(/Failed to resolve the URL index/);
+      expect(logStub.error).to.have.been.calledOnce;
+    });
+
+    it('logs a warning when the index references an id that could not be hydrated', async () => {
+      lookupStub.resolves(rowsFor({ 'https://e.com/a': ['ghost'] }));
+      const logStub = { error: sandbox.stub(), warn: sandbox.stub(), info: sandbox.stub() };
+      await mod.lookupByUrl({}, oppCfg({
+        rawUrls: ['https://e.com/a'], fetchEntities: fetchFrom([]), log: logStub,
+      }));
+      expect(logStub.warn).to.have.been.calledOnce;
+      expect(logStub.warn.firstCall.args[0]).to.match(/could not be hydrated/);
+    });
+
+    it('logs one info line per request with the request/match/page counts', async () => {
+      lookupStub.resolves(rowsFor({ 'https://e.com/a': ['o1'] }));
+      const logStub = { error: sandbox.stub(), warn: sandbox.stub(), info: sandbox.stub() };
+      await mod.lookupByUrl({}, oppCfg({
+        rawUrls: ['https://e.com/a'], fetchEntities: fetchFrom([opp('o1')]), log: logStub,
+      }));
+      expect(logStub.info).to.have.been.calledOnce;
+      expect(logStub.info.firstCall.args[0]).to.include('siteId=site-1');
     });
   });
 
@@ -370,6 +506,16 @@ describe('lookup-by-url support', () => {
       }));
       expect(response.suggestions).to.deep.equal({});
       expect(response.results).to.deep.equal([]);
+      expect(response.unmatchedUrls).to.deep.equal(['https://e.com/a']);
+    });
+
+    it('never invokes the hook when nothing was hydrated, so its own fixed cost is not paid', async () => {
+      lookupStub.resolves([]);
+      const filterEntities = sandbox.stub().resolves([]);
+      const { response } = await mod.lookupByUrl({}, suggCfg({
+        rawUrls: ['https://e.com/a'], fetchEntities: fetchFrom([]), filterEntities,
+      }));
+      expect(filterEntities).to.not.have.been.called;
       expect(response.unmatchedUrls).to.deep.equal(['https://e.com/a']);
     });
   });

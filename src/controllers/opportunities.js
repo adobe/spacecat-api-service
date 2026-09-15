@@ -184,14 +184,22 @@ function OpportunitiesController(ctx) {
 
   /**
    * Looks up opportunities backed by any of the supplied source URLs, across all of the site's
-   * opportunity types. POST body: `{ urls: [...], fields?, status?, limit?, cursor? }`
-   * (query params are dropped for a JSON body, so all params travel in the body — mirrors the
-   * agentic-traffic hits-by-urls endpoint). See lookup-service-api-design.md, Milestone 1.
+   * opportunity types. POST body: `{ urls: [...], fields?, status?, limit?, cursor?, locale? }`
+   * (all parameters travel in the body, not as query params - this middleware stack only ever
+   * exposes `request.json()` as `context.data` for a JSON POST, mirroring the agentic-traffic
+   * hits-by-urls endpoint). See the Lookup Service architecture doc ("Offsite Intelligence -
+   * Funneling"), section 4.2, in the gambit-ai-toolkit knowledge base.
    * @param {Object} context of the request
    * @returns {Promise<Response>} Normalized results + opportunities map + pagination.
    */
   const getByUrl = async (context) => {
     const siteId = context.params?.siteId;
+    const locale = context.data?.locale ?? null;
+
+    if (!isValidLocale(locale)) {
+      return badRequest('Invalid locale format');
+    }
+
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
     }
@@ -204,9 +212,13 @@ function OpportunitiesController(ctx) {
       return forbidden('Only users belonging to the organization of the site can view its opportunities');
     }
 
+    // `requirePostgrest` from postgrest-availability.js reads `context.dataAccess`, but this
+    // controller (like every other method here) is constructed with `dataAccess` once per
+    // request and closes over it - the per-call `context` argument never carries it. Check the
+    // closure variable directly, matching the 503-on-unconfigured convention that helper uses.
     const postgrestClient = dataAccess.services?.postgrestClient;
-    if (!postgrestClient) {
-      return createResponse({ message: 'URL lookup is not available' }, 500);
+    if (!postgrestClient?.from) {
+      return createResponse({ message: 'URL lookup requires Postgres (DATA_SERVICE_PROVIDER=postgres)' }, 503);
     }
 
     const { response, error } = await lookupByUrl(postgrestClient, {
@@ -214,28 +226,36 @@ function OpportunitiesController(ctx) {
       siteId,
       rawUrls: context.data?.urls,
       params: context.data ?? {},
+      log: ctx.log,
       validStatuses: Object.values(OpportunityModel.STATUSES),
       defaultExcludedStatuses: [OpportunityModel.STATUSES.IGNORED],
       fetchEntities: async (ids) => {
         const { data } = await Opportunity.batchGetByKeys(ids.map((id) => ({ opportunityId: id })));
         return data ?? [];
       },
-      // Narrow to what the caller may see, exactly like getAllForSite/getByStatus:
+      // Narrow to what the caller may see, exactly like getAllForSite/getByStatus: the
+      // site-ownership check first (the index row is derived, best-effort-written data, and
+      // must never be the sole authority for a tenancy decision - see ADR/design doc), then
       // Summit-PLG type gating + D4 FACS composite (per-opportunity-type ReBAC).
-      filterEntities: async (opptys) => filterOpportunitiesByFacsComposite(
-        context,
-        await filterForSummitPlg(site, opptys, context),
-      ),
+      filterEntities: async (opptys) => {
+        const owned = opptys.filter((o) => o.getSiteId() === siteId);
+        if (owned.length !== opptys.length) {
+          ctx.log?.warn?.(`[opportunities.getByUrl] dropped ${opptys.length - owned.length} opportunity(ies) `
+            + `whose siteId did not match the requested site ${siteId} - the opportunity_urls index may be stale`);
+        }
+        const permitted = await filterForSummitPlg(site, owned, context);
+        return filterOpportunitiesByFacsComposite(context, permitted);
+      },
       getId: (oppty) => oppty.getId(),
       getStatus: (oppty) => oppty.getStatus(),
       getSortKey: (oppty) => oppty.getId(),
-      toFullDto: (oppty) => OpportunityDto.toJSON(oppty),
+      toFullDto: (oppty) => OpportunityDto.toJSON(oppty, locale),
       lightweightFields: OPPORTUNITY_BY_URL_LIGHTWEIGHT_FIELDS,
       forceFields: ['id'],
       idListKey: 'opportunityIds',
       mapKey: 'opportunities',
       includeNoMatchInResults: true,
-      includeUnmatchedUrls: false,
+      includeUnmatchedUrls: true,
     });
     if (error) {
       return badRequest(error);

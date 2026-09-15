@@ -15,13 +15,18 @@ import { lookupEntityIdsByUrl } from '@adobe/spacecat-shared-data-access';
 import { applyFieldProjection } from '../utils/field-projection.js';
 
 /**
- * Shared engine for the `POST .../by-url` lookup endpoints (opportunities + suggestions).
- * See `lookup-service-api-design.md` (Milestone 1). Both endpoints:
- *   1. take a body `{ urls: [...] }` (1-100; invalid entries dropped, not hard-failed),
+ * Shared engine for the `POST .../by-urls` lookup endpoints (opportunities + suggestions).
+ * See the Lookup Service architecture doc ("Offsite Intelligence - Funneling"), section 4.2,
+ * in the gambit-ai-toolkit knowledge base - not a file in this repo. Both endpoints:
+ *   1. take a body `{ urls: [...] }` (1-100; invalid entries dropped, not hard-failed) plus
+ *      `fields`/`status`/`limit`/`cursor`, all in the same JSON body - this middleware stack
+ *      (`helix-shared-body-data`) only ever exposes `request.json()` as `context.data` for a
+ *      JSON POST, so a query-param path for these is not reachable, not just undocumented,
  *   2. resolve matching entity ids from the site-scoped source-URL index
  *      (`opportunity_urls` / `suggestion_urls`) via `lookupEntityIdsByUrl`,
- *   3. hydrate + status-filter + keyset-paginate the DISTINCT matched entities in memory
- *      (the index util returns the full match set; the set per URL is bounded by the URL cap),
+ *   3. hydrate + authorize + status-filter + keyset-paginate the DISTINCT matched entities in
+ *      memory, bounded by `MAX_LOOKUP_MATCHES` (the URL cap alone does not bound the match set,
+ *      since one URL can legitimately back many entities),
  *   4. return a normalized response: `results[]` referencing ids + a top-level entity map.
  *
  * Matching is over the canonical URL (writer and reader both use `canonicalizeUrl`), so callers
@@ -29,13 +34,22 @@ import { applyFieldProjection } from '../utils/field-projection.js';
  */
 
 export const MAX_LOOKUP_URLS = 100;
+export const MAX_URL_LENGTH = 2048;
+export const MAX_LOOKUP_MATCHES = 1000;
 export const DEFAULT_LOOKUP_PAGE_SIZE = 100;
 export const MAX_LOOKUP_PAGE_SIZE = 100;
 
+// A raw double-quote or a control character is never valid in a URL, and (unlike a comma or
+// parenthesis, both legitimate in a path/query) would let a crafted entry break out of the
+// PostgREST `.in()` filter's value quoting. Drop it like any other malformed entry
+// (drop-don't-fail), rather than rejecting the whole request.
+// eslint-disable-next-line no-control-regex -- control-character range is intentional here
+const INVALID_URL_CHARS = /["\u0000-\u001f]/;
+
 /**
  * Validates the request-body `urls`. Non-array / oversized are hard errors; individual
- * non-string/empty entries are dropped (drop-don't-fail), and an all-dropped/empty list is
- * allowed (the caller gets an empty response, not a 400).
+ * non-string/empty/oversized/unsafe entries are dropped (drop-don't-fail), and an
+ * all-dropped/empty list is allowed (the caller gets an empty response, not a 400).
  * @param {*} rawUrls
  * @returns {{ urls: string[] } | { error: string }}
  */
@@ -46,19 +60,25 @@ export function parseLookupUrls(rawUrls) {
   if (rawUrls.length > MAX_LOOKUP_URLS) {
     return { error: `urls must contain at most ${MAX_LOOKUP_URLS} entries` };
   }
-  const urls = rawUrls.filter((u) => typeof u === 'string' && u.trim().length > 0);
+  const urls = rawUrls.filter((u) => typeof u === 'string'
+    && u.trim().length > 0
+    && u.length <= MAX_URL_LENGTH
+    && !INVALID_URL_CHARS.test(u));
   return { urls };
 }
 
 /**
- * Validates the optional `status` query param against the entity's status enum.
+ * Validates the optional `status` body field against the entity's status enum.
  * @param {string|undefined} statusParam - comma-separated status value(s)
  * @param {string[]} validStatuses - allowed status values
  * @returns {{ statuses: string[] } | { error: string }}
  */
 export function parseLookupStatus(statusParam, validStatuses) {
-  if (!hasText(statusParam)) {
+  if (statusParam === undefined || statusParam === null || statusParam === '') {
     return { statuses: [] };
+  }
+  if (typeof statusParam !== 'string') {
+    return { error: 'status must be a string' };
   }
   const statuses = statusParam.split(',').map((s) => s.trim()).filter(Boolean);
   const invalid = statuses.filter((s) => !validStatuses.includes(s));
@@ -71,7 +91,7 @@ export function parseLookupStatus(statusParam, validStatuses) {
 function decodeCursor(cursor) {
   try {
     const decoded = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'));
-    if (!isNonEmptyObject(decoded) || typeof decoded.k !== 'string') {
+    if (!isNonEmptyObject(decoded) || typeof decoded.k !== 'string' || typeof decoded.id !== 'string') {
       return null;
     }
     return decoded;
@@ -80,12 +100,12 @@ function decodeCursor(cursor) {
   }
 }
 
-function encodeCursor(sortKey) {
-  return Buffer.from(JSON.stringify({ k: sortKey }), 'utf8').toString('base64url');
+function encodeCursor(sortKey, id) {
+  return Buffer.from(JSON.stringify({ k: sortKey, id }), 'utf8').toString('base64url');
 }
 
 /**
- * Validates `limit` / `cursor` query params.
+ * Validates `limit` / `cursor` body fields.
  * @param {object} params
  * @returns {{ limit: number, cursorKey: object|null } | { error: string }}
  */
@@ -93,8 +113,11 @@ export function parseLookupPagination(params = {}) {
   let limit = DEFAULT_LOOKUP_PAGE_SIZE;
   const rawLimit = params.limit;
   if (rawLimit !== undefined && rawLimit !== null && `${rawLimit}` !== '') {
+    const isCleanInteger = typeof rawLimit === 'number'
+      ? Number.isInteger(rawLimit)
+      : /^\d+$/.test(String(rawLimit).trim());
     limit = Number.parseInt(rawLimit, 10);
-    if (!Number.isInteger(limit) || limit < 1 || limit > MAX_LOOKUP_PAGE_SIZE) {
+    if (!isCleanInteger || limit < 1 || limit > MAX_LOOKUP_PAGE_SIZE) {
       return { error: `limit must be an integer between 1 and ${MAX_LOOKUP_PAGE_SIZE}` };
     }
   }
@@ -115,6 +138,9 @@ export function parseLookupPagination(params = {}) {
  * @returns {{ list: object[] } | { error: string }}
  */
 function projectLookup(fullDtos, fieldsParam, lightweightFields, forceFields) {
+  if (fieldsParam !== undefined && fieldsParam !== null && typeof fieldsParam !== 'string') {
+    return { error: 'fields must be a string' };
+  }
   if (hasText(fieldsParam)) {
     const { list, error } = applyFieldProjection(fullDtos, fieldsParam);
     if (error) {
@@ -146,6 +172,23 @@ function projectLookup(fullDtos, fieldsParam, lightweightFields, forceFields) {
 }
 
 /**
+ * Total-order comparator over the caller's (not-necessarily-unique) sort key, breaking ties on
+ * the always-unique entity id so entities with an equal `getSortKey` value are never dropped by
+ * the cursor filter below (a plain `<`/`>` comparator with no equal case silently treats a tie
+ * as "already past the cursor").
+ */
+function compareEntities(a, b, getSortKey, getId) {
+  const ka = getSortKey(a);
+  const kb = getSortKey(b);
+  if (ka !== kb) {
+    return ka < kb ? -1 : 1;
+  }
+  // Tie-break on id. The caller's `survivingById` is a Map keyed by id, so two entities with
+  // the same id can never both reach this comparator - the `ida === idb` case is unreachable.
+  return getId(a) < getId(b) ? -1 : 1;
+}
+
+/**
  * Runs a by-URL lookup and builds the normalized response (or a validation error the caller
  * should surface as `badRequest`). Site existence + access control are the caller's concern —
  * this runs after those pass.
@@ -155,27 +198,31 @@ function projectLookup(fullDtos, fieldsParam, lightweightFields, forceFields) {
  * @param {string} cfg.table - `opportunity_urls` | `suggestion_urls`
  * @param {string} cfg.siteId
  * @param {*} cfg.rawUrls - request body `urls`
- * @param {object} cfg.params - query params (`fields`, `status`, `limit`, `cursor`)
+ * @param {object} cfg.params - body fields (`fields`, `status`, `limit`, `cursor`)
+ * @param {object} [cfg.log] - optional logger; when omitted, the engine logs nothing
  * @param {string[]} cfg.validStatuses - the entity status enum
  * @param {string[]} cfg.defaultExcludedStatuses - statuses hidden when `status` is omitted
  * @param {(ids: string[]) => Promise<object[]>} cfg.fetchEntities - batch hydrate by id
  * @param {(entities: object[]) => object[]|Promise<object[]>} [cfg.filterEntities] - optional
- *   authorization / product-gating narrowing of the hydrated set, before status-filter
+ *   authorization / product-gating narrowing of the hydrated set, before status-filter. Never
+ *   invoked when nothing was hydrated, so a hook with its own fixed per-call cost (e.g. an
+ *   `allBySiteId` fetch) is not paid on a request that matched nothing.
  * @param {(e: object) => string} cfg.getId
  * @param {(e: object) => string} cfg.getStatus
- * @param {(e: object) => string} cfg.getSortKey - immutable keyset sort key
+ * @param {(e: object) => string} cfg.getSortKey - keyset sort key; need not be unique - the
+ *   engine breaks ties on `getId` internally, so uniqueness is structural, not a caller contract
  * @param {(e: object) => object} cfg.toFullDto - full DTO JSON for an entity
  * @param {string[]} cfg.lightweightFields - default projection when `fields` omitted
  * @param {string[]} cfg.forceFields - always-retained fields
  * @param {string} cfg.idListKey - `opportunityIds` | `suggestionIds`
  * @param {string} cfg.mapKey - `opportunities` | `suggestions`
  * @param {boolean} cfg.includeNoMatchInResults - opportunities keep no-match URLs in `results`
- * @param {boolean} cfg.includeUnmatchedUrls - suggestions add a first-page `unmatchedUrls`
+ * @param {boolean} cfg.includeUnmatchedUrls - add a first-page `unmatchedUrls`
  * @returns {Promise<{ response: object } | { error: string }>}
  */
 export async function lookupByUrl(postgrestClient, cfg) {
   const {
-    table, siteId, rawUrls, params = {},
+    table, siteId, rawUrls, params = {}, log,
     validStatuses, defaultExcludedStatuses,
     fetchEntities, filterEntities, getId, getStatus, getSortKey, toFullDto,
     lightweightFields, forceFields,
@@ -217,8 +264,12 @@ export async function lookupByUrl(postgrestClient, cfg) {
   }
 
   const rows = await lookupEntityIdsByUrl(postgrestClient, { table, siteId, urls });
+  if (!Array.isArray(rows)) {
+    log?.error?.(`[lookup-by-url] lookupEntityIdsByUrl returned a non-array result for table=${table} siteId=${siteId}`);
+    return { error: 'Failed to resolve the URL index' };
+  }
 
-  // canonical URL -> ordered distinct matched ids; plus the distinct id set (first-seen order).
+  // canonical URL -> Set of matched entity ids; plus the distinct id set (first-seen order).
   const idsByCanonical = new Map();
   const allIds = [];
   const seenIds = new Set();
@@ -227,23 +278,32 @@ export async function lookupByUrl(postgrestClient, cfg) {
       seenIds.add(row.entity_id);
       allIds.push(row.entity_id);
     }
-    let arr = idsByCanonical.get(row.url);
-    if (!arr) {
-      arr = [];
-      idsByCanonical.set(row.url, arr);
+    let set = idsByCanonical.get(row.url);
+    if (!set) {
+      set = new Set();
+      idsByCanonical.set(row.url, set);
     }
-    if (!arr.includes(row.entity_id)) {
-      arr.push(row.entity_id);
-    }
+    set.add(row.entity_id);
+  }
+
+  if (allIds.length > MAX_LOOKUP_MATCHES) {
+    return { error: `Too many matched entities (${allIds.length}); narrow the urls list or add a status filter` };
   }
 
   const hydrated = allIds.length > 0 ? await fetchEntities(allIds) : [];
+  if (hydrated.length !== allIds.length) {
+    log?.warn?.(`[lookup-by-url] index referenced ${allIds.length - hydrated.length} entity id(s) that could not be hydrated (table=${table}, siteId=${siteId}) - the index may be stale`);
+  }
   // Authorization / product-gating narrowing (e.g. D4 FACS composite type-scoping,
   // Summit-PLG). Applied to the full hydrated set BEFORE status filtering and
   // pagination, so an entity the caller may not see is absent from the entity map,
   // the per-URL id lists, and the page — and (for suggestions) counted as unmatched,
-  // i.e. indistinguishable from "no match".
-  const entities = filterEntities ? await filterEntities(hydrated) : hydrated;
+  // i.e. indistinguishable from "no match". Skipped entirely when nothing was hydrated,
+  // so a hook with its own fixed cost (e.g. an `allBySiteId` fetch) isn't paid on a
+  // request that matched nothing.
+  const entities = (filterEntities && hydrated.length > 0)
+    ? await filterEntities(hydrated)
+    : hydrated;
 
   // status filter (default excludes the dismissed statuses)
   const survivingById = new Map();
@@ -261,17 +321,21 @@ export async function lookupByUrl(postgrestClient, cfg) {
     survivingById.set(getId(entity), entity);
   }
 
-  // keyset page over the immutable sort key (keys are distinct entity ids, so a 2-way
-  // comparator is total — no equal case to handle).
+  // keyset page over `getSortKey`, tie-broken on `getId` (see `compareEntities`) so the sort
+  // is total and the cursor filter below can never silently drop a tied entity.
   const sorted = [...survivingById.values()]
-    .sort((a, b) => (getSortKey(a) < getSortKey(b) ? -1 : 1));
+    .sort((a, b) => compareEntities(a, b, getSortKey, getId));
   const afterCursor = cursorKey
-    ? sorted.filter((e) => getSortKey(e) > cursorKey.k)
+    ? sorted.filter((e) => {
+      const k = getSortKey(e);
+      return k !== cursorKey.k ? k > cursorKey.k : getId(e) > cursorKey.id;
+    })
     : sorted;
   const pageEntities = afterCursor.slice(0, limit);
   const hasMore = afterCursor.length > limit;
+  const lastPageEntity = pageEntities[pageEntities.length - 1];
   const nextCursor = hasMore
-    ? encodeCursor(getSortKey(pageEntities[pageEntities.length - 1]))
+    ? encodeCursor(getSortKey(lastPageEntity), getId(lastPageEntity))
     : null;
   const pageIds = new Set(pageEntities.map((e) => getId(e)));
 
@@ -292,7 +356,7 @@ export async function lookupByUrl(postgrestClient, cfg) {
   const unmatchedSeen = new Set();
   for (const url of urls) {
     const canonical = canonicalizeUrl(url);
-    const matched = idsByCanonical.get(canonical) || [];
+    const matched = [...(idsByCanonical.get(canonical) ?? [])];
     const pageMatched = matched.filter((id) => pageIds.has(id));
     if (includeNoMatchInResults || pageMatched.length > 0) {
       results.push({ url, [idListKey]: pageMatched });
@@ -305,6 +369,8 @@ export async function lookupByUrl(postgrestClient, cfg) {
       }
     }
   }
+
+  log?.info?.(`[lookup-by-url] table=${table} siteId=${siteId} urls=${urls.length} indexRows=${rows.length} matchedIds=${allIds.length} hydrated=${hydrated.length} afterAuth=${entities.length} page=${pageEntities.length} hasMore=${hasMore}`);
 
   return { response: buildResponse(results, entityMap, nextCursor, hasMore, unmatchedUrls) };
 }

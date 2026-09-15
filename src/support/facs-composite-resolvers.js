@@ -100,7 +100,7 @@ function permittedValues(bindings, capability) {
  * `…/opportunities/top-paid`, and the two site-level collections that expose
  * opportunity-derived data across ALL types: `…/fixes` (getAllForSite) and
  * `…/edge-deployed-urls` — plus the POST-for-read URL lookups
- * (`POST …/opportunities/by-url` and `POST …/suggestions/by-url`), which return
+ * (`POST …/opportunities/by-urls` and `POST …/suggestions/by-urls`), which return
  * opportunity-derived data across ALL types in one call. None has a single
  * opportunity to type-scope against;
  * each is result-filtered by its controller (D4) via
@@ -119,7 +119,7 @@ function permittedValues(bindings, capability) {
 export function isOpportunityDerivedCollectionRoute(routePattern) {
   return typeof routePattern === 'string'
     && (/^GET\s.*\/(opportunities(\/by-status\/[^/]+|\/top-paid)?|fixes|edge-deployed-urls)$/.test(routePattern)
-      || /^POST\s.*\/(opportunities|suggestions)\/by-url$/.test(routePattern));
+      || /^POST\s.*\/(opportunities|suggestions)\/by-urls$/.test(routePattern));
 }
 
 /**

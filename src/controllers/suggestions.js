@@ -3771,19 +3771,27 @@ function SuggestionsController(ctx, sqs, env) {
 
   // Lightweight default projection for the by-url lookup (omits the heavy `data` blob;
   // callers opt in via `fields=...,data`). `opportunityId` is force-included alongside `id`
-  // since results span opportunities. See lookup-service-api-design.md, Milestone 1.
+  // since results span opportunities. See the Lookup Service architecture doc ("Offsite
+  // Intelligence - Funneling"), section 4.2, in the gambit-ai-toolkit knowledge base.
   const SUGGESTION_BY_URL_LIGHTWEIGHT_FIELDS = ['id', 'opportunityId', 'type', 'status', 'rank', 'updatedAt'];
 
   /**
    * Looks up suggestions backed by any of the supplied source URLs, across ALL of the site's
-   * opportunities in one call. POST body: `{ urls: [...], fields?, status?, limit?, cursor? }`
-   * (query params are dropped for a JSON body, so all params travel in the body). Keyset-paginated
-   * over the immutable `(opportunityId, id)`. See lookup-service-api-design.md, Milestone 1.
+   * opportunities in one call. POST body: `{ urls: [...], fields?, status?, limit?, cursor?,
+   * locale? }` (all parameters travel in the body, not as query params - this middleware stack
+   * only ever exposes `request.json()` as `context.data` for a JSON POST). Keyset-paginated
+   * over the immutable `(opportunityId, id)`.
    * @param {Object} context of the request
    * @returns {Promise<Response>} Normalized results + suggestions map + unmatchedUrls + pagination.
    */
   const getByUrl = async (context) => {
     const siteId = context.params?.siteId;
+    const locale = context.data?.locale ?? null;
+
+    if (!isValidLocale(locale)) {
+      return badRequest('Invalid locale format');
+    }
+
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
     }
@@ -3796,9 +3804,12 @@ function SuggestionsController(ctx, sqs, env) {
       return forbidden('User does not belong to the organization');
     }
 
+    // See the matching comment in controllers/opportunities.js getByUrl: `requirePostgrest`
+    // reads `context.dataAccess`, which this factory-per-request controller never populates
+    // on the per-call context - it closes over `dataAccess` once instead. Check it directly.
     const postgrestClient = dataAccess.services?.postgrestClient;
-    if (!postgrestClient) {
-      return createResponse({ message: 'URL lookup is not available' }, 500);
+    if (!postgrestClient?.from) {
+      return createResponse({ message: 'URL lookup requires Postgres (DATA_SERVICE_PROVIDER=postgres)' }, 503);
     }
 
     const { response, error } = await lookupByUrl(postgrestClient, {
@@ -3806,6 +3817,7 @@ function SuggestionsController(ctx, sqs, env) {
       siteId,
       rawUrls: context.data?.urls,
       params: context.data ?? {},
+      log: ctx.log,
       validStatuses: Object.values(SuggestionModel.STATUSES),
       defaultExcludedStatuses: [
         SuggestionModel.STATUSES.SKIPPED,
@@ -3817,19 +3829,24 @@ function SuggestionsController(ctx, sqs, env) {
         return data ?? [];
       },
       // Narrow to suggestions whose opportunity the caller may see — mirrors the
-      // edge-deployed-urls D4 composite gate. No-op for site-wide / non-FACS / admin.
+      // edge-deployed-urls D4 composite gate (site scoping comes for free here, since
+      // `permittedOpptyIds` is derived from `allBySiteId`) — then apply the same
+      // Summit-PLG grant gating every other suggestion read path applies
+      // (getAllForOpportunity*, getByStatus*, getByID), so this endpoint cannot return
+      // ungranted suggestion content that those endpoints deliberately withhold.
       filterEntities: async (suggestions) => {
         const permitted = filterOpportunitiesByFacsComposite(
           context,
           await Opportunity.allBySiteId(siteId),
         );
         const permittedOpptyIds = new Set(permitted.map((o) => o.getId()));
-        return suggestions.filter((s) => permittedOpptyIds.has(s.getOpportunityId()));
+        const scoped = suggestions.filter((s) => permittedOpptyIds.has(s.getOpportunityId()));
+        return filterByGrantStatus(site, scoped, context);
       },
       getId: (sugg) => sugg.getId(),
       getStatus: (sugg) => sugg.getStatus(),
       getSortKey: (sugg) => `${sugg.getOpportunityId()}|${sugg.getId()}`,
-      toFullDto: (sugg) => SuggestionDto.toJSON(sugg),
+      toFullDto: (sugg) => SuggestionDto.toJSON(sugg, 'full', null, locale),
       lightweightFields: SUGGESTION_BY_URL_LIGHTWEIGHT_FIELDS,
       forceFields: ['id', 'opportunityId'],
       idListKey: 'suggestionIds',

@@ -1757,6 +1757,20 @@ describe('Opportunities Controller', () => {
       expect(res.status).to.equal(400);
     });
 
+    it('returns 400 for a malformed locale', async () => {
+      const res = await controllerWithPg.getByUrl({
+        params: { siteId: SITE_ID }, data: { urls: [inputUrl], locale: 'not-a-locale!!' },
+      });
+      expect(res.status).to.equal(400);
+    });
+
+    it('honors a valid locale when projecting the matched opportunities', async () => {
+      const res = await controllerWithPg.getByUrl({
+        params: { siteId: SITE_ID }, data: { urls: [inputUrl], locale: 'en_us' },
+      });
+      expect(res.status).to.equal(200);
+    });
+
     it('returns 404 when the site does not exist', async () => {
       mockSite.findById.resolves(null);
       const res = await controllerWithPg.getByUrl({
@@ -1786,12 +1800,24 @@ describe('Opportunities Controller', () => {
       expect(res.status).to.equal(403);
     });
 
-    it('returns 500 when the postgrest client is unavailable', async () => {
+    it('returns 503 when the postgrest client is unavailable', async () => {
       const ctrl = OpportunitiesController({
         dataAccess: mockOpportunityDataAccess, pathInfo: { headers: {} }, ...defaultAuthAttributes,
       });
       const res = await ctrl.getByUrl({ params: { siteId: SITE_ID }, data: { urls: [inputUrl] } });
-      expect(res.status).to.equal(500);
+      expect(res.status).to.equal(503);
+    });
+
+    it('returns 503 when the postgrest client is present but not a real PostgREST client (no .from)', async () => {
+      const ctrl = OpportunitiesController({
+        dataAccess: {
+          ...mockOpportunityDataAccess, services: { postgrestClient: {} },
+        },
+        pathInfo: { headers: {} },
+        ...defaultAuthAttributes,
+      });
+      const res = await ctrl.getByUrl({ params: { siteId: SITE_ID }, data: { urls: [inputUrl] } });
+      expect(res.status).to.equal(503);
     });
 
     it('returns 400 for an invalid urls body', async () => {
@@ -1799,6 +1825,38 @@ describe('Opportunities Controller', () => {
       expect(res.status).to.equal(400);
       const body = await res.json();
       expect(body.message).to.match(/must be an array/);
+    });
+
+    it('returns 400 when the request has no body at all', async () => {
+      const res = await controllerWithPg.getByUrl({ params: { siteId: SITE_ID } });
+      expect(res.status).to.equal(400);
+    });
+
+    it('treats an unrecognized batchGetByKeys result as no hydrated opportunities', async () => {
+      batchStub.resolves({ data: null });
+      const res = await controllerWithPg.getByUrl({
+        params: { siteId: SITE_ID }, data: { urls: [inputUrl] },
+      });
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.opportunities).to.deep.equal({});
+    });
+
+    it('drops and warns on a hydrated opportunity whose siteId does not match the requested site (stale/cross-site index row)', async () => {
+      const logStub = { warn: sandbox.stub(), info: sandbox.stub(), error: sandbox.stub() };
+      const siteIdStub = sandbox.stub(mockOpptyEntity, 'getSiteId').returns('a-different-site-id');
+      const ctrl = OpportunitiesController({
+        dataAccess: daWithPg, pathInfo: { headers: {} }, log: logStub, ...defaultAuthAttributes,
+      });
+      const res = await ctrl.getByUrl({ params: { siteId: SITE_ID }, data: { urls: [inputUrl] } });
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      // dropped for tenancy, not merely narrowed by type - absent from both the map and results
+      expect(body.opportunities).to.deep.equal({});
+      expect(body.results).to.deep.equal([{ url: inputUrl, opportunityIds: [] }]);
+      expect(logStub.warn).to.have.been.calledOnce;
+      expect(logStub.warn.firstCall.args[0]).to.match(/siteId did not match/);
+      siteIdStub.restore();
     });
 
     it('returns matched opportunities for the supplied urls', async () => {

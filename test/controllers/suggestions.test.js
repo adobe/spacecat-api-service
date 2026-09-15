@@ -15768,14 +15768,24 @@ describe('Suggestions Controller', () => {
       expect(batchStub).to.not.have.been.called;
     });
 
-    it('returns 500 when the postgrest client is unavailable', async () => {
+    it('returns 503 when the postgrest client is unavailable', async () => {
       const ctrl = SuggestionsController({
         dataAccess: { ...daWithPg, services: {} },
         pathInfo: { headers: { 'x-product': 'llmo' } },
         attributes: { authInfo: adminAuth() },
       }, mockSqs, {});
       const res = await ctrl.getByUrl({ params: { siteId: SITE_ID }, data: { urls: [inputUrl] } });
-      expect(res.status).to.equal(500);
+      expect(res.status).to.equal(503);
+    });
+
+    it('returns 503 when the postgrest client is present but not a real PostgREST client (no .from)', async () => {
+      const ctrl = SuggestionsController({
+        dataAccess: { ...daWithPg, services: { postgrestClient: {} } },
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        attributes: { authInfo: adminAuth() },
+      }, mockSqs, {});
+      const res = await ctrl.getByUrl({ params: { siteId: SITE_ID }, data: { urls: [inputUrl] } });
+      expect(res.status).to.equal(503);
     });
 
     it('returns 400 for an invalid urls body', async () => {
@@ -15835,6 +15845,71 @@ describe('Suggestions Controller', () => {
       expect(body.suggestions).to.deep.equal({});
       expect(body.results).to.deep.equal([]);
       expect(body.unmatchedUrls).to.deep.equal([inputUrl]);
+    });
+
+    it('returns 400 for a malformed locale', async () => {
+      const res = await controllerWithPg.getByUrl({
+        params: { siteId: SITE_ID }, data: { urls: [inputUrl], locale: 'not-a-locale!!' },
+      });
+      expect(res.status).to.equal(400);
+    });
+
+    it('honors a valid locale when projecting the matched suggestions', async () => {
+      const res = await controllerWithPg.getByUrl({
+        params: { siteId: SITE_ID }, data: { urls: [inputUrl], locale: 'en_us' },
+      });
+      expect(res.status).to.equal(200);
+    });
+
+    it('excludes an ungranted suggestion on a Summit-PLG site, exactly like every other suggestion read path', async () => {
+      // Regression test for the entitlement bypass: getByUrl must apply the same
+      // filterByGrantStatus gate that getAllForOpportunity/getByStatus/getByID apply,
+      // not just the D4 FACS composite gate.
+      mockSuggestionGrant.splitSuggestionsByGrantStatus.resolves({
+        grantedIds: [], notGrantedIds: [SUG_ID], grantIds: [],
+      });
+      const ControllerWithSummitPlg = await esmock('../../src/controllers/suggestions.js', {
+        '../../src/support/utils.js': { getIsSummitPlgEnabled: async () => true },
+      });
+      const ctrl = ControllerWithSummitPlg({
+        dataAccess: daWithPg,
+        pathInfo: { headers: { 'x-product': 'llmo', 'x-client-type': 'sites-optimizer-ui' } },
+        attributes: { authInfo: adminAuth() },
+      }, mockSqs, {});
+      const res = await ctrl.getByUrl({
+        params: { siteId: SITE_ID },
+        data: { urls: [inputUrl] },
+        pathInfo: { headers: { 'x-client-type': 'sites-optimizer-ui' } },
+      });
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.suggestions).to.deep.equal({});
+      expect(body.results).to.deep.equal([]);
+      expect(body.unmatchedUrls).to.deep.equal([inputUrl]);
+      expect(mockSuggestionGrant.splitSuggestionsByGrantStatus).to.have.been.calledOnce;
+    });
+
+    it('keeps a granted suggestion on a Summit-PLG site', async () => {
+      mockSuggestionGrant.splitSuggestionsByGrantStatus.resolves({
+        grantedIds: [SUG_ID], notGrantedIds: [], grantIds: [`grant-${SUG_ID}`],
+      });
+      const ControllerWithSummitPlg = await esmock('../../src/controllers/suggestions.js', {
+        '../../src/support/utils.js': { getIsSummitPlgEnabled: async () => true },
+      });
+      const ctrl = ControllerWithSummitPlg({
+        dataAccess: daWithPg,
+        pathInfo: { headers: { 'x-product': 'llmo', 'x-client-type': 'sites-optimizer-ui' } },
+        attributes: { authInfo: adminAuth() },
+      }, mockSqs, {});
+      const res = await ctrl.getByUrl({
+        params: { siteId: SITE_ID },
+        data: { urls: [inputUrl] },
+        pathInfo: { headers: { 'x-client-type': 'sites-optimizer-ui' } },
+      });
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.results).to.deep.equal([{ url: inputUrl, suggestionIds: [SUG_ID] }]);
+      expect(mockSuggestionGrant.splitSuggestionsByGrantStatus).to.have.been.calledOnce;
     });
   });
 });

@@ -152,18 +152,18 @@ describe('routeFacsCapabilities', () => {
       ).to.deep.equal([]);
     });
 
-    it('classifies every ASO POST /by-url URL-lookup route as a deferred collection', () => {
-      // The GET heuristic above skips POST routes; the by-url lookups return
+    it('classifies every ASO POST /by-urls URL-lookup route as a deferred collection', () => {
+      // The GET heuristic above skips POST routes; the by-urls lookups return
       // opportunity-derived data across ALL types too, so they MUST be classified
       // (else they hit the resolver's grant-on-any branch and leak cross-type data).
-      const byUrl = Object.keys(routeFacsCapabilities.PRODUCTS_ROUTES.ASO ?? {})
-        .filter((r) => /^POST .*\/by-url$/.test(r));
-      expect(byUrl.length, 'no ASO POST /by-url routes matched - heuristic stale?')
+      const byUrls = Object.keys(routeFacsCapabilities.PRODUCTS_ROUTES.ASO ?? {})
+        .filter((r) => /^POST .*\/by-urls$/.test(r));
+      expect(byUrls.length, 'no ASO POST /by-urls routes matched - heuristic stale?')
         .to.be.greaterThan(0);
-      const uncovered = byUrl.filter((r) => !isOpportunityDerivedCollectionRoute(r));
+      const uncovered = byUrls.filter((r) => !isOpportunityDerivedCollectionRoute(r));
       expect(
         uncovered,
-        'ASO POST /by-url routes not classified as deferred collections (they would grant-on-any '
+        'ASO POST /by-urls routes not classified as deferred collections (they would grant-on-any '
           + `and leak cross-type data - add them to isOpportunityDerivedCollectionRoute): ${uncovered.join(', ')}`,
       ).to.deep.equal([]);
     });
