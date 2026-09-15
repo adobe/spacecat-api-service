@@ -91,8 +91,26 @@ export const MAX_PROMPT_TEXT_LENGTH = 10_000;
  *   search?: string,
  *   sort?: string,
  *   order?: string,
+ *   maxPages?: number,
  * }} PromptListOptions
  */
+
+// The synchronous, edge-timeout-sensitive caller of listAllProjectPrompts
+// (listFacetedPrompts, driving the UI's search-as-you-type) cannot afford the
+// full 100-page/20K-item walk that listAllProjectPrompts's OTHER caller
+// (bulk-tags-job.js, an async background job with no Fastly budget) legitimately
+// needs. GitHub issue #3283: a ~9,690-prompt project took ~49 sequential
+// upstream pages and blew Fastly's ~15s edge timeout well before reaching the
+// 100-page ceiling, surfacing as a raw proxy 503 instead of a clean API error.
+// Assuming a conservative ~500ms per sequential upstream page round-trip (no
+// precise per-page timing survives the incident's Fastly-truncated logs), 10
+// pages budgets ~5s for the walk itself, leaving headroom in the ~15s budget for
+// the preceding tag-tree snapshot read, auth, and response serialization. This
+// intentionally trades "silently slow towards a correct answer" for "fails fast
+// with the existing typed PROMPT_CORPUS_INCOMPLETE error" on any project whose
+// corpus needs more than FACETED_PROMPT_LIST_MAX_PAGES * 200 = 2,000 prompts to
+// enumerate — well below the 20K ceiling the async paths still support.
+export const FACETED_PROMPT_LIST_MAX_PAGES = 10;
 
 /** @typedef {typeof ERROR_CODES[keyof typeof ERROR_CODES]} TagValidationErrorCode */
 
@@ -593,12 +611,11 @@ export async function listAllProjectPrompts(
   log,
 ) {
   const {
-    tagIds = [], search, sort, order,
+    tagIds = [], search, sort, order, maxPages = 100,
   } = options ?? {};
   const items = [];
   const limit = 200;
   let page = 1;
-  const maxPages = 100;
   while (page <= maxPages) {
     // eslint-disable-next-line no-await-in-loop
     const response = await transport.listPromptsByTags(semrushWorkspaceId, projectId, {
@@ -819,6 +836,7 @@ export async function listFacetedPrompts(
     search,
     sort,
     order,
+    maxPages: FACETED_PROMPT_LIST_MAX_PAGES,
   }, log);
   const filtered = resolved.groups.length === 0 ? all : all.filter((prompt) => {
     const promptTagIds = new Set((Array.isArray(prompt?.tags) ? prompt.tags : [])

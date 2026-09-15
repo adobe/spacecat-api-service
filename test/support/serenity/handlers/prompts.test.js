@@ -28,6 +28,7 @@ import {
   validateAsync,
   reconcilePublishErrors,
   listAllProjectPrompts,
+  listFacetedPrompts,
   normalizePromptTagSelection,
   resolveFacetedTagFilter,
   resolveCallerId,
@@ -38,6 +39,7 @@ import {
   capUpdateTagIds,
   parseUpdatePromptBody,
   MAX_PROMPT_TEXT_LENGTH,
+  FACETED_PROMPT_LIST_MAX_PAGES,
 } from '../../../../src/support/serenity/handlers/prompts.js';
 import { ErrorWithStatusCode } from '../../../../src/support/utils.js';
 import { SerenityTransportError } from '../../../../src/support/serenity/rest-transport.js';
@@ -156,6 +158,85 @@ describe('faceted prompt guard helpers', () => {
       expect(error.code).to.equal(ERROR_CODES.PROMPT_CORPUS_INCOMPLETE);
     });
     expect(listPromptsByTags).to.have.callCount(100);
+  });
+
+  it('fails closed after a caller-supplied maxPages instead of walking to 100 (issue #3283)', async () => {
+    const fullPage = Array.from({ length: 200 }, (_, index) => ({ id: `prompt-${index}` }));
+    const listPromptsByTags = sinon.stub().resolves({ items: fullPage });
+
+    await expect(listAllProjectPrompts(
+      { listPromptsByTags },
+      WORKSPACE,
+      'project-1',
+      { maxPages: FACETED_PROMPT_LIST_MAX_PAGES },
+      fakeLog(),
+    )).to.be.rejected.then((error) => {
+      expect(error.status).to.equal(503);
+      expect(error.code).to.equal(ERROR_CODES.PROMPT_CORPUS_INCOMPLETE);
+    });
+    expect(listPromptsByTags).to.have.callCount(FACETED_PROMPT_LIST_MAX_PAGES);
+  });
+
+  it('succeeds without hitting the ceiling when the corpus finishes exactly at maxPages', async () => {
+    const listPromptsByTags = sinon.stub().callsFake((_workspaceId, _projectId, { page }) => {
+      const isLastPage = page === FACETED_PROMPT_LIST_MAX_PAGES;
+      const size = isLastPage ? 50 : 200;
+      return Promise.resolve({
+        items: Array.from({ length: size }, (_, index) => ({ id: `p-${page}-${index}` })),
+      });
+    });
+
+    const items = await listAllProjectPrompts(
+      { listPromptsByTags },
+      WORKSPACE,
+      'project-1',
+      { maxPages: FACETED_PROMPT_LIST_MAX_PAGES },
+      fakeLog(),
+    );
+
+    expect(listPromptsByTags).to.have.callCount(FACETED_PROMPT_LIST_MAX_PAGES);
+    expect(items).to.have.lengthOf((FACETED_PROMPT_LIST_MAX_PAGES - 1) * 200 + 50);
+  });
+
+  it('walks the full 100-page/20K ceiling when no maxPages override is given (async callers, e.g. bulk-tags-job, are unaffected)', async () => {
+    const fullPage = Array.from({ length: 200 }, (_, index) => ({ id: `prompt-${index}` }));
+    const listPromptsByTags = sinon.stub().resolves({ items: fullPage });
+
+    await expect(listAllProjectPrompts(
+      { listPromptsByTags },
+      WORKSPACE,
+      'project-1',
+      undefined,
+      fakeLog(),
+    )).to.be.rejected.then((error) => {
+      expect(error.code).to.equal(ERROR_CODES.PROMPT_CORPUS_INCOMPLETE);
+    });
+    expect(listPromptsByTags).to.have.callCount(100);
+  });
+
+  it('listFacetedPrompts (the interactive search-as-you-type path) fails fast at FACETED_PROMPT_LIST_MAX_PAGES, not 100 (issue #3283)', async () => {
+    const fullPage = Array.from({ length: 200 }, (_, index) => ({ id: `prompt-${index}` }));
+    const listProjectTags = makeListProjectTagsStub();
+    const listPromptsByTags = sinon.stub().resolves({ items: fullPage });
+    const transport = { listProjectTags, listPromptsByTags };
+
+    await expect(listFacetedPrompts(
+      transport,
+      WORKSPACE,
+      'project-1',
+      {
+        geoTargetId: 2840,
+        languageCode: 'en',
+        page: 1,
+        limit: 50,
+        tagIds: [],
+      },
+      fakeLog(),
+    )).to.be.rejected.then((error) => {
+      expect(error.status).to.equal(503);
+      expect(error.code).to.equal(ERROR_CODES.PROMPT_CORPUS_INCOMPLETE);
+    });
+    expect(listPromptsByTags).to.have.callCount(FACETED_PROMPT_LIST_MAX_PAGES);
   });
 
   it('rejects unknown, root, read-only, and unsupported-depth facet ids', async () => {
