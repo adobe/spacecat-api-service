@@ -91,8 +91,26 @@ export const MAX_PROMPT_TEXT_LENGTH = 10_000;
  *   search?: string,
  *   sort?: string,
  *   order?: string,
+ *   maxPages?: number,
  * }} PromptListOptions
  */
+
+// The synchronous, edge-timeout-sensitive caller of listAllProjectPrompts
+// (listFacetedPrompts, driving the UI's search-as-you-type) cannot afford the
+// full 100-page/20K-item walk that listAllProjectPrompts's OTHER caller
+// (bulk-tags-job.js, an async background job with no Fastly budget) legitimately
+// needs. GitHub issue #3283: a ~9,690-prompt project took ~49 sequential
+// upstream pages and blew Fastly's ~15s edge timeout well before reaching the
+// 100-page ceiling, surfacing as a raw proxy 503 instead of a clean API error.
+// Assuming a conservative ~500ms per sequential upstream page round-trip (no
+// precise per-page timing survives the incident's Fastly-truncated logs), 10
+// pages budgets ~5s for the walk itself, leaving headroom in the ~15s budget for
+// the preceding tag-tree snapshot read, auth, and response serialization. This
+// intentionally trades "silently slow towards a correct answer" for "fails fast
+// with the existing typed PROMPT_CORPUS_INCOMPLETE error" on any project whose
+// corpus needs more than FACETED_PROMPT_LIST_MAX_PAGES * 200 = 2,000 prompts to
+// enumerate — well below the 20K ceiling the async paths still support.
+export const FACETED_PROMPT_LIST_MAX_PAGES = 10;
 
 /** @typedef {typeof ERROR_CODES[keyof typeof ERROR_CODES]} TagValidationErrorCode */
 
@@ -591,12 +609,11 @@ export async function listAllProjectPrompts(
   log,
 ) {
   const {
-    tagIds = [], search, sort, order,
+    tagIds = [], search, sort, order, maxPages = 100,
   } = options ?? {};
   const items = [];
   const limit = 200;
   let page = 1;
-  const maxPages = 100;
   while (page <= maxPages) {
     // eslint-disable-next-line no-await-in-loop
     const response = await transport.listPromptsByTags(semrushWorkspaceId, projectId, {
@@ -811,13 +828,59 @@ export async function listFacetedPrompts(
     log,
     snapshot,
   );
+
+  // 0 or 1 tag-family groups: the AND-across-families filter below is provably
+  // a no-op here — 0 groups means `filtered` would equal the unfiltered set
+  // anyway, and 1 group means upstream's own OR-by-tag_ids already returns
+  // exactly that group's members, so re-checking membership locally repeats
+  // work upstream already did. A full corpus walk buys nothing in either case,
+  // so skip it and delegate to a single paginated upstream call — the same
+  // call shape and total-count heuristic the non-faceted branch of
+  // handleListPrompts already uses successfully (see above). This is what
+  // lets a bare page load (0 groups) or a single-family search survive a
+  // large project (verified: Adobe Helpx carries 38,764 serenity prompts,
+  // an order of magnitude past even the pre-existing 100-page/20,000-item
+  // walk ceiling) instead of failing on every request regardless of query.
+  // Only 2+ simultaneous families still need the bounded walk below, since
+  // upstream cannot express "AND across families" in a single call.
+  if (resolved.groups.length <= 1) {
+    const resp = await transport.listPromptsByTags(semrushWorkspaceId, projectId, {
+      tag_ids: resolved.candidateIds,
+      page,
+      limit,
+      search,
+      ...(sort ? { sort, order } : {}),
+    });
+    const items = Array.isArray(resp?.items) ? resp.items : [];
+    let total;
+    if (items.length < limit) {
+      total = (page - 1) * limit + items.length;
+    } else {
+      total = Number.isFinite(resp?.total) ? resp.total : items.length;
+    }
+    return {
+      items: items
+        .map((item) => buildPromptDto(
+          geoTargetId,
+          languageCode,
+          item,
+          resolved.compatibilityById,
+        ))
+        .filter(Boolean),
+      total,
+      page,
+      limit,
+    };
+  }
+
   const all = await listAllProjectPrompts(transport, semrushWorkspaceId, projectId, {
     tagIds: resolved.candidateIds,
     search,
     sort,
     order,
+    maxPages: FACETED_PROMPT_LIST_MAX_PAGES,
   }, log);
-  const filtered = resolved.groups.length === 0 ? all : all.filter((prompt) => {
+  const filtered = all.filter((prompt) => {
     const promptTagIds = new Set((Array.isArray(prompt?.tags) ? prompt.tags : [])
       .map((tag) => (typeof tag === 'string' ? tag : String(tag?.id ?? '')))
       .filter(Boolean));

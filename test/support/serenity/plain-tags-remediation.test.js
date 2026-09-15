@@ -821,6 +821,31 @@ describe('remaining plain-tags regression coverage', () => {
       expect(transport.updateProjectTag).not.to.have.been.called;
     });
 
+    it('rejects create under an unknown parent as an invalid request', async () => {
+      const { transport } = deepAuthoringFixture();
+
+      await expect(handleCreateTag(
+        transport,
+        authoringDataAccess(),
+        BRAND,
+        WS,
+        {
+          type: 'tag',
+          name: 'Missing Parent Child',
+          parentId: 'missing-parent',
+          geoTargetId: 2840,
+          languageCode: 'en',
+        },
+        fakeLog(),
+        true,
+      )).to.be.rejected.then((error) => {
+        expect(error.status).to.equal(400);
+        expect(error.message)
+          .to.equal('parentId must be the "tag" root or one of its descendants');
+      });
+      expect(transport.createProjectTags).not.to.have.been.called;
+    });
+
     it('keeps deep re-parent disabled by default without changing the existing tag', async () => {
       const { transport, deepParent } = deepAuthoringFixture();
 
@@ -1048,18 +1073,30 @@ describe('remaining plain-tags regression coverage', () => {
   });
 
   describe('listFacetedPrompts pagination', () => {
-    it('applies page-2 arithmetic after filtering the complete cohort', async () => {
+    // With the 0/1-group fast path (issue #3283), a single selected family
+    // delegates to one paginated upstream call. The complete-cohort walk + local
+    // AND-across-families filter + page-slice arithmetic this test covers now runs
+    // only when 2+ families are selected, so the selection uses two families.
+    it('applies page-2 arithmetic after filtering the complete cohort (2+ families)', async () => {
       const rootPath = [{ id: 'tag-root', name: 'tag' }];
       const listProjectTags = pagedTreeStub({
-        '': [tagNode('tag-root', 'tag', null, null, 1)],
-        'tag-root': [tagNode('family', 'Family', 'tag-root', rootPath)],
+        '': [tagNode('tag-root', 'tag', null, null, 2)],
+        'tag-root': [
+          tagNode('family', 'Family', 'tag-root', rootPath),
+          tagNode('family2', 'Family2', 'tag-root', rootPath),
+        ],
       });
+      // Only prompts carrying BOTH families survive the AND-across-families filter.
+      const bothFamilies = [
+        { id: 'family', name: 'Family', path: rootPath },
+        { id: 'family2', name: 'Family2', path: rootPath },
+      ];
       const prompts = [
-        { id: 'p-1', name: 'one', tags: [{ id: 'family', name: 'Family', path: rootPath }] },
-        { id: 'p-x', name: 'other', tags: [{ id: 'other', name: 'Other', path: rootPath }] },
-        { id: 'p-2', name: 'two', tags: [{ id: 'family', name: 'Family', path: rootPath }] },
+        { id: 'p-1', name: 'one', tags: bothFamilies },
+        { id: 'p-x', name: 'other', tags: [{ id: 'family', name: 'Family', path: rootPath }] },
+        { id: 'p-2', name: 'two', tags: bothFamilies },
         { id: 'p-y', name: 'another', tags: [] },
-        { id: 'p-3', name: 'three', tags: [{ id: 'family', name: 'Family', path: rootPath }] },
+        { id: 'p-3', name: 'three', tags: bothFamilies },
       ];
       const listPromptsByTags = sinon.stub().resolves({ items: prompts });
 
@@ -1072,7 +1109,7 @@ describe('remaining plain-tags regression coverage', () => {
           languageCode: 'en',
           page: 2,
           limit: 2,
-          tagIds: ['family'],
+          tagIds: ['family', 'family2'],
         },
         fakeLog(),
       );
@@ -1082,7 +1119,7 @@ describe('remaining plain-tags regression coverage', () => {
       expect(listPromptsByTags).to.have.been.calledOnceWith(
         WS,
         PROJECT,
-        sinon.match({ tag_ids: ['family'], page: 1, limit: 200 }),
+        sinon.match({ tag_ids: ['family', 'family2'], page: 1, limit: 200 }),
       );
     });
   });

@@ -659,7 +659,9 @@ describe('SerenityController', () => {
       });
       const log = fakeLog();
       const controller = SerenityController({ env: {} }, log, {});
-      const ctx = fakeContext();
+      const ctx = fakeContext({
+        env: { SERENITY_TAG_SEARCH_CURSOR_SECRET: 'search-secret' },
+      });
       ctx.request = {
         url: 'https://x/v2/orgs/x/brands/y/serenity/prompts?geoTargetId=2840&languageCode=en&page=2',
       };
@@ -1166,6 +1168,25 @@ describe('SerenityController', () => {
         limit: '10',
       });
       expect(handlers.handleSearchTags.firstCall.args[6]).to.equal('search-secret');
+    });
+
+    it('searchTags returns authorization errors without dispatching', async () => {
+      accessControlHasAccessStub.resolves(false);
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.searchTags(fakeContext());
+
+      expect(response.status).to.equal(403);
+      expect(handlers.handleSearchTags).not.to.have.been.called;
+      expect(handlers.handleSearchTagsSubworkspace).not.to.have.been.called;
+    });
+
+    it('searchTags maps handler errors through the Serenity error envelope', async () => {
+      handlers.handleSearchTags.rejects(new ErrorWithStatusCode('invalid search', 400));
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.searchTags(fakeContext());
+
+      expect(response.status).to.equal(400);
+      expect((await readBody(response)).message).to.equal('invalid search');
     });
 
     it('listModels dispatches to handleListModels and wraps the result in ok()', async () => {
@@ -2433,6 +2454,28 @@ describe('SerenityController', () => {
       expect(handlers.handleListTagsSubworkspace).to.have.been.calledOnce;
       expect(handlers.handleListTagsSubworkspace.firstCall.args[1]).to.equal('subworkspace-ws-1');
       expect(handlers.handleListTags).to.not.have.been.called;
+    });
+
+    it('searchTags routes to the subworkspace handler in subworkspace mode', async () => {
+      handlers.handleSearchTagsSubworkspace.resolves({
+        items: [], cursor: null, complete: true,
+      });
+      const controller = SerenityController(
+        { env: { SERENITY_TAG_SEARCH_CURSOR_SECRET: 'search-secret' } },
+        fakeLog(),
+        {},
+      );
+      const ctx = fakeContext({
+        env: { SERENITY_TAG_SEARCH_CURSOR_SECRET: 'search-secret' },
+      });
+      ctx.request = { url: 'https://x?geoTargetId=2840&languageCode=en&q=campaign' };
+      const response = await controller.searchTags(ctx);
+
+      expect(response.status).to.equal(200);
+      expect(handlers.handleSearchTagsSubworkspace).to.have.been.calledOnce;
+      expect(handlers.handleSearchTagsSubworkspace.firstCall.args[1]).to.equal('subworkspace-ws-1');
+      expect(handlers.handleSearchTagsSubworkspace.firstCall.args[4]).to.equal('search-secret');
+      expect(handlers.handleSearchTags).not.to.have.been.called;
     });
 
     it('listModels routes to the subworkspace handler in subworkspace mode', async () => {

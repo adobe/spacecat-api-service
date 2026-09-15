@@ -1,3 +1,10 @@
+## [1.814.3](https://github.com/adobe/spacecat-api-service/compare/v1.814.2...v1.814.3) (2026-09-15)
+
+
+### Bug Fixes
+
+* **serenity:** cap faceted prompt corpus walk to fail fast on large brands ([#3285](https://github.com/adobe/spacecat-api-service/issues/3285)) ([10eef6a](https://github.com/adobe/spacecat-api-service/commit/10eef6a3f78471da6d8824c1cdcdf62faae3a22f)), closes [#3279](https://github.com/adobe/spacecat-api-service/issues/3279) [#3280](https://github.com/adobe/spacecat-api-service/issues/3280) [#3280](https://github.com/adobe/spacecat-api-service/issues/3280) [Hi#level](https://github.com/Hi/issues/level) [#3283](https://github.com/adobe/spacecat-api-service/issues/3283) [#3283](https://github.com/adobe/spacecat-api-service/issues/3283) [#3279](https://github.com/adobe/spacecat-api-service/issues/3279) [#3280](https://github.com/adobe/spacecat-api-service/issues/3280)
+
 ## [1.814.2](https://github.com/adobe/spacecat-api-service/compare/v1.814.1...v1.814.2) (2026-09-15)
 
 

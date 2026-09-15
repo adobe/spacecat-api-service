@@ -10,12 +10,14 @@
  * governing permissions and limitations under the License.
  */
 
+import { createHmac } from 'node:crypto';
 import { expect, use } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import {
   handleSearchTags,
+  handleSearchTagsSubworkspace,
   MAX_TAG_SEARCH_LIMIT,
   MAX_TAG_SEARCH_QUERY_LENGTH,
   searchTagSnapshot,
@@ -55,6 +57,18 @@ function dataAccess() {
       findBySlice: sinon.stub().resolves({ getSemrushProjectId: () => PROJECT }),
     },
   };
+}
+
+function signedCursor(payload) {
+  const encoded = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
+  const signature = createHmac('sha256', SECRET).update(encoded).digest('base64url');
+  return `${encoded}.${signature}`;
+}
+
+function rewriteCursor(cursor, update) {
+  const [encoded] = cursor.split('.');
+  const payload = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'));
+  return signedCursor({ ...payload, ...update });
 }
 
 function tag(id, name, parentId, childrenCount, path = undefined) {
@@ -360,6 +374,171 @@ describe('Serenity custom-tag search', () => {
     }
   });
 
+  it('rejects invalid selectors, a missing query, and malformed cursor payloads', async () => {
+    const transport = deepTransport();
+    for (const query of [
+      { geoTargetId: 'nope', languageCode: 'en', q: 'needle' },
+      { geoTargetId: 2840, languageCode: '', q: 'needle' },
+      { geoTargetId: 2840, languageCode: 'en' },
+      {
+        geoTargetId: 2840, languageCode: 'en', q: 'needle', cursor: 'malformed',
+      },
+      {
+        geoTargetId: 2840,
+        languageCode: 'en',
+        q: 'needle',
+        cursor: signedCursor({
+          v: 1,
+          offset: 'invalid',
+          q: 'needle',
+          project: `${WORKSPACE}:${PROJECT}`,
+          revision: 'revision',
+        }),
+      },
+    ]) {
+      // eslint-disable-next-line no-await-in-loop
+      await expect(handleSearchTags(
+        transport,
+        dataAccess(),
+        BRAND,
+        WORKSPACE,
+        query,
+        fakeLog(),
+        SECRET,
+      )).to.be.rejected.then((error) => {
+        expect(error.status).to.equal(400);
+      });
+    }
+  });
+
+  it('rejects missing cursor signing, request-mismatched cursors, and invalid offsets', async () => {
+    const transport = deepTransport();
+    await expect(handleSearchTags(
+      transport,
+      dataAccess(),
+      BRAND,
+      WORKSPACE,
+      {
+        geoTargetId: 2840, languageCode: 'en', q: 'needle', limit: 1,
+      },
+      fakeLog(),
+      undefined,
+    )).to.be.rejected.then((error) => {
+      expect(error.status).to.equal(503);
+      expect(error.code).to.equal(ERROR_CODES.TAG_SEARCH_UNAVAILABLE);
+    });
+
+    const first = await handleSearchTags(
+      transport,
+      dataAccess(),
+      BRAND,
+      WORKSPACE,
+      {
+        geoTargetId: 2840, languageCode: 'en', q: 'needle', limit: 1,
+      },
+      fakeLog(),
+      SECRET,
+    );
+    await expect(handleSearchTags(
+      transport,
+      dataAccess(),
+      BRAND,
+      WORKSPACE,
+      {
+        geoTargetId: 2840,
+        languageCode: 'en',
+        q: 'different',
+        limit: 1,
+        cursor: first.cursor,
+      },
+      fakeLog(),
+      SECRET,
+    )).to.be.rejected.then((error) => {
+      expect(error.status).to.equal(400);
+      expect(error.code).to.equal(ERROR_CODES.TAG_SEARCH_CURSOR_INVALID);
+    });
+    await expect(handleSearchTags(
+      transport,
+      dataAccess(),
+      BRAND,
+      WORKSPACE,
+      {
+        geoTargetId: 2840,
+        languageCode: 'en',
+        q: 'needle',
+        limit: 1,
+        cursor: rewriteCursor(first.cursor, { offset: 999 }),
+      },
+      fakeLog(),
+      SECRET,
+    )).to.be.rejected.then((error) => {
+      expect(error.status).to.equal(400);
+      expect(error.code).to.equal(ERROR_CODES.TAG_SEARCH_CURSOR_INVALID);
+    });
+  });
+
+  it('returns marketNotFound for missing flat and subworkspace slices', async () => {
+    const missingDataAccess = dataAccess();
+    missingDataAccess.BrandSemrushProject.findBySlice.resolves(null);
+    await expect(handleSearchTags(
+      deepTransport(),
+      missingDataAccess,
+      BRAND,
+      WORKSPACE,
+      {
+        geoTargetId: 2840, languageCode: 'en', q: 'needle',
+      },
+      fakeLog(),
+      SECRET,
+    )).to.be.rejected.then((error) => {
+      expect(error.status).to.equal(404);
+      expect(error.code).to.equal(ERROR_CODES.MARKET_NOT_FOUND);
+    });
+
+    await expect(handleSearchTagsSubworkspace(
+      { listProjects: sinon.stub().resolves({ items: [] }) },
+      WORKSPACE,
+      {
+        geoTargetId: 2840, languageCode: 'en', q: 'needle',
+      },
+      fakeLog(),
+      SECRET,
+    )).to.be.rejected.then((error) => {
+      expect(error.status).to.equal(404);
+      expect(error.code).to.equal(ERROR_CODES.MARKET_NOT_FOUND);
+    });
+  });
+
+  it('searches the resolved subworkspace project', async () => {
+    const transport = {
+      ...deepTransport(),
+      listProjects: sinon.stub().resolves({
+        items: [{
+          id: PROJECT,
+          settings: {
+            ai: {
+              location: { id: 2840 },
+              language: { name: 'en' },
+            },
+          },
+        }],
+      }),
+    };
+
+    const result = await handleSearchTagsSubworkspace(
+      transport,
+      WORKSPACE,
+      {
+        geoTargetId: 2840, languageCode: 'en', q: 'needle',
+      },
+      fakeLog(),
+      SECRET,
+    );
+
+    expect(result.items.map((item) => item.id)).to.deep.equal(['leaf', 'other-leaf']);
+    expect(transport.listProjects).to.have.been.calledOnceWith(WORKSPACE);
+  });
+
   it('fails instead of returning partial results for an incomplete Semrush page', async () => {
     const transport = {
       listProjectTags: sinon.stub().resolves({
@@ -397,6 +576,83 @@ describe('Serenity custom-tag search', () => {
       expect(error.status).to.equal(503);
       expect(error.code).to.equal(ERROR_CODES.TAG_TREE_LIMIT_EXCEEDED);
       expect(error.details).to.deep.equal({ budget: 'nodes', maximum: 2 });
+    });
+  });
+
+  it('fails explicitly when traversal duration or initial-root node budgets are exhausted', async () => {
+    const roots = {
+      listProjectTags: sinon.stub().resolves({
+        items: [
+          tag('category-root', 'category', null, 0),
+          tag('tag-root', 'tag', null, 0),
+        ],
+        page: 1,
+        total: 2,
+      }),
+    };
+    await expect(loadTagTreeSnapshot(
+      roots,
+      WORKSPACE,
+      PROJECT,
+      fakeLog(),
+      { maxDurationMs: 0 },
+    )).to.be.rejected.then((error) => {
+      expect(error.code).to.equal(ERROR_CODES.TAG_TREE_LIMIT_EXCEEDED);
+      expect(error.details).to.deep.equal({ budget: 'duration', maximum: 0 });
+    });
+    await expect(loadTagTreeSnapshot(
+      roots,
+      WORKSPACE,
+      PROJECT,
+      fakeLog(),
+      { maxNodes: 1 },
+    )).to.be.rejected.then((error) => {
+      expect(error.code).to.equal(ERROR_CODES.TAG_TREE_LIMIT_EXCEEDED);
+      expect(error.details).to.deep.equal({ budget: 'nodes', maximum: 1 });
+    });
+  });
+
+  it('rejects duplicate selected roots and child parent mismatches', async () => {
+    await expect(loadTagTreeSnapshot(
+      {
+        listProjectTags: sinon.stub().resolves({
+          items: [
+            tag('category-a', 'category', null, 0),
+            tag('category-b', 'category', null, 0),
+          ],
+          page: 1,
+          total: 2,
+        }),
+      },
+      WORKSPACE,
+      PROJECT,
+      fakeLog(),
+      { rootName: 'category' },
+    )).to.be.rejected.then((error) => {
+      expect(error.code).to.equal(ERROR_CODES.TAG_TREE_DATA_INTEGRITY);
+      expect(error.details).to.deep.equal({ reason: 'ambiguousRoot', rootName: 'category' });
+    });
+
+    const root = { id: 'tag-root', name: 'tag' };
+    await expect(loadTagTreeSnapshot(
+      {
+        listProjectTags: sinon.stub().callsFake((_workspace, _project, options) => (
+          Promise.resolve({
+            items: options.parentId
+              ? [tag('child', 'Child', 'wrong-parent', 0, [root])]
+              : [tag(root.id, root.name, null, 1)],
+            page: options.page,
+            total: 1,
+          })
+        )),
+      },
+      WORKSPACE,
+      PROJECT,
+      fakeLog(),
+      { rootName: 'tag' },
+    )).to.be.rejected.then((error) => {
+      expect(error.code).to.equal(ERROR_CODES.TAG_TREE_DATA_INTEGRITY);
+      expect(error.details).to.deep.equal({ reason: 'parentMismatch', tagId: 'child' });
     });
   });
 
