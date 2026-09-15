@@ -10,6 +10,10 @@
  * governing permissions and limitations under the License.
  */
 
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+
 import { expect } from 'chai';
 
 import { iso31661Alpha2ToNumeric } from 'iso-3166';
@@ -21,7 +25,7 @@ import {
 } from '../../../src/support/serenity/google-geo-target-names.js';
 
 describe('serenity locations — resolveLocation', () => {
-  it('maps an ISO alpha-2 code to geoTargetId (2000 + ISO numeric) + English name', () => {
+  it('maps an ISO alpha-2 code to geoTargetId (2000 + ISO numeric) + Google geo-target name', () => {
     expect(resolveLocation('US')).to.deep.equal({
       geoTargetId: 2840,
       locationName: 'United States',
@@ -146,5 +150,73 @@ describe('serenity locations — location_name is Google Ads geo-target, not CLD
   it('omits Kosovo (XK), which Google publishes but ISO 3166-1 has no numeric for', () => {
     expect(GOOGLE_GEO_TARGET_NAMES.XK).to.equal(undefined);
     expect(resolveLocation('XK')).to.equal(null);
+  });
+});
+
+describe('serenity locations — GOOGLE_GEO_TARGET_NAMES matches Google’s published data', () => {
+  // Machine-check the 246 country/region names against Google's OWN published
+  // geotargets CSV, committed as a fixture. Without this, the ~240 non-divergent
+  // entries in the 249-key map are unverifiable in-repo: a single silent typo
+  // (an em-dash, a dropped "The", "Turkey" creeping back) would reintroduce the
+  // exact silent-zero-collection bug this module fixes, invisible to CI and to
+  // human review of a 300-line data wall. Fixture = top-level (empty Parent ID)
+  // Active Country/Region rows of geotargets-2026-08-12.csv; regenerate both the
+  // fixture and the map from a fresh snapshot together (see the module header).
+  const CSV = join(
+    dirname(fileURLToPath(import.meta.url)),
+    '../../fixtures/serenity/google-geotargets-2026-08-12.country-region.csv',
+  );
+
+  // Parse the fixture (every field double-quoted, no embedded commas/quotes in
+  // these country names) into { countryCode: name }.
+  const parseRow = (line) => line.split('","').map((c) => c.replace(/^"|"$/g, ''));
+  const rows = readFileSync(CSV, 'utf8').trim().split('\n');
+  const header = parseRow(rows[0]);
+  const nameIdx = header.indexOf('Name');
+  const ccIdx = header.indexOf('Country Code');
+  const google = {};
+  for (const line of rows.slice(1)) {
+    const cols = parseRow(line);
+    google[cols[ccIdx]] = cols[nameIdx];
+  }
+
+  it('reproduces the fixture: 246 country/region rows', () => {
+    expect(Object.keys(google)).to.have.lengthOf(246);
+  });
+
+  // Google publishes XK (Kosovo) but ISO 3166-1 assigns it no numeric, so it can't
+  // be resolved by the `2000 + numeric` formula and is deliberately absent from the
+  // map. It is the ONLY Google code excluded; assert that so the exclusion can't
+  // silently grow to hide a real gap.
+  it('excludes exactly one Google code (XK) that ISO 3166-1 cannot resolve', () => {
+    const notInMap = Object.keys(google).filter((code) => !(code in GOOGLE_GEO_TARGET_NAMES));
+    expect(notInMap).to.deep.equal(['XK']);
+    expect(iso31661Alpha2ToNumeric.XK).to.equal(undefined);
+  });
+
+  it('every name in the map equals Google’s published name (for codes Google publishes)', () => {
+    // XK is filtered out — not ISO-resolvable, asserted separately above.
+    const mismatches = Object.entries(google)
+      .filter(([code]) => code in iso31661Alpha2ToNumeric)
+      .filter(([code, name]) => GOOGLE_GEO_TARGET_NAMES[code] !== name)
+      .map(([code, name]) => `${code}: map=${JSON.stringify(GOOGLE_GEO_TARGET_NAMES[code])} google=${JSON.stringify(name)}`);
+    expect(mismatches, mismatches.join('; ')).to.deep.equal([]);
+  });
+
+  it('MARKETS_WITHOUT_GOOGLE_GEO_TARGET are exactly the ISO codes Google publishes no row for', () => {
+    const isoWithoutGoogle = Object.keys(iso31661Alpha2ToNumeric)
+      .filter((code) => !(code in google))
+      .sort();
+    expect(isoWithoutGoogle).to.deep.equal([...MARKETS_WITHOUT_GOOGLE_GEO_TARGET].sort());
+  });
+
+  it('resolveLocation returns Google’s exact name for every code Google publishes', () => {
+    // XK is filtered out — not ISO-resolvable, asserted separately above.
+    const bad = Object.entries(google)
+      .filter(([code]) => code in iso31661Alpha2ToNumeric)
+      .map(([code, name]) => [code, name, resolveLocation(code)])
+      .filter(([, name, resolved]) => !resolved || resolved.locationName !== name)
+      .map(([code, name, resolved]) => `${code}: ${JSON.stringify(resolved && resolved.locationName)} != ${JSON.stringify(name)}`);
+    expect(bad, bad.join('; ')).to.deep.equal([]);
   });
 });

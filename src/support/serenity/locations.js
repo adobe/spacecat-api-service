@@ -71,9 +71,20 @@ export function resolveLocation(market) {
   if (!numeric) {
     return null;
   }
+  // Guarantee the name at the boundary, not just via a test elsewhere: the id
+  // resolves off `iso-3166` but the name off the hand-maintained map, and the
+  // whole point of this module is that a missing/unmatched name silently breaks
+  // Google AI collection. If the two datasets ever diverge (e.g. an `iso-3166`
+  // bump adds a code the map lacks), fail loud here — the caller maps null to a
+  // 400 — rather than shipping `location_name: undefined` to Semrush. Today the
+  // map is total over the ISO set (enforced by a test), so this never triggers.
+  const locationName = GOOGLE_GEO_TARGET_NAMES[alpha2];
+  if (!locationName) {
+    return null;
+  }
   return {
     geoTargetId: 2000 + Number(numeric),
-    locationName: GOOGLE_GEO_TARGET_NAMES[alpha2],
+    locationName,
   };
 }
 
