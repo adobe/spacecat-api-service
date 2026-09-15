@@ -184,6 +184,12 @@ async function withMissingIntentFallback(postgrestClient, run) {
 // stays well under proxy/header URL-length limits: a full page (pageSize caps at
 // 1000) of ~36-char UUIDs would be ~37KB and risk a 414. 100 ids ≈ 3.7KB.
 const INTENT_LOOKUP_CHUNK_SIZE = 100;
+// Chunk size for the set-based bulk delete. PostgREST caps any single response at
+// 1000 rows, so a `prompt_id=in.(...)` update over >1000 matching ids would delete
+// them all yet omit the excess from RETURNING, mis-reporting deleted ids as
+// not-found. Chunking under the cap keeps the returned-id diff exact for any input
+// size, independent of the caller's own cap. 500 stays comfortably under 1000.
+const PROMPT_DELETE_CHUNK_SIZE = 500;
 
 function chunkArray(arr, size) {
   const chunks = [];
@@ -1406,28 +1412,32 @@ export async function bulkDeletePrompts({
   // time-to-first-byte past the ~15s Fastly edge timeout, surfacing as a 503 to
   // the caller (#3279). A single `prompt_id=in.(...)` update is one round-trip:
   // each id still resolves through uq_prompt_per_brand (brand_id, prompt_id), and
-  // the returning rows tell us exactly which ids matched. The caller caps the
-  // batch at 100 ids, well under PostgREST's 1000-row response ceiling, so no
-  // chunking is needed here.
+  // the returning rows tell us exactly which ids matched. Chunked under the
+  // PostgREST 1000-row response ceiling (PROMPT_DELETE_CHUNK_SIZE) so the
+  // returned-id diff stays exact for any input size, not just the caller's cap.
   let rows;
   try {
-    const { data, error } = await postgrestClient
-      .from('prompts')
-      .update({ status: 'deleted', updated_by: updatedBy })
-      .eq('organization_id', organizationId)
-      .eq('brand_id', brandUuid)
-      .in('prompt_id', promptIds)
-      .select('prompt_id');
-
-    if (error) {
+    // One round-trip per chunk (a single chunk for the caller's 100-id cap); the
+    // chunking only matters if a future caller exceeds PROMPT_DELETE_CHUNK_SIZE.
+    const results = await Promise.all(
+      chunkArray(promptIds, PROMPT_DELETE_CHUNK_SIZE).map((chunk) => postgrestClient
+        .from('prompts')
+        .update({ status: 'deleted', updated_by: updatedBy })
+        .eq('organization_id', organizationId)
+        .eq('brand_id', brandUuid)
+        .in('prompt_id', chunk)
+        .select('prompt_id')),
+    );
+    const firstError = results.find((r) => r.error)?.error;
+    if (firstError) {
       // A batch-level failure fails every id identically — fan it out per id
       // so the caller's { metadata, failures } contract is unchanged from the loop.
       return {
         metadata: { total, success: 0, failure: total },
-        failures: promptIds.map((promptId) => ({ promptId, reason: error.message })),
+        failures: promptIds.map((promptId) => ({ promptId, reason: firstError.message })),
       };
     }
-    rows = data ?? [];
+    rows = results.flatMap((r) => r.data ?? []);
   } catch (err) {
     return {
       metadata: { total, success: 0, failure: total },

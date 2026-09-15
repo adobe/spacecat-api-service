@@ -3685,6 +3685,41 @@ describe('prompts-storage', () => {
       expect(result.metadata.success).to.equal(3);
     });
 
+    it('chunks a batch larger than the PostgREST cap and still counts every id', async () => {
+      let fromCalls = 0;
+      const client = {
+        from: () => {
+          fromCalls += 1;
+          let inIds = [];
+          const chain = {
+            update: () => chain,
+            eq: () => chain,
+            in: (_col, ids) => {
+              inIds = ids;
+              return chain;
+            },
+            select: () => Promise.resolve({
+              data: inIds.map((id) => ({ prompt_id: id })),
+              error: null,
+            }),
+          };
+          return chain;
+        },
+      };
+      const promptIds = Array.from({ length: 1200 }, (_, i) => `p${i}`);
+      const result = await bulkDeletePrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        promptIds,
+        postgrestClient: client,
+      });
+      expect(result.metadata.total).to.equal(1200);
+      expect(result.metadata.success).to.equal(1200);
+      expect(result.metadata.failure).to.equal(0);
+      // 1200 ids chunked at 500 -> 3 round-trips (500 + 500 + 200).
+      expect(fromCalls).to.equal(3);
+    });
+
     it('reports ids the update did not echo back as not-found failures', async () => {
       const client = { from: () => makeChain({ data: [{ prompt_id: 'p1' }], error: null }) };
       const result = await bulkDeletePrompts({
