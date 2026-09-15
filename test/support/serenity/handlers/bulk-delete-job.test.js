@@ -13,6 +13,7 @@
 import { expect, use } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
+import { isRetryableJobError } from '../../../../src/support/serenity/async-job-runner.js';
 import {
   acceptBulkDelete,
   bulkDeleteHandler,
@@ -85,28 +86,48 @@ describe('bulk-delete-job', () => {
       },
     });
 
-    it('runs the delete via the injected transport and completes the job with the result', async () => {
+    it('returns the delete result for the runner to persist (does not self-manage job state)', async () => {
       const transport = {
         deletePromptsByIds: sinon.stub().resolves({}),
         publishProject: sinon.stub().resolves({}),
       };
       const job = makeJob(metadata);
-      await bulkDeleteHandler(context(), job, 'access-token', transport);
+      const returned = await bulkDeleteHandler(context(), job, 'access-token', transport);
       expect(transport.deletePromptsByIds).to.have.been.calledOnce;
-      expect(job.statusVal).to.equal('COMPLETED');
-      expect(job.resultVal).to.deep.include({ deleted: 1 });
-      expect(job.save).to.have.been.called;
+      // The runner (index.js:325-327) sets COMPLETED + setResult(returnValue); the
+      // handler must NOT self-manage state or the runner would overwrite it.
+      expect(returned).to.deep.include({ deleted: 1 });
+      expect(job.statusVal).to.equal('IN_PROGRESS');
+      expect(job.save).to.not.have.been.called;
     });
 
-    it('marks the job FAILED (non-retryable) on a deterministic error', async () => {
+    it('through the runner contract: the returned result is what gets persisted', async () => {
+      const transport = {
+        deletePromptsByIds: sinon.stub().resolves({}),
+        publishProject: sinon.stub().resolves({}),
+      };
+      const job = makeJob(metadata);
+      // Simulate the runner's post-handler processing (index.js:325-327).
+      const result = await bulkDeleteHandler(context(), job, 'access-token', transport);
+      job.setStatus('COMPLETED');
+      job.setResult(result ?? null);
+      expect(job.statusVal).to.equal('COMPLETED');
+      expect(job.resultVal).to.deep.include({ deleted: 1 });
+    });
+
+    it('throws (non-retryable) on a deterministic error so the runner records FAILED', async () => {
       const ctx = context();
       ctx.dataAccess.BrandSemrushProject.allByBrandId = sinon.stub().rejects(
         Object.assign(new Error('bad request'), { status: 400 }),
       );
       const job = makeJob(metadata);
-      await bulkDeleteHandler(ctx, job, 'access-token', { deletePromptsByIds: sinon.stub() });
-      expect(job.statusVal).to.equal('FAILED');
-      expect(job.errorVal.retryable).to.equal(false);
+      let thrown;
+      try {
+        await bulkDeleteHandler(ctx, job, 'access-token', { deletePromptsByIds: sinon.stub() });
+      } catch (e) { thrown = e; }
+      expect(thrown, 'handler should throw').to.exist;
+      expect(isRetryableJobError(thrown)).to.equal(false);
+      expect(job.statusVal).to.equal('IN_PROGRESS');
     });
 
     it('rethrows a retryable job error on a transient 5xx (SQS redelivers)', async () => {
@@ -115,10 +136,11 @@ describe('bulk-delete-job', () => {
         Object.assign(new Error('upstream 503'), { status: 503 }),
       );
       const job = makeJob(metadata);
-      await expect(
-        bulkDeleteHandler(ctx, job, 'access-token', { deletePromptsByIds: sinon.stub() }),
-      ).to.be.rejected;
-      expect(job.statusVal).to.not.equal('FAILED');
+      let thrown;
+      try {
+        await bulkDeleteHandler(ctx, job, 'access-token', { deletePromptsByIds: sinon.stub() });
+      } catch (e) { thrown = e; }
+      expect(isRetryableJobError(thrown), 'transient error must be retryable').to.equal(true);
     });
 
     it('bounds the failures stored on the job to MAX_STORED_FAILURES and keeps the true total', async () => {
@@ -134,11 +156,10 @@ describe('bulk-delete-job', () => {
         publishProject: sinon.stub().resolves({}),
       };
       const job = makeJob({ ...metadata, targets });
-      await bulkDeleteHandler(ctx, job, 'access-token', transport);
-      expect(job.statusVal).to.equal('COMPLETED');
-      expect(job.resultVal.failed).to.have.lengthOf(MAX_STORED_FAILURES);
-      expect(job.resultVal.failedTotal).to.equal(n);
-      expect(job.resultVal.failedTruncated).to.equal(true);
+      const returned = await bulkDeleteHandler(ctx, job, 'access-token', transport);
+      expect(returned.failed).to.have.lengthOf(MAX_STORED_FAILURES);
+      expect(returned.failedTotal).to.equal(n);
+      expect(returned.failedTruncated).to.equal(true);
     });
 
     it('exposes the public job type constant for the poller', () => {

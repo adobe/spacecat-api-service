@@ -10,6 +10,8 @@
  * governing permissions and limitations under the License.
  */
 
+// @ts-check
+
 import { ErrorWithStatusCode } from '../../utils.js';
 import { createSerenityTransport } from '../rest-transport.js';
 import {
@@ -121,8 +123,14 @@ export async function bulkDeleteHandler(context, job, accessToken, injectedTrans
   const transport = injectedTransport
     ?? createSerenityTransport({ env: context.env, imsToken: accessToken });
 
+  // The runner owns terminal job state on a RETURN-VALUE contract
+  // (serenity-prompt-classification/index.js): it sets COMPLETED + setResult(the
+  // return value) on success, and FAILED on a non-retryable throw. So this
+  // handler must RETURN the result and THROW on failure — it must NOT setResult/
+  // setStatus/save itself (the runner would overwrite it).
+  let result;
   try {
-    const result = subworkspace === true
+    result = subworkspace === true
       ? await handleBulkDeletePromptsSubworkspace(
         transport,
         workspaceId,
@@ -141,35 +149,30 @@ export async function bulkDeleteHandler(context, job, accessToken, injectedTrans
         log,
         { orgId, env: context.env, callerId },
       );
-    const failedList = Array.isArray(result.failed) ? result.failed : [];
-    const storedResult = failedList.length > MAX_STORED_FAILURES
-      ? {
-        ...result,
-        failed: failedList.slice(0, MAX_STORED_FAILURES),
-        failedTotal: failedList.length,
-        failedTruncated: true,
-      }
-      : result;
-    job.setResult(storedResult);
-    job.setStatus('COMPLETED');
-    await job.save();
   } catch (error) {
     // A transient failure of the whole batch (a marked retryable error, or a 5xx
-    // that is not an already-gone workspace) is worth a redelivery; a deterministic
-    // one fails the job so the poller surfaces it. Per-target upstream failures
-    // never reach here — the delete handler collects those into result.failed and
-    // returns normally.
-    const transient = isRetryableJobError(error)
-      || (!isUpstreamGone(error) && Number(error?.status) >= 500);
-    if (transient) {
-      throw retryableJobError(`bulk-delete job ${job.getId()} failed transiently`, error);
+    // that is not an already-gone workspace) is thrown as retryable so the runner
+    // keeps the job IN_PROGRESS for SQS redelivery; the delete is idempotent, so a
+    // re-run is safe. Any other error propagates so the runner records FAILED.
+    // Per-target upstream failures never reach here — the delete handler collects
+    // those into result.failed and returns normally.
+    const err = /** @type {any} */ (error);
+    if (isRetryableJobError(err) || (!isUpstreamGone(err) && Number(err?.status) >= 500)) {
+      throw retryableJobError(`bulk-delete job ${job.getId()} failed transiently`, err);
     }
-    job.setStatus('FAILED');
-    job.setError({
-      code: error?.code || 'BULK_DELETE_FAILED',
-      message: error?.message || 'Bulk delete failed',
-      retryable: false,
-    });
-    await job.save();
+    throw err;
   }
+
+  // Bound the failures persisted on the job record so a large delete cannot push
+  // the AsyncJob item past the store's size limit; the true count stays as
+  // failedTotal. The runner persists this return value via setResult.
+  const failedList = Array.isArray(result.failed) ? result.failed : [];
+  return failedList.length > MAX_STORED_FAILURES
+    ? {
+      ...result,
+      failed: failedList.slice(0, MAX_STORED_FAILURES),
+      failedTotal: failedList.length,
+      failedTruncated: true,
+    }
+    : result;
 }
