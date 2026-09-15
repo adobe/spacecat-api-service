@@ -40,6 +40,7 @@ import {
   resolveTopicIds,
   buildTextFilterQl,
   normalizeAiVisibilityTarget,
+  resolveSearchType,
 } from '../grpc-utils.js';
 
 /* ------------------------------------------------------------------ */
@@ -502,7 +503,7 @@ export async function handleTopicsStats(sp, clients) {
   if (!domain) { return { status: 400, body: { error: 'missing_domain', message: 'domain is required' } }; }
   const country = resolveCountry(sp);
   const raw = await clients.topicClient.brandTopics({
-    country, target: brandTarget(domain), order: { by: BRAND_TOPICS_ORDER_BY_ENUM.VISIBILITY }, range: { limit: 500, offset: 0 },
+    country, target: brandTarget(domain), searchType: resolveSearchType(domain), order: { by: BRAND_TOPICS_ORDER_BY_ENUM.VISIBILITY }, range: { limit: 500, offset: 0 },
   });
   const t = (raw.topics || []).find((x) => String(x.id) === topicId);
   if (!t) { return { status: 200, body: { data: [] } }; }

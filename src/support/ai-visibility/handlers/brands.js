@@ -23,6 +23,7 @@ import {
   SOURCES_REQUEST_ORDER_BY_ENUM,
   DOMAINS_REQUEST_ORDER_BY_ENUM,
   SOURCE_CATEGORY_ENUM,
+  SEARCH_TYPE_ENUM,
 } from '@quazar/ai-seo-ts/v2/source/enums_pb.js';
 import {
   num,
@@ -528,21 +529,28 @@ export async function handleBrandCitedPages(sp, clients) {
     }
   }
 
+  // sourcesTotals (ai-vo) carries no search_type, so its count is whole-domain.
+  // Only use it as a DOMAIN-scope fallback; for a scoped (SUBDOMAIN/SUBFOLDER)
+  // target the primary scoped total is the statsByLLM month path, and if that
+  // is unavailable we floor to the fetched rows rather than leak a parent-domain
+  // count that makes the pager show phantom empty pages.
+  const totalsUnscopable = searchType !== SEARCH_TYPE_ENUM.DOMAIN;
+  const unscopedTotal = async () => {
+    if (totalsUnscopable) { return null; }
+    try {
+      const vo = await clients.voSourcesClient.sourcesTotals(totalsReq);
+      return voTotalCountForSourceCategory(vo, 'OWNED_BY_TARGET');
+    } catch { return null; }
+  };
   const fromTotalsPromise = (async () => {
     if (monthYm) {
       try {
         const s = await citedPagesOwnedCountFromStatsByLlmForMonth(country, target, monthYm, llmEnum, clients);
         if (s != null && Number.isFinite(s)) { return s; }
       } catch { /* fallback below */ }
-      try {
-        const vo = await clients.voSourcesClient.sourcesTotals(totalsReq);
-        return voTotalCountForSourceCategory(vo, 'OWNED_BY_TARGET');
-      } catch { return null; }
+      return unscopedTotal();
     }
-    try {
-      const vo = await clients.voSourcesClient.sourcesTotals(totalsReq);
-      return voTotalCountForSourceCategory(vo, 'OWNED_BY_TARGET');
-    } catch { return null; }
+    return unscopedTotal();
   })();
 
   const pair = await Promise.allSettled([fetchSourcesListBody(), fromTotalsPromise]);
@@ -635,7 +643,9 @@ export async function handleBrandTopBrands(sp, clients) {
   // regardless of offset/sort so `total` is stable across pages — a page-dependent window
   // makes the pager's page-count shift as the user pages forward.
   const fetchN = 1000;
-  const brandDomain = domain.replace(/^www\./, '').toLowerCase();
+  // topBrandsByDomain takes a registrable domain and exposes no search_type, so a
+  // subfolder target cannot be scoped — use the host only (drop any path).
+  const brandDomain = domain.split('/')[0].replace(/^www\./, '');
   const listArgs = { country, brandDomain, limit: fetchN };
 
   let raw;
@@ -688,8 +698,9 @@ export async function handleBrandCitedSources(sp, clients) {
   const { limit, offset } = parseLimitOffset(sp);
   const llmEnum = optionalLlmFromQuery(sp) ?? LLM_ENUM.ALL;
   const target = brandTarget(domain);
+  const searchType = resolveSearchType(domain);
   const listReq = {
-    country, llm: llmEnum, target, order: resolveGrpcSortOrder(sp, DOMAINS_REQUEST_ORDER_BY_ENUM, DOMAINS_REQUEST_ORDER_BY_ENUM.PROMPTS_COUNT, DOMAINS_SORT_KEYS), range: { limit, offset },
+    country, llm: llmEnum, target, searchType, order: resolveGrpcSortOrder(sp, DOMAINS_REQUEST_ORDER_BY_ENUM, DOMAINS_REQUEST_ORDER_BY_ENUM.PROMPTS_COUNT, DOMAINS_SORT_KEYS), range: { limit, offset },
   };
   const totalsReq = { country, llm: llmEnum, target };
 
@@ -704,7 +715,11 @@ export async function handleBrandCitedSources(sp, clients) {
   const data = domains.map(mapSourceDomainRowToCitedSource).filter((r) => r.sourceDomain);
   const fromTotals = settledFulfilledMap(totalsOutcome, (v) => sumVoTotalBySourceCategoryCounts(v), null);
   const floor = offset + data.length;
-  const total = fromTotals != null && Number.isFinite(fromTotals) ? Math.max(fromTotals, floor) : floor;
+  // domainsTotals (ai-vo) carries no search_type, so its count is whole-domain.
+  // For a scoped (SUBDOMAIN/SUBFOLDER) list, an unscoped total over-counts and
+  // makes the pager compute phantom empty pages — fall back to the fetched floor.
+  const total = (searchType === SEARCH_TYPE_ENUM.DOMAIN && fromTotals != null && Number.isFinite(fromTotals))
+    ? Math.max(fromTotals, floor) : floor;
   return {
     status: 200,
     body: {
@@ -738,7 +753,7 @@ export async function handleBrandSourceOpportunities(sp, clients) {
   let competitors = [];
   try {
     const topRaw = await clients.brandClient.topBrandsByDomain({
-      country, brandDomain: domain.replace(/^www\./, '').toLowerCase(), llm, limit: 20,
+      country, brandDomain: domain.split('/')[0].replace(/^www\./, ''), llm, limit: 20,
     });
     competitors = (topRaw.brands || [])
       .map((b) => {

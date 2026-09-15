@@ -1811,6 +1811,21 @@ describe('AI Visibility – brands handlers', () => {
       expect(clients.sourceClient.gapSourceDomains.firstCall.args[0].searchType).to.equal(SEARCH_TYPE_ENUM.SUBDOMAIN);
       expect(clients.sourceClient.gapSourceDomainsTotals.firstCall.args[0].searchType).to.equal(SEARCH_TYPE_ENUM.SUBDOMAIN);
     });
+
+    it('handleBrandCitedSources sets SUBFOLDER on the list and floors the unscopable total', async () => {
+      clients.sourceClient.sourceDomains.resolves({ domains: [{ domain: 'a.com' }, { domain: 'b.com' }] });
+      // totals RPC would report a whole-domain count; it must NOT win for a scoped target.
+      clients.voSourcesClient.domainsTotals.resolves({ categories: [{ total: 9999 }] });
+      const res = await handleBrandCitedSources(new URLSearchParams('domain=coca-cola.com%2Fus%2Fen&country=us'), clients);
+      expect(clients.sourceClient.sourceDomains.firstCall.args[0].searchType).to.equal(SEARCH_TYPE_ENUM.SUBFOLDER);
+      expect(res.body.total).to.equal(2); // floor (offset 0 + 2 rows), not the 9999 whole-domain count
+    });
+
+    it('handleBrandTopBrands sends host-only brandDomain (no path) for a subfolder target', async () => {
+      await handleBrandTopBrands(new URLSearchParams('domain=coca-cola.com%2Fus%2Fen%2Fbrands%2Fsmartwater&country=us'), clients);
+      const arg = clients.brandClient.topBrandsByDomain.firstCall.args[0];
+      expect(arg.brandDomain).to.equal('coca-cola.com');
+    });
   });
 
   /* ------------------------------------------------------------------ */

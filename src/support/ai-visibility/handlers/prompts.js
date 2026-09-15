@@ -28,6 +28,7 @@ import {
   relationStatusFor,
   deriveResponse,
   normalizeAiVisibilityTarget,
+  resolveSearchType,
 } from '../grpc-utils.js';
 
 export async function handlePromptsResponses(sp, clients) {
@@ -41,6 +42,7 @@ export async function handlePromptsResponses(sp, clients) {
     country,
     llm,
     target: brandTarget(domain),
+    searchType: resolveSearchType(domain),
     range: { limit: PROMPTS_RESPONSES_PROMPTS_SCAN_LIMIT, offset: 0 },
     order: { by: PROMPTS_REQUEST_ORDER_BY_ENUM.TOPIC_VOLUME },
   });

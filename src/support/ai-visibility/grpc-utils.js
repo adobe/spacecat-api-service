@@ -263,6 +263,12 @@ export const MAX_AI_VISIBILITY_TARGET_LEN = 2048;
  * query/fragment (not part of a Semrush subfolder target). This is a defence-in-depth
  * input control, NOT the resource-level authorization gate — see the deferred
  * `report:read` per-domain binding hardening item.
+ *
+ * `%` is deliberately rejected: it closes the percent-encoded traversal class
+ * (`URLSearchParams` decodes one layer, so a double-encoded `..` would otherwise
+ * slip past the literal `..` check), at the cost of rejecting a legitimately
+ * percent-encoded path segment — an accepted trade-off since subfolder brand
+ * targets are admin-configured locale/section paths, not arbitrary encoded URLs.
  */
 // eslint-disable-next-line no-control-regex
 const INVALID_TARGET_RE = /[\s@\\<>"'`?#:%\x00-\x1f\x7f]|\/\/|\.\./;
@@ -277,6 +283,11 @@ const INVALID_TARGET_RE = /[\s@\\<>"'`?#:%\x00-\x1f\x7f]|\/\/|\.\./;
  * `www.amazon.com` → `www.amazon.com` (www is NOT stripped, matching prior behaviour),
  * `nba.com` → `nba.com`. Path-bearing inputs are new: `https://coca-cola.com/US/en/`
  * → `coca-cola.com/US/en`.
+ *
+ * Note: `www` is intentionally preserved here (Semrush treats `www.x`/`x` alike),
+ * unlike the customer-config `stripWWW`/`composeBaseURL` helpers in
+ * `@adobe/spacecat-shared-utils` — this is a Semrush-target normalizer, not the
+ * canonical customer-URL normalizer; do not swap one for the other.
  *
  * @param {string|null|undefined} raw
  * @returns {string} canonical `host[/path]`, or `''` when empty or invalid

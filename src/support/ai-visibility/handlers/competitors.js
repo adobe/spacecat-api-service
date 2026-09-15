@@ -46,6 +46,12 @@ function mapCompetitorsStatsResponse(raw) {
 export async function handleCompetitorsMetrics(sp, clients) {
   const domain = normalizeAiVisibilityTarget(sp.get('domain'));
   if (!domain) { return { status: 400, body: { error: 'missing_domain', message: 'domain is required' } }; }
+  // The ai-cr CompetitorsMetrics RPC scopes only to a registrable domain (no
+  // search_type field), so a subfolder target cannot be honoured — reject it
+  // rather than silently return whole-domain metrics under a 200.
+  if (domain.includes('/')) {
+    return { status: 400, body: { error: 'unsupported_target', message: 'competitor metrics do not support subfolder (path) targets' } };
+  }
   const compDomains = parseCompetitorDomainsList(sp);
   if (compDomains.length === 0) {
     return {
