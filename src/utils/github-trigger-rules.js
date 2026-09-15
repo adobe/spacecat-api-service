@@ -20,6 +20,20 @@ export const EVENT_JOB_MAP = {
 };
 
 /**
+ * Resolves a human-readable display name for a requested team, falling
+ * slug -> name -> 'unknown'. Unlike a plain `??` chain, this treats an
+ * empty or whitespace-only slug/name as absent, so a `''` slug does not
+ * render an empty team name in the skip reason.
+ *
+ * @param {object} team - The requested_team object from the webhook payload
+ * @returns {string} The team slug, else its name, else 'unknown'
+ */
+function teamDisplayName(team) {
+  const nonBlank = (v) => (typeof v === 'string' && v.trim() !== '' ? v : undefined);
+  return nonBlank(team?.slug) ?? nonBlank(team?.name) ?? 'unknown';
+}
+
+/**
  * Determines whether a GitHub webhook event should be skipped.
  * Returns a human-readable skip reason string, or null if the event should be processed.
  *
@@ -54,12 +68,20 @@ export function getSkipReason(data, action, reviewerLogin) {
     // hours with no diagnostic signal (adobe/mysticat-github-service#123).
     // Name it explicitly instead: team-based triggers are a real, distinct,
     // unsupported case, not a wrong-reviewer no-op.
-    if (data.requested_team) {
-      const teamName = data.requested_team.slug ?? data.requested_team.name ?? 'unknown';
-      return `review requested via team ${teamName} - team-based triggers not supported`;
-    }
+    // A present, matching direct reviewer takes precedence over the
+    // team-skip branch. GitHub normally sends EITHER requested_reviewer OR
+    // requested_team, but a malformed or replayed payload can carry BOTH;
+    // a legitimate direct-reviewer request (requested_reviewer.login ===
+    // reviewerLogin) must not be misclassified as a team skip just because
+    // a requested_team is also present. We therefore only consider the
+    // team-skip / wrong-reviewer branches when the reviewer does NOT match -
+    // which still covers the normal team-routed case, where
+    // requested_reviewer is absent entirely.
     const reviewer = data.requested_reviewer?.login;
     if (reviewer !== reviewerLogin) {
+      if (data.requested_team) {
+        return `review requested via team ${teamDisplayName(data.requested_team)} - team-based triggers not supported`;
+      }
       return `reviewer ${reviewer} is not ${reviewerLogin}`;
     }
   }

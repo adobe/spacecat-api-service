@@ -110,6 +110,41 @@ describe('github-trigger-rules', () => {
         expect(reason).to.include('unknown');
         expect(reason).to.not.include('undefined');
       });
+
+      it('lets a matching requested_reviewer win even when requested_team is also present', () => {
+        // GitHub sends EITHER field, but a malformed or replayed payload can
+        // carry BOTH. A present, matching direct reviewer is a legitimate
+        // request and must not be misclassified as a team skip.
+        const data = {
+          ...baseData,
+          action: 'review_requested',
+          requested_reviewer: { login: REVIEWER },
+          requested_team: { slug: 'drs-team', name: 'DRS Team' },
+        };
+        expect(getSkipReason(data, 'review_requested', REVIEWER)).to.be.null;
+      });
+
+      it('treats an empty-string slug as absent, yielding "unknown" (not an empty team name)', () => {
+        // `??` only treats null/undefined as absent, so a `''` slug would
+        // render an empty team name. It must fall through to name, and a
+        // blank name through to 'unknown'.
+        const data = {
+          ...baseData,
+          action: 'review_requested',
+          requested_team: { slug: '' },
+        };
+        const reason = getSkipReason(data, 'review_requested', REVIEWER);
+        expect(reason).to.include('via team unknown');
+        expect(reason).to.not.include('via team  -');
+
+        // An empty slug with a present name falls through to the name.
+        const withName = {
+          ...baseData,
+          action: 'review_requested',
+          requested_team: { slug: '', name: 'DRS Team' },
+        };
+        expect(getSkipReason(withName, 'review_requested', REVIEWER)).to.include('DRS Team');
+      });
     });
 
     describe('labeled trigger (disabled)', () => {
