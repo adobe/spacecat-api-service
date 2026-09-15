@@ -12,11 +12,17 @@
 
 /* eslint-disable max-statements-per-line, max-len -- AI Visibility handler surface */
 
-import { ConnectError, Code } from '@connectrpc/connect';
+import {
+  ConnectError,
+  Code,
+} from '@connectrpc/connect';
 import { StatsResponseSchema } from '@quazar/ai-seo-ts/ai-cr/messages_pb.js';
 import {
-  brandTarget, resolveCountryForCompetitorsMetrics,
-  engineToLlm, parseCompetitorDomainsList,
+  brandTarget,
+  resolveCountryForCompetitorsMetrics,
+  engineToLlm,
+  parseCompetitorDomainsList,
+  normalizeAiVisibilityTarget,
 } from '../grpc-utils.js';
 import { messageToJson } from '../proto-json.js';
 
@@ -38,8 +44,14 @@ function mapCompetitorsStatsResponse(raw) {
 }
 
 export async function handleCompetitorsMetrics(sp, clients) {
-  const domain = sp.get('domain')?.trim();
+  const domain = normalizeAiVisibilityTarget(sp.get('domain'));
   if (!domain) { return { status: 400, body: { error: 'missing_domain', message: 'domain is required' } }; }
+  // The ai-cr CompetitorsMetrics RPC scopes only to a registrable domain (no
+  // search_type field), so a subfolder target cannot be honoured — reject it
+  // rather than silently return whole-domain metrics under a 200.
+  if (domain.includes('/')) {
+    return { status: 400, body: { error: 'unsupported_target', message: 'competitor metrics do not support subfolder (path) targets' } };
+  }
   const compDomains = parseCompetitorDomainsList(sp);
   if (compDomains.length === 0) {
     return {
@@ -48,7 +60,9 @@ export async function handleCompetitorsMetrics(sp, clients) {
     };
   }
   const country = resolveCountryForCompetitorsMetrics(sp);
-  const body = { country, target: brandTarget(domain), competitors: compDomains.map(brandTarget) };
+  // Drop any competitor that normalizes to an empty target, so one malformed
+  // entry shrinks the comparison set rather than sending a blank target upstream.
+  const body = { country, target: brandTarget(domain), competitors: compDomains.map(brandTarget).filter((t) => t.domain) };
   const explicit = sp.get('gapSnapshotDate')?.trim() || sp.get('metricsSnapshotDate')?.trim();
   const dm = explicit && /^(\d{4})-(\d{2})-(\d{1,2})$/.exec(explicit);
   if (dm) {
