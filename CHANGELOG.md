@@ -1,3 +1,10 @@
+# [1.814.0](https://github.com/adobe/spacecat-api-service/compare/v1.813.1...v1.814.0) (2026-09-15)
+
+
+### Features
+
+* **serenity:** scheduled probe emitting StuckInProgressJobs + NeedsReauthBacklog ([#3277](https://github.com/adobe/spacecat-api-service/issues/3277)) ([20195f1](https://github.com/adobe/spacecat-api-service/commit/20195f1f13f79d410478f40084df74112ec41edb)), closes [#7](https://github.com/adobe/spacecat-api-service/issues/7) [Hi#level](https://github.com/Hi/issues/level)
+
 ## [1.813.1](https://github.com/adobe/spacecat-api-service/compare/v1.813.0...v1.813.1) (2026-09-15)
 
 
