@@ -400,6 +400,26 @@ const FIXTURES = {
     handlerResult: { items: [{ id: 't1', name: 'Topic A' }] },
     query: { geoTargetId: '2840', languageCode: 'en' },
   },
+  searchSerenityTags: {
+    expectedStatus: 200,
+    controllerMethod: 'searchTags',
+    handlerName: 'handleSearchTags',
+    handlerResult: {
+      items: [{
+        id: 't1',
+        name: 'Campaign',
+        parentId: 'tag-root',
+        depth: 2,
+        path: ['Campaign'],
+        match: 'exact',
+      }],
+      cursor: null,
+      complete: true,
+    },
+    query: {
+      geoTargetId: '2840', languageCode: 'en', q: 'campaign', limit: '25',
+    },
+  },
   createSerenityTag: {
     expectedStatus: 201,
     controllerMethod: 'createTag',
@@ -1084,6 +1104,7 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
         handleCreateMarket: sinon.stub(),
         handleDeleteMarket: sinon.stub(),
         handleListTags: sinon.stub(),
+        handleSearchTags: sinon.stub(),
         handleCreateTag: sinon.stub(),
         handleUpdateTag: sinon.stub(),
         handleDeleteTag: sinon.stub(),
@@ -1176,6 +1197,10 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
             handleDeleteTagSubworkspace: sinon.stub(),
             handleTagImpact: handlerStubs.handleTagImpact,
             handleTagImpactSubworkspace: sinon.stub(),
+          },
+          '../../src/support/serenity/handlers/tag-search.js': {
+            handleSearchTags: handlerStubs.handleSearchTags,
+            handleSearchTagsSubworkspace: sinon.stub(),
           },
           '../../src/support/serenity/handlers/bulk-tags-job.js': {
             BULK_TAGS_JOB_TYPE: 'serenity-bulk-tags',

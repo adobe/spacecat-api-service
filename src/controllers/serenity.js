@@ -99,8 +99,15 @@ import {
   handleTagImpact,
   handleTagImpactSubworkspace,
 } from '../support/serenity/handlers/tags.js';
+import {
+  handleSearchTags,
+  handleSearchTagsSubworkspace,
+} from '../support/serenity/handlers/tag-search.js';
 import { ensureSubworkspace, decommissionBrandWorkspace } from '../support/serenity/workspace-lifecycle.js';
-import { isSerenityActiveForBrand } from '../support/serenity/serenity-active.js';
+import {
+  isSerenityActiveForBrand,
+  isUnboundedTagAuthoringActiveForBrand,
+} from '../support/serenity/serenity-active.js';
 import { MAX_TOPICS_ON_CREATE } from '../support/serenity/brand-provisioning.js';
 import { resolveDefaultModelIds } from '../support/serenity/default-models.js';
 import { marketForGeoTargetId } from '../support/serenity/locations.js';
@@ -1517,6 +1524,44 @@ function SerenityController(context, log, env) {
     }
   };
 
+  const searchTags = async (ctx) => {
+    let auth;
+    try {
+      const imsToken = await resolveSemrushImsToken(ctx);
+      auth = await authorize(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const transport = buildTransport(ctx, imsToken);
+      const cursorSecret = ctx.env?.SERENITY_TAG_SEARCH_CURSOR_SECRET
+        || ctx.env?.IMS_CLIENT_SECRET
+        || ctx.env?.AUTOFIX_CRYPT_SECRET
+        || env?.SERENITY_TAG_SEARCH_CURSOR_SECRET
+        || env?.IMS_CLIENT_SECRET
+        || env?.AUTOFIX_CRYPT_SECRET;
+      const result = auth.mode === 'subworkspace'
+        ? await handleSearchTagsSubworkspace(
+          transport,
+          /** @type {string} */ (auth.workspaceId),
+          extractQuery(ctx),
+          log,
+          cursorSecret,
+        )
+        : await handleSearchTags(
+          transport,
+          ctx.dataAccess,
+          /** @type {string} */ (auth.brandUuid),
+          /** @type {string} */ (auth.workspaceId),
+          extractQuery(ctx),
+          log,
+          cursorSecret,
+        );
+      return createResponse(result, 200);
+    } catch (e) {
+      return mapError(e, log, reqCtxOf(ctx, auth));
+    }
+  };
+
   /**
    * POST /serenity/tags — register a bare-named prompt tag beneath a dimension
    * root, on a single market (the (geoTargetId, languageCode) slice in the body).
@@ -1537,6 +1582,12 @@ function SerenityController(context, log, env) {
         return auth.error;
       }
       const transport = buildTransport(ctx, imsToken);
+      const unboundedTagAuthoring = await isUnboundedTagAuthoringActiveForBrand(
+        ctx,
+        ctx.params.spaceCatId,
+        /** @type {string} */ (auth.brandUuid),
+        log,
+      );
       // authorize() guarantees brandUuid (404s a missing brand) and, in flat
       // mode, a non-null workspaceId (404s 'no semrush_workspace_id'); assert
       // the invariant for the typed handler, mirroring activate().
@@ -1546,6 +1597,7 @@ function SerenityController(context, log, env) {
           /** @type {string} */ (auth.workspaceId),
           ctx.data || {},
           log,
+          unboundedTagAuthoring,
         )
         : await handleCreateTag(
           transport,
@@ -1554,6 +1606,7 @@ function SerenityController(context, log, env) {
           /** @type {string} */ (auth.workspaceId),
           ctx.data || {},
           log,
+          unboundedTagAuthoring,
         );
       return createResponse(result.body, result.status);
     } catch (e) {
@@ -1581,6 +1634,12 @@ function SerenityController(context, log, env) {
         return auth.error;
       }
       const transport = buildTransport(ctx, imsToken);
+      const unboundedTagAuthoring = await isUnboundedTagAuthoringActiveForBrand(
+        ctx,
+        ctx.params.spaceCatId,
+        /** @type {string} */ (auth.brandUuid),
+        log,
+      );
       const result = auth.mode === 'subworkspace'
         ? await handleUpdateTagSubworkspace(
           transport,
@@ -1588,6 +1647,7 @@ function SerenityController(context, log, env) {
           tagId,
           ctx.data || {},
           log,
+          unboundedTagAuthoring,
         )
         : await handleUpdateTag(
           transport,
@@ -1597,6 +1657,7 @@ function SerenityController(context, log, env) {
           tagId,
           ctx.data || {},
           log,
+          unboundedTagAuthoring,
         );
       return createResponse(result.body, result.status);
     } catch (e) {
@@ -2685,6 +2746,7 @@ function SerenityController(context, log, env) {
     createMarket,
     deleteMarket,
     listTags,
+    searchTags,
     createTag,
     updateTag,
     getTagImpact,

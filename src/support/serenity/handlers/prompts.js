@@ -342,8 +342,6 @@ function buildTagsOf(item, compatibilityById) {
         reason = 'caseVariantRoot';
       } else if (names.some((name) => name.includes(':') || name.includes('__'))) {
         reason = 'separatorInName';
-      } else if (rootName === DIMENSION.TAG && names.length > 3) {
-        reason = 'unsupportedDepth';
       }
       acc.push({
         id: t.id ? String(t.id) : '',
@@ -697,8 +695,7 @@ export async function resolveFacetedTagFilter(
   const selected = tagIds.map((id) => tree.byId.get(id));
   if (selected.some((item) => !item
     || item.depth === 1
-    || item.compatibility?.state !== 'canonical'
-    || (item.rootName === DIMENSION.TAG && item.depth > 3))) {
+    || item.compatibility?.state !== 'canonical')) {
     const error = new ErrorWithStatusCode(
       'One or more selected tag ids are unknown or incompatible with faceted-v1',
       400,
@@ -715,11 +712,9 @@ export async function resolveFacetedTagFilter(
     }
     const accepted = groups.get(familyId);
     accepted.add(item.id);
-    if (item.depth === 2) {
-      for (const descendant of tree.items) {
-        if (descendant.fullPath.some((part) => part.id === item.id)) {
-          accepted.add(descendant.id);
-        }
+    for (const descendant of tree.items) {
+      if (descendant.fullPath.some((part) => part.id === item.id)) {
+        accepted.add(descendant.id);
       }
     }
   }
@@ -734,8 +729,8 @@ export async function resolveFacetedTagFilter(
 
 /**
  * Normalizes a complete prompt tag replacement by retaining unknown/read-only
- * ids verbatim and adding the required depth-2 parent for every canonical
- * depth-3 plain tag.
+ * ids verbatim and adding the complete customer-authored ancestor chain for
+ * every canonical plain-tag descendant.
  *
  * @param {SerenityTransport} transport
  * @param {string} semrushWorkspaceId
@@ -779,8 +774,10 @@ export async function normalizePromptTagSelection(
       continue;
     }
     normalized.add(id);
-    if (item.rootName === DIMENSION.TAG && item.depth === 3) {
-      normalized.add(item.fullPath[1].id);
+    if (item.rootName === DIMENSION.TAG) {
+      for (const ancestor of item.fullPath.slice(1, -1)) {
+        normalized.add(ancestor.id);
+      }
     }
   }
   const result = [...normalized];

@@ -12925,15 +12925,24 @@ SerenityTagCompatibility:
         read and return `unverified` for tags not locally provable as read-only.
     reason:
       type: [string, 'null']
-      enum: [unsupportedDepth, caseVariantRoot, ambiguousPath, separatorInName, taxonomyNotLoaded, null]
+      enum: [caseVariantRoot, ambiguousPath, separatorInName, taxonomyNotLoaded, null]
 
 SerenityTagConstraints:
   type: object
-  required: [maxPromptTagIds, maxTagFilterValues, bulkIdempotencyTtlSeconds]
+  required:
+    - maxPromptTagIds
+    - maxTagFilterValues
+    - bulkIdempotencyTtlSeconds
+    - maxTagSearchQueryLength
+    - maxTagSearchLimit
+    - defaultTagSearchLimit
   properties:
     maxPromptTagIds: { type: integer, example: 50 }
     maxTagFilterValues: { type: integer, example: 50 }
     bulkIdempotencyTtlSeconds: { type: integer, example: 86400 }
+    maxTagSearchQueryLength: { type: integer, example: 200 }
+    maxTagSearchLimit: { type: integer, example: 100 }
+    defaultTagSearchLimit: { type: integer, example: 25 }
 
 SerenityTagListResponse:
   type: object
@@ -12947,6 +12956,38 @@ SerenityTagListResponse:
     total: { type: integer, minimum: 0 }
     complete: { type: boolean }
     constraints: { $ref: '#/SerenityTagConstraints' }
+
+SerenityTagSearchItem:
+  type: object
+  additionalProperties: false
+  required: [id, name, parentId, depth, path, match]
+  properties:
+    id: { type: string }
+    name: { type: string }
+    parentId: { type: string }
+    depth: { type: integer, minimum: 2 }
+    path:
+      type: array
+      minItems: 1
+      items: { type: string }
+    match:
+      type: string
+      enum: [exact, prefix, substring, path]
+
+SerenityTagSearchResponse:
+  type: object
+  additionalProperties: false
+  required: [items, cursor, complete]
+  properties:
+    items:
+      type: array
+      items: { $ref: '#/SerenityTagSearchItem' }
+    cursor:
+      type: [string, 'null']
+      description: Opaque continuation cursor, or null on the final page.
+    complete:
+      type: boolean
+      enum: [true]
 
 SerenityTagImpact:
   type: object

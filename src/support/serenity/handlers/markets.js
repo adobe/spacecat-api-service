@@ -24,6 +24,13 @@ import { resolveSiteIdentity, resolveMarketIdentity, logMarketCreated } from '..
 import { createProvisionAndPublishProject, CreateNoProjectIdError } from '../project-provisioning.js';
 import { alertQuotaRejection } from '../quota-alerts.js';
 import { classifyTagCompatibility } from '../tag-compatibility.js';
+import {
+  DEFAULT_TAG_SEARCH_LIMIT,
+  MAX_TAG_SEARCH_LIMIT,
+  MAX_TAG_SEARCH_QUERY_LENGTH,
+  MAX_TREE_PAGES_PER_PARENT,
+  TAG_TREE_PAGE_SIZE,
+} from '../tag-search-constants.js';
 
 /** @typedef {import('../rest-transport.js').SerenityTransport} SerenityTransport */
 /** @typedef {import('../rest-transport.js').ProjectCreateBody} ProjectCreateBody */
@@ -895,8 +902,8 @@ export async function listProjectTagTree(
   }
   const items = [];
   const seenIds = new Set();
-  const LIMIT = 100;
-  const PAGE_LIMIT = 50;
+  const LIMIT = TAG_TREE_PAGE_SIZE;
+  const PAGE_LIMIT = MAX_TREE_PAGES_PER_PARENT;
   let page = 1;
   let expectedTotal;
   let stoppedEarly = false;
@@ -1013,6 +1020,9 @@ export function tagConstraints() {
     maxPromptTagIds: MAX_PROMPT_TAG_IDS,
     maxTagFilterValues: MAX_TAG_FILTER_VALUES,
     bulkIdempotencyTtlSeconds: BULK_IDEMPOTENCY_TTL_SECONDS,
+    maxTagSearchQueryLength: MAX_TAG_SEARCH_QUERY_LENGTH,
+    maxTagSearchLimit: MAX_TAG_SEARCH_LIMIT,
+    defaultTagSearchLimit: DEFAULT_TAG_SEARCH_LIMIT,
   };
 }
 

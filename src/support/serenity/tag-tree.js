@@ -65,6 +65,12 @@ import {
   valueSlugOfDisplayName,
 } from './prompt-tags.js';
 import { classifyTagCompatibility } from './tag-compatibility.js';
+import {
+  MAX_TREE_CONCURRENCY,
+  MAX_TREE_DURATION_MS,
+  MAX_TREE_NODES,
+  MAX_TREE_PARENT_READS,
+} from './tag-search-constants.js';
 
 /** @typedef {import('./rest-transport.js').SerenityTransport} SerenityTransport */
 /**
@@ -106,7 +112,33 @@ import { classifyTagCompatibility } from './tag-compatibility.js';
  * call. Nothing caps a level's width on purpose: truncating a level would report
  * a tag that exists as absent, which is a wrong answer rather than a slow one.
  */
-const MAX_TREE_READS = 200;
+export {
+  MAX_TREE_CONCURRENCY,
+  MAX_TREE_DURATION_MS,
+  MAX_TREE_NODES,
+  MAX_TREE_PARENT_READS,
+};
+// Backward-compatible name retained for existing callers/tests.
+export const MAX_TREE_READS = MAX_TREE_PARENT_READS;
+
+function treeReadError(message, code, details) {
+  const error = new ErrorWithStatusCode(message, 503);
+  error.code = code;
+  if (details) {
+    /** @type {any} */ (error).details = details;
+  }
+  return error;
+}
+
+function assertTraversalDeadline(startedAt, maxDurationMs) {
+  if (Date.now() - startedAt >= maxDurationMs) {
+    throw treeReadError(
+      'Unable to read the complete tag tree within the traversal time budget',
+      ERROR_CODES.TAG_TREE_LIMIT_EXCEEDED,
+      { budget: 'duration', maximum: maxDurationMs },
+    );
+  }
+}
 
 /**
  * Bounds the total id count {@link collectSubtreeIds} forwards into a single
@@ -651,65 +683,164 @@ export async function findTagsInTree(transport, semrushWorkspaceId, projectId, t
  * @param {string} semrushWorkspaceId
  * @param {string} projectId
  * @param {object} [log]
+ * @param {object} [options]
+ * @param {string} [options.rootName]
+ * @param {number} [options.maxParents]
+ * @param {number} [options.maxNodes]
+ * @param {number} [options.concurrency]
+ * @param {number} [options.maxDurationMs]
  * @returns {Promise<{
  *   items: TagTreeSnapshotItem[],
  *   byId: Map<string, TagTreeSnapshotItem>,
  * }>}
  */
-async function loadTagTreeSnapshot(
+export async function loadTagTreeSnapshot(
   transport,
   semrushWorkspaceId,
   projectId,
   log,
+  {
+    rootName,
+    maxParents = MAX_TREE_READS,
+    maxNodes = MAX_TREE_NODES,
+    concurrency = MAX_TREE_CONCURRENCY,
+    maxDurationMs = MAX_TREE_DURATION_MS,
+  } = {},
 ) {
+  const startedAt = Date.now();
   const roots = await listProjectTagTree(transport, semrushWorkspaceId, projectId, '', log);
-  const nodes = roots.items.map((root) => ({
+  assertTraversalDeadline(startedAt, maxDurationMs);
+  const canonicalTagRoots = roots.items.filter((root) => root.name === DIMENSION.TAG);
+  const caseVariantRoot = roots.items.find((root) => root.name.toLowerCase() === DIMENSION.TAG
+    && root.name !== DIMENSION.TAG);
+  if (canonicalTagRoots.length > 1) {
+    throw treeReadError(
+      'Unable to establish a consistent tag tree',
+      ERROR_CODES.TAG_TREE_DATA_INTEGRITY,
+      { reason: 'ambiguousRoot', rootName: DIMENSION.TAG },
+    );
+  }
+  if (caseVariantRoot && (rootName === DIMENSION.TAG || canonicalTagRoots.length > 0)) {
+    throw treeReadError(
+      'Unable to establish a consistent tag tree',
+      ERROR_CODES.TAG_TREE_DATA_INTEGRITY,
+      { reason: 'caseVariantRoot', rootName: caseVariantRoot.name },
+    );
+  }
+  const selectedRoots = rootName === undefined
+    ? roots.items
+    : roots.items.filter((root) => dimensionOfRootName(root.name) === rootName);
+  if (rootName !== undefined && selectedRoots.length > 1) {
+    throw treeReadError(
+      'Unable to establish a consistent tag tree',
+      ERROR_CODES.TAG_TREE_DATA_INTEGRITY,
+      { reason: 'ambiguousRoot', rootName },
+    );
+  }
+  const nodes = selectedRoots.map((root) => ({
     ...root,
     rootName: root.name,
     rootId: root.id,
     depth: 1,
     fullPath: [{ id: root.id, name: root.name }],
   }));
-  const visited = new Set();
+  const seenIds = new Set();
+  for (const node of nodes) {
+    if (seenIds.has(node.id)) {
+      throw treeReadError(
+        'Unable to establish a consistent tag tree',
+        ERROR_CODES.TAG_TREE_DATA_INTEGRITY,
+        { reason: 'repeatedTagId', tagId: node.id },
+      );
+    }
+    seenIds.add(node.id);
+  }
+  if (nodes.length > maxNodes) {
+    throw treeReadError(
+      'Unable to read the complete tag tree within the node budget',
+      ERROR_CODES.TAG_TREE_LIMIT_EXCEEDED,
+      { budget: 'nodes', maximum: maxNodes },
+    );
+  }
   let frontier = nodes.filter((node) => node.childrenCount > 0);
-  let reads = 1;
+  let parentReads = 0;
   while (frontier.length > 0) {
     const next = [];
-    for (const parent of frontier) {
-      if (visited.has(parent.id)) {
-        // eslint-disable-next-line no-continue
-        continue;
+    for (let offset = 0; offset < frontier.length; offset += concurrency) {
+      assertTraversalDeadline(startedAt, maxDurationMs);
+      const parents = frontier.slice(offset, offset + concurrency);
+      if (parentReads + parents.length > maxParents) {
+        throw treeReadError(
+          'Unable to read the complete tag tree within the parent expansion budget',
+          ERROR_CODES.TAG_TREE_LIMIT_EXCEEDED,
+          { budget: 'parents', maximum: maxParents },
+        );
       }
-      visited.add(parent.id);
-      reads += 1;
-      if (reads > MAX_TREE_READS) {
-        const error = new ErrorWithStatusCode('Unable to read the complete tag tree', 503);
-        error.code = ERROR_CODES.TAG_TREE_READ_INCOMPLETE;
-        throw error;
-      }
+      parentReads += parents.length;
       // eslint-disable-next-line no-await-in-loop
-      const children = await listProjectTagTree(
-        transport,
-        semrushWorkspaceId,
-        projectId,
-        parent.id,
-        log,
-      );
-      for (const child of children.items) {
-        const fullPath = Array.isArray(child.path) && child.path.length > 0
-          ? [...child.path, { id: child.id, name: child.name }]
-          : [...parent.fullPath, { id: child.id, name: child.name }];
-        const node = {
-          ...child,
-          parentId: child.parentId ?? parent.id,
-          rootName: fullPath[0]?.name ?? parent.rootName,
-          rootId: fullPath[0]?.id ?? parent.rootId,
-          depth: fullPath.length,
-          fullPath,
-        };
-        nodes.push(node);
-        if (node.childrenCount > 0) {
-          next.push(node);
+      const levels = await Promise.all(parents.map(async (parent) => ({
+        parent,
+        children: await listProjectTagTree(
+          transport,
+          semrushWorkspaceId,
+          projectId,
+          parent.id,
+          log,
+        ),
+      })));
+      assertTraversalDeadline(startedAt, maxDurationMs);
+      for (const { parent, children } of levels) {
+        for (const child of children.items) {
+          if (seenIds.has(child.id)) {
+            throw treeReadError(
+              'Unable to establish a consistent tag tree',
+              ERROR_CODES.TAG_TREE_DATA_INTEGRITY,
+              { reason: 'repeatedTagId', tagId: child.id },
+            );
+          }
+          const suppliedPath = Array.isArray(child.path) && child.path.length > 0
+            ? child.path
+            : null;
+          if (child.parentId && child.parentId !== parent.id) {
+            throw treeReadError(
+              'Unable to establish a consistent tag tree',
+              ERROR_CODES.TAG_TREE_DATA_INTEGRITY,
+              { reason: 'parentMismatch', tagId: child.id },
+            );
+          }
+          if (suppliedPath
+            && (suppliedPath.length !== parent.fullPath.length
+              || suppliedPath.some((part, index) => (
+                part.id !== parent.fullPath[index]?.id
+                || part.name !== parent.fullPath[index]?.name
+              )))) {
+            throw treeReadError(
+              'Unable to establish a consistent tag tree',
+              ERROR_CODES.TAG_TREE_DATA_INTEGRITY,
+              { reason: 'pathMismatch', tagId: child.id },
+            );
+          }
+          const fullPath = [...parent.fullPath, { id: child.id, name: child.name }];
+          const node = {
+            ...child,
+            parentId: child.parentId ?? parent.id,
+            rootName: parent.rootName,
+            rootId: parent.rootId,
+            depth: fullPath.length,
+            fullPath,
+          };
+          seenIds.add(node.id);
+          nodes.push(node);
+          if (nodes.length > maxNodes) {
+            throw treeReadError(
+              'Unable to read the complete tag tree within the node budget',
+              ERROR_CODES.TAG_TREE_LIMIT_EXCEEDED,
+              { budget: 'nodes', maximum: maxNodes },
+            );
+          }
+          if (node.childrenCount > 0) {
+            next.push(node);
+          }
         }
       }
     }
@@ -735,6 +866,8 @@ async function loadTagTreeSnapshot(
  * @param {object} [log]
  * @param {object} [options]
  * @param {boolean} [options.forceRefresh=false]
+ * @param {boolean} [options.cacheResult=true]
+ * @param {string} [options.rootName]
  * @returns {Promise<{
  *   items: TagTreeSnapshotItem[],
  *   byId: Map<string, TagTreeSnapshotItem>,
@@ -745,20 +878,30 @@ export async function readTagTreeSnapshot(
   semrushWorkspaceId,
   projectId,
   log,
-  { forceRefresh = false } = {},
+  { forceRefresh = false, cacheResult = true, rootName } = {},
 ) {
-  if (!forceRefresh) {
+  if (!forceRefresh && rootName === undefined) {
     const cached = getCachedTagTreeSnapshot(semrushWorkspaceId, projectId);
     if (cached) {
       return /** @type {ReturnType<typeof loadTagTreeSnapshot>} */ (cached);
     }
   }
-  const pending = loadTagTreeSnapshot(transport, semrushWorkspaceId, projectId, log);
-  cacheTagTreeSnapshot(semrushWorkspaceId, projectId, pending);
+  const pending = loadTagTreeSnapshot(
+    transport,
+    semrushWorkspaceId,
+    projectId,
+    log,
+    { rootName },
+  );
+  if (cacheResult && rootName === undefined) {
+    cacheTagTreeSnapshot(semrushWorkspaceId, projectId, pending);
+  }
   try {
     return await pending;
   } catch (error) {
-    deleteCachedTagTreeSnapshotIfSame(semrushWorkspaceId, projectId, pending);
+    if (cacheResult && rootName === undefined) {
+      deleteCachedTagTreeSnapshotIfSame(semrushWorkspaceId, projectId, pending);
+    }
     throw error;
   }
 }
