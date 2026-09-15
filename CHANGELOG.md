@@ -1,3 +1,10 @@
+## [1.813.1](https://github.com/adobe/spacecat-api-service/compare/v1.813.0...v1.813.1) (2026-09-15)
+
+
+### Bug Fixes
+
+* **cors:** allow Idempotency-Key request header ([#3276](https://github.com/adobe/spacecat-api-service/issues/3276)) ([2e316a7](https://github.com/adobe/spacecat-api-service/commit/2e316a7e37d09c81cc3629f06f3c9bc51932b75b)), closes [#3258](https://github.com/adobe/spacecat-api-service/issues/3258)
+
 # [1.813.0](https://github.com/adobe/spacecat-api-service/compare/v1.812.0...v1.813.0) (2026-09-15)
 
 
