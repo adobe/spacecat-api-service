@@ -41,6 +41,10 @@ import {
   BULK_TAGS_JOB_TYPE,
 } from '../support/serenity/handlers/bulk-tags-job.js';
 import {
+  bulkDeleteHandler,
+  BULK_DELETE_JOB_TYPE,
+} from '../support/serenity/handlers/bulk-delete-job.js';
+import {
   semrushMarketGenerationHandler,
   SEMRUSH_MARKET_GENERATION_JOB_TYPE,
 } from '../support/serenity/handlers/semrush-market-generation-job.js';
@@ -121,6 +125,7 @@ export const vaultOpts = {
 const HANDLERS = {
   [CLASSIFY_PROMPTS_JOB_TYPE]: classifyPromptsHandler,
   [BULK_TAGS_JOB_TYPE]: bulkTagsHandler,
+  [BULK_DELETE_JOB_TYPE]: bulkDeleteHandler,
   [SEMRUSH_MARKET_GENERATION_JOB_TYPE]: semrushMarketGenerationHandler,
 };
 
