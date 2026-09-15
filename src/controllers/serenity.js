@@ -60,6 +60,11 @@ import {
   pageBulkFailures,
 } from '../support/serenity/handlers/bulk-tags-job.js';
 import {
+  acceptBulkDelete,
+  BULK_DELETE_JOB_TYPE,
+  BULK_DELETE_PUBLIC_JOB_TYPE,
+} from '../support/serenity/handlers/bulk-delete-job.js';
+import {
   handleListMarkets,
   handleGetMarket,
   handleCreateMarket,
@@ -941,6 +946,55 @@ function SerenityController(context, log, env) {
   const bulkDeletePrompts = async (ctx) => {
     let auth;
     try {
+      // Async path (#3287): a large brand's delete + publish can outlive the ~15s
+      // Fastly edge budget (the Lambda has 900s), so the client 503s while the work
+      // keeps running. When enabled, enqueue the delete as a job and return 202 +
+      // jobId for the UI to poll; the sync path below stays the default until the
+      // flag and the polling UI are rolled out together.
+      if ((ctx.env || env)?.SERENITY_ASYNC_BULK_DELETE === 'true') {
+        auth = await authorize(ctx);
+        if (auth.error) {
+          return auth.error;
+        }
+        const rawPromiseToken = getRawPromiseToken(ctx);
+        if (!rawPromiseToken) {
+          return createResponse(
+            { error: 'invalidRequest', message: `Bulk delete requires a promise token; send the ${X_PROMISE_TOKEN_HEADER} header` },
+            400,
+          );
+        }
+        const promisePair = resolvePromisePair(ctx);
+        if (promisePair !== getSemrushPair()) {
+          return createResponse(
+            { error: 'invalidRequest', message: 'Bulk delete requires the x-promise-audience: semrush header' },
+            400,
+          );
+        }
+        let exchangeResult;
+        try {
+          exchangeResult = await exchangePromiseTokenResponse(ctx, rawPromiseToken, promisePair);
+        } catch (error) {
+          log.error('serenity bulk delete: promise token exchange failed', { error: error?.message });
+          throw new ErrorWithStatusCode('Invalid or expired promise token', 401);
+        }
+        const rotatedPromiseToken = {
+          promise_token: exchangeResult.promise_token,
+          expires_in: exchangeResult.promise_token_expires_in,
+          ...(exchangeResult.token_type ? { token_type: exchangeResult.token_type } : {}),
+        };
+        const acceptResult = await acceptBulkDelete({
+          context: ctx,
+          brandId: /** @type {string} */ (auth.brandUuid),
+          orgId: /** @type {string} */ (ctx?.params?.spaceCatId),
+          workspaceId: /** @type {string} */ (auth.workspaceId),
+          subworkspace: auth.mode === 'subworkspace',
+          body: ctx.data || {},
+          callerId: resolveCallerId(ctx),
+          promiseToken: rotatedPromiseToken,
+          promisePair: /** @type {string} */ (promisePair),
+        });
+        return createResponse(acceptResult.body, acceptResult.status);
+      }
       const imsToken = await resolveSemrushImsToken(ctx);
       auth = await authorize(ctx);
       if (auth.error) {
@@ -2489,10 +2543,12 @@ function SerenityController(context, log, env) {
         return notFound(`Job not found: ${jobId}`);
       }
       const metadata = job.getMetadata?.() ?? {};
-      /** @type {'classifyPrompts' | 'bulkTags' | 'tagImpact'} */
+      /** @type {'classifyPrompts' | 'bulkTags' | 'bulkDelete' | 'tagImpact'} */
       let publicJobType = 'classifyPrompts';
       if (metadata.jobType === BULK_TAGS_JOB_TYPE) {
         publicJobType = BULK_TAGS_PUBLIC_JOB_TYPE;
+      } else if (metadata.jobType === BULK_DELETE_JOB_TYPE) {
+        publicJobType = BULK_DELETE_PUBLIC_JOB_TYPE;
       } else if (metadata.jobType === 'serenity-tag-impact') {
         publicJobType = 'tagImpact';
       }

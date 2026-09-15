@@ -379,10 +379,25 @@ v2-serenity-prompts-bulk-delete:
           schema: { $ref: './schemas.yaml#/SerenityBulkDeletePromptsRequest' }
     responses:
       '200':
-        description: Bulk-delete completed.
+        description: Bulk-delete completed synchronously (default path).
         content:
           application/json:
             schema: { $ref: './schemas.yaml#/SerenityBulkDeletePromptsResponse' }
+      '202':
+        description: |
+          Bulk-delete accepted for async processing (returned when the async path
+          is enabled). The delete + publish run in the job runner; poll
+          `GET /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/prompts/jobs/{jobId}`
+          for the outcome. Requires the `x-promise-token` + `x-promise-audience: semrush`
+          headers.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                jobId: { type: string, format: uuid }
+                status: { type: string, example: IN_PROGRESS }
+                jobType: { type: string, example: bulkDelete }
       '400': { $ref: './responses.yaml#/400' }
       '404':
         description: Organization, brand, or workspace not found, or serenity is not active for the organization.
