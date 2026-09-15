@@ -27,6 +27,12 @@ import { handleBulkDeletePromptsSubworkspace } from './prompts-subworkspace.js';
 export const BULK_DELETE_JOB_TYPE = 'serenity-bulk-delete';
 export const BULK_DELETE_PUBLIC_JOB_TYPE = 'bulkDelete';
 
+// Cap the failures persisted on the job record so a large delete with many
+// upstream failures cannot push the AsyncJob item past the store's size limit
+// (which would fail job.save() and mark a landed delete as failed). The true
+// count is kept as failedTotal; the poller surfaces the sample + the count.
+export const MAX_STORED_FAILURES = 200;
+
 /**
  * Producer: validate the delete request and enqueue it as an async job, returning
  * 202 + jobId. The synchronous delete+publish for a large brand can exceed the
@@ -135,7 +141,16 @@ export async function bulkDeleteHandler(context, job, accessToken, injectedTrans
         log,
         { orgId, env: context.env, callerId },
       );
-    job.setResult(result);
+    const failedList = Array.isArray(result.failed) ? result.failed : [];
+    const storedResult = failedList.length > MAX_STORED_FAILURES
+      ? {
+        ...result,
+        failed: failedList.slice(0, MAX_STORED_FAILURES),
+        failedTotal: failedList.length,
+        failedTruncated: true,
+      }
+      : result;
+    job.setResult(storedResult);
     job.setStatus('COMPLETED');
     await job.save();
   } catch (error) {

@@ -18,6 +18,7 @@ import {
   bulkDeleteHandler,
   BULK_DELETE_JOB_TYPE,
   BULK_DELETE_PUBLIC_JOB_TYPE,
+  MAX_STORED_FAILURES,
 } from '../../../../src/support/serenity/handlers/bulk-delete-job.js';
 
 use(chaiAsPromised);
@@ -118,6 +119,26 @@ describe('bulk-delete-job', () => {
         bulkDeleteHandler(ctx, job, 'access-token', { deletePromptsByIds: sinon.stub() }),
       ).to.be.rejected;
       expect(job.statusVal).to.not.equal('FAILED');
+    });
+
+    it('bounds the failures stored on the job to MAX_STORED_FAILURES and keeps the true total', async () => {
+      const n = MAX_STORED_FAILURES + 50;
+      const targets = Array.from({ length: n }, (_, i) => ({
+        semrushPromptId: `sp-${i}`, geoTargetId: 2840, languageCode: 'en',
+      }));
+      const ctx = context();
+      // Upstream delete rejects for every id -> handleBulkDeletePrompts returns a
+      // large failed[] (collected, not thrown).
+      const transport = {
+        deletePromptsByIds: sinon.stub().rejects(Object.assign(new Error('nope'), { status: 400 })),
+        publishProject: sinon.stub().resolves({}),
+      };
+      const job = makeJob({ ...metadata, targets });
+      await bulkDeleteHandler(ctx, job, 'access-token', transport);
+      expect(job.statusVal).to.equal('COMPLETED');
+      expect(job.resultVal.failed).to.have.lengthOf(MAX_STORED_FAILURES);
+      expect(job.resultVal.failedTotal).to.equal(n);
+      expect(job.resultVal.failedTruncated).to.equal(true);
     });
 
     it('exposes the public job type constant for the poller', () => {

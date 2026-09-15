@@ -951,6 +951,9 @@ function SerenityController(context, log, env) {
       // keeps running. When enabled, enqueue the delete as a job and return 202 +
       // jobId for the UI to poll; the sync path below stays the default until the
       // flag and the polling UI are rolled out together.
+      // NOTE: keep this flag OFF until project-elmo-ui ships the 202/poll handling
+      // (project-elmo-ui#3185/#3184). While on, the endpoint returns 202 { jobId }
+      // with no `deleted` field, which the current grid does not understand.
       if ((ctx.env || env)?.SERENITY_ASYNC_BULK_DELETE === 'true') {
         auth = await authorize(ctx);
         if (auth.error) {
