@@ -1,3 +1,10 @@
+# [1.813.0](https://github.com/adobe/spacecat-api-service/compare/v1.812.0...v1.813.0) (2026-09-15)
+
+
+### Features
+
+* **serenity:** subset multi-model for url-prompts + owned-urls | LLMO-7553 ([#3272](https://github.com/adobe/spacecat-api-service/issues/3272)) ([6057736](https://github.com/adobe/spacecat-api-service/commit/605773673443e1f32c5eac759e228be274e68feb)), closes [#3158](https://github.com/adobe/spacecat-api-service/issues/3158) [#3265](https://github.com/adobe/spacecat-api-service/issues/3265) [#3158](https://github.com/adobe/spacecat-api-service/issues/3158) [#3158](https://github.com/adobe/spacecat-api-service/issues/3158) [#3158](https://github.com/adobe/spacecat-api-service/issues/3158)
+
 # [1.812.0](https://github.com/adobe/spacecat-api-service/compare/v1.811.0...v1.812.0) (2026-09-14)
 
 
