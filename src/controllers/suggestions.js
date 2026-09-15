@@ -52,6 +52,7 @@ import { SuggestionDto, SUGGESTION_VIEWS, SUGGESTION_SKIP_REASONS } from '../dto
 import { isValidLocale } from '../utils/validations.js';
 import { applyFieldProjection } from '../utils/field-projection.js';
 import { lookupByUrl } from '../support/lookup-by-url.js';
+import { requirePostgrestClient } from '../support/postgrest-availability.js';
 import {
   getScheduleParams,
   buildExperimentMetadata,
@@ -179,6 +180,12 @@ const getExperimentName = (opportunityType) => EXPERIMENT_NAME_BY_OPPORTUNITY_TY
 const VALIDATION_MESSAGE_TYPE_BY_OPPORTUNITY_TYPE = {
   [Audit.AUDIT_TYPES.PRERENDER]: 'optimize-at-edge-enabled-marking',
 };
+
+// Lightweight default projection for the by-urls lookup (omits the heavy `data` blob;
+// callers opt in via `fields=...,data`). `opportunityId` is force-included alongside `id`
+// since results span opportunities. See the Lookup Service architecture doc ("Offsite
+// Intelligence - Funneling"), section 4.2, in the gambit-ai-toolkit knowledge base.
+const SUGGESTION_BY_URL_LIGHTWEIGHT_FIELDS = ['id', 'opportunityId', 'type', 'status', 'rank', 'updatedAt'];
 
 async function isSitePlgTier(site, log) {
   try {
@@ -497,9 +504,16 @@ function SuggestionsController(ctx, sqs, env) {
    * @param {Object} site - Site entity.
    * @param {Array} suggestions - Suggestion entities to filter.
    * @param {Object} context - Request context.
+   * @param {Object} [opts]
+   * @param {boolean} [opts.failClosed=false] - On a grant-status lookup error, return `[]`
+   *   instead of the pre-existing fail-open default (`suggestions` unfiltered). Opt-in only -
+   *   every existing caller keeps the fail-open default. Intended for a caller whose blast
+   *   radius on a false pass-through is wider than a single opportunity's suggestions (e.g.
+   *   the site-wide by-urls lookup), where failing open would leak ungranted content across
+   *   every opportunity matched in that one call.
    * @returns {Promise<Array>} Filtered suggestion entities.
    */
-  const filterByGrantStatus = async (site, suggestions, context) => {
+  const filterByGrantStatus = async (site, suggestions, context, { failClosed = false } = {}) => {
     if (!await getIsSummitPlgEnabled(site, ctx, context, accessControlUtil)) {
       return suggestions;
     }
@@ -509,7 +523,7 @@ function SuggestionsController(ctx, sqs, env) {
       return suggestions.filter((s) => grantedIds.includes(s.getId()));
     } catch (err) {
       ctx.log?.error?.('Failed to filter suggestions by grant status', err?.message ?? err);
-      return suggestions;
+      return failClosed ? [] : suggestions;
     }
   };
 
@@ -3769,12 +3783,6 @@ function SuggestionsController(ctx, sqs, env) {
     return createResponse(toReviewView(data), 201);
   };
 
-  // Lightweight default projection for the by-url lookup (omits the heavy `data` blob;
-  // callers opt in via `fields=...,data`). `opportunityId` is force-included alongside `id`
-  // since results span opportunities. See the Lookup Service architecture doc ("Offsite
-  // Intelligence - Funneling"), section 4.2, in the gambit-ai-toolkit knowledge base.
-  const SUGGESTION_BY_URL_LIGHTWEIGHT_FIELDS = ['id', 'opportunityId', 'type', 'status', 'rank', 'updatedAt'];
-
   /**
    * Looks up suggestions backed by any of the supplied source URLs, across ALL of the site's
    * opportunities in one call. POST body: `{ urls: [...], fields?, status?, limit?, cursor?,
@@ -3804,12 +3812,14 @@ function SuggestionsController(ctx, sqs, env) {
       return forbidden('User does not belong to the organization');
     }
 
-    // See the matching comment in controllers/opportunities.js getByUrl: `requirePostgrest`
-    // reads `context.dataAccess`, which this factory-per-request controller never populates
-    // on the per-call context - it closes over `dataAccess` once instead. Check it directly.
+    // requirePostgrestClient (not requirePostgrest) because this controller closes over
+    // `dataAccess` once per request rather than reading it off the per-call `context` argument.
     const postgrestClient = dataAccess.services?.postgrestClient;
-    if (!postgrestClient?.from) {
-      return createResponse({ message: 'URL lookup requires Postgres (DATA_SERVICE_PROVIDER=postgres)' }, 503);
+    const guard = requirePostgrestClient(postgrestClient, {
+      errorMessage: 'URL lookup requires Postgres (DATA_SERVICE_PROVIDER=postgres)',
+    });
+    if (guard) {
+      return guard;
     }
 
     const { response, error } = await lookupByUrl(postgrestClient, {
@@ -3828,20 +3838,28 @@ function SuggestionsController(ctx, sqs, env) {
         const { data } = await Suggestion.batchGetByKeys(ids.map((id) => ({ suggestionId: id })));
         return data ?? [];
       },
-      // Narrow to suggestions whose opportunity the caller may see — mirrors the
-      // edge-deployed-urls D4 composite gate (site scoping comes for free here, since
-      // `permittedOpptyIds` is derived from `allBySiteId`) — then apply the same
-      // Summit-PLG grant gating every other suggestion read path applies
-      // (getAllForOpportunity*, getByStatus*, getByID), so this endpoint cannot return
-      // ungranted suggestion content that those endpoints deliberately withhold.
+      // Narrow to suggestions whose opportunity the caller may see. Fetches only the
+      // opportunities actually referenced by the hydrated suggestions (not every opportunity
+      // on the site) - the same siteId re-check opportunities.getByUrl does explicitly, then
+      // the D4 composite gate, then the same Summit-PLG grant gating every other suggestion
+      // read path applies (getAllForOpportunity*, getByStatus*, getByID), so this endpoint
+      // cannot return ungranted suggestion content those endpoints deliberately withhold.
+      // failClosed: true because a false pass-through here would leak ungranted content across
+      // every opportunity matched in this one call, not just a single opportunity as elsewhere.
       filterEntities: async (suggestions) => {
-        const permitted = filterOpportunitiesByFacsComposite(
-          context,
-          await Opportunity.allBySiteId(siteId),
+        const opptyIds = [...new Set(suggestions.map((s) => s.getOpportunityId()))];
+        const { data: candidateOpptys } = await Opportunity.batchGetByKeys(
+          opptyIds.map((id) => ({ opportunityId: id })),
         );
+        const owned = (candidateOpptys ?? []).filter((o) => o.getSiteId() === siteId);
+        if (owned.length !== (candidateOpptys ?? []).length) {
+          ctx.log?.warn?.(`[suggestions.getByUrl] dropped ${(candidateOpptys ?? []).length - owned.length} `
+            + `opportunity(ies) whose siteId did not match the requested site ${siteId} - the suggestion_urls index may be stale`);
+        }
+        const permitted = filterOpportunitiesByFacsComposite(context, owned);
         const permittedOpptyIds = new Set(permitted.map((o) => o.getId()));
         const scoped = suggestions.filter((s) => permittedOpptyIds.has(s.getOpportunityId()));
-        return filterByGrantStatus(site, scoped, context);
+        return filterByGrantStatus(site, scoped, context, { failClosed: true });
       },
       getId: (sugg) => sugg.getId(),
       getStatus: (sugg) => sugg.getStatus(),
@@ -3852,7 +3870,6 @@ function SuggestionsController(ctx, sqs, env) {
       idListKey: 'suggestionIds',
       mapKey: 'suggestions',
       includeNoMatchInResults: false,
-      includeUnmatchedUrls: true,
     });
     if (error) {
       return badRequest(error);

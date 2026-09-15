@@ -39,12 +39,12 @@ export const MAX_LOOKUP_MATCHES = 1000;
 export const DEFAULT_LOOKUP_PAGE_SIZE = 100;
 export const MAX_LOOKUP_PAGE_SIZE = 100;
 
-// A raw double-quote or a control character is never valid in a URL, and (unlike a comma or
-// parenthesis, both legitimate in a path/query) would let a crafted entry break out of the
-// PostgREST `.in()` filter's value quoting. Drop it like any other malformed entry
+// A raw double-quote, backslash, or control character is never valid in a URL, and (unlike a
+// comma or parenthesis, both legitimate in a path/query) would let a crafted entry break out of
+// the PostgREST `.in()` filter's value quoting. Drop it like any other malformed entry
 // (drop-don't-fail), rather than rejecting the whole request.
 // eslint-disable-next-line no-control-regex -- control-character range is intentional here
-const INVALID_URL_CHARS = /["\u0000-\u001f]/;
+const INVALID_URL_CHARS = /["\\\u0000-\u001f]/;
 
 /**
  * Validates the request-body `urls`. Non-array / oversized are hard errors; individual
@@ -217,7 +217,6 @@ function compareEntities(a, b, getSortKey, getId) {
  * @param {string} cfg.idListKey - `opportunityIds` | `suggestionIds`
  * @param {string} cfg.mapKey - `opportunities` | `suggestions`
  * @param {boolean} cfg.includeNoMatchInResults - opportunities keep no-match URLs in `results`
- * @param {boolean} cfg.includeUnmatchedUrls - add a first-page `unmatchedUrls`
  * @returns {Promise<{ response: object } | { error: string }>}
  */
 export async function lookupByUrl(postgrestClient, cfg) {
@@ -226,7 +225,7 @@ export async function lookupByUrl(postgrestClient, cfg) {
     validStatuses, defaultExcludedStatuses,
     fetchEntities, filterEntities, getId, getStatus, getSortKey, toFullDto,
     lightweightFields, forceFields,
-    idListKey, mapKey, includeNoMatchInResults, includeUnmatchedUrls,
+    idListKey, mapKey, includeNoMatchInResults,
   } = cfg;
 
   const urlsResult = parseLookupUrls(rawUrls);
@@ -253,7 +252,7 @@ export async function lookupByUrl(postgrestClient, cfg) {
       [mapKey]: entityMap,
       pagination: { limit, cursor: nextCursor, hasMore },
     };
-    if (includeUnmatchedUrls && isFirstPage) {
+    if (isFirstPage) {
       response.unmatchedUrls = unmatchedUrls;
     }
     return response;
@@ -287,7 +286,9 @@ export async function lookupByUrl(postgrestClient, cfg) {
   }
 
   if (allIds.length > MAX_LOOKUP_MATCHES) {
-    return { error: `Too many matched entities (${allIds.length}); narrow the urls list or add a status filter` };
+    // Raw index-matched count, before status filtering (which runs after hydration, below) -
+    // a status filter cannot reduce this number, so it is deliberately not suggested as a fix.
+    return { error: `Too many matched entities (${allIds.length}); narrow the urls list to fewer/less-popular URLs` };
   }
 
   const hydrated = allIds.length > 0 ? await fetchEntities(allIds) : [];
@@ -361,7 +362,7 @@ export async function lookupByUrl(postgrestClient, cfg) {
     if (includeNoMatchInResults || pageMatched.length > 0) {
       results.push({ url, [idListKey]: pageMatched });
     }
-    if (includeUnmatchedUrls && isFirstPage && !unmatchedSeen.has(url)) {
+    if (isFirstPage && !unmatchedSeen.has(url)) {
       const survivingMatched = matched.some((id) => survivingById.has(id));
       if (!survivingMatched) {
         unmatchedSeen.add(url);

@@ -30,6 +30,7 @@ import { OpportunityDto } from '../dto/opportunity.js';
 import { isValidLocale } from '../utils/validations.js';
 import { applyFieldProjection } from '../utils/field-projection.js';
 import { lookupByUrl } from '../support/lookup-by-url.js';
+import { requirePostgrestClient } from '../support/postgrest-availability.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { filterOpportunitiesByFacsComposite } from '../support/facs-composite-resolvers.js';
 import {
@@ -212,13 +213,14 @@ function OpportunitiesController(ctx) {
       return forbidden('Only users belonging to the organization of the site can view its opportunities');
     }
 
-    // `requirePostgrest` from postgrest-availability.js reads `context.dataAccess`, but this
-    // controller (like every other method here) is constructed with `dataAccess` once per
-    // request and closes over it - the per-call `context` argument never carries it. Check the
-    // closure variable directly, matching the 503-on-unconfigured convention that helper uses.
+    // requirePostgrestClient (not requirePostgrest) because this controller closes over
+    // `dataAccess` once per request rather than reading it off the per-call `context` argument.
     const postgrestClient = dataAccess.services?.postgrestClient;
-    if (!postgrestClient?.from) {
-      return createResponse({ message: 'URL lookup requires Postgres (DATA_SERVICE_PROVIDER=postgres)' }, 503);
+    const guard = requirePostgrestClient(postgrestClient, {
+      errorMessage: 'URL lookup requires Postgres (DATA_SERVICE_PROVIDER=postgres)',
+    });
+    if (guard) {
+      return guard;
     }
 
     const { response, error } = await lookupByUrl(postgrestClient, {
@@ -255,7 +257,6 @@ function OpportunitiesController(ctx) {
       idListKey: 'opportunityIds',
       mapKey: 'opportunities',
       includeNoMatchInResults: true,
-      includeUnmatchedUrls: true,
     });
     if (error) {
       return badRequest(error);

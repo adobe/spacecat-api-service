@@ -15731,7 +15731,11 @@ describe('Suggestions Controller', () => {
         Suggestion: { ...mockSuggestion, batchGetByKeys: batchStub },
         Opportunity: {
           ...mockOpportunity,
-          allBySiteId: sandbox.stub().resolves([{ getId: () => OPPORTUNITY_ID, getType: () => 'wikipedia-analysis' }]),
+          batchGetByKeys: sandbox.stub().resolves({
+            data: [{
+              getId: () => OPPORTUNITY_ID, getSiteId: () => SITE_ID, getType: () => 'wikipedia-analysis',
+            }],
+          }),
         },
         Site: { findById: sandbox.stub().resolves(site) },
         services: { postgrestClient: pgClient },
@@ -15816,8 +15820,30 @@ describe('Suggestions Controller', () => {
       expect(batchStub).to.have.been.calledOnce;
     });
 
+    it('drops and warns on a suggestion whose opportunity siteId does not match the requested site (stale/cross-site index row)', async () => {
+      daWithPg.Opportunity.batchGetByKeys.resolves({
+        data: [{
+          getId: () => OPPORTUNITY_ID, getSiteId: () => 'a-different-site-id', getType: () => 'wikipedia-analysis',
+        }],
+      });
+      const logStub = { warn: sandbox.stub(), info: sandbox.stub(), error: sandbox.stub() };
+      const ctrl = SuggestionsController({
+        dataAccess: daWithPg,
+        pathInfo: { headers: { 'x-product': 'llmo' } },
+        attributes: { authInfo: adminAuth() },
+        log: logStub,
+      }, mockSqs, {});
+      const res = await ctrl.getByUrl({ params: { siteId: SITE_ID }, data: { urls: [inputUrl] } });
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.suggestions).to.deep.equal({});
+      expect(body.unmatchedUrls).to.deep.equal([inputUrl]);
+      expect(logStub.warn).to.have.been.calledOnce;
+      expect(logStub.warn.firstCall.args[0]).to.match(/siteId did not match/);
+    });
+
     it('returns a suggestion whose opportunity type is in the caller\'s permitted set (D4 composite)', async () => {
-      // the suggestion's opportunity (from allBySiteId) is type 'wikipedia-analysis';
+      // the suggestion's opportunity (from batchGetByKeys) is type 'wikipedia-analysis';
       // a grant scoped to that type must keep the suggestion.
       const res = await controllerWithPg.getByUrl({
         params: { siteId: SITE_ID },

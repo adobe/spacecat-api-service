@@ -2088,6 +2088,9 @@ site-opportunities-by-urls:
         application/json:
           schema:
             $ref: './schemas.yaml#/LookupByUrlRequest'
+          examples:
+            opportunities-by-urls-request:
+              $ref: './examples.yaml#/opportunities-by-urls-request'
     responses:
       '200':
         description: Normalized results, an opportunities map keyed by id, and a pagination block.
@@ -2095,6 +2098,9 @@ site-opportunities-by-urls:
           application/json:
             schema:
               $ref: './schemas.yaml#/OpportunitiesByUrlResponse'
+            examples:
+              opportunities-by-urls-response:
+                $ref: './examples.yaml#/opportunities-by-urls-response'
       '400':
         $ref: './responses.yaml#/400'
       '401':
@@ -2138,6 +2144,9 @@ site-suggestions-by-urls:
         application/json:
           schema:
             $ref: './schemas.yaml#/LookupByUrlRequest'
+          examples:
+            suggestions-by-urls-request:
+              $ref: './examples.yaml#/suggestions-by-urls-request'
     responses:
       '200':
         description: Normalized results, a suggestions map keyed by id, unmatchedUrls, and a pagination block.
@@ -2145,6 +2154,9 @@ site-suggestions-by-urls:
           application/json:
             schema:
               $ref: './schemas.yaml#/SuggestionsByUrlResponse'
+            examples:
+              suggestions-by-urls-response:
+                $ref: './examples.yaml#/suggestions-by-urls-response'
       '400':
         $ref: './responses.yaml#/400'
       '401':

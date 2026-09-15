@@ -89,7 +89,6 @@ describe('lookup-by-url support', () => {
     idListKey: 'opportunityIds',
     mapKey: 'opportunities',
     includeNoMatchInResults: true,
-    includeUnmatchedUrls: false,
   });
 
   const suggCfg = (over = {}) => ({
@@ -111,7 +110,6 @@ describe('lookup-by-url support', () => {
     idListKey: 'suggestionIds',
     mapKey: 'suggestions',
     includeNoMatchInResults: false,
-    includeUnmatchedUrls: true,
   });
 
   // ---- parse helpers --------------------------------------------------------
@@ -136,11 +134,13 @@ describe('lookup-by-url support', () => {
       expect(mod.parseLookupUrls(['https://e.com/ok', tooLong])).to.deep.equal({ urls: ['https://e.com/ok'] });
     });
 
-    it('drops entries containing a raw double-quote or a control character', () => {
+    it('drops entries containing a raw double-quote, backslash, or a control character', () => {
       // a crafted value using these characters is how a PostgREST `.in()` value-quoting gap
       // could be exploited to widen the filter beyond the intended URL list
-      expect(mod.parseLookupUrls(['https://e.com/ok', 'https://e.com/a",")', 'https://e.com/b']))
-        .to.deep.equal({ urls: ['https://e.com/ok'] });
+      const withBackslash = `https://e.com/a${String.fromCharCode(92)}b`;
+      expect(mod.parseLookupUrls([
+        'https://e.com/ok', 'https://e.com/a",")', withBackslash, 'https://e.com/b',
+      ])).to.deep.equal({ urls: ['https://e.com/ok', 'https://e.com/b'] });
     });
 
     it('keeps legitimate reserved characters (commas, parens) in a URL', () => {
@@ -225,7 +225,8 @@ describe('lookup-by-url support', () => {
       });
       expect(response.opportunities.o1).to.not.have.property('data');
       expect(response.pagination).to.deep.equal({ limit: 100, cursor: null, hasMore: false });
-      expect(response).to.not.have.property('unmatchedUrls');
+      // unmatchedUrls is now unconditional on the first page - 'miss' matched nothing.
+      expect(response.unmatchedUrls).to.deep.equal(['https://example.com/miss']);
     });
 
     it('hides IGNORED opportunities by default and can request them explicitly', async () => {
@@ -296,7 +297,10 @@ describe('lookup-by-url support', () => {
     it('returns an empty response for an empty / all-invalid url list without querying', async () => {
       const { response } = await mod.lookupByUrl({}, oppCfg({ rawUrls: ['', null, 7] }));
       expect(response).to.deep.equal({
-        results: [], opportunities: {}, pagination: { limit: 100, cursor: null, hasMore: false },
+        results: [],
+        opportunities: {},
+        unmatchedUrls: [],
+        pagination: { limit: 100, cursor: null, hasMore: false },
       });
       expect(lookupStub).to.not.have.been.called;
     });

@@ -14995,14 +14995,13 @@ LookupByUrlRequest:
     urls:
       type: array
       description: >
-        Source URLs to match, 1–100 entries (each at most 2048 characters). Matching is done
-        after canonicalization (scheme / www / trailing-slash normalization). Non-string,
+        Source URLs to match, up to 100 entries (each at most 2048 characters). Matching is
+        done after canonicalization (scheme / www / trailing-slash normalization). Non-string,
         empty, oversized, or unsafe (containing a raw double-quote or control character)
-        entries are dropped; an empty or all-dropped list returns an empty result set, not
-        a 400.
+        entries are dropped; an empty array, or a list where every entry is dropped, returns
+        an empty result set, not a 400.
       items:
         type: string
-      minItems: 1
       maxItems: 100
     fields:
       type: string
