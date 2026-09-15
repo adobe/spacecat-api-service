@@ -1117,3 +1117,58 @@ AiVisibilityV1FtsExport:
       models: [chatgpt]
       marketsCatalog: [WW, AE, AR, US]
       modelsCatalog: [all, chatgpt, gemini, googleAiMode, googleAiOverview]
+
+opportunities-by-urls-request:
+  description: Look up opportunities backed by two source URLs, one of which has no match
+  value:
+    urls:
+      - 'https://www.example.com/cwv-article'
+      - 'https://www.example.com/never-indexed'
+
+opportunities-by-urls-response:
+  description: One matched opportunity and one no-match URL, on a single page
+  value:
+    results:
+      - url: 'https://www.example.com/cwv-article'
+        opportunityIds: ['123e4567-e89b-12d3-a456-426614174000']
+      - url: 'https://www.example.com/never-indexed'
+        opportunityIds: []
+    opportunities:
+      '123e4567-e89b-12d3-a456-426614174000':
+        id: '123e4567-e89b-12d3-a456-426614174000'
+        type: 'cited-analysis'
+        status: 'NEW'
+        title: 'Authoritative domains are linking to invalid SecurBank URLs. This could impact your SEO.'
+        updatedAt: '2026-01-15T10:30:00.000Z'
+    unmatchedUrls:
+      - 'https://www.example.com/never-indexed'
+    pagination:
+      limit: 100
+      cursor: null
+      hasMore: false
+
+suggestions-by-urls-request:
+  description: Look up suggestions backed by one source URL
+  value:
+    urls:
+      - 'https://www.dailynews.com/2024/08/13/black-friday-sale-at-example-inc/'
+
+suggestions-by-urls-response:
+  description: One matched suggestion, force-including opportunityId, with no unmatched URLs
+  value:
+    results:
+      - url: 'https://www.dailynews.com/2024/08/13/black-friday-sale-at-example-inc/'
+        suggestionIds: ['213e4567-f543-12d3-a456-426614174000']
+    suggestions:
+      '213e4567-f543-12d3-a456-426614174000':
+        id: '213e4567-f543-12d3-a456-426614174000'
+        opportunityId: '123e4567-e89b-12d3-a456-426614174000'
+        type: 'REDIRECT_UPDATE'
+        status: 'NEW'
+        rank: 571000
+        updatedAt: '2026-01-15T10:30:00.000Z'
+    unmatchedUrls: []
+    pagination:
+      limit: 100
+      cursor: null
+      hasMore: false
