@@ -24,6 +24,7 @@ import {
   updatePromptById,
   deletePromptById,
   bulkDeletePrompts,
+  deletePromptsByFilter,
   checkPromptsExist,
   getPromptStats,
   normalizeIntent,
@@ -3696,6 +3697,84 @@ describe('prompts-storage', () => {
       expect(result.metadata.total).to.equal(2);
       expect(result.metadata.success).to.equal(1);
       expect(result.metadata.failure).to.equal(1);
+    });
+  });
+
+  describe('deletePromptsByFilter', () => {
+    it('throws when postgrestClient has no from', async () => {
+      await expect(
+        deletePromptsByFilter({
+          organizationId: ORG_ID,
+          brandUuid: BRAND_UUID,
+          all: true,
+          postgrestClient: null,
+        }),
+      ).to.be.rejectedWith('PostgREST client is required');
+    });
+
+    it('refuses an unscoped delete (no criteria, all=false)', async () => {
+      let fromCalls = 0;
+      const client = {
+        from: () => {
+          fromCalls += 1;
+          return makeChain({ count: 999, error: null });
+        },
+      };
+      const result = await deletePromptsByFilter({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        filter: {},
+        all: false,
+        postgrestClient: client,
+      });
+      expect(result).to.deep.equal({ error: 'confirmation_required' });
+      expect(fromCalls).to.equal(0);
+    });
+
+    it('deletes the whole brand when all:true and returns the count', async () => {
+      const client = { from: () => makeChain({ count: 42, error: null }) };
+      const result = await deletePromptsByFilter({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        all: true,
+        postgrestClient: client,
+      });
+      expect(result).to.deep.equal({ metadata: { deleted: 42 } });
+    });
+
+    it('deletes by a filter criterion and returns the count', async () => {
+      const client = { from: () => makeChain({ count: 5, error: null }) };
+      const result = await deletePromptsByFilter({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        filter: { region: 'US' },
+        postgrestClient: client,
+      });
+      expect(result).to.deep.equal({ metadata: { deleted: 5 } });
+    });
+
+    it('fails closed to deleted:0 when a category filter resolves to no row', async () => {
+      // Category lookup resolves to no row -> fail closed, delete nothing.
+      const client = { from: () => makeChain({ data: null, count: 0, error: null }) };
+      const result = await deletePromptsByFilter({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        filter: { categoryId: 'does-not-exist' },
+        postgrestClient: client,
+      });
+      expect(result).to.deep.equal({ metadata: { deleted: 0 } });
+    });
+
+    it('throws when the update errors', async () => {
+      const client = { from: () => makeChain({ count: null, error: { message: 'DB error' } }) };
+      await expect(
+        deletePromptsByFilter({
+          organizationId: ORG_ID,
+          brandUuid: BRAND_UUID,
+          all: true,
+          postgrestClient: client,
+        }),
+      ).to.be.rejectedWith('Failed to delete prompts by filter: DB error');
     });
   });
 

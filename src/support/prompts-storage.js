@@ -1429,6 +1429,97 @@ export async function bulkDeletePrompts({
   };
 }
 
+export async function deletePromptsByFilter({
+  organizationId,
+  brandUuid,
+  filter = {},
+  all = false,
+  postgrestClient,
+  updatedBy = 'system',
+}) {
+  if (!postgrestClient?.from) {
+    throw new Error('PostgREST client is required');
+  }
+
+  const {
+    status, region, origin, source, categoryId, topicId, search,
+  } = filter || {};
+
+  const hasCriteria = [status, region, origin, source, categoryId, topicId, search]
+    .some(hasText);
+
+  // Guard against an accidental brand-wide wipe: a filter delete needs at least
+  // one criterion, and clearing the whole brand must be opted into explicitly
+  // with all:true. The caller maps this sentinel to a 400.
+  if (!hasCriteria && !all) {
+    return { error: 'confirmation_required' };
+  }
+
+  // FAIL CLOSED on an unresolved category/topic business key, mirroring
+  // listPrompts: a filter that resolves to no row deletes nothing rather than
+  // dropping the filter and deleting the brand.
+  let categoryUuid = null;
+  if (hasText(categoryId)) {
+    categoryUuid = await resolveCategoryUuid(organizationId, categoryId, postgrestClient);
+    if (!categoryUuid) {
+      return { metadata: { deleted: 0 } };
+    }
+  }
+  let topicUuid = null;
+  if (hasText(topicId)) {
+    topicUuid = await resolveTopicUuid(organizationId, topicId, postgrestClient);
+    if (!topicUuid) {
+      return { metadata: { deleted: 0 } };
+    }
+  }
+
+  // One scoped set update soft-deletes every matching row in a single
+  // round-trip, so a large library can be cleared without the ~N/100 capped
+  // bulk-delete calls it would otherwise take (#3279). The filter predicates are
+  // the same ones listPrompts applies, so "delete everything matching this view"
+  // deletes exactly what the view shows.
+  let query = postgrestClient
+    .from('prompts')
+    .update({ status: 'deleted', updated_by: updatedBy })
+    .eq('organization_id', organizationId)
+    .eq('brand_id', brandUuid);
+
+  if (hasText(status)) {
+    query = query.eq('status', status);
+  } else {
+    // Never re-touch already-deleted rows (and never count them as deleted).
+    query = query.neq('status', 'deleted');
+  }
+  if (hasText(origin)) {
+    query = query.eq('origin', origin);
+  }
+  if (hasText(source)) {
+    query = query.eq('source_canonical', foldSourceValue(source));
+  }
+  if (hasText(region)) {
+    const regionVariants = [...new Set([region.toLowerCase(), region.toUpperCase()])];
+    query = query.overlaps('regions', regionVariants);
+  }
+  if (hasText(search)) {
+    const term = `%${search}%`;
+    query = query.or(`text.ilike.${term},name.ilike.${term}`);
+  }
+  if (categoryUuid) {
+    query = query.eq('category_id', categoryUuid);
+  }
+  if (topicUuid) {
+    query = query.eq('topic_id', topicUuid);
+  }
+
+  // head:true transfers only the count header, never the (possibly tens of
+  // thousands of) updated rows — the same pattern the market-probe count uses.
+  const { count, error } = await query.select('prompt_id', { count: 'exact', head: true });
+  if (error) {
+    throw new Error(`Failed to delete prompts by filter: ${error.message}`);
+  }
+  return { metadata: { deleted: count ?? 0 } };
+}
+
 export async function checkPromptsExist({ brandUuid, prompts, postgrestClient }) {
   if (!postgrestClient?.rpc) {
     throw new Error('PostgREST client is required');

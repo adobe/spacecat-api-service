@@ -47,6 +47,7 @@ import {
   updatePromptById,
   deletePromptById,
   bulkDeletePrompts,
+  deletePromptsByFilter,
   checkPromptsExist,
   getPromptStats,
   resolveBrandUuid,
@@ -895,11 +896,19 @@ function BrandsController(ctx, log, env) {
         return badRequest('Brand ID required');
       }
 
-      const { promptIds } = body;
-      if (!Array.isArray(promptIds) || promptIds.length === 0) {
-        return badRequest('promptIds array required (min 1, max 100)');
+      const { promptIds, all, filter } = body;
+      const hasIdList = Array.isArray(promptIds) && promptIds.length > 0;
+      const hasFilterObj = filter !== null && typeof filter === 'object' && !Array.isArray(filter);
+
+      // Exactly one selector. An explicit id list keeps the 100-cap; a filter /
+      // all delete is a single set update with no cap (that is the point — it
+      // clears a large library in one round-trip). A body carrying none of the
+      // three is rejected rather than treated as "delete everything", so a
+      // malformed request can never wipe a brand.
+      if (!hasIdList && all !== true && !hasFilterObj) {
+        return badRequest('Provide promptIds (min 1, max 100), a filter object, or all:true');
       }
-      if (promptIds.length > 100) {
+      if (Array.isArray(promptIds) && promptIds.length > 100) {
         return badRequest('Maximum 100 prompt IDs per request');
       }
 
@@ -924,14 +933,28 @@ function BrandsController(ctx, log, env) {
         return notFound(`Brand not found: ${brandId}`);
       }
 
-      const result = await bulkDeletePrompts({
+      if (hasIdList) {
+        const result = await bulkDeletePrompts({
+          organizationId: spaceCatId,
+          brandUuid,
+          promptIds,
+          postgrestClient,
+          updatedBy,
+        });
+        return createResponse(result, 200);
+      }
+
+      const result = await deletePromptsByFilter({
         organizationId: spaceCatId,
         brandUuid,
-        promptIds,
+        all: all === true,
+        filter: hasFilterObj ? filter : {},
         postgrestClient,
         updatedBy,
       });
-
+      if (result?.error === 'confirmation_required') {
+        return badRequest('Refusing to delete: provide at least one filter criterion or set all:true');
+      }
       return createResponse(result, 200);
     } catch (error) {
       log.error(`Error bulk deleting prompts for brand ${brandId}:`, error);

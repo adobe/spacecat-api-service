@@ -2299,6 +2299,11 @@ AuditUrlDeleteResponse:
         failure:
           type: integer
           description: Number of failed deletions
+        deleted:
+          type: integer
+          description: |
+            Number of prompts soft-deleted by a filter / all delete. Present on the
+            filter-based response instead of total/success/failure.
     failures:
       type: array
       items:
@@ -6839,9 +6844,16 @@ V2PromptInput:
 
 V2PromptBulkDeleteRequest:
   type: object
-  description: Request body for bulk-deleting prompts
-  required:
-    - promptIds
+  description: |
+    Request body for bulk-deleting prompts. Provide exactly one selector:
+    `promptIds` (an explicit list, max 100), `filter` (delete every prompt
+    matching these criteria), or `all: true` (delete every non-deleted prompt for
+    the brand). A body carrying none of these is rejected with 400 to prevent an
+    accidental brand-wide wipe.
+  oneOf:
+    - required: [promptIds]
+    - required: [filter]
+    - required: [all]
   properties:
     promptIds:
       type: array
@@ -6850,6 +6862,29 @@ V2PromptBulkDeleteRequest:
       minItems: 1
       maxItems: 100
       description: Array of prompt business keys to soft-delete
+    all:
+      type: boolean
+      description: When true, soft-delete every non-deleted prompt for the brand.
+    filter:
+      type: object
+      description: |
+        Soft-delete every prompt matching these criteria (same semantics as the
+        GET prompts list filters). At least one criterion is required.
+      properties:
+        status:
+          type: string
+        region:
+          type: string
+        origin:
+          type: string
+        source:
+          type: string
+        categoryId:
+          type: string
+        topicId:
+          type: string
+        search:
+          type: string
 
 V2PromptBulkDeleteResponse:
   type: object

@@ -2245,6 +2245,52 @@ describe('Brands Controller', () => {
       expect(response.status).to.equal(400);
     });
 
+    it('returns 400 when the body has no promptIds, filter, or all', async () => {
+      const response = await brandsController.bulkDeletePromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { filter: [] },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+    });
+
+    it('refuses a filter delete with no criteria and all not set', async () => {
+      const response = await brandsController.bulkDeletePromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { filter: {} },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(400);
+      const body = await response.json();
+      expect(body.message).to.match(/filter|all/i);
+    });
+
+    it('routes an all:true body to the filter delete and returns 200', async () => {
+      const response = await brandsController.bulkDeletePromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { all: true },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body.metadata).to.have.property('deleted');
+    });
+
+    it('routes a filter body to the filter delete and returns 200', async () => {
+      const response = await brandsController.bulkDeletePromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: { filter: { origin: 'human' } },
+        dataAccess: mockDataAccess,
+      });
+      expect(response.status).to.equal(200);
+      const body = await response.json();
+      expect(body.metadata).to.have.property('deleted');
+    });
+
     it('returns 400 when params is undefined', async () => {
       const response = await brandsController.bulkDeletePromptsByBrand({
         ...context,
