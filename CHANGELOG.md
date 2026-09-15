@@ -1,3 +1,11 @@
+## [1.814.1](https://github.com/adobe/spacecat-api-service/compare/v1.814.0...v1.814.1) (2026-09-15)
+
+
+### Bug Fixes
+
+* **github-trigger-rules:** correctly diagnose team-routed review requests ([#3275](https://github.com/adobe/spacecat-api-service/issues/3275)) ([566f421](https://github.com/adobe/spacecat-api-service/commit/566f4219f4fb3b3738d8241e1adea676fb38b8bc)), closes [#3234](https://github.com/adobe/spacecat-api-service/issues/3234) [#3235](https://github.com/adobe/spacecat-api-service/issues/3235) [#3236](https://github.com/adobe/spacecat-api-service/issues/3236) [#3236](https://github.com/adobe/spacecat-api-service/issues/3236) [Hi#level](https://github.com/Hi/issues/level) [adobe/mysticat-github-service#123](https://github.com/adobe/mysticat-github-service/issues/123) [adobe-rnd/llmo-data-retrieval-service#3234](https://github.com/adobe-rnd/llmo-data-retrieval-service/issues/3234) [#3235](https://github.com/adobe/spacecat-api-service/issues/3235) [#3234](https://github.com/adobe/spacecat-api-service/issues/3234) [#3235](https://github.com/adobe/spacecat-api-service/issues/3235) [#3236](https://github.com/adobe/spacecat-api-service/issues/3236)
+* **serenity:** source project location_name from Google Ads geo-targets, not CLDR [LLMO-7614] ([#3278](https://github.com/adobe/spacecat-api-service/issues/3278)) ([29d0c74](https://github.com/adobe/spacecat-api-service/commit/29d0c74e547216b017e86ad1f21538b743b07c7c)), closes [#2610](https://github.com/adobe/spacecat-api-service/issues/2610)
+
 # [1.814.0](https://github.com/adobe/spacecat-api-service/compare/v1.813.1...v1.814.0) (2026-09-15)
 
 
