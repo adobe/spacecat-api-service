@@ -258,6 +258,7 @@ export default function getRouteHandlers(
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode': serenityController.getMarket,
     'DELETE /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode': serenityController.deleteMarket,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags': serenityController.listTags,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags/search': serenityController.searchTags,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags': serenityController.createTag,
     'PATCH /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags/:tagId': serenityController.updateTag,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags/:tagId/impact': serenityController.getTagImpact,

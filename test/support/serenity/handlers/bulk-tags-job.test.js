@@ -123,6 +123,12 @@ const snapshot = {
     ['other', {
       id: 'other', rootName: 'tag', depth: 2, fullPath: [{ id: 'tag', name: 'tag' }, { id: 'other', name: 'Other' }],
     }],
+    ['middle', {
+      id: 'middle', rootName: 'tag', depth: 3, fullPath: [{ id: 'tag', name: 'tag' }, { id: 'family', name: 'Family' }, { id: 'middle', name: 'Middle' }],
+    }],
+    ['deep', {
+      id: 'deep', rootName: 'tag', depth: 4, fullPath: [{ id: 'tag', name: 'tag' }, { id: 'family', name: 'Family' }, { id: 'middle', name: 'Middle' }, { id: 'deep', name: 'Deep' }],
+    }],
   ]),
   items: [],
 };
@@ -194,6 +200,17 @@ describe('bulk tags job request and tree semantics', () => {
       .to.have.members(['child', 'family']);
     expect(applyBulkTagOperation(['family', 'child', 'other'], 'remove', [snapshot.byId.get('family')], snapshot))
       .to.have.members(['other']);
+  });
+
+  it('assigns every deep ancestor and removes an arbitrary-depth subtree', () => {
+    expect(applyBulkTagOperation([], 'assign', [snapshot.byId.get('deep')], snapshot))
+      .to.have.members(['deep', 'middle', 'family']);
+    expect(applyBulkTagOperation(
+      ['family', 'middle', 'deep', 'other'],
+      'remove',
+      [snapshot.byId.get('middle')],
+      snapshot,
+    )).to.have.members(['family', 'other']);
   });
 
   it('uses OR within each facet family and AND across families', () => {

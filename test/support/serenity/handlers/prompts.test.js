@@ -158,9 +158,9 @@ describe('faceted prompt guard helpers', () => {
     expect(listPromptsByTags).to.have.callCount(100);
   });
 
-  it('rejects unknown, root, read-only, and unsupported-depth facet ids', async () => {
+  it('rejects unknown, root, and read-only facet ids while accepting deep tags', async () => {
     const snapshot = promptTagSnapshot();
-    for (const tagId of ['missing', 'tag-root', 'read-only', 'too-deep']) {
+    for (const tagId of ['missing', 'tag-root', 'read-only']) {
       // eslint-disable-next-line no-await-in-loop
       await expect(resolveFacetedTagFilter(
         {},
@@ -174,6 +174,15 @@ describe('faceted prompt guard helpers', () => {
         expect(error.code).to.equal(ERROR_CODES.INVALID_TAG_FILTER);
       });
     }
+    const deep = await resolveFacetedTagFilter(
+      {},
+      WORKSPACE,
+      'project-1',
+      ['too-deep'],
+      fakeLog(),
+      snapshot,
+    );
+    expect([...deep.groups[0]]).to.deep.equal(['too-deep']);
   });
 
   it('expands a selected family into OR alternatives and keeps families as AND groups', async () => {
@@ -197,7 +206,22 @@ describe('faceted prompt guard helpers', () => {
     ]);
   });
 
-  it('auto-adds a depth-3 plain tag parent on prompt replacement', async () => {
+  it('derives the first-level family and expands a selected deep ancestor', async () => {
+    const result = await resolveFacetedTagFilter(
+      {},
+      WORKSPACE,
+      'project-1',
+      ['middle-c'],
+      fakeLog(),
+      promptTagSnapshot(),
+    );
+
+    expect(result.groups).to.have.lengthOf(1);
+    expect([...result.groups[0]]).to.have.members(['middle-c', 'too-deep']);
+    expect(result.candidateIds).to.have.members(['middle-c', 'too-deep']);
+  });
+
+  it('auto-adds the complete plain-tag ancestor chain on prompt replacement', async () => {
     const result = await normalizePromptTagSelection(
       {},
       WORKSPACE,
@@ -208,6 +232,16 @@ describe('faceted prompt guard helpers', () => {
     );
 
     expect(result).to.have.members(['leaf-a-1', 'family-a']);
+
+    const deep = await normalizePromptTagSelection(
+      {},
+      WORKSPACE,
+      'project-1',
+      ['too-deep'],
+      fakeLog(),
+      promptTagSnapshot(),
+    );
+    expect(deep).to.have.members(['too-deep', 'middle-c', 'family-c']);
   });
 
   it('rejects dimension roots on prompt replacement', async () => {

@@ -29,6 +29,7 @@ import { BRAND_CACHE_TTL_MS, MAX_ENTRIES } from './workspace-resolver.js';
  */
 export const SERENITY_FEATURE_FLAG_PRODUCT = 'LLMO';
 export const SERENITY_FEATURE_FLAG_NAME = 'serenity';
+export const SERENITY_UNBOUNDED_TAG_AUTHORING_FEATURE_FLAG_NAME = 'serenity_unbounded_tag_authoring';
 
 /**
  * The org-wide switch that pins the org's UI to the Serenity experience, set by
@@ -208,6 +209,36 @@ export async function isSerenityActiveForOrg(ctx, spaceCatId, log) {
  */
 export async function isSerenityActiveForBrand(ctx, spaceCatId, brandUuid, log) {
   const scopes = await readCachedFlagScopes(ctx, spaceCatId, SERENITY_FEATURE_FLAG_NAME, log);
+  if (!scopes) {
+    return false;
+  }
+  return resolveFlagRowForBrand(scopes, brandUuid)?.flag_value === true;
+}
+
+/**
+ * Independent rollout switch for creating, renaming, or re-parenting custom
+ * `tag` descendants beyond the legacy depth-2/depth-3 authoring boundary.
+ * Reads/searches remain unbounded regardless of this flag so disabling it is a
+ * safe authoring backout that preserves existing deep taxonomy and assignments.
+ *
+ * @param {object} ctx - Request context.
+ * @param {string} spaceCatId - SpaceCat organization UUID.
+ * @param {string} brandUuid - Resolved Postgres brand UUID.
+ * @param {object} [log] - Optional logger.
+ * @returns {Promise<boolean>} `true` only when explicitly enabled for the brand.
+ */
+export async function isUnboundedTagAuthoringActiveForBrand(
+  ctx,
+  spaceCatId,
+  brandUuid,
+  log,
+) {
+  const scopes = await readCachedFlagScopes(
+    ctx,
+    spaceCatId,
+    SERENITY_UNBOUNDED_TAG_AUTHORING_FEATURE_FLAG_NAME,
+    log,
+  );
   if (!scopes) {
     return false;
   }

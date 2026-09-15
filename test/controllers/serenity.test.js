@@ -153,6 +153,7 @@ describe('SerenityController', () => {
     handleCreateMarket: sinon.stub(),
     handleDeleteMarket: sinon.stub(),
     handleListTags: sinon.stub(),
+    handleSearchTags: sinon.stub(),
     handleListModels: sinon.stub(),
     handleUpdateModels: sinon.stub(),
     listGlobalModelCatalog: sinon.stub(),
@@ -162,6 +163,7 @@ describe('SerenityController', () => {
     handleCreateMarketSubworkspace: sinon.stub(),
     handleDeleteMarketSubworkspace: sinon.stub(),
     handleListTagsSubworkspace: sinon.stub(),
+    handleSearchTagsSubworkspace: sinon.stub(),
     handleListModelsSubworkspace: sinon.stub(),
     handleUpdateModelsSubworkspace: sinon.stub(),
     handleListPromptsSubworkspace: sinon.stub(),
@@ -187,6 +189,7 @@ describe('SerenityController', () => {
   let resolveWorkspaceIdStub;
   let resolveBrandWorkspaceStub;
   let isSerenityActiveStub;
+  let isUnboundedTagAuthoringActiveStub;
   let createTransportStub;
   let resolveBrandUuidStub;
   let getBrandAliasesStub;
@@ -221,6 +224,7 @@ describe('SerenityController', () => {
     // existing assertion that drives a brand-level route reaches its handler.
     // The "serenity inactive" describe overrides this to false.
     isSerenityActiveStub = sinon.stub().resolves(true);
+    isUnboundedTagAuthoringActiveStub = sinon.stub().resolves(true);
     decommissionStub = sinon.stub().resolves();
     ensureSubworkspaceStub = sinon.stub().resolves(SUBWS);
     clearBrandWorkspaceCacheStub = sinon.stub();
@@ -324,12 +328,17 @@ describe('SerenityController', () => {
         handleTagImpact: handlers.handleTagImpact,
         handleTagImpactSubworkspace: handlers.handleTagImpactSubworkspace,
       },
+      '../../src/support/serenity/handlers/tag-search.js': {
+        handleSearchTags: handlers.handleSearchTags,
+        handleSearchTagsSubworkspace: handlers.handleSearchTagsSubworkspace,
+      },
       '../../src/support/serenity/workspace-lifecycle.js': {
         ensureSubworkspace: ensureSubworkspaceStub,
         decommissionBrandWorkspace: decommissionStub,
       },
       '../../src/support/serenity/serenity-active.js': {
         isSerenityActiveForBrand: isSerenityActiveStub,
+        isUnboundedTagAuthoringActiveForBrand: isUnboundedTagAuthoringActiveStub,
       },
       '../../src/support/access-control-util.js': MockAccessControlUtil,
       '../../src/support/prompts-storage.js': {
@@ -1136,6 +1145,29 @@ describe('SerenityController', () => {
       expect(handlers.handleListTags).to.have.been.calledOnce;
     });
 
+    it('searchTags dispatches the parsed query and cursor secret', async () => {
+      handlers.handleSearchTags.resolves({ items: [], cursor: null, complete: true });
+      const controller = SerenityController(
+        { env: { SERENITY_TAG_SEARCH_CURSOR_SECRET: 'search-secret' } },
+        fakeLog(),
+        {},
+      );
+      const ctx = fakeContext({ env: { SERENITY_TAG_SEARCH_CURSOR_SECRET: 'search-secret' } });
+      ctx.request = {
+        url: 'https://x?geoTargetId=2840&languageCode=en&q=campaign&limit=10',
+      };
+      const response = await controller.searchTags(ctx);
+      expect(response.status).to.equal(200);
+      expect(handlers.handleSearchTags).to.have.been.calledOnce;
+      expect(handlers.handleSearchTags.firstCall.args[4]).to.deep.include({
+        geoTargetId: '2840',
+        languageCode: 'en',
+        q: 'campaign',
+        limit: '10',
+      });
+      expect(handlers.handleSearchTags.firstCall.args[6]).to.equal('search-secret');
+    });
+
     it('listModels dispatches to handleListModels and wraps the result in ok()', async () => {
       handlers.handleListModels.resolves({ items: [] });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
@@ -1477,6 +1509,7 @@ describe('SerenityController', () => {
       expect(body.tag).to.equal('category:Footwear');
       expect(handlers.handleCreateTag).to.have.been.calledOnce;
       expect(handlers.handleCreateTag.firstCall.args[4]).to.deep.equal({});
+      expect(handlers.handleCreateTag.firstCall.args[6]).to.equal(true);
       expect(handlers.handleCreateTagSubworkspace).to.not.have.been.called;
     });
 
@@ -1502,6 +1535,19 @@ describe('SerenityController', () => {
       expect(response.status).to.equal(400);
       const body = await readBody(response);
       expect(body.message).to.match(/name is required/);
+    });
+
+    it('forwards the disabled unbounded-authoring rollout state to tag mutations', async () => {
+      isUnboundedTagAuthoringActiveStub.resolves(false);
+      handlers.handleCreateTag.resolves({ status: 201, body: {} });
+      handlers.handleUpdateTag.resolves({ status: 200, body: {} });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+
+      await controller.createTag(fakeContext());
+      await controller.updateTag(fakeContext({ params: { tagId: 'tag-1' } }));
+
+      expect(handlers.handleCreateTag.firstCall.args[6]).to.equal(false);
+      expect(handlers.handleUpdateTag.firstCall.args[7]).to.equal(false);
     });
 
     it('updateTag requires the :tagId path param', async () => {
@@ -1530,6 +1576,7 @@ describe('SerenityController', () => {
       expect(body).to.include({ tagId: 'tag-1', parentId: 'root-1' });
       expect(handlers.handleUpdateTag).to.have.been.calledOnce;
       expect(handlers.handleUpdateTag.firstCall.args[4]).to.equal('tag-1');
+      expect(handlers.handleUpdateTag.firstCall.args[7]).to.equal(true);
       expect(handlers.handleUpdateTagSubworkspace).to.not.have.been.called;
     });
 
@@ -2249,6 +2296,7 @@ describe('SerenityController', () => {
       expect(handlers.handleCreateTagSubworkspace).to.have.been.calledOnce;
       expect(handlers.handleCreateTagSubworkspace.firstCall.args[1]).to.equal('subworkspace-ws-1');
       expect(handlers.handleCreateTagSubworkspace.firstCall.args[2]).to.deep.equal({});
+      expect(handlers.handleCreateTagSubworkspace.firstCall.args[4]).to.equal(true);
       expect(handlers.handleCreateTag).to.not.have.been.called;
     });
 
@@ -2265,6 +2313,7 @@ describe('SerenityController', () => {
       expect(handlers.handleUpdateTagSubworkspace).to.have.been.calledOnce;
       expect(handlers.handleUpdateTagSubworkspace.firstCall.args[1]).to.equal('subworkspace-ws-1');
       expect(handlers.handleUpdateTagSubworkspace.firstCall.args[2]).to.equal('tag-1');
+      expect(handlers.handleUpdateTagSubworkspace.firstCall.args[5]).to.equal(true);
       expect(handlers.handleUpdateTag).to.not.have.been.called;
     });
 

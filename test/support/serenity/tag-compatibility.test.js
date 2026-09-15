@@ -63,7 +63,7 @@ describe('tag compatibility classification', () => {
     });
   });
 
-  it('marks plain tags deeper than three levels read-only', () => {
+  it('keeps deeply nested plain tags canonical', () => {
     const [item] = classifyTagCompatibility([{
       id: 'deep',
       name: 'Too Deep',
@@ -75,9 +75,6 @@ describe('tag compatibility classification', () => {
       ],
     }]);
 
-    expect(item.compatibility).to.deep.equal({
-      state: 'readOnly',
-      reason: 'unsupportedDepth',
-    });
+    expect(item.compatibility).to.deep.equal({ state: 'canonical', reason: null });
   });
 });
