@@ -1,3 +1,10 @@
+## [1.814.2](https://github.com/adobe/spacecat-api-service/compare/v1.814.1...v1.814.2) (2026-09-15)
+
+
+### Bug Fixes
+
+* **prompts:** bulk-delete the whole batch in one round-trip ([#3280](https://github.com/adobe/spacecat-api-service/issues/3280)) ([e81b60d](https://github.com/adobe/spacecat-api-service/commit/e81b60d7d646b8d1230fbf524d88c9f9cc3d7af8)), closes [Hi#level](https://github.com/Hi/issues/level)
+
 ## [1.814.1](https://github.com/adobe/spacecat-api-service/compare/v1.814.0...v1.814.1) (2026-09-15)
 
 
