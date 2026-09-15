@@ -12,7 +12,13 @@
 
 import { expect } from 'chai';
 
+import { iso31661Alpha2ToNumeric } from 'iso-3166';
+
 import { resolveLocation, marketForGeoTargetId } from '../../../src/support/serenity/locations.js';
+import {
+  GOOGLE_GEO_TARGET_NAMES,
+  MARKETS_WITHOUT_GOOGLE_GEO_TARGET,
+} from '../../../src/support/serenity/google-geo-target-names.js';
 
 describe('serenity locations — resolveLocation', () => {
   it('maps an ISO alpha-2 code to geoTargetId (2000 + ISO numeric) + English name', () => {
@@ -81,5 +87,64 @@ describe('serenity locations — marketForGeoTargetId (inverse)', () => {
     expect(marketForGeoTargetId(NaN)).to.equal(null);
     expect(marketForGeoTargetId(2840.5)).to.equal(null);
     expect(marketForGeoTargetId('nope')).to.equal(null);
+  });
+});
+
+describe('serenity locations — location_name is Google Ads geo-target, not CLDR', () => {
+  // `location_name` is matched against Google Ads geo-targets by Google AI Mode /
+  // AI Overview at collection time. CLDR (`Intl.DisplayNames`) spells 31 of these
+  // differently, and a mismatch makes those two providers silently collect NOTHING.
+  // Each pair below is [market, Google's name, the CLDR name that broke it].
+  const DIVERGENT = [
+    ['TT', 'Trinidad and Tobago', 'Trinidad & Tobago'],
+    ['HK', 'Hong Kong', 'Hong Kong SAR China'],
+    ['TR', 'Turkiye', 'Türkiye'],
+    ['PS', 'Palestine', 'Palestinian Territories'],
+    ['BS', 'The Bahamas', 'Bahamas'],
+    ['KN', 'Saint Kitts and Nevis', 'St. Kitts & Nevis'],
+    ['MO', 'Macao', 'Macao SAR China'],
+    ['ST', 'Sao Tome and Principe', 'São Tomé & Príncipe'],
+  ];
+
+  DIVERGENT.forEach(([market, googleName, cldrName]) => {
+    it(`resolves ${market} to Google's '${googleName}', not CLDR's '${cldrName}'`, () => {
+      const { locationName } = resolveLocation(market);
+      expect(locationName).to.equal(googleName);
+      expect(locationName).to.not.equal(cldrName);
+    });
+  });
+
+  it('still matches CLDR for the countries where the two datasets agree', () => {
+    expect(resolveLocation('US').locationName).to.equal('United States');
+    expect(resolveLocation('DE').locationName).to.equal('Germany');
+    expect(resolveLocation('JP').locationName).to.equal('Japan');
+    expect(resolveLocation('BR').locationName).to.equal('Brazil');
+  });
+
+  it('returns a non-empty name for EVERY resolvable market (no market loses its name)', () => {
+    const unnamed = Object.keys(iso31661Alpha2ToNumeric)
+      .filter((code) => {
+        const resolved = resolveLocation(code);
+        return resolved !== null && !resolved.locationName;
+      });
+    expect(unnamed, `markets resolving without a location_name: ${unnamed.join(', ')}`)
+      .to.deep.equal([]);
+  });
+
+  it('still resolves the markets Google publishes no geo-target for', () => {
+    // Cuba/Iran/North Korea/Åland have no Google geo-target under any name, so the
+    // two Google providers can never collect there — but every OTHER provider can,
+    // so these must keep resolving rather than blocking market creation.
+    MARKETS_WITHOUT_GOOGLE_GEO_TARGET.forEach((market) => {
+      const resolved = resolveLocation(market);
+      expect(resolved, market).to.not.equal(null);
+      expect(resolved.locationName, market).to.be.a('string').and.have.length.greaterThan(0);
+    });
+    expect(resolveLocation('CU').locationName).to.equal('Cuba');
+  });
+
+  it('omits Kosovo (XK), which Google publishes but ISO 3166-1 has no numeric for', () => {
+    expect(GOOGLE_GEO_TARGET_NAMES.XK).to.equal(undefined);
+    expect(resolveLocation('XK')).to.equal(null);
   });
 });
