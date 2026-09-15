@@ -214,13 +214,41 @@ describe('faceted prompt guard helpers', () => {
     expect(listPromptsByTags).to.have.callCount(100);
   });
 
-  it('listFacetedPrompts (the interactive search-as-you-type path) fails fast at FACETED_PROMPT_LIST_MAX_PAGES, not 100 (issue #3283)', async () => {
+  it('listFacetedPrompts (the interactive search-as-you-type path) fails fast at FACETED_PROMPT_LIST_MAX_PAGES, not 100, when 2+ tag families are selected (issue #3283)', async () => {
     const fullPage = Array.from({ length: 200 }, (_, index) => ({ id: `prompt-${index}` }));
     const listProjectTags = makeListProjectTagsStub();
     const listPromptsByTags = sinon.stub().resolves({ items: fullPage });
     const transport = { listProjectTags, listPromptsByTags };
 
+    // Two distinct dimension roots (category, intent) -> two AND-across-family
+    // groups, which is the only case that still requires the full walk after
+    // the 0/1-group fast path was added.
     await expect(listFacetedPrompts(
+      transport,
+      WORKSPACE,
+      'project-1',
+      {
+        geoTargetId: 2840,
+        languageCode: 'en',
+        page: 1,
+        limit: 50,
+        tagIds: [TAG_IDS.categoryRunningShoes, TAG_IDS.intentInformational],
+      },
+      fakeLog(),
+    )).to.be.rejected.then((error) => {
+      expect(error.status).to.equal(503);
+      expect(error.code).to.equal(ERROR_CODES.PROMPT_CORPUS_INCOMPLETE);
+    });
+    expect(listPromptsByTags).to.have.callCount(FACETED_PROMPT_LIST_MAX_PAGES);
+  });
+
+  it('listFacetedPrompts skips the full corpus walk and issues one upstream call when no tag facets are selected (0 groups)', async () => {
+    const listProjectTags = makeListProjectTagsStub();
+    const page = Array.from({ length: 30 }, (_, index) => ({ id: `prompt-${index}`, name: `Prompt ${index}`, tags: [] }));
+    const listPromptsByTags = sinon.stub().resolves({ items: page, total: 999999 });
+    const transport = { listProjectTags, listPromptsByTags };
+
+    const result = await listFacetedPrompts(
       transport,
       WORKSPACE,
       'project-1',
@@ -232,11 +260,43 @@ describe('faceted prompt guard helpers', () => {
         tagIds: [],
       },
       fakeLog(),
-    )).to.be.rejected.then((error) => {
-      expect(error.status).to.equal(503);
-      expect(error.code).to.equal(ERROR_CODES.PROMPT_CORPUS_INCOMPLETE);
-    });
-    expect(listPromptsByTags).to.have.callCount(FACETED_PROMPT_LIST_MAX_PAGES);
+    );
+
+    expect(listPromptsByTags).to.have.callCount(1);
+    expect(listPromptsByTags.firstCall.args[2]).to.include({ page: 1, limit: 50 });
+    expect(listPromptsByTags.firstCall.args[2].tag_ids).to.deep.equal([]);
+    expect(result.items).to.have.lengthOf(30);
+    // Fewer than `limit` returned -> provably the last (only) page -> exact
+    // count from page math, not the untrustworthy upstream `total`.
+    expect(result.total).to.equal(30);
+  });
+
+  it('listFacetedPrompts skips the full corpus walk and issues one upstream call when exactly one tag family is selected (1 group)', async () => {
+    const listProjectTags = makeListProjectTagsStub();
+    const fullPage = Array.from({ length: 50 }, (_, index) => ({ id: `prompt-${index}`, name: `Prompt ${index}`, tags: [] }));
+    const listPromptsByTags = sinon.stub().resolves({ items: fullPage, total: 500 });
+    const transport = { listProjectTags, listPromptsByTags };
+
+    const result = await listFacetedPrompts(
+      transport,
+      WORKSPACE,
+      'project-1',
+      {
+        geoTargetId: 2840,
+        languageCode: 'en',
+        page: 1,
+        limit: 50,
+        tagIds: [TAG_IDS.categoryRunningShoes],
+      },
+      fakeLog(),
+    );
+
+    expect(listPromptsByTags).to.have.callCount(1);
+    expect(listPromptsByTags.firstCall.args[2]).to.include({ page: 1, limit: 50 });
+    expect(listPromptsByTags.firstCall.args[2].tag_ids).to.include(TAG_IDS.categoryRunningShoes);
+    expect(result.items).to.have.lengthOf(50);
+    // A full page came back -> not provably the last page -> trust upstream's total.
+    expect(result.total).to.equal(500);
   });
 
   it('rejects unknown, root, read-only, and unsupported-depth facet ids', async () => {
@@ -691,6 +751,10 @@ describe('handlers/prompts.js — handleListPrompts', () => {
     };
     const log = fakeLog();
 
+    // Two distinct dimension families (category, intent) so the request still
+    // walks listAllProjectPrompts, and this test can keep verifying `log` is
+    // threaded through to it. A single family now takes the fast path added
+    // for issue #3283's follow-up and never reaches that walk.
     await handleListPrompts(
       transport,
       dataAccess,
@@ -699,7 +763,7 @@ describe('handlers/prompts.js — handleListPrompts', () => {
       {
         geoTargetId: 2840,
         languageCode: 'en',
-        tagIds: [TAG_IDS.categoryRunningShoes],
+        tagIds: [TAG_IDS.categoryRunningShoes, TAG_IDS.intentInformational],
         tagFilterMode: 'faceted-v1',
       },
       log,

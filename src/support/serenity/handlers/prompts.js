@@ -831,6 +831,51 @@ export async function listFacetedPrompts(
     log,
     snapshot,
   );
+
+  // 0 or 1 tag-family groups: the AND-across-families filter below is provably
+  // a no-op here — 0 groups means `filtered` would equal the unfiltered set
+  // anyway, and 1 group means upstream's own OR-by-tag_ids already returns
+  // exactly that group's members, so re-checking membership locally repeats
+  // work upstream already did. A full corpus walk buys nothing in either case,
+  // so skip it and delegate to a single paginated upstream call — the same
+  // call shape and total-count heuristic the non-faceted branch of
+  // handleListPrompts already uses successfully (see above). This is what
+  // lets a bare page load (0 groups) or a single-family search survive a
+  // large project (verified: Adobe Helpx carries 38,764 serenity prompts,
+  // an order of magnitude past even the pre-existing 100-page/20,000-item
+  // walk ceiling) instead of failing on every request regardless of query.
+  // Only 2+ simultaneous families still need the bounded walk below, since
+  // upstream cannot express "AND across families" in a single call.
+  if (resolved.groups.length <= 1) {
+    const resp = await transport.listPromptsByTags(semrushWorkspaceId, projectId, {
+      tag_ids: resolved.candidateIds,
+      page,
+      limit,
+      search,
+      ...(sort ? { sort, order } : {}),
+    });
+    const items = Array.isArray(resp?.items) ? resp.items : [];
+    let total;
+    if (items.length < limit) {
+      total = (page - 1) * limit + items.length;
+    } else {
+      total = Number.isFinite(resp?.total) ? resp.total : items.length;
+    }
+    return {
+      items: items
+        .map((item) => buildPromptDto(
+          geoTargetId,
+          languageCode,
+          item,
+          resolved.compatibilityById,
+        ))
+        .filter(Boolean),
+      total,
+      page,
+      limit,
+    };
+  }
+
   const all = await listAllProjectPrompts(transport, semrushWorkspaceId, projectId, {
     tagIds: resolved.candidateIds,
     search,
@@ -838,7 +883,7 @@ export async function listFacetedPrompts(
     order,
     maxPages: FACETED_PROMPT_LIST_MAX_PAGES,
   }, log);
-  const filtered = resolved.groups.length === 0 ? all : all.filter((prompt) => {
+  const filtered = all.filter((prompt) => {
     const promptTagIds = new Set((Array.isArray(prompt?.tags) ? prompt.tags : [])
       .map((tag) => (typeof tag === 'string' ? tag : String(tag?.id ?? '')))
       .filter(Boolean));
