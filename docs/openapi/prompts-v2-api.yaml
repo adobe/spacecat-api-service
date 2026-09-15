@@ -108,6 +108,27 @@ v2-prompts-by-brand:
         enum: [asc, desc]
         default: desc
       description: Sort direction. Default is desc
+    - name: count
+      in: query
+      required: false
+      schema:
+        type: string
+        enum: [exact, none]
+        default: exact
+      description: >-
+        `exact` (default) returns the exact total for the query. `none` skips the
+        count and returns `total: null`, so a bulk pager reading a large brand
+        does not recompute the total on every page.
+    - name: embed
+      in: query
+      required: false
+      schema:
+        type: boolean
+        default: true
+      description: >-
+        When `false`, omits the embedded brand/category/topic objects (their
+        names come back null) so a large page avoids the per-row join cost. A
+        topic/category sort falls back to the default order in this mode.
   get:
     tags:
       - customer-config

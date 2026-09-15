@@ -558,8 +558,12 @@ function mapRowToPrompt(row) {
  * @param {string} [params.order] - Sort direction (asc, desc). Default desc
  * @param {number} [params.limit] - Page size (default 100, max 5000)
  * @param {number} [params.page] - Page number, 1-based (default 1)
+ * @param {string} [params.countMode] - `exact` (default) returns the exact
+ * total; `none` skips the count and returns total:null.
+ * @param {boolean} [params.embed] - When false, omit the brand/category/topic
+ * joins (their names come back null). Default true.
  * @param {object} params.postgrestClient - PostgREST client
- * @returns {Promise<{items:object[],total:number,limit:number,page:number}>}
+ * @returns {Promise<{items:object[],total:(number|null),limit:number,page:number}>}
  */
 export async function listPrompts({
   organizationId,
@@ -575,6 +579,13 @@ export async function listPrompts({
   order,
   limit = 100,
   page = 1,
+  // WP: cheaper reads for large brands (#3279). `countMode: 'none'` skips the
+  // exact count (returns total:null) so a bulk pager doesn't recompute it on
+  // every page; `embed: false` drops the brands/categories/topics joins so a
+  // large page doesn't pay the per-row embed cost. Both default to today's
+  // behaviour.
+  countMode = 'exact',
+  embed = true,
   postgrestClient,
 }) {
   if (!postgrestClient?.from) {
@@ -622,6 +633,7 @@ export async function listPrompts({
     }
   }
 
+  const useEmbed = embed !== false;
   const buildSelect = (includeIntent) => `
     id,
     prompt_id,
@@ -637,10 +649,10 @@ export async function listPrompts({
     created_at,
     created_by,
     updated_at,
-    updated_by,
+    updated_by${useEmbed ? `,
     brands(id,name),
     categories(id,name,origin),
-    topics(id,topic_id,name)
+    topics(id,topic_id,name)` : ''}
   `;
 
   // Best-effort against environments where `prompts.intent` is absent (see
@@ -649,14 +661,20 @@ export async function listPrompts({
   const run = (includeIntent) => {
     let baseQuery = postgrestClient
       .from('prompts')
-      .select(buildSelect(includeIntent), { count: 'exact' })
+      .select(
+        buildSelect(includeIntent),
+        countMode === 'none' ? undefined : { count: 'exact' },
+      )
       .eq('organization_id', organizationId);
 
-    // Sorting
+    // Sorting. A foreign-table sort (topic/category) needs the embed; in lean
+    // mode (embed:false) fall back to the default order rather than ordering on a
+    // resource that is not being joined.
     const sortCol = SORT_COLUMN_MAP[sort];
-    if (sortCol) {
+    const isForeignSort = Boolean(sortCol) && sortCol.includes('(');
+    if (sortCol && !(isForeignSort && !useEmbed)) {
       const ascending = order === 'asc';
-      if (sortCol.includes('(')) {
+      if (isForeignSort) {
         const [foreignTable, col] = sortCol.replace(')', '').split('(');
         baseQuery = baseQuery.order(col, { ascending, foreignTable });
       } else {
@@ -714,20 +732,31 @@ export async function listPrompts({
     return baseQuery.range(offset, offset + limitNum - 1);
   };
 
-  const { data: rows, error, count } = await withMissingIntentFallback(postgrestClient, run);
+  const { data: rows, error, count: rowCount } = await withMissingIntentFallback(
+    postgrestClient,
+    run,
+  );
 
   if (error) {
     throw new Error(`Failed to list prompts: ${error.message}`);
   }
+  // countMode:'none' deliberately did not request a count — surface total:null
+  // ("not computed") rather than a misleading page-length figure.
   if (!rows?.length) {
     return {
-      items: [], total: count ?? 0, limit: limitNum, page: pageNum,
+      items: [],
+      total: countMode === 'none' ? null : (rowCount ?? 0),
+      limit: limitNum,
+      page: pageNum,
     };
   }
 
   const prompts = rows.map(mapRowToPrompt);
   return {
-    items: prompts, total: count ?? prompts.length, limit: limitNum, page: pageNum,
+    items: prompts,
+    total: countMode === 'none' ? null : (rowCount ?? prompts.length),
+    limit: limitNum,
+    page: pageNum,
   };
 }
 

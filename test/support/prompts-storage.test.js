@@ -325,6 +325,92 @@ describe('prompts-storage', () => {
       expect(result.page).to.equal(1);
     });
 
+    it('skips the count and returns total:null when countMode is none', async () => {
+      const client = {
+        from: (table) => {
+          if (table === 'brands') {
+            return makeChain({ data: { id: BRAND_UUID }, error: null });
+          }
+          return makeChain({
+            data: [{
+              id: 'pk',
+              prompt_id: PROMPT_ID,
+              text: 't',
+              regions: ['us'],
+              status: 'active',
+              origin: 'human',
+              source: 'config',
+            }],
+            error: null,
+            count: 999,
+          });
+        },
+      };
+      const result = await listPrompts({
+        organizationId: ORG_ID,
+        brandId: BRAND_UUID,
+        countMode: 'none',
+        postgrestClient: client,
+      });
+      expect(result.total).to.equal(null);
+      expect(result.items).to.have.lengthOf(1);
+    });
+
+    it('omits the embedded resources from the select when embed is false', async () => {
+      let capturedSelect = '';
+      const promptsChain = {
+        select: (sel) => {
+          capturedSelect = sel;
+          return promptsChain;
+        },
+        eq: () => promptsChain,
+        neq: () => promptsChain,
+        order: () => promptsChain,
+        overlaps: () => promptsChain,
+        or: () => promptsChain,
+        range: () => Promise.resolve({ data: [], error: null, count: 0 }),
+      };
+      const client = {
+        from: (table) => (table === 'brands'
+          ? makeChain({ data: { id: BRAND_UUID }, error: null })
+          : promptsChain),
+      };
+      await listPrompts({
+        organizationId: ORG_ID,
+        brandId: BRAND_UUID,
+        embed: false,
+        postgrestClient: client,
+      });
+      expect(capturedSelect).to.not.include('brands(');
+      expect(capturedSelect).to.not.include('categories(');
+      expect(capturedSelect).to.not.include('topics(');
+    });
+
+    it('keeps the embedded resources in the select by default', async () => {
+      let capturedSelect = '';
+      const promptsChain = {
+        select: (sel) => {
+          capturedSelect = sel;
+          return promptsChain;
+        },
+        eq: () => promptsChain,
+        neq: () => promptsChain,
+        order: () => promptsChain,
+        range: () => Promise.resolve({ data: [], error: null, count: 0 }),
+      };
+      const client = {
+        from: (table) => (table === 'brands'
+          ? makeChain({ data: { id: BRAND_UUID }, error: null })
+          : promptsChain),
+      };
+      await listPrompts({
+        organizationId: ORG_ID,
+        brandId: BRAND_UUID,
+        postgrestClient: client,
+      });
+      expect(capturedSelect).to.include('brands(');
+    });
+
     it('returns paginated result with items', async () => {
       const row = {
         id: 'prompt-pk-uuid',

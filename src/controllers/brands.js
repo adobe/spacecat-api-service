@@ -560,6 +560,7 @@ function BrandsController(ctx, log, env) {
     const {
       limit, page, categoryId, topicId, status,
       search, region, origin, source, sort, order,
+      count, embed,
     } = getQueryParams(context);
 
     try {
@@ -612,6 +613,11 @@ function BrandsController(ctx, log, env) {
         order,
         limit,
         page,
+        // Additive read options (#3279): opt out of the exact count / the
+        // brands+categories+topics embed so a bulk pager can read large brands
+        // cheaply. Defaults preserve today's response.
+        countMode: count === 'none' ? 'none' : 'exact',
+        embed: embed !== 'false',
         postgrestClient,
       });
 
