@@ -185,5 +185,136 @@ describe('semrush-credential-resolver', () => {
       await getCachedToken('c', mint, 0);
       expect(mint.callCount).to.equal(4);
     });
+
+    // B1 -- in-flight token coalescing.
+    it('coalesces concurrent cold mints for one key into a single mint (B1)', async () => {
+      let resolveMint;
+      const mint = sandbox.stub().returns(
+        new Promise((resolve) => { resolveMint = resolve; }),
+      );
+
+      const p1 = getCachedToken('k1', mint, 0);
+      const p2 = getCachedToken('k1', mint, 0);
+
+      // Both callers wait on the same outstanding mint -- not one mint each.
+      expect(mint.calledOnce).to.be.true;
+
+      resolveMint('tok-shared');
+      const [a, b] = await Promise.all([p1, p2]);
+
+      expect(a).to.equal('tok-shared');
+      expect(b).to.equal('tok-shared');
+      expect(mint.calledOnce).to.be.true;
+
+      // The result is now cached and the in-flight slot cleared.
+      const third = await getCachedToken('k1', mint, 1000);
+      expect(third).to.equal('tok-shared');
+      expect(mint.calledOnce).to.be.true;
+    });
+
+    it('shares a failing in-flight mint with all callers and caches nothing (B1)', async () => {
+      let rejectMint;
+      const mint = sandbox.stub().returns(
+        new Promise((_resolve, reject) => { rejectMint = reject; }),
+      );
+
+      const p1 = getCachedToken('k1', mint, 0);
+      const p2 = getCachedToken('k1', mint, 0);
+      rejectMint(new Error('mint failed'));
+
+      await expect(p1).to.be.rejectedWith('mint failed');
+      await expect(p2).to.be.rejectedWith('mint failed');
+      expect(mint.calledOnce).to.be.true;
+      expect(getTokenCacheSize()).to.equal(0);
+
+      // In-flight slot cleared on failure -> a later call re-mints cleanly.
+      const good = sandbox.stub().resolves('tok-ok');
+      expect(await getCachedToken('k1', good, 0)).to.equal('tok-ok');
+      expect(good.calledOnce).to.be.true;
+    });
+
+    // B3 -- TTL skew margin.
+    it('refreshes a real (provider-supplied) token a few seconds before expiry (B3)', async () => {
+      const mint = sandbox.stub();
+      mint.onFirstCall().resolves({ token: 'a', expiresInMs: 60 * 1000 });
+      mint.onSecondCall().resolves({ token: 'b', expiresInMs: 60 * 1000 });
+
+      // Real expiry = 60000; skewed to 60000 - 5000 = 55000.
+      const first = await getCachedToken('k1', mint, 0);
+      const beforeSkew = await getCachedToken('k1', mint, 54999); // still valid
+      const atSkew = await getCachedToken('k1', mint, 55000); // re-mint 5s early
+
+      expect(first).to.equal('a');
+      expect(beforeSkew).to.equal('a');
+      expect(atSkew).to.equal('b');
+      expect(mint.calledTwice).to.be.true;
+    });
+
+    it('does not skew the conservative default TTL (B3)', async () => {
+      const mint = sandbox.stub();
+      mint.onFirstCall().resolves('a'); // string -> default TTL, no provider expiry
+      mint.onSecondCall().resolves('b');
+      const ttl = 5 * 60 * 1000;
+
+      const first = await getCachedToken('k1', mint, 0);
+      const justBefore = await getCachedToken('k1', mint, ttl - 1); // valid to the boundary
+      const atTtl = await getCachedToken('k1', mint, ttl);
+
+      expect(first).to.equal('a');
+      expect(justBefore).to.equal('a');
+      expect(atTtl).to.equal('b');
+    });
+
+    it('keeps its own expiry when the real TTL is shorter than the skew (B3)', async () => {
+      const mint = sandbox.stub();
+      mint.onFirstCall().resolves({ token: 'a', expiresInMs: 2000 }); // < 5000 skew
+      mint.onSecondCall().resolves({ token: 'b', expiresInMs: 2000 });
+
+      // 2000 - 5000 would be born-stale; the guard keeps the real 2000 expiry instead.
+      const first = await getCachedToken('k1', mint, 0);
+      const beforeExpiry = await getCachedToken('k1', mint, 1999);
+      const atExpiry = await getCachedToken('k1', mint, 2000);
+
+      expect(first).to.equal('a');
+      expect(beforeExpiry).to.equal('a');
+      expect(atExpiry).to.equal('b');
+    });
+
+    it('applies the skew on the absolute expiresAtMs path too (B3)', async () => {
+      const mint = sandbox.stub();
+      mint.onFirstCall().resolves({ token: 'a', expiresAtMs: 60 * 1000 });
+      mint.onSecondCall().resolves({ token: 'b', expiresAtMs: 60 * 1000 });
+
+      // Absolute expiry = 60000; skewed to 60000 - 5000 = 55000 (independent of `now`).
+      const first = await getCachedToken('k1', mint, 0);
+      const beforeSkew = await getCachedToken('k1', mint, 54999); // still valid
+      const atSkew = await getCachedToken('k1', mint, 55000); // re-mint 5s early
+
+      expect(first).to.equal('a');
+      expect(beforeSkew).to.equal('a');
+      expect(atSkew).to.equal('b');
+      expect(mint.calledTwice).to.be.true;
+    });
+
+    // MUST-FIX 1 -- expiry is measured from AFTER the mint resolves, not request start.
+    it('measures expiry from when the mint resolves, not from the initial call time', async () => {
+      // Clock advances 10s while the mint runs, so the post-mint read sees 10000.
+      let t = 0;
+      const clock = () => t;
+      const mint = sandbox.stub().callsFake(() => {
+        t = 10 * 1000; // the (slow) mint takes 10s
+        return Promise.resolve('tok');
+      });
+
+      await getCachedToken('k1', mint, clock);
+
+      // Default TTL is measured from 10000, so the entry is valid until 10000 + 300000,
+      // not 0 + 300000 -- the slow mint did not shorten the cached lifetime.
+      t = 300 * 1000; // exactly the old (buggy) expiry boundary
+      const stillValidNearOldExpiry = sandbox.stub().resolves('tok-2');
+      const reused = await getCachedToken('k1', stillValidNearOldExpiry, clock);
+      expect(reused).to.equal('tok');
+      expect(stillValidNearOldExpiry.notCalled).to.be.true;
+    });
   });
 });
