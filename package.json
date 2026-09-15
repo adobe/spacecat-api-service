@@ -1,6 +1,6 @@
 {
   "name": "@adobe/spacecat-api-service",
-  "version": "1.811.0",
+  "version": "1.812.0",
   "description": "SpaceCat API Service",
   "main": "src/index.js",
   "type": "module",

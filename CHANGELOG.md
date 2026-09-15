@@ -1,3 +1,15 @@
+# [1.812.0](https://github.com/adobe/spacecat-api-service/compare/v1.811.0...v1.812.0) (2026-09-14)
+
+
+### Bug Fixes
+
+* **llmo:** preserve path in overrideBaseURL fallback when SEO detection returns no override ([#3271](https://github.com/adobe/spacecat-api-service/issues/3271)) ([f454213](https://github.com/adobe/spacecat-api-service/commit/f454213f22dc99e2fc4564099d3e6d9e0e7a53ad)), closes [#2675](https://github.com/adobe/spacecat-api-service/issues/2675) [#2675](https://github.com/adobe/spacecat-api-service/issues/2675) [#aem-sites-optimizer-automation](https://github.com/adobe/spacecat-api-service/issues/aem-sites-optimizer-automation)
+
+
+### Features
+
+* **broken backlink:** onboarding now set dispatcher by default | SITES-51223 ([#3254](https://github.com/adobe/spacecat-api-service/issues/3254)) ([ed6cd00](https://github.com/adobe/spacecat-api-service/commit/ed6cd00f38e6385b15b930638cd85c6868c94630))
+
 # [1.811.0](https://github.com/adobe/spacecat-api-service/compare/v1.810.0...v1.811.0) (2026-09-14)
 
 
