@@ -161,6 +161,10 @@ export const ERROR_CODES = Object.freeze({
   // Subworkspace provisioning (serenity dual-mode, subworkspace path).
   AMBIGUOUS_WORKSPACE: 'ambiguousWorkspace',
   LINKED_SUBWORKSPACES: 'linkedSubworkspaces',
+  // A sub-workspace settled to a terminal Semrush failure status (#3241/LLMO-7352) — the
+  // workspace will never become usable and must not be adopted or reused; the caller needs a
+  // fresh create/retry, not a wait. Distinct from the timeout token (a `not ready` workspace MAY
+  // still settle) so a client can tell "give it more time" apart from "this one is dead".
   SUBWORKSPACE_CREATION_FAILED: 'subworkspaceCreationFailed',
   SUBWORKSPACE_CREATION_TIMEOUT: 'subworkspaceCreationTimeout',
   // Publish-after-populate (LLMO-5492): a publish rejected because the workspace
