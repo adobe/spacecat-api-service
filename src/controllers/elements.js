@@ -22,6 +22,7 @@ import { createElementsTransport } from '../support/elements/elements-transport.
 import { ElementsTransportError } from '../support/elements/errors.js';
 import { createElementsService } from '../support/elements/elements-service.js';
 import { fetchOwnedUrlsTraffic, mergeOwnedUrlsTraffic } from '../support/elements/owned-urls-traffic.js';
+import { parseAgentTypes } from './llmo/llmo-agent-types.js';
 import { mapWithConcurrency } from '../support/elements/concurrency.js';
 import { addDaysToDate } from '../support/elements/week-utils.js';
 import { normalizeSentimentMetric, SENTIMENT_METRICS } from '../support/elements/definitions/index.js';
@@ -1778,11 +1779,17 @@ export default function ElementsController(context, log, env) {
       // (keeps p_urls small). Best-effort — degrades to 0/[] on any failure. No
       // region filter is passed to the RPC (the old `region` UI code has no
       // equivalent now that projects are selected by Semrush project id).
+      // agentTypes mirrors the PG url-inspector owned-urls handler (LLMO-4526):
+      // without it this hybrid join counted every agent_type, so the "Citation
+      // Attempts" column on Serenity-mode brands silently included agent types
+      // (e.g. Training bots) the PG dashboard's equivalent column excludes.
+      const agentTypes = parseAgentTypes(query.agentTypes ?? query.agent_types);
       const trafficMap = await fetchOwnedUrlsTraffic(ctx?.dataAccess?.Site?.postgrestService, {
         siteId: resolvedSiteId,
         startDate,
         endDate,
         urls: pageUrls.map((u) => u.url),
+        agentTypes,
         referralSource: query.referralSource || query.referral_source,
         log,
       });
