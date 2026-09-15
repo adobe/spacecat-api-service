@@ -1812,19 +1812,18 @@ describe('AI Visibility – brands handlers', () => {
       expect(clients.sourceClient.gapSourceDomainsTotals.firstCall.args[0].searchType).to.equal(SEARCH_TYPE_ENUM.SUBDOMAIN);
     });
 
-    it('handleBrandCitedSources sets SUBFOLDER on the list and floors the unscopable total', async () => {
-      clients.sourceClient.sourceDomains.resolves({ domains: [{ domain: 'a.com' }, { domain: 'b.com' }] });
-      // totals RPC would report a whole-domain count; it must NOT win for a scoped target.
-      clients.voSourcesClient.domainsTotals.resolves({ categories: [{ total: 9999 }] });
+    it('handleBrandCitedSources rejects a subfolder target (SourceDomainsRequest has no search_type)', async () => {
       const res = await handleBrandCitedSources(new URLSearchParams('domain=coca-cola.com%2Fus%2Fen&country=us'), clients);
-      expect(clients.sourceClient.sourceDomains.firstCall.args[0].searchType).to.equal(SEARCH_TYPE_ENUM.SUBFOLDER);
-      expect(res.body.total).to.equal(2); // floor (offset 0 + 2 rows), not the 9999 whole-domain count
+      expect(res.status).to.equal(400);
+      expect(res.body.error).to.equal('unsupported_target');
+      expect(clients.sourceClient.sourceDomains.called).to.equal(false);
     });
 
-    it('handleBrandTopBrands sends host-only brandDomain (no path) for a subfolder target', async () => {
+    it('handleBrandTopBrands passes the full path target + SUBFOLDER (TopBrandsByDomainRequest is scopable)', async () => {
       await handleBrandTopBrands(new URLSearchParams('domain=coca-cola.com%2Fus%2Fen%2Fbrands%2Fsmartwater&country=us'), clients);
       const arg = clients.brandClient.topBrandsByDomain.firstCall.args[0];
-      expect(arg.brandDomain).to.equal('coca-cola.com');
+      expect(arg.brandDomain).to.equal('coca-cola.com/us/en/brands/smartwater');
+      expect(arg.searchType).to.equal(SEARCH_TYPE_ENUM.SUBFOLDER);
     });
   });
 

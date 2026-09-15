@@ -48,6 +48,12 @@ export async function handleCitedSourcesExport(sp, clients) {
       body: { error: 'invalid_request', message: 'domain is required' },
     };
   }
+  if (domain.includes('/')) {
+    return {
+      status: 400,
+      body: { error: 'unsupported_target', message: 'cited sources do not support subfolder (path) targets' },
+    };
+  }
   const engine = engineToLlm(sp.get('engine')) || LLM_ENUM.ALL;
   const country = resolveCountry(sp) || COUNTRY_ENUM.WORLDWIDE;
   const sortBy = sp.get('sortBy') || DOMAINS_REQUEST_ORDER_BY_ENUM.PROMPTS_COUNT;

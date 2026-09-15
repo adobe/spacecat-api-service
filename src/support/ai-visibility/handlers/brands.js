@@ -643,10 +643,13 @@ export async function handleBrandTopBrands(sp, clients) {
   // regardless of offset/sort so `total` is stable across pages — a page-dependent window
   // makes the pager's page-count shift as the user pages forward.
   const fetchN = 1000;
-  // topBrandsByDomain takes a registrable domain and exposes no search_type, so a
-  // subfolder target cannot be scoped — use the host only (drop any path).
-  const brandDomain = domain.split('/')[0].replace(/^www\./, '');
-  const listArgs = { country, brandDomain, limit: fetchN };
+  // TopBrandsByDomainRequest carries both brand_domain and search_type, so a subfolder
+  // target IS scopable — pass the full target and let search_type scope it (mirrors
+  // the v1 handler v1/brand/top-brands.js).
+  const brandDomain = domain.replace(/^www\./, '');
+  const listArgs = {
+    country, brandDomain, searchType: resolveSearchType(domain), limit: fetchN,
+  };
 
   let raw;
   if (llmSingle) {
@@ -694,13 +697,18 @@ export async function handleBrandTopBrands(sp, clients) {
 export async function handleBrandCitedSources(sp, clients) {
   const domain = normalizeAiVisibilityTarget(sp.get('domain'));
   if (!domain) { return { status: 400, body: { error: 'missing_domain', message: 'domain is required' } }; }
+  // SourceDomainsRequest / domainsTotals carry no search_type field, so this RPC
+  // cannot scope to a subfolder — reject a path-bearing target rather than return
+  // whole-domain rows (silently, under a 200) for a subfolder request.
+  if (domain.includes('/')) {
+    return { status: 400, body: { error: 'unsupported_target', message: 'cited sources do not support subfolder (path) targets' } };
+  }
   const country = resolveCountryForCitedSources(sp);
   const { limit, offset } = parseLimitOffset(sp);
   const llmEnum = optionalLlmFromQuery(sp) ?? LLM_ENUM.ALL;
   const target = brandTarget(domain);
-  const searchType = resolveSearchType(domain);
   const listReq = {
-    country, llm: llmEnum, target, searchType, order: resolveGrpcSortOrder(sp, DOMAINS_REQUEST_ORDER_BY_ENUM, DOMAINS_REQUEST_ORDER_BY_ENUM.PROMPTS_COUNT, DOMAINS_SORT_KEYS), range: { limit, offset },
+    country, llm: llmEnum, target, order: resolveGrpcSortOrder(sp, DOMAINS_REQUEST_ORDER_BY_ENUM, DOMAINS_REQUEST_ORDER_BY_ENUM.PROMPTS_COUNT, DOMAINS_SORT_KEYS), range: { limit, offset },
   };
   const totalsReq = { country, llm: llmEnum, target };
 
@@ -715,11 +723,7 @@ export async function handleBrandCitedSources(sp, clients) {
   const data = domains.map(mapSourceDomainRowToCitedSource).filter((r) => r.sourceDomain);
   const fromTotals = settledFulfilledMap(totalsOutcome, (v) => sumVoTotalBySourceCategoryCounts(v), null);
   const floor = offset + data.length;
-  // domainsTotals (ai-vo) carries no search_type, so its count is whole-domain.
-  // For a scoped (SUBDOMAIN/SUBFOLDER) list, an unscoped total over-counts and
-  // makes the pager compute phantom empty pages — fall back to the fetched floor.
-  const total = (searchType === SEARCH_TYPE_ENUM.DOMAIN && fromTotals != null && Number.isFinite(fromTotals))
-    ? Math.max(fromTotals, floor) : floor;
+  const total = fromTotals != null && Number.isFinite(fromTotals) ? Math.max(fromTotals, floor) : floor;
   return {
     status: 200,
     body: {
@@ -753,7 +757,7 @@ export async function handleBrandSourceOpportunities(sp, clients) {
   let competitors = [];
   try {
     const topRaw = await clients.brandClient.topBrandsByDomain({
-      country, brandDomain: domain.split('/')[0].replace(/^www\./, ''), llm, limit: 20,
+      country, brandDomain: domain.replace(/^www\./, ''), searchType: resolveSearchType(domain), llm, limit: 20,
     });
     competitors = (topRaw.brands || [])
       .map((b) => {

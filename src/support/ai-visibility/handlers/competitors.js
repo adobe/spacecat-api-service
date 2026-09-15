@@ -60,7 +60,9 @@ export async function handleCompetitorsMetrics(sp, clients) {
     };
   }
   const country = resolveCountryForCompetitorsMetrics(sp);
-  const body = { country, target: brandTarget(domain), competitors: compDomains.map(brandTarget) };
+  // Drop any competitor that normalizes to an empty target, so one malformed
+  // entry shrinks the comparison set rather than sending a blank target upstream.
+  const body = { country, target: brandTarget(domain), competitors: compDomains.map(brandTarget).filter((t) => t.domain) };
   const explicit = sp.get('gapSnapshotDate')?.trim() || sp.get('metricsSnapshotDate')?.trim();
   const dm = explicit && /^(\d{4})-(\d{2})-(\d{1,2})$/.exec(explicit);
   if (dm) {

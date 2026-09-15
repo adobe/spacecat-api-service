@@ -13,6 +13,9 @@ x-ai-vis-domain: &domainParam
     (`coca-cola.com/us/en/brands/smartwater`, URL-encode the `/`). The value
     determines `search_type` scoping (see the per-endpoint description). An
     empty or malformed value returns `400`.
+    Subfolder (path) targets are supported on most endpoints, but **rejected with
+    `400 unsupported_target`** by `competitors/metrics` and the `cited-sources`
+    endpoints, whose upstream RPCs cannot scope below a registrable domain.
   schema:
     type: string
     example: adobe.com
