@@ -747,6 +747,36 @@ describe('StateAccessMappingsController', () => {
       });
     });
 
+    it('rejects a site-level capability scoped to an opportunity type (ASO)', async () => {
+      const createStub = sinon.stub();
+      const { Controller } = await loadController({ createFacsAccessMappings: createStub });
+      const ctx = makeContext({
+        product: 'ASO',
+        body: asoBody({
+          grantedCapabilities: ['aso/can_configure'],
+          compositeKeyType1: 'opportunity',
+          compositeKeyValue1: 'security',
+        }),
+      });
+      const res = await Controller(ctx).createMapping(ctx);
+      expect(res.status).to.equal(400);
+      // Rejected before persistence — no row is written.
+      expect(createStub.called).to.be.false;
+    });
+
+    it('allows a site-level capability on the all (site-wide) row (ASO)', async () => {
+      const createStub = sinon.stub().resolves({
+        created: [makeRow({ product: 'ASO', resource_type: 'site' })], skipped: [],
+      });
+      const { Controller } = await loadController({ createFacsAccessMappings: createStub });
+      const ctx = makeContext({
+        product: 'ASO',
+        body: asoBody({ grantedCapabilities: ['aso/can_configure'], compositeKeyValue1: 'all' }),
+      });
+      const res = await Controller(ctx).createMapping(ctx);
+      expect(res.status).to.equal(201);
+    });
+
     it('surfaces the composite-key qualifier in the created DTO (ASO)', async () => {
       const row = makeRow({
         product: 'ASO',
@@ -1434,6 +1464,46 @@ describe('StateAccessMappingsController', () => {
       const res = await Controller(ctx).patchMapping(ctx);
       expect(res.status).to.equal(200);
       expect(ctx.log.warn.called).to.be.true;
+    });
+
+    it('rejects adding a site-level capability to a type-scoped row (ASO)', async () => {
+      const { Controller, stubs } = await loadController({
+        getFacsAccessMappingById: sinon.stub().resolves(
+          makeRow({
+            product: 'ASO', resource_type: 'site', composite_key_value_1: 'security',
+          }),
+        ),
+      });
+      const ctx = makeContext({
+        product: 'ASO',
+        pathParams: { id: VALID_UUID_MAPPING },
+        body: { grantedCapabilities: ['aso/can_configure'] },
+      });
+      const res = await Controller(ctx).patchMapping(ctx);
+      expect(res.status).to.equal(400);
+      expect(stubs.updateFacsAccessMappingCapabilities.called).to.be.false;
+    });
+
+    it('allows a site-level capability when the target row is the all row (ASO)', async () => {
+      const updated = makeRow({
+        product: 'ASO',
+        resource_type: 'site',
+        composite_key_value_1: 'all',
+        granted_capabilities: ['aso/can_view', 'aso/can_configure'],
+      });
+      const { Controller } = await loadController({
+        getFacsAccessMappingById: sinon.stub().resolves(
+          makeRow({ product: 'ASO', resource_type: 'site', composite_key_value_1: 'all' }),
+        ),
+        updateFacsAccessMappingCapabilities: sinon.stub().resolves(updated),
+      });
+      const ctx = makeContext({
+        product: 'ASO',
+        pathParams: { id: VALID_UUID_MAPPING },
+        body: { grantedCapabilities: ['aso/can_configure'] },
+      });
+      const res = await Controller(ctx).patchMapping(ctx);
+      expect(res.status).to.equal(200);
     });
 
     it('returns 404 when no active row matched', async () => {
@@ -2170,6 +2240,90 @@ describe('StateAccessMappingsController', () => {
       expect(res.status).to.equal(200);
       const body = await res.json();
       expect(body.capabilities).to.deep.equal([]);
+    });
+
+    it('groups ASO opportunity caps by type and separates site-level caps', async () => {
+      const allRow = makeRow({
+        product: 'ASO',
+        resource_type: 'site',
+        subject_type: 'user',
+        subject_id: CALLER_USER,
+        composite_key_value_1: 'all',
+        granted_capabilities: ['aso/can_view', 'aso/can_manage_users'],
+      });
+      const altRow = makeRow({
+        product: 'ASO',
+        resource_type: 'site',
+        subject_type: 'user',
+        subject_id: CALLER_USER,
+        composite_key_value_1: 'alt-text',
+        granted_capabilities: ['aso/can_view', 'aso/can_edit'],
+      });
+      const stub = sinon.stub();
+      stub.withArgs(sinon.match.any, sinon.match({ subjectType: 'user' })).resolves([allRow, altRow]);
+      stub.withArgs(sinon.match.any, sinon.match({ subjectType: 'org' })).resolves([]);
+      const { Controller } = await loadController({ listFacsAccessMappings: stub });
+      const ctx = makeContext({
+        product: 'ASO',
+        pathParams: { resourceId: VALID_UUID_RES },
+        queryParams: { resourceType: 'site' },
+        facsPermissions: [],
+      });
+      const res = await Controller(ctx).getUserCapabilities(ctx);
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      // Site-level cap pulled out of the opportunity buckets entirely.
+      expect(body.siteCapabilities).to.deep.equal(['aso/can_manage_users']);
+      expect(body.opportunityCapabilities.all).to.deep.equal(['aso/can_view']);
+      expect(body.opportunityCapabilities['alt-text']).to.deep.equal([
+        'aso/can_edit', 'aso/can_view',
+      ]);
+      // Flat view unchanged (back-compat).
+      expect(body.capabilities).to.include.members([
+        'aso/can_edit', 'aso/can_manage_users', 'aso/can_view',
+      ]);
+    });
+
+    it('routes a site-level cap on a type-scoped row into siteCapabilities (qualifier-agnostic)', async () => {
+      const legacyRow = makeRow({
+        product: 'ASO',
+        resource_type: 'site',
+        subject_type: 'user',
+        subject_id: CALLER_USER,
+        composite_key_value_1: 'alt-text',
+        granted_capabilities: ['aso/can_manage_users'],
+      });
+      const stub = sinon.stub();
+      stub.withArgs(sinon.match.any, sinon.match({ subjectType: 'user' })).resolves([legacyRow]);
+      stub.withArgs(sinon.match.any, sinon.match({ subjectType: 'org' })).resolves([]);
+      const { Controller } = await loadController({ listFacsAccessMappings: stub });
+      const ctx = makeContext({
+        product: 'ASO',
+        pathParams: { resourceId: VALID_UUID_RES },
+        queryParams: { resourceType: 'site' },
+        facsPermissions: [],
+      });
+      const res = await Controller(ctx).getUserCapabilities(ctx);
+      const body = await res.json();
+      expect(body.siteCapabilities).to.deep.equal(['aso/can_manage_users']);
+      // Not leaked into the type bucket it happened to be stored on.
+      expect(body.opportunityCapabilities['alt-text']).to.be.undefined;
+    });
+
+    it('folds JWT facs_permissions into the all bucket and site caps (ASO)', async () => {
+      const { Controller } = await loadController({
+        listFacsAccessMappings: sinon.stub().resolves([]),
+      });
+      const ctx = makeContext({
+        product: 'ASO',
+        pathParams: { resourceId: VALID_UUID_RES },
+        queryParams: { resourceType: 'site' },
+        facsPermissions: ['aso/can_edit', 'aso/can_manage_users'],
+      });
+      const res = await Controller(ctx).getUserCapabilities(ctx);
+      const body = await res.json();
+      expect(body.siteCapabilities).to.deep.equal(['aso/can_manage_users']);
+      expect(body.opportunityCapabilities.all).to.deep.equal(['aso/can_edit']);
     });
   });
 
