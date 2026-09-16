@@ -147,6 +147,9 @@ describe('handlers/provision-workspace-job.js (LLMO-7352 / LLMO-7418)', () => {
       parentWorkspaceId: PARENT_WS,
       title: TITLE,
       promiseToken: { promise_token: 'ptok-current' },
+      // createAndEnqueueJob persists the resolved pair onto every job's metadata, so a real
+      // job always carries one; the fixture omitted it and the forwarded value read undefined.
+      promisePair: 'SEMRUSH',
       ...overrides,
     };
   }
@@ -586,6 +589,12 @@ describe('handlers/provision-workspace-job.js (LLMO-7352 / LLMO-7418)', () => {
         const [, enqueueArgs] = createAndEnqueueJobStub.firstCall.args;
         expect(enqueueArgs.jobType).to.equal('serenity-create-market');
         expect(enqueueArgs.promiseToken).to.deep.equal({ promise_token: 'ptok-current' });
+        // Fail-closed pair binding (Gap 1, #3252): the chained job writes to Semrush, so a
+        // forwarded pair that is anything but the Semrush one must refuse to enqueue rather than
+        // carry the wrong delegated credential onward. Unasserted until now — deleting the
+        // binding left the whole suite green.
+        expect(enqueueArgs.requirePair).to.equal('SEMRUSH');
+        expect(enqueueArgs.promisePair).to.equal('SEMRUSH');
         expect(enqueueArgs.metadata).to.deep.equal({
           requestBody: { market: 'us' },
           workspaceId: CANDIDATE_WS,
@@ -782,6 +791,8 @@ describe('handlers/provision-workspace-job.js (LLMO-7352 / LLMO-7418)', () => {
       expect(createAndEnqueueJobStub).to.have.been.calledOnce;
       const [, enqueueArgs] = createAndEnqueueJobStub.firstCall.args;
       expect(enqueueArgs.jobType).to.equal('serenity-provision-workspace');
+      // Same fail-closed pair binding on the self-requeue hop (see the chained enqueue above).
+      expect(enqueueArgs.requirePair).to.equal('SEMRUSH');
       expect(enqueueArgs.promiseToken).to.deep.equal({ promise_token: 'ptok-current' });
       expect(enqueueArgs.metadata).to.deep.equal({
         brandId: BRAND_ID,
