@@ -4952,6 +4952,35 @@ describe('brands-storage', () => {
     });
 
     describe('promoteProvisioningReady', () => {
+      // THE invariant this whole feature rests on, and it had no assertion: the promotion must be
+      // scoped to THIS attempt and to a row still sitting at `pending`, so a superseded attempt or
+      // a late SQS redelivery cannot clobber a newer winner's pointer. Every other predicate in
+      // this file is asserted this way (see persistProvisioningCandidate's `is` assertion); these
+      // two terminal writes were the ones that skipped it. Verified by mutation: deleting the
+      // attempt-id and `pending` filters here left the entire suite green.
+      it('scopes the CAS to THIS attempt AND a still-pending row — not a bare UPDATE by brand id', async () => {
+        const postgrestClient = createCapturingClient({
+          brands: { data: { id: BRAND_ID }, error: null },
+        });
+
+        await promoteProvisioningReady({
+          brandId: BRAND_ID,
+          attemptId: ATTEMPT_ID,
+          workspaceId: CANONICAL_WS,
+          hasSiteAnchor: true,
+          postgrestClient,
+          updatedBy: 'serenity-provision-worker',
+        });
+
+        expect(postgrestClient.capturedCalls.eq).to.deep.equal([
+          { table: 'brands', col: 'id', val: BRAND_ID },
+          { table: 'brands', col: 'semrush_provisioning_attempt_id', val: ATTEMPT_ID },
+          { table: 'brands', col: 'semrush_provisioning_status', val: 'pending' },
+        ]);
+        expect(postgrestClient.capturedCalls.in).to.deep.equal([
+          { table: 'brands', col: 'status', val: ['pending', 'active'] },
+        ]);
+      });
       it('throws when postgrestClient is missing', async () => {
         await expect(promoteProvisioningReady({
           brandId: BRAND_ID,
@@ -5082,6 +5111,27 @@ describe('brands-storage', () => {
     });
 
     describe('promoteProvisioningFailed', () => {
+      // Same invariant as the ready promotion, same missing assertion: a superseded attempt must
+      // not be able to stamp a failure onto a brand a newer attempt now owns. Verified by
+      // mutation: deleting the attempt-id filter here left the suite green.
+      it('scopes the CAS to THIS attempt AND a still-pending row', async () => {
+        const postgrestClient = createCapturingClient({
+          brands: { data: { id: BRAND_ID }, error: null },
+        });
+
+        await promoteProvisioningFailed({
+          brandId: BRAND_ID,
+          attemptId: ATTEMPT_ID,
+          error: 'boom',
+          postgrestClient,
+        });
+
+        expect(postgrestClient.capturedCalls.eq).to.deep.equal([
+          { table: 'brands', col: 'id', val: BRAND_ID },
+          { table: 'brands', col: 'semrush_provisioning_attempt_id', val: ATTEMPT_ID },
+          { table: 'brands', col: 'semrush_provisioning_status', val: 'pending' },
+        ]);
+      });
       it('throws when postgrestClient is missing', async () => {
         await expect(promoteProvisioningFailed({
           brandId: BRAND_ID,
