@@ -217,19 +217,40 @@ export async function provisionWorkspaceHandler(context, job, accessToken) {
       }
       return { provisioningStatus: 'superseded' };
     }
-    // Our OWN attempt already reached a terminal state (`ready` or `failed`) — this is NOT a
-    // supersession, it is an at-least-once SQS redelivery of a message whose EARLIER delivery
-    // already finished this exact job (a duplicate concurrent delivery, or one that arrived
-    // after the visibility timeout expired mid-processing). `candidate` here can be the
-    // brand's now-CANONICAL, LIVE workspace — including a real market project a chained job
-    // may have already created in it — so cleaning it up would delete live customer data, not
-    // an orphan. Stand down as a true no-op: never call cleanupIfOwned on this path.
+    // Our OWN attempt (the attempt id still matches) already reached a terminal state. Two very
+    // different causes land here, and they need OPPOSITE cleanup behaviour — conflating them
+    // either deletes live customer data or leaks a workspace (Luis review, PR #3233):
+    //
+    //   'ready'  — an at-least-once SQS redelivery of a message whose EARLIER delivery already
+    //              finished this exact job. `candidate` is by then the brand's CANONICAL, LIVE
+    //              workspace, possibly holding a real market project a chained job created in
+    //              it. Cleaning it up would delete live customer data. Stand down as a true
+    //              no-op.
+    //   'failed' — this attempt never promoted (both promoteProvisioningFailed and
+    //              cancelProvisioningAttempt CAS on `status = 'pending'`, so a row reading
+    //              'failed' cannot have been promoted by THIS attempt). The common cause is a
+    //              deactivate: cancelProvisioningAttempt writes 'failed' and does NOT touch
+    //              attempt_id, so an in-flight hop arrives here. `deactivate` only decommissions
+    //              the CANONICAL pointer, which is still null — so without the cleanup below a
+    //              sub-workspace this chain freshly created is orphaned in Semrush with nothing
+    //              referencing it, consuming the org's allocation forever.
+    //
+    // cleanupIfOwned is itself guarded on `freshlyCreated`, so an ADOPTED candidate (someone
+    // else's workspace) is never touched on either path.
     if (state.provisioningStatus !== 'pending') {
-      log?.info?.('provision-workspace-job: this attempt already reached a terminal state (redelivery); standing down without cleanup', {
+      const cancelledMidFlight = state.provisioningStatus === 'failed';
+      log?.info?.('provision-workspace-job: this attempt already reached a terminal state; standing down', {
         brandId,
         attemptId,
         currentStatus: state.provisioningStatus,
+        // 'failed' here is a cancel/failure of THIS attempt (commonly a deactivate), NOT an SQS
+        // redelivery — the two were previously reported under the same "(redelivery)" label.
+        reason: cancelledMidFlight ? 'attempt-cancelled-or-failed' : 'redelivery',
+        cleanedUpCandidate: Boolean(cancelledMidFlight && candidate?.freshlyCreated),
       });
+      if (cancelledMidFlight && candidate) {
+        await cleanupIfOwned(transport, candidate, parentWorkspaceId, log, 'provision-worker-cancelled-stand-down');
+      }
       return { provisioningStatus: 'superseded' };
     }
 
@@ -325,9 +346,20 @@ export async function provisionWorkspaceHandler(context, job, accessToken) {
     if (isWorkspaceTerminalFailure(status)) {
       // A terminally-failed shell cannot be deleted (Semrush-side restriction) — no cleanup
       // call here regardless of freshlyCreated; the pointer is simply never promoted to it.
-      await promoteProvisioningFailed({
+      // The CAS result is load-bearing (Luis review, PR #3233): a `false` means a newer attempt
+      // superseded this one between our poll and this write, so the failure we observed is not
+      // this brand's current story. Emitting it at ERROR and returning 'failed' would report a
+      // terminal failure the row never recorded, and would page on a brand a newer attempt may
+      // be provisioning successfully right now.
+      const recorded = await promoteProvisioningFailed({
         brandId, attemptId, error: TERMINAL_FAILURE_MESSAGE, postgrestClient,
       });
+      if (!recorded) {
+        log?.info?.('provision-workspace-job: terminal status observed but this attempt was already superseded; not recording', {
+          brandId, attemptId, semrushWorkspaceId: candidate.workspaceId, status,
+        });
+        return { provisioningStatus: 'superseded' };
+      }
       log?.error?.('provision-workspace-job: sub-workspace settled to a terminal failure status', {
         brandId, attemptId, semrushWorkspaceId: candidate.workspaceId, status,
       });

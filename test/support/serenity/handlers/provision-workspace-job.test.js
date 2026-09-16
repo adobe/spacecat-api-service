@@ -351,11 +351,38 @@ describe('handlers/provision-workspace-job.js (LLMO-7352 / LLMO-7418)', () => {
       expect(emptyWorkspaceBestEffortStub).to.not.have.been.called;
     });
 
-    it('does NOT clean up the candidate on a redelivery of a hop whose OWN attempt already reached failed', async () => {
+    // BEHAVIOUR CHANGE (Luis review, PR #3233). This previously asserted "no cleanup on
+    // failed", grouping it with the `ready` redelivery above. That was a workspace LEAK: the
+    // common way a row reads 'failed' with OUR attempt id still current is a deactivate —
+    // cancelProvisioningAttempt writes 'failed' and does not touch attempt_id. `deactivate`
+    // only decommissions the CANONICAL pointer, which is still null because this attempt never
+    // promoted, so the sub-workspace this chain freshly created was orphaned in Semrush with
+    // nothing referencing it, consuming the org's allocation forever.
+    //
+    // 'failed' is safe to clean up precisely because it cannot have been promoted by this
+    // attempt: promoteProvisioningFailed and cancelProvisioningAttempt both CAS on
+    // `status = 'pending'`, so a promoted ('ready') row can never be moved to 'failed'.
+    it('DOES clean up a freshly-created candidate when its own attempt was cancelled/failed (deactivate mid-flight)', async () => {
       getBrandProvisioningStateStub.resolves(pendingState({ provisioningStatus: 'failed' }));
       const { provisionWorkspaceHandler } = await loadHandler();
       const job = makeJob(makeMetadata({
         requeueDepth: 1, candidateWorkspaceId: CANDIDATE_WS, freshlyCreated: true,
+      }));
+
+      const result = await provisionWorkspaceHandler(context, job, 'token');
+
+      expect(result).to.deep.equal({ provisioningStatus: 'superseded' });
+      expect(emptyWorkspaceBestEffortStub).to.have.been.calledOnce;
+      expect(emptyWorkspaceBestEffortStub.firstCall.args[1]).to.equal(CANDIDATE_WS);
+    });
+
+    it('does NOT clean up an ADOPTED candidate on the same cancelled path (never deletes another brand\'s workspace)', async () => {
+      // cleanupIfOwned's freshlyCreated guard is what keeps the fix above safe: a candidate this
+      // chain adopted rather than created belongs to someone else and must survive.
+      getBrandProvisioningStateStub.resolves(pendingState({ provisioningStatus: 'failed' }));
+      const { provisionWorkspaceHandler } = await loadHandler();
+      const job = makeJob(makeMetadata({
+        requeueDepth: 1, candidateWorkspaceId: CANDIDATE_WS, freshlyCreated: false,
       }));
 
       await provisionWorkspaceHandler(context, job, 'token');
@@ -493,6 +520,25 @@ describe('handlers/provision-workspace-job.js (LLMO-7352 / LLMO-7418)', () => {
   });
 
   describe('poll result: terminal failure', () => {
+    // Luis review, PR #3233: promoteProvisioningFailed's CAS result is load-bearing. A `false`
+    // means a NEWER attempt took the brand between our poll and this write, so the failure we
+    // observed is not this brand's current story — reporting it at ERROR and returning 'failed'
+    // would page on a brand a newer attempt may be provisioning successfully right now.
+    it('reports superseded (not failed) when the failure write loses its CAS to a newer attempt', async () => {
+      transport.getWorkspaceStatus.resolves({ status: 'creation_failed' });
+      promoteProvisioningFailedStub.resolves(false);
+      const { provisionWorkspaceHandler } = await loadHandler();
+      const job = makeJob(makeMetadata());
+
+      const result = await provisionWorkspaceHandler(context, job, 'token');
+
+      expect(result).to.deep.equal({ provisioningStatus: 'superseded' });
+      // The misleading ERROR-level emission is the thing being prevented.
+      const errorCalls = context.log.error.getCalls()
+        .filter((c) => /terminal failure status/.test(String(c.args[0])));
+      expect(errorCalls).to.have.length(0);
+    });
+
     it('promotes to failed WITHOUT attempting cleanup (a failed shell cannot be deleted)', async () => {
       transport.getWorkspaceStatus.resolves({ status: 'creation_failed' });
       const { provisionWorkspaceHandler } = await loadHandler();

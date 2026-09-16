@@ -565,6 +565,12 @@ export async function createOrAdoptSubworkspaceCandidate(
       created = await transport.createSubworkspace(parentWorkspaceId, title);
       freshlyCreated = true;
     } catch (e) {
+      // Identical to ensureSubworkspace's own condition below, deliberately: 504 = our
+      // transport's timeout signal -> ambiguous create, recover by adoption. The transport
+      // timeout is a SerenityTransportError (status 504), NOT an ErrorWithStatusCode, so this
+      // branch IS live; the instanceof guard exists so a 504 from our own poll helper (which is
+      // an ErrorWithStatusCode) re-throws instead of re-entering adoption. Comment duplicated
+      // here because the extraction left the explanation behind (Luis review, PR #3233).
       if (!(e instanceof ErrorWithStatusCode) && e?.status === 504) {
         created = await adoptFromFamily(transport, parentWorkspaceId, title, log, claim);
       } else {
