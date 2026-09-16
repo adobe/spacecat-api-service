@@ -1114,6 +1114,139 @@ describe('Fixes Controller', () => {
       expect(response).includes({ status: 200 });
       expect(await response.json()).deep.equals([]);
     });
+
+    it('accepts a comma-separated status list and returns their union', async () => {
+      const deployedFix = await fixEntityCollection.create({
+        type: Suggestion.TYPES.CONTENT_UPDATE,
+        opportunityId,
+        status: FixEntity.STATUSES.DEPLOYED,
+        changeDetails: { arbitrary: 'value 1' },
+      });
+      const publishedFix = await fixEntityCollection.create({
+        type: Suggestion.TYPES.REDIRECT_UPDATE,
+        opportunityId,
+        status: FixEntity.STATUSES.PUBLISHED,
+        changeDetails: { arbitrary: 'value 2' },
+      });
+      const pendingFix = await fixEntityCollection.create({
+        type: Suggestion.TYPES.CONTENT_UPDATE,
+        opportunityId,
+        status: FixEntity.STATUSES.PENDING,
+        changeDetails: { arbitrary: 'value 3' },
+      });
+      dataAccess.Opportunity.allBySiteId.resolves([{ getId: () => opportunityId }]);
+      fixEntityCollection.allByOpportunityIds.resolves([deployedFix, publishedFix, pendingFix]);
+
+      requestContext.data = { status: `${FixEntity.STATUSES.DEPLOYED},${FixEntity.STATUSES.PUBLISHED}` };
+      const response = await fixesController.getAllForSite(requestContext);
+
+      expect(response).includes({ status: 200 });
+      expect(await response.json()).deep.equals(
+        [deployedFix, publishedFix].map((fix) => FixDto.toJSON(fix)),
+      );
+    });
+
+    it('responds 400 when any status in the list is invalid', async () => {
+      dataAccess.Opportunity.allBySiteId.resolves([{ getId: () => opportunityId }]);
+      requestContext.data = { status: `${FixEntity.STATUSES.DEPLOYED},NOT_A_REAL_STATUS` };
+
+      const response = await fixesController.getAllForSite(requestContext);
+
+      expect(response).includes({ status: 400 });
+      expect(fixEntityCollection.allByOpportunityIds).to.not.have.been.called;
+    });
+
+    it('filters aggregated fixes by a from/to deploy-time window (anchored on deployedAt)', async () => {
+      const inWindow = await fixEntityCollection.create({
+        type: Suggestion.TYPES.CONTENT_UPDATE,
+        opportunityId,
+        changeDetails: { arbitrary: 'in' },
+        deployedAt: '2026-08-15T10:00:00.000Z',
+        executedAt: '2026-08-15T10:00:00.000Z',
+      });
+      const beforeWindow = await fixEntityCollection.create({
+        type: Suggestion.TYPES.REDIRECT_UPDATE,
+        opportunityId,
+        changeDetails: { arbitrary: 'before' },
+        deployedAt: '2026-07-01T10:00:00.000Z',
+        executedAt: '2026-07-01T10:00:00.000Z',
+      });
+      dataAccess.Opportunity.allBySiteId.resolves([{ getId: () => opportunityId }]);
+      fixEntityCollection.allByOpportunityIds.resolves([inWindow, beforeWindow]);
+
+      requestContext.data = { from: '2026-08-01T00:00:00.000Z', to: '2026-09-01T00:00:00.000Z' };
+      const response = await fixesController.getAllForSite(requestContext);
+
+      expect(response).includes({ status: 200 });
+      expect(await response.json()).deep.equals([FixDto.toJSON(inWindow)]);
+    });
+
+    it('falls back to executedAt when deployedAt is null for the window filter', async () => {
+      const executedOnly = await fixEntityCollection.create({
+        type: Suggestion.TYPES.CONTENT_UPDATE,
+        opportunityId,
+        changeDetails: { arbitrary: 'exec-only' },
+        executedAt: '2026-08-15T10:00:00.000Z',
+      });
+      sandbox.stub(executedOnly, 'getDeployedAt').returns(null);
+      dataAccess.Opportunity.allBySiteId.resolves([{ getId: () => opportunityId }]);
+      fixEntityCollection.allByOpportunityIds.resolves([executedOnly]);
+
+      requestContext.data = { from: '2026-08-01T00:00:00.000Z', to: '2026-09-01T00:00:00.000Z' };
+      const response = await fixesController.getAllForSite(requestContext);
+
+      expect(response).includes({ status: 200 });
+      expect(await response.json()).deep.equals([FixDto.toJSON(executedOnly)]);
+    });
+
+    it('excludes fixes with neither deployedAt nor executedAt when a window is requested', async () => {
+      const undated = await fixEntityCollection.create({
+        type: Suggestion.TYPES.CONTENT_UPDATE,
+        opportunityId,
+        changeDetails: { arbitrary: 'undated' },
+      });
+      sandbox.stub(undated, 'getDeployedAt').returns(null);
+      sandbox.stub(undated, 'getExecutedAt').returns(null);
+      dataAccess.Opportunity.allBySiteId.resolves([{ getId: () => opportunityId }]);
+      fixEntityCollection.allByOpportunityIds.resolves([undated]);
+
+      requestContext.data = { from: '2026-08-01T00:00:00.000Z' };
+      const response = await fixesController.getAllForSite(requestContext);
+
+      expect(response).includes({ status: 200 });
+      expect(await response.json()).deep.equals([]);
+    });
+
+    it('responds 400 for a non-ISO from value', async () => {
+      dataAccess.Opportunity.allBySiteId.resolves([{ getId: () => opportunityId }]);
+      requestContext.data = { from: '2026-08-01' };
+
+      const response = await fixesController.getAllForSite(requestContext);
+
+      expect(response).includes({ status: 400 });
+      expect(await response.json()).deep.equals({ message: 'from must be an ISO-8601 date-time' });
+      expect(fixEntityCollection.allByOpportunityIds).to.not.have.been.called;
+    });
+
+    it('skips (200, not 500) a fix whose anchor timestamp is unparseable when windowed', async () => {
+      const malformed = await fixEntityCollection.create({
+        type: Suggestion.TYPES.CONTENT_UPDATE,
+        opportunityId,
+        changeDetails: { arbitrary: 'malformed' },
+      });
+      // deployedAt is a garbage string → new Date(...).getTime() is NaN; the window
+      // filter must drop it via its Number.isNaN guard, not throw.
+      sandbox.stub(malformed, 'getDeployedAt').returns('not-a-date');
+      sandbox.stub(malformed, 'getExecutedAt').returns(null);
+      dataAccess.Opportunity.allBySiteId.resolves([{ getId: () => opportunityId }]);
+      fixEntityCollection.allByOpportunityIds.resolves([malformed]);
+
+      requestContext.data = { from: '2026-08-01T00:00:00.000Z', to: '2026-09-01T00:00:00.000Z' };
+      const response = await fixesController.getAllForSite(requestContext);
+
+      expect(response).includes({ status: 200 });
+      expect(await response.json()).deep.equals([]);
+    });
   });
 
   describe('getting fixes by status', () => {

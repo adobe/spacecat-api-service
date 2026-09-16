@@ -206,6 +206,49 @@ export default function fixTests(getHttpClient, resetData) {
         const res = await http.user.get(`${SITE_FIXES_BASE}?locale=fr-FR`);
         expect(res.status).to.equal(400);
       });
+
+      it('user: accepts a comma-separated status list and returns their union', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`${SITE_FIXES_BASE}?status=DEPLOYED,PUBLISHED`);
+        expect(res.status).to.equal(200);
+        // FIX_2 and FIX_3 are DEPLOYED; no PUBLISHED fixes exist in the baseline.
+        expect(res.body).to.be.an('array').with.lengthOf(2);
+        res.body.forEach((f) => expectFixDto(f));
+        const ids = res.body.map((f) => f.id);
+        expect(ids).to.include(FIX_2_ID);
+        expect(ids).to.include(FIX_3_ID);
+      });
+
+      it('returns 400 when any status in the list is invalid', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`${SITE_FIXES_BASE}?status=DEPLOYED,NOT_A_REAL_STATUS`);
+        expect(res.status).to.equal(400);
+      });
+
+      it('user: filters aggregated fixes by a from/to deploy-time window', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(
+          `${SITE_FIXES_BASE}?from=2025-01-01T00:00:00.000Z&to=2025-02-01T00:00:00.000Z`,
+        );
+        expect(res.status).to.equal(200);
+        // Only FIX_1 has an anchor (executedAt 2025-01-20; deployedAt is null → falls
+        // back to executedAt). FIX_2/3/4 have neither timestamp → excluded from a window.
+        expect(res.body).to.be.an('array').with.lengthOf(1);
+        expect(res.body[0].id).to.equal(FIX_1_ID);
+      });
+
+      it('user: returns empty when the window excludes all anchored fixes', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`${SITE_FIXES_BASE}?from=2025-06-01T00:00:00.000Z`);
+        expect(res.status).to.equal(200);
+        expect(res.body).to.be.an('array').with.lengthOf(0);
+      });
+
+      it('returns 400 for a non-ISO from value', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`${SITE_FIXES_BASE}?from=2025-01-01`);
+        expect(res.status).to.equal(400);
+      });
     });
 
     describe('GET .../fixes?fixCreatedDate (date-filtered with suggestions)', () => {

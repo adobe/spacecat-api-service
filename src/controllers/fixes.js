@@ -220,19 +220,22 @@ export class FixesController {
   /**
    * Gets all fixes for a given site, across every opportunity, by fetching the site's
    * opportunity IDs and filtering fixes on opportunityId IN (...). Optionally filtered
-   * by status (applied in-memory, since the underlying query only supports one filter
-   * condition at a time). The result set is capped by `limit` (default
-   * DEFAULT_SITE_FIXES_LIMIT, max MAX_SITE_FIXES_LIMIT) since the aggregation is
-   * multiplicative across a site's opportunities and fixes.
+   * by status (comma-separated list, applied in-memory since the underlying query only
+   * supports one filter condition at a time) and by a deploy-time window (`from`/`to`,
+   * ISO-8601 date-times, anchored on `deployedAt ?? executedAt`). The result set is
+   * capped by `limit` (default DEFAULT_SITE_FIXES_LIMIT, max MAX_SITE_FIXES_LIMIT) since
+   * the aggregation is multiplicative across a site's opportunities and fixes.
    *
    * @param {RequestContext} context - request context
    * @returns {Promise<Response>} Array of fixes response.
    */
   async getAllForSite(context) {
     const { siteId } = context.params;
-    const status = context.data?.status ?? null;
+    const statusParam = context.data?.status ?? null;
     const locale = context.data?.locale ?? null;
     const limitParam = context.data?.limit ?? null;
+    const from = context.data?.from ?? null;
+    const to = context.data?.to ?? null;
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -247,10 +250,32 @@ export class FixesController {
       return badRequest('Invalid locale format');
     }
 
+    // `status` accepts a comma-separated list (e.g. `DEPLOYED,PUBLISHED`) so callers
+    // can pull the "already-live" set in one request; a single value still works.
     const validStatuses = Object.values(FixEntityModel.STATUSES);
-    if (hasText(status) && !validStatuses.includes(status)) {
-      return badRequest(`Invalid status value: ${status}. Valid: ${validStatuses.join(', ')}`);
+    const statuses = hasText(statusParam)
+      ? statusParam.split(',').map((s) => s.trim()).filter(Boolean)
+      : [];
+    const invalidStatuses = statuses.filter((s) => !validStatuses.includes(s));
+    if (invalidStatuses.length > 0) {
+      return badRequest(`Invalid status value: ${invalidStatuses.join(', ')}. Valid: ${validStatuses.join(', ')}`);
     }
+
+    // Optional deploy-time window (ISO-8601 date-times). Fixes are anchored on
+    // `deployedAt ?? executedAt` — the deploy moment — so the window answers "what was
+    // deployed on these dates". This deliberately differs from `getAllForOpportunity`'s
+    // `fixCreatedDate` anchor (`executedAt ?? createdAt`, chosen in #2501 to match the UI
+    // accordion buckets): this endpoint reports deploys, not accordion membership.
+    // A fix with neither timestamp is excluded when a window is requested, since it
+    // cannot be placed on a date.
+    if (hasText(from) && !isIsoDate(from)) {
+      return badRequest('from must be an ISO-8601 date-time');
+    }
+    if (hasText(to) && !isIsoDate(to)) {
+      return badRequest('to must be an ISO-8601 date-time');
+    }
+    const fromTime = hasText(from) ? new Date(from).getTime() : null;
+    const toTime = hasText(to) ? new Date(to).getTime() : null;
 
     const parsedLimit = hasText(limitParam) ? parseInt(limitParam, 10) : DEFAULT_SITE_FIXES_LIMIT;
     if (!Number.isInteger(parsedLimit) || parsedLimit <= 0) {
@@ -272,8 +297,28 @@ export class FixesController {
       ? await this.#FixEntity.allByOpportunityIds(opportunityIds)
       : [];
 
-    if (hasText(status)) {
-      fixEntities = fixEntities.filter((fix) => fix.getStatus() === status);
+    if (statuses.length > 0) {
+      fixEntities = fixEntities.filter((fix) => statuses.includes(fix.getStatus()));
+    }
+
+    if (fromTime !== null || toTime !== null) {
+      fixEntities = fixEntities.filter((fix) => {
+        const ts = fix.getDeployedAt() ?? fix.getExecutedAt();
+        if (!ts) {
+          return false;
+        }
+        const t = new Date(ts).getTime();
+        if (Number.isNaN(t)) {
+          return false;
+        }
+        if (fromTime !== null && t < fromTime) {
+          return false;
+        }
+        if (toTime !== null && t > toTime) {
+          return false;
+        }
+        return true;
+      });
     }
 
     fixEntities = fixEntities.slice(0, effectiveLimit);
