@@ -14985,3 +14985,123 @@ OaeValidationJobResponse:
           metadata:
             type: [object, 'null']
             description: Validator-specific detail (e.g. origin_status, or a network error reason).
+
+LookupByUrlRequest:
+  type: object
+  additionalProperties: false
+  required:
+    - urls
+  properties:
+    urls:
+      type: array
+      description: >
+        Source URLs to match, up to 100 entries (each at most 2048 characters). Matching is
+        done after canonicalization (scheme / www / trailing-slash normalization). Non-string,
+        empty, oversized, or unsafe (containing a raw double-quote or control character)
+        entries are dropped; an empty array, or a list where every entry is dropped, returns
+        an empty result set, not a 400.
+      items:
+        type: string
+      maxItems: 100
+    fields:
+      type: string
+      description: >
+        Optional comma-separated sparse-fieldset projection (e.g. `id,type,status,data`).
+        Omitted → a lightweight default projection that omits the heavy `data` blob. `id`
+        (and `opportunityId` for suggestions) is always included. A non-string value is a 400.
+    status:
+      type: string
+      description: >
+        Optional status filter - a single value, or multiple as a comma-separated string (e.g.
+        `NEW,APPROVED`). Omitted → dismissed statuses are hidden by default (opportunities hide
+        `IGNORED`; suggestions hide `SKIPPED`, `REJECTED`, `OUTDATED`). A non-string value is
+        a 400.
+    limit:
+      type: integer
+      minimum: 1
+      maximum: 100
+      default: 100
+    cursor:
+      type: string
+      description: Opaque keyset cursor from a previous response's `pagination.cursor`.
+    locale:
+      type: string
+      description: Optional locale for the returned DTOs, same as the sibling read endpoints.
+
+LookupPagination:
+  type: object
+  properties:
+    limit:
+      type: integer
+    cursor:
+      type: [string, 'null']
+    hasMore:
+      type: boolean
+
+OpportunitiesByUrlResponse:
+  type: object
+  properties:
+    results:
+      type: array
+      description: >
+        One entry per requested URL (input order; includes duplicates and no-match URLs).
+        `opportunityIds` is page-relative - an empty array means "no match on this page",
+        which is NOT the same as "no match at all" once `pagination.hasMore` is true. Use
+        `unmatchedUrls` for a definitive whole-result-set answer.
+      items:
+        type: object
+        properties:
+          url:
+            type: string
+          opportunityIds:
+            type: array
+            items:
+              type: string
+    opportunities:
+      type: object
+      description: >
+        Map keyed by opportunity id; each distinct matched opportunity on this page appears
+        once, projected to `fields` or the lightweight default.
+      additionalProperties:
+        $ref: '#/Opportunity'
+    unmatchedUrls:
+      type: array
+      description: >
+        Requested URLs matching zero opportunities across the whole result set (not just this
+        page). First page only (absent when a cursor is supplied).
+      items:
+        type: string
+    pagination:
+      $ref: '#/LookupPagination'
+
+SuggestionsByUrlResponse:
+  type: object
+  properties:
+    results:
+      type: array
+      description: One entry per requested URL that has at least one matching suggestion on this page.
+      items:
+        type: object
+        properties:
+          url:
+            type: string
+          suggestionIds:
+            type: array
+            items:
+              type: string
+    suggestions:
+      type: object
+      description: >
+        Map keyed by suggestion id; each distinct suggestion on this page appears once. Each
+        value force-includes `opportunityId` (the result spans opportunities).
+      additionalProperties:
+        $ref: '#/Suggestion'
+    unmatchedUrls:
+      type: array
+      description: >
+        Requested URLs matching zero suggestions across the whole result set (not just this
+        page). First page only (absent when a cursor is supplied).
+      items:
+        type: string
+    pagination:
+      $ref: '#/LookupPagination'
