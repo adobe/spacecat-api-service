@@ -79,6 +79,19 @@ v2-brands-for-org:
           application/json:
             schema:
               $ref: './schemas.yaml#/V2Brand'
+      '202':
+        description: |
+          PR-C (LLMO-7352/LLMO-7418): the request set `async: true` alongside
+          `semrushMarket`. The brand row is persisted immediately (visible,
+          non-active — "Setting up", no workspace pointer yet); the
+          sub-workspace ready-check and the initial market's project create/
+          publish are enqueued to a background job chain instead of running
+          inline. Poll the returned `jobId` at `GET .../serenity/jobs/{jobId}`
+          for status + result.
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/V2BrandProvisioningAccepted'
       '400':
         $ref: './responses.yaml#/400'
       '403':
@@ -108,6 +121,12 @@ v2-brands-for-org:
             active brand with the same normalized name (case- and
             whitespace-insensitive) in this organization
             (`code: brand_duplicate_active_name`).
+          - (PR-C, `async: true` only) a provisioning attempt is already in flight
+            for this brand (`code: semrush_provisioning_in_progress`). The same
+            token is returned by `POST .../serenity/markets` and
+            `POST .../serenity/activate`, so a client has one string to branch on.
+            Distinct from the market-slice 409, which IS idempotent success — this
+            one means nothing was started and the caller should retry shortly.
         headers:
           X-Error:
             $ref: './headers.yaml#/xError'

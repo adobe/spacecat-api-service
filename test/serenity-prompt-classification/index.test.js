@@ -55,6 +55,8 @@ describe('serenity-prompt-classification worker entry', () => {
   let claimJobLeaseStub;
   let clearJobLeaseStub;
   let provisionWorkspaceHandlerStub;
+  let createMarketJobHandlerStub;
+  let activateMarketsJobHandlerStub;
 
   beforeEach(async () => {
     sandbox = sinon.createSandbox();
@@ -67,6 +69,9 @@ describe('serenity-prompt-classification worker entry', () => {
     claimJobLeaseStub = sandbox.stub().resolves(true);
     clearJobLeaseStub = sandbox.stub();
     provisionWorkspaceHandlerStub = sandbox.stub().resolves({ provisioningStatus: 'ready' });
+    createMarketJobHandlerStub = sandbox.stub().resolves({ status: 201, body: {} });
+    activateMarketsJobHandlerStub = sandbox.stub()
+      .resolves({ status: 200, body: { status: 'active', markets: [] } });
 
     ({
       NeedsReauthError,
@@ -101,6 +106,14 @@ describe('serenity-prompt-classification worker entry', () => {
       '../../src/support/serenity/handlers/provision-workspace-job.js': {
         provisionWorkspaceHandler: provisionWorkspaceHandlerStub,
         PROVISION_WORKSPACE_JOB_TYPE: 'serenity-provision-workspace',
+      },
+      '../../src/support/serenity/handlers/create-market-job.js': {
+        createMarketJobHandler: createMarketJobHandlerStub,
+        CREATE_MARKET_JOB_TYPE: 'serenity-create-market',
+      },
+      '../../src/support/serenity/handlers/activate-markets-job.js': {
+        activateMarketsJobHandler: activateMarketsJobHandlerStub,
+        ACTIVATE_MARKETS_JOB_TYPE: 'serenity-activate-markets',
       },
     }));
   });
@@ -204,6 +217,79 @@ describe('serenity-prompt-classification worker entry', () => {
     expect(invalidateStub).to.have.been.called;
   });
 
+  it('dispatches serenity-create-market to createMarketJobHandler (PR-C, LLMO-7352/LLMO-7418)', async () => {
+    // Stored jobType must match the message type: the runner drops a mismatched delivery, so a
+    // job built with the default classify type would never reach the handler at all.
+    const job = makeJob('IN_PROGRESS', 'serenity-create-market');
+    const context = makeContext(job);
+    exchangeAndPersistStub.resolves('access-token');
+
+    await run({ jobId: 'job-123', type: 'serenity-create-market' }, context);
+
+    expect(createMarketJobHandlerStub).to.have.been.calledOnceWith(context, job, 'access-token');
+    expect(job.getStatus()).to.equal('COMPLETED');
+    expect(job.getResult()).to.deep.equal({ status: 201, body: {} });
+    // This job never self-requeues or chains further — it is always the LAST hop, so the token
+    // must be invalidated like any other terminal job.
+    expect(invalidateStub).to.have.been.called;
+  });
+
+  // The chained market handlers forward this job's promise token to the prompt-generation jobs
+  // they enqueue. Invalidation is BY IDENTITY and kills every token in the exchange chain, so
+  // without an explicit signal the runner would kill the copy those jobs are holding before any
+  // of them exchanges it.
+  describe('token hand-off to jobs a handler enqueued itself', () => {
+    it('does NOT invalidate the token when the handler reports a hand-off', async () => {
+      createMarketJobHandlerStub.resolves({ status: 201, body: {}, tokenHandedOff: true });
+      const job = makeJob('IN_PROGRESS', 'serenity-create-market');
+      const context = makeContext(job);
+      exchangeAndPersistStub.resolves('access-token');
+
+      await run({ jobId: 'job-123', type: 'serenity-create-market' }, context);
+
+      expect(invalidateStub).to.not.have.been.called;
+      expect(job.getStatus()).to.equal('COMPLETED');
+    });
+
+    it('STRIPS the signal from the stored result — it is internal, never client-facing', async () => {
+      createMarketJobHandlerStub.resolves({ status: 201, body: {}, tokenHandedOff: true });
+      const job = makeJob('IN_PROGRESS', 'serenity-create-market');
+      const context = makeContext(job);
+      exchangeAndPersistStub.resolves('access-token');
+
+      await run({ jobId: 'job-123', type: 'serenity-create-market' }, context);
+
+      expect(job.getResult()).to.deep.equal({ status: 201, body: {} });
+    });
+
+    it('still invalidates when the handler reports no hand-off (unchanged path)', async () => {
+      createMarketJobHandlerStub.resolves({ status: 201, body: {} });
+      const job = makeJob('IN_PROGRESS', 'serenity-create-market');
+      const context = makeContext(job);
+      exchangeAndPersistStub.resolves('access-token');
+
+      await run({ jobId: 'job-123', type: 'serenity-create-market' }, context);
+
+      expect(invalidateStub).to.have.been.called;
+    });
+  });
+
+  it('dispatches serenity-activate-markets to activateMarketsJobHandler (PR-C, LLMO-7352/LLMO-7418)', async () => {
+    // The third registered provisioning handler had no dispatch test and was not even mocked
+    // here, so the real module was pulled in and its registration was never actually exercised.
+    const job = makeJob('IN_PROGRESS', 'serenity-activate-markets');
+    const context = makeContext(job);
+    exchangeAndPersistStub.resolves('access-token');
+
+    await run({ jobId: 'job-123', type: 'serenity-activate-markets' }, context);
+
+    expect(activateMarketsJobHandlerStub).to.have.been.calledOnceWith(context, job, 'access-token');
+    expect(job.getStatus()).to.equal('COMPLETED');
+    expect(job.getResult()).to.deep.equal({ status: 200, body: { status: 'active', markets: [] } });
+    // Also the LAST hop of its chain — token invalidated like any other terminal job.
+    expect(invalidateStub).to.have.been.called;
+  });
+
   it('does not invalidate the promise token when the handler self-requeued (token ownership transferred)', async () => {
     const job = makeJob();
     const context = makeContext(job);
@@ -230,6 +316,19 @@ describe('serenity-prompt-classification worker entry', () => {
     expect(job.getStatus()).to.equal('IN_PROGRESS');
     expect(job.getResult()).to.equal(undefined);
     expect(invalidateStub).not.to.have.been.called;
+  });
+
+  it('does not invalidate the promise token when the handler chained a follow-up job (PR-C, LLMO-7418)', async () => {
+    const job = makeJob('IN_PROGRESS', 'serenity-provision-workspace');
+    const context = makeContext(job);
+    exchangeAndPersistStub.resolves('access-token');
+    provisionWorkspaceHandlerStub.resolves({ provisioningStatus: 'ready', chainedJobId: 'chained-job-1' });
+
+    await run({ jobId: 'job-123', type: 'serenity-provision-workspace' }, context);
+
+    expect(job.getStatus()).to.equal('COMPLETED');
+    expect(invalidateStub).to.not.have.been.called;
+    expect(job.save).to.have.been.called;
   });
 
   it('marks unknown application errors non-retryable', async () => {
@@ -409,6 +508,57 @@ describe('serenity-prompt-classification worker entry', () => {
       expect(job.getStatus()).to.equal('FAILED');
       expect(job.getError().code).to.equal('NEEDS_REAUTH');
       expect(job.getError().retryable).to.equal(false);
+    });
+
+    // PR-C (LLMO-7352/LLMO-7418). Every provisioning job type carries a promiseToken the
+    // runner exchanges, and every one writes to Semrush (sub-workspace create, project create,
+    // project publish) — the exact pair the Gap-4 lease exists to protect. They were left out
+    // of LEASE_REQUIRED_JOB_TYPES when they were added. Their own CAS is not a substitute: it
+    // makes a duplicate delivery's DB write lose only AFTER the Semrush call already happened.
+    [
+      'serenity-provision-workspace',
+      'serenity-create-market',
+      'serenity-activate-markets',
+    ].forEach((jobType) => {
+      it(`claims the lease for ${jobType} (token-bearing Semrush write)`, async () => {
+        const job = makeJob('IN_PROGRESS', jobType);
+        const context = makeContext(job);
+        exchangeAndPersistStub.resolves('access-token');
+
+        await run({ jobId: 'job-123', type: jobType }, context);
+
+        expect(claimJobLeaseStub).to.have.been.calledOnce;
+        expect(job.getStatus()).to.equal('COMPLETED');
+      });
+
+      it(`drops a duplicate ${jobType} delivery that loses the lease, without touching Semrush`, async () => {
+        // The point of the lease: the loser must not reach the handler at all. Standing down
+        // inside the handler would be too late — the upstream write would already have run.
+        claimJobLeaseStub.resolves(false);
+        const job = makeJob('IN_PROGRESS', jobType);
+        const context = makeContext(job);
+
+        await run({ jobId: 'job-123', type: jobType }, context);
+
+        expect(provisionWorkspaceHandlerStub).to.not.have.been.called;
+        expect(createMarketJobHandlerStub).to.not.have.been.called;
+        expect(activateMarketsJobHandlerStub).to.not.have.been.called;
+        // Not exchanged either — a dropped duplicate must not reset the token's TTL.
+        expect(exchangeAndPersistStub).to.not.have.been.called;
+        expect(job.getStatus()).to.equal('IN_PROGRESS');
+      });
+
+      it(`fails closed (rethrows for redelivery) when the ${jobType} lease claim errors`, async () => {
+        claimJobLeaseStub.rejects(new Error('postgrest down'));
+        const job = makeJob('IN_PROGRESS', jobType);
+        const context = makeContext(job);
+
+        await expect(run({ jobId: 'job-123', type: jobType }, context))
+          .to.be.rejectedWith('postgrest down');
+        expect(provisionWorkspaceHandlerStub).to.not.have.been.called;
+        expect(createMarketJobHandlerStub).to.not.have.been.called;
+        expect(activateMarketsJobHandlerStub).to.not.have.been.called;
+      });
     });
 
     it('does not claim a lease for the classify job type (unchanged path)', async () => {

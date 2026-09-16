@@ -716,6 +716,22 @@ v2-serenity-markets:
         content:
           application/json:
             schema: { $ref: './schemas.yaml#/SerenityMarket' }
+      '202':
+        description: |
+          PR-C (LLMO-7352/LLMO-7418): the request set `async: true` (a
+          sub-workspace-mode brand only). The sub-workspace-ready check and the
+          project create/publish are enqueued to a background job chain instead
+          of running inline. Poll the returned `jobId` at
+          `GET .../serenity/jobs/{jobId}` for status + result — the polling
+          endpoint transparently follows the job chain to its EFFECTIVE
+          terminal hop, so `status` only reports `COMPLETED` once the actual
+          market create/publish has run, not merely once the sub-workspace
+          became ready; on COMPLETED, `result` is the same body a synchronous
+          `201` would have returned. Absent/false runs synchronously as
+          today; this is opt-in only and not yet the default.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityProvisioningJobAccepted' }
       '400':
         description: Bad request (unknown market, malformed languageCode, missing field).
       '404':
@@ -1325,6 +1341,22 @@ v2-serenity-activate:
         content:
           application/json:
             schema: { $ref: './schemas.yaml#/SerenityActivateResponse' }
+      '202':
+        description: |
+          PR-C (LLMO-7352/LLMO-7418): the request set `async: true` on the
+          project-activation branch (primary URL + markets present). The whole
+          batch (sub-workspace ready-check, every market's project create/
+          publish, the site link, and the active flip) is enqueued to a
+          background job chain instead of running inline. Poll the returned
+          `jobId` at `GET .../serenity/jobs/{jobId}` for status + result — the
+          polling endpoint transparently follows the job chain to its
+          EFFECTIVE terminal hop, so `status` only reports `COMPLETED` once
+          the actual batch has run, not merely once the sub-workspace became
+          ready; on COMPLETED, `result` is the same body a synchronous
+          `200`/`207` would have returned.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityProvisioningJobAccepted' }
       '207':
         description: >-
           An already-active brand re-supplied markets and at least one failed; the
@@ -3733,4 +3765,56 @@ v2-serenity-competitor-summary:
         content:
           application/json:
             schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '500': { $ref: './responses.yaml#/500' }
+
+v2-serenity-job-by-id:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID-only on the /serenity/* surface)
+      schema:
+        type: string
+        format: uuid
+    - name: jobId
+      in: path
+      required: true
+      description: 'Async job id returned by any `async: true` 202 response.'
+      schema:
+        type: string
+        format: uuid
+  get:
+    tags: [serenity]
+    summary: Poll any Serenity async job (PR-C, LLMO-7352/LLMO-7418)
+    description: |
+      Job-type-agnostic alias of `GET .../serenity/prompts/jobs/{jobId}` (same
+      handler — it never inspects the job's `type`, only its `brandId`). Use this
+      path, not the prompts-named one, to poll a job returned by `async: true` on
+      `POST .../serenity/markets`, `POST .../serenity/activate`, or
+      `POST /v2/orgs/{spaceCatId}/brands` — the prompts path works too, but this
+      one doesn't say "prompts" for a workspace-provisioning or market/activation
+      job. Access is gated by the same org/brand access + serenity-active checks
+      as every other serenity endpoint; a job that does not belong to the
+      addressed brand 404s exactly like a missing job (jobs are never leaked
+      across brands). The response is secret-free — only
+      `{ jobId, status, result, error }`.
+    operationId: getSerenityJobStatus
+    security:
+      - session_token: []
+    responses:
+      '200':
+        description: Job status (and result when COMPLETED / error when FAILED).
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityJobStatus' }
+      '400': { $ref: './responses.yaml#/400' }
+      '404':
+        description: Organization, brand, or job not found, serenity is not active for the brand, or the job belongs to a different brand.
       '500': { $ref: './responses.yaml#/500' }

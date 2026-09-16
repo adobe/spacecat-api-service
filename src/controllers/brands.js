@@ -66,14 +66,24 @@ import {
   getBrandAliases,
   readSerenityFlagScopes,
   withSerenityState,
+  beginProvisioningAttempt,
+  guardAgainstConcurrentProvisioning,
+  promoteProvisioningFailed,
+  recordFreshBrandProvisioningStartFailure,
 } from '../support/brands-storage.js';
 import { listViewableResourceIds } from '../support/state-access-mapping-utils.js';
 import { isFacsRebacResource } from '../routes/facs-capabilities.js';
-import { provisionBrandSubworkspace, provisionBrandSubworkspaceBare, emptyProvisionedWorkspace } from '../support/serenity/brand-provisioning.js';
+import {
+  provisionBrandSubworkspace, provisionBrandSubworkspaceBare, emptyProvisionedWorkspace,
+} from '../support/serenity/brand-provisioning.js';
 import { isAsyncPromptGenEnabled, maybeEnqueueMarketGeneration } from '../support/serenity/async-prompt-gen.js';
-import { resolveCallerId } from '../support/serenity/handlers/prompts.js';
 import { computeWriteDeadline } from '../support/serenity/intent-classification.js';
 import { ensureMarketSite } from '../support/serenity/site-linkage.js';
+import { resolveWorkspaceId } from '../support/serenity/workspace-resolver.js';
+import { createAndEnqueueJob, PROMISE_PAIR_SEMRUSH } from '../support/serenity/async-job-runner.js';
+import { PROVISION_WORKSPACE_JOB_TYPE } from '../support/serenity/handlers/provision-workspace-job.js';
+import { CREATE_MARKET_JOB_TYPE } from '../support/serenity/handlers/create-market-job.js';
+import { resolveCallerId, validateAsync } from '../support/serenity/handlers/prompts.js';
 import {
   upsertMappingRow, linkSiteToLiveRows, projectsForSite, relinkSiteForRows,
 } from '../support/serenity/mapping-rows.js';
@@ -1700,10 +1710,9 @@ function BrandsController(ctx, log, env) {
     const { spaceCatId } = context.params || {};
     const brandData = context.data;
 
-    // One shared write-budget deadline for the whole request, computed at the
-    // true request entry (before auth/loadBrand/provisioning) so intent
-    // classification during provisioning budgets against the real request start
-    // rather than function-entry time deep in the call stack (serenity-docs#32).
+    // Shared write-budget deadline for the SYNCHRONOUS provisioning branch only
+    // (serenity-docs#32); the async branch never uses it (the write happens in the
+    // worker, not this request).
     const writeDeadline = computeWriteDeadline();
 
     // Hoisted above the try so the catch can run compensation: if a Semrush
@@ -1717,6 +1726,11 @@ function BrandsController(ctx, log, env) {
     // compensation in the catch below tears the workspace down, so it must fire only for a
     // workspace this request actually created.
     let provisionedWorkspaceWasCreated = false;
+    // PR-C (LLMO-7352/LLMO-7418): set only for the hasSemrushMarket branch. Non-null after the
+    // brand row is persisted below means an async provisioning attempt must be started for it;
+    // hoisted so the catch can mark that persisted-but-not-yet-provisioning row visibly failed if
+    // starting the attempt itself throws (see the catch's compensation).
+    let asyncMarketProvisioning = null;
 
     try {
       if (!hasText(spaceCatId)) {
@@ -1762,9 +1776,11 @@ function BrandsController(ctx, log, env) {
       // by the site-mirror hook below (avoids re-deriving from the payload).
       let provisionedBrandDomain = null;
       let provisionedBrandPrimaryUrl = null;
-      // The initial market's identity, captured for the mapping-row write below
-      // (must happen AFTER the brand row exists — provisionBrandSubworkspace
-      // runs before it does, see brand-provisioning.js's return doc).
+      // The initial market's identity, captured for the mapping-row write below (must happen
+      // AFTER the brand row exists — the SYNCHRONOUS provisionBrandSubworkspace call runs
+      // before it does, see brand-provisioning.js's return doc). Only ever set on the
+      // synchronous (async absent/false) branch; the async branch's job chain writes this
+      // itself once the project is created.
       let provisionedInitialMarket = null;
       // A pending (draft) brand defers ALL Semrush provisioning: no
       // sub-workspace, no project, and crucially no primary URL required. The
@@ -1846,84 +1862,110 @@ function BrandsController(ctx, log, env) {
           if (generatePrompts && modelIds.length === 0) {
             return badRequest('semrushModelIds must list at least one AI model to track');
           }
-          // Brand aliases drive branded/non-branded prompt classification and the
-          // project brand_names. Normalize to `{ name, regions }` (accepting both
-          // payload shapes: plain strings — region-less — or `{ name, regions }`),
-          // keeping `regions` so the create handler region-clamps each alias to the
-          // initial market.
-          const brandAliases = Array.isArray(brandData.brandAliases)
-            ? brandData.brandAliases
-              .map((a) => (typeof a === 'string'
-                ? { name: a, regions: [] }
-                : { name: a?.name, regions: a?.regions || [] }))
-              .filter((a) => hasText(a.name))
-            : [];
-          // Brand URLs (own sites + social + earned) are pushed onto the initial
-          // market's project benchmark. The row isn't written yet, so they come
-          // straight from the create payload (same V2 shape upsertBrand persists).
-          const brandUrlSources = {
-            urls: brandData.urls,
-            socialAccounts: brandData.socialAccounts,
-            earnedContent: brandData.earnedContent,
-          };
-          provisionedBrandId = randomUUID();
-          const provisioned = await provisionBrandSubworkspace(context, {
-            spaceCatId,
-            brandId: provisionedBrandId,
-            brandName: brandData.name,
-            // market/languageCode may be undefined when generatePrompts=false and
-            // no market was picked — provisionBrandSubworkspace falls back to US/EN.
-            market,
-            languageCode,
-            brandDomain,
-            primaryUrl: provisionedBrandPrimaryUrl,
-            modelIds,
-            generateTopics: generatePrompts && !asyncGenBrand,
-            brandAliases,
-            brandUrlSources,
-            // Competitors ("other brands to track") are merged into the initial
-            // market's CI competitor list. Like URLs, they come from the create
-            // payload (the brand row isn't written yet).
-            competitors: brandData.competitors,
-            writeDeadline,
-          }, log);
-          provisionedWorkspaceId = provisioned.semrushSubWorkspaceId;
-          provisionedWorkspaceWasCreated = provisioned.createdByThisRequest === true;
-          provisionedInitialMarket = {
-            projectId: provisioned.projectId,
-            geoTargetId: provisioned.geoTargetId,
-            languageCode: provisioned.languageCode,
-          };
-          // Async prompt generation: enqueue the DRS-backed producer for the
-          // just-provisioned initial market (best-effort; a producer hiccup must
-          // never fail the brand create). Annotates the 201 body so the UI polls.
-          if (asyncGenBrand && provisioned.projectId) {
-            try {
-              const imsToken = await resolveSemrushImsToken(context, log, 'brands');
-              const transport = createSerenityTransport({ env: context.env, imsToken });
-              brandPromptGeneration = await maybeEnqueueMarketGeneration(context, {
-                enabled: true,
-                generateRequested: true,
-                producerParams: {
-                  transport,
-                  brandId: provisionedBrandId,
-                  siteId: undefined,
-                  imsOrgId: organization.getImsOrgId?.() ?? spaceCatId,
-                  workspaceId: provisioned.semrushSubWorkspaceId,
-                  geoTargetId: provisioned.geoTargetId,
-                  languageCode: provisioned.languageCode,
-                  market,
-                  brandDomain,
-                  baseUrl: provisionedBrandPrimaryUrl ?? brandDomain,
-                  brand: brandData.name,
-                  aliases: collectAliasNames(brandAliases, market),
-                  callerId: resolveCallerId(context),
-                },
-              });
-            } catch (e) {
-              log?.warn?.('createBrandForOrg: async prompt-generation enqueue failed (non-fatal)', {
-                brandId: provisionedBrandId, error: e?.message,
-              });
+          // PR-C (LLMO-7352/LLMO-7418): opt-in only (mirrors createMarket's own `async` flag,
+          // `validateAsync`). Absent/false runs the EXACT bespoke synchronous path this endpoint
+          // has always run — no behavior change for any caller that doesn't opt in. `async: true`
+          // instead persists the brand row FIRST (visible, non-active — "Setting up"), then hands
+          // the initial-market create off to the provision-workspace-job -> serenity-create-market
+          // job chain, the same shared path Add Market uses. Unlike createPrompts's flag, this one
+          // is NOT permanent: the synchronous branch is the LLMO-7352 bug pattern itself, slated
+          // for removal once every known caller has migrated to `async: true`.
+          if (validateAsync(brandData)) {
+            // brandAliases/urls/competitors are NOT read here (unlike the sync branch below): the
+            // brand row this section persists below (upsertBrand) writes them to storage, and the
+            // async chain's orchestration reads them back from there — the same DB-backed source
+            // Add Market itself already relies on. No caller-payload duplication needed.
+            // Resolved and validated HERE, before any write: a missing org workspace config would
+            // otherwise only surface after upsertBrand already persisted the row, leaving a
+            // permanently-inert brand behind with no attempt ever started for it.
+            const parentWorkspaceId = await resolveWorkspaceId(context, spaceCatId);
+            if (!parentWorkspaceId || !hasText(parentWorkspaceId)) {
+              return badRequest('Organization has no Semrush workspace configured');
+            }
+            provisionedBrandId = randomUUID();
+            asyncMarketProvisioning = {
+              market, languageCode, modelIds, parentWorkspaceId,
+            };
+          } else {
+            // Brand aliases drive branded/non-branded prompt classification and the
+            // project brand_names. Normalize to `{ name, regions }` (accepting both
+            // payload shapes: plain strings — region-less — or `{ name, regions }`),
+            // keeping `regions` so the create handler region-clamps each alias to the
+            // initial market.
+            const brandAliases = Array.isArray(brandData.brandAliases)
+              ? brandData.brandAliases
+                .map((a) => (typeof a === 'string'
+                  ? { name: a, regions: [] }
+                  : { name: a?.name, regions: a?.regions || [] }))
+                .filter((a) => hasText(a.name))
+              : [];
+            // Brand URLs (own sites + social + earned) are pushed onto the initial
+            // market's project benchmark. The row isn't written yet, so they come
+            // straight from the create payload (same V2 shape upsertBrand persists).
+            const brandUrlSources = {
+              urls: brandData.urls,
+              socialAccounts: brandData.socialAccounts,
+              earnedContent: brandData.earnedContent,
+            };
+            provisionedBrandId = randomUUID();
+            const provisioned = await provisionBrandSubworkspace(context, {
+              spaceCatId,
+              brandId: provisionedBrandId,
+              brandName: brandData.name,
+              // market/languageCode may be undefined when generatePrompts=false and
+              // no market was picked — provisionBrandSubworkspace falls back to US/EN.
+              market,
+              languageCode,
+              brandDomain,
+              primaryUrl: provisionedBrandPrimaryUrl,
+              modelIds,
+              generateTopics: generatePrompts && !asyncGenBrand,
+              brandAliases,
+              brandUrlSources,
+              // Competitors ("other brands to track") are merged into the initial
+              // market's CI competitor list. Like URLs, they come from the create
+              // payload (the brand row isn't written yet).
+              competitors: brandData.competitors,
+              writeDeadline,
+            }, log);
+            provisionedWorkspaceId = provisioned.semrushSubWorkspaceId;
+            provisionedWorkspaceWasCreated = provisioned.createdByThisRequest === true;
+            provisionedInitialMarket = {
+              projectId: provisioned.projectId,
+              geoTargetId: provisioned.geoTargetId,
+              languageCode: provisioned.languageCode,
+            };
+            // Async prompt generation: enqueue the DRS-backed producer for the
+            // just-provisioned initial market (best-effort; a producer hiccup must
+            // never fail the brand create). Annotates the 201 body so the UI polls.
+            if (asyncGenBrand && provisioned.projectId) {
+              try {
+                const imsToken = await resolveSemrushImsToken(context, log, 'brands');
+                const transport = createSerenityTransport({ env: context.env, imsToken });
+                brandPromptGeneration = await maybeEnqueueMarketGeneration(context, {
+                  enabled: true,
+                  generateRequested: true,
+                  producerParams: {
+                    transport,
+                    brandId: provisionedBrandId,
+                    siteId: undefined,
+                    imsOrgId: organization.getImsOrgId?.() ?? spaceCatId,
+                    workspaceId: provisioned.semrushSubWorkspaceId,
+                    geoTargetId: provisioned.geoTargetId,
+                    languageCode: provisioned.languageCode,
+                    market,
+                    brandDomain,
+                    baseUrl: provisionedBrandPrimaryUrl ?? brandDomain,
+                    brand: brandData.name,
+                    aliases: collectAliasNames(brandAliases, market),
+                    callerId: resolveCallerId(context),
+                  },
+                });
+              } catch (e) {
+                log?.warn?.('createBrandForOrg: async prompt-generation enqueue failed (non-fatal)', {
+                  brandId: provisionedBrandId, error: e?.message,
+                });
+              }
             }
           }
         } else {
@@ -1978,11 +2020,14 @@ function BrandsController(ctx, log, env) {
         semrushSubWorkspaceId: provisionedWorkspaceId,
       });
 
-      // When a Semrush sub-workspace + initial market were provisioned, write the
-      // brand_to_semrush_projects mapping row for it NOW that the brand row exists
-      // (its brand_id FK requires a persisted row — provisionBrandSubworkspace ran
-      // before this, against a throwaway id, so it could not write it itself; see
-      // brand-provisioning.js's return doc). Best-effort, like every mapping write.
+      // When a Semrush sub-workspace + initial market were provisioned SYNCHRONOUSLY (async
+      // absent/false), write the brand_to_semrush_projects mapping row for it NOW that the
+      // brand row exists (its brand_id FK requires a persisted row — provisionBrandSubworkspace
+      // ran before this, against a throwaway id, so it could not write it itself; see
+      // brand-provisioning.js's return doc). Best-effort, like every mapping write. On the
+      // `async: true` path this never fires — `provisionedInitialMarket` stays null, and
+      // `orchestrateCreateMarketSubworkspace` (inside the job chain) writes the equivalent
+      // mapping row itself, once the project is actually created.
       if (provisionedInitialMarket && hasText(provisionedInitialMarket.projectId)) {
         await upsertMappingRow(context.dataAccess, {
           brandId: provisionedBrandId,
@@ -1992,20 +2037,19 @@ function BrandsController(ctx, log, env) {
         }, log);
       }
 
-      // When a Semrush sub-workspace + initial market were provisioned, mirror that
-      // initial market as a SpaceCat Site (+ brand_sites link) keyed on the url the
-      // market TRACKS, so the Semrush project has a resolvable site entity naming
-      // the same url it analyses. Keyed on the host instead, a brand created on
-      // `nba.com/kings` would be recorded against the root `nba.com` Site — and
-      // that Site becomes `brands.site_id`, which sibling brands on one apex would
-      // then collide on.
-      // INVARIANT: ensureMarketSite MUST NOT throw — it sits inside the try/catch
-      // whose catch releases the just-provisioned workspace; a throw here would
-      // tear down a live brand's workspace. ensureMarketSite is best-effort by
-      // contract (its own catch-all swallows + logs), so this holds.
-      // Only when an initial MARKET was provisioned (project path) — a
-      // sub-workspace-only create (B) has no market domain to mirror, so it skips
-      // this. The brand's own primary site is set from baseSiteId by upsertBrand.
+      // When a Semrush sub-workspace + initial market were provisioned SYNCHRONOUSLY, mirror
+      // that initial market as a SpaceCat Site (+ brand_sites link) keyed on the url the market
+      // TRACKS, so the Semrush project has a resolvable site entity naming the same url it
+      // analyses. Keyed on the host instead, a brand created on `nba.com/kings` would be
+      // recorded against the root `nba.com` Site — and that Site becomes `brands.site_id`,
+      // which sibling brands on one apex would then collide on.
+      // INVARIANT: ensureMarketSite MUST NOT throw — it sits inside the try/catch whose catch
+      // releases the just-provisioned workspace; a throw here would tear down a live brand's
+      // workspace. ensureMarketSite is best-effort by contract (its own catch-all swallows +
+      // logs), so this holds.
+      // Only when an initial MARKET was provisioned SYNCHRONOUSLY (project path) — a
+      // sub-workspace-only create (B) has no market domain to mirror, and the `async: true`
+      // path's own job chain does this mirroring itself once its project is created.
       if (provisionedWorkspaceId && hasText(provisionedWorkspaceId)
         && provisionedBrandDomain && hasText(provisionedBrandDomain)) {
         const linkedSiteId = await ensureMarketSite(context, {
@@ -2019,6 +2063,128 @@ function BrandsController(ctx, log, env) {
           log,
         });
         await linkSiteToLiveRows(context.dataAccess, provisionedBrandId, linkedSiteId, log);
+      }
+
+      // PR-C (LLMO-7352/LLMO-7418): the brand row now exists (persisted just above, non-active,
+      // no workspace pointer) — start the async provisioning chain for its initial market. A
+      // fresh row's `semrush_provisioning_status` is always NULL, so beginProvisioningAttempt's
+      // CAS succeeding here is the expected case; the false branch is defensive only.
+      if (asyncMarketProvisioning) {
+        // asyncMarketProvisioning is only ever set right after provisionedBrandId is minted
+        // above, so it is never null here — assert the non-null invariant once for the typed
+        // storage/job-enqueue helpers below (mirrors serenity.js's identical auth.brandUuid cast).
+        const asyncBrandId = /** @type {string} */ (provisionedBrandId);
+        const { parentWorkspaceId } = asyncMarketProvisioning;
+        const attemptId = randomUUID();
+        // LLMO-7418 external-review Finding 9, applied here too: beginProvisioningAttempt's CAS
+        // has no staleness awareness on its own, so on an upsert onto an EXISTING brand that is
+        // stuck at `pending` (a worker that died, or a rollback that left its job unhandled) it
+        // would return false forever and this endpoint would 409 that brand permanently. The
+        // guard reconciles an attempt older than the stale threshold first, and 409s only a
+        // genuinely live one. For a brand-new row it reads no state and returns immediately.
+        await guardAgainstConcurrentProvisioning(asyncBrandId, postgrestClient, log);
+        let began;
+        try {
+          began = await beginProvisioningAttempt({
+            brandId: asyncBrandId,
+            attemptId,
+            postgrestClient,
+            updatedBy,
+          });
+        } catch (beginError) {
+          // The row is already persisted (visible, non-active) but never reached `pending` —
+          // this write itself is what would have set that, so `promoteProvisioningFailed`'s
+          // CAS (which requires the row to ALREADY be at `pending` with this attemptId) can
+          // never reach it. See recordFreshBrandProvisioningStartFailure's doc for why an
+          // unconditional write is safe here specifically.
+          log.error('brands: failed to begin the provisioning attempt after brand row was persisted', {
+            brandId: asyncBrandId, error: beginError?.message,
+          });
+          await recordFreshBrandProvisioningStartFailure({
+            brandId: asyncBrandId,
+            error: 'Failed to start Semrush provisioning',
+            postgrestClient,
+          }).catch((failError) => {
+            log.error('brands: failed to record the provisioning-start failure itself', {
+              brandId: asyncBrandId, error: failError?.message,
+            });
+          });
+          throw beginError;
+        }
+        if (!began) {
+          // Same token the guard above throws, so a client has ONE string to branch on for
+          // "an attempt is already in flight" regardless of which check caught it. (`code`,
+          // not `error`, matches this controller's own envelope — cf. brand_duplicate_active_name.)
+          return createResponse(
+            {
+              code: 'semrush_provisioning_in_progress',
+              message: 'A Semrush sub-workspace provisioning attempt is already in progress for this brand; please retry shortly.',
+            },
+            409,
+          );
+        }
+        try {
+          const job = await createAndEnqueueJob(context, {
+            jobType: PROVISION_WORKSPACE_JOB_TYPE,
+            // Fail-closed pair binding (Gap 1, #3252): this job writes to Semrush, so refuse to
+            // enqueue it on anything but the Semrush pair rather than mint a token on the wrong
+            // delegated credential. Safe for every caller that reaches here — the async branch
+            // only runs for a Serenity-mode request, which always carries the Semrush audience
+            // header the pair is resolved from.
+            requirePair: PROMISE_PAIR_SEMRUSH,
+            metadata: {
+              brandId: asyncBrandId,
+              attemptId,
+              parentWorkspaceId,
+              title: brandData.name,
+              chainedJobType: CREATE_MARKET_JOB_TYPE,
+              chainedJobMetadata: {
+                brandId: asyncBrandId,
+                parentWorkspaceId,
+                orgId: spaceCatId,
+                requestBody: {
+                  market: asyncMarketProvisioning.market,
+                  languageCode: asyncMarketProvisioning.languageCode,
+                  brandDomain: provisionedBrandDomain,
+                  primaryUrl: provisionedBrandPrimaryUrl,
+                  brandNames: [brandData.name],
+                  brandDisplayName: brandData.name,
+                  generatePrompts,
+                },
+                modelIds: asyncMarketProvisioning.modelIds,
+                callerId: resolveCallerId(context),
+              },
+            },
+          });
+          return createResponse(
+            {
+              ...withSerenityState(created, serenityScopes),
+              status: 'pending',
+              jobId: job.getId(),
+              jobType: PROVISION_WORKSPACE_JOB_TYPE,
+            },
+            202,
+          );
+        } catch (enqueueError) {
+          // The brand row is already persisted (visible, non-active) but no attempt could be
+          // started for it — mark it visibly failed rather than leaving a silently-inert row
+          // nothing will ever revisit (the reconciliation sweep only looks for STUCK `pending`
+          // attempts, and this row never reached `pending` for one to find).
+          log.error('brands: failed to start async Semrush provisioning after brand row was persisted', {
+            brandId: asyncBrandId, error: enqueueError?.message,
+          });
+          await promoteProvisioningFailed({
+            brandId: asyncBrandId,
+            attemptId,
+            error: 'Failed to start Semrush provisioning',
+            postgrestClient,
+          }).catch((failError) => {
+            log.error('brands: failed to record the provisioning-start failure itself', {
+              brandId: asyncBrandId, error: failError?.message,
+            });
+          });
+          throw enqueueError;
+        }
       }
 
       const createdBody = withSerenityState(created, serenityScopes);
@@ -2036,7 +2202,9 @@ function BrandsController(ctx, log, env) {
       // Compensation: a sub-workspace was CREATED upstream but the brand row failed to
       // persist (e.g. a unique-constraint 409 or transient PostgREST error). Nothing
       // references that workspace, so empty its projects (best-effort) rather than leaving
-      // them stranded on a shell nothing points at.
+      // them stranded on a shell nothing points at. Reachable from the bare create path (B)
+      // and the hasSemrushMarket path's SYNCHRONOUS (async absent/false) branch — the `async:
+      // true` branch never sets `provisionedWorkspaceId`, so this never double-fires for it.
       //
       // Gated on having created it. A workspace that provisioning ADOPTED is not ours to
       // tear down: titles are bare brand display names, so an adopted workspace can be a

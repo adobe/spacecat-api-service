@@ -8074,6 +8074,50 @@ V2BrandInput:
         onboarded inline. Written to `brands.site_id` as the brand's primary-URL
         anchor. Sent on every create (a Serenity brand is anchored by BOTH its
         sub-workspace and this primary Site).
+    semrushMarket:
+      type: object
+      description: >-
+        Provisions an initial Semrush market (project) for the brand at create
+        time, in a serenity-active organization. Requires `market` and
+        `languageCode`; omit entirely for a sub-workspace-only create (markets
+        added afterwards from the Markets tab).
+      required: [market, languageCode]
+      properties:
+        market:
+          type: string
+          pattern: '^[A-Za-z]{2}$'
+          description: ISO 3166-1 alpha-2 country code; resolved server-side to a Geo Target ID.
+        languageCode:
+          type: string
+          pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$'
+    semrushModelIds:
+      type: array
+      items: { type: string }
+      description: >-
+        AI model (LLM) ids to attach to the initial market's project. Required
+        (non-empty) when `generatePrompts` is true; optional otherwise (the
+        project is created model-less until models are added later).
+    generatePrompts:
+      type: boolean
+      default: false
+      description: >-
+        Whether to generate topics/prompts for the initial `semrushMarket`
+        project. Requires a primary URL and `semrushModelIds`.
+    async:
+      type: boolean
+      default: false
+      description: >
+        PR-C (LLMO-7352/LLMO-7418). Only meaningful when `semrushMarket` is
+        supplied. When true, the brand row is persisted first (visible,
+        non-active — "Setting up"), then the sub-workspace ready-check and the
+        initial market's project create/publish are enqueued to a background
+        job chain instead of running inline, and the endpoint returns 202 with
+        a job id to poll via `GET .../serenity/jobs/{jobId}`. Omitted/false
+        processes synchronously as today (still 201) — this is opt-in only and
+        not yet the default. Unlike `SerenityCreatePromptsRequest`'s `async`
+        flag, this one is not intended to be a permanent dual-mode feature: the
+        synchronous path is the LLMO-7352 bug pattern itself, and is expected
+        to be retired once known callers have migrated to `async: true`.
 
 V2BrandUpdateInput:
   type: object
@@ -14985,3 +15029,109 @@ OaeValidationJobResponse:
           metadata:
             type: [object, 'null']
             description: Validator-specific detail (e.g. origin_status, or a network error reason).
+SerenityProvisioningJobAccepted:
+  type: object
+  description: |
+    202 body for an `async: true` Serenity call whose work begins by provisioning
+    a Semrush sub-workspace (PR-C, LLMO-7352/LLMO-7418): `POST
+    .../serenity/markets` and `POST .../serenity/activate`.
+
+    `jobType` names the FIRST hop of the job chain — the sub-workspace
+    provisioning worker — not the market/activation work that follows it. Poll
+    `jobId` at `GET .../serenity/jobs/{jobId}`: that endpoint follows the chain
+    to its EFFECTIVE terminal hop, so it reports `COMPLETED` only once the
+    market/activation itself has run, and returns the body the synchronous
+    endpoint would have returned as `result`.
+
+    Distinct from `SerenityPromptsJobAccepted`, which is the CSV-import
+    (`classifyPrompts`) 202 and has no sub-workspace hop.
+  required: [jobId, jobType, status]
+  properties:
+    jobId:
+      type: string
+      format: uuid
+    jobType:
+      type: string
+      enum: [serenity-provision-workspace]
+    status:
+      type: string
+      description: The job's initial state (IN_PROGRESS at enqueue time).
+      enum: [IN_PROGRESS, COMPLETED, FAILED]
+
+V2BrandProvisioningAccepted:
+  description: |
+    202 body for `POST /v2/orgs/{spaceCatId}/brands` with `async: true` (PR-C,
+    LLMO-7352/LLMO-7418).
+
+    Unlike the other async 202s this returns the brand itself: the row is ALREADY
+    persisted when the 202 is sent, so the UI can render it immediately. `status`
+    is therefore the BRAND's status (`pending` — shown as "Setting up"), NOT the
+    job's; the brand carries no workspace pointer yet. The sub-workspace and the
+    initial market are provisioned by the job chain named by `jobId`/`jobType` —
+    poll it at `GET .../serenity/jobs/{jobId}`.
+  allOf:
+    - $ref: '#/V2Brand'
+    - type: object
+      required: [id, status, jobId, jobType]
+      properties:
+        status:
+          type: string
+          description: Always `pending` on this response — the brand is not active yet.
+          enum: [pending]
+        jobId:
+          type: string
+          format: uuid
+        jobType:
+          type: string
+          enum: [serenity-provision-workspace]
+
+SerenityJobStatus:
+  type: object
+  description: |
+    Poll response for ANY async Serenity job — serenity-classify-prompts,
+    serenity-provision-workspace, serenity-create-market, or
+    serenity-activate-markets (PR-C, LLMO-7352/LLMO-7418). Secret-free by
+    design — the job's internal metadata (promise token etc.) is never exposed.
+  required: [jobId, status]
+  properties:
+    jobId:
+      type: string
+      format: uuid
+    status:
+      type: string
+      enum: [IN_PROGRESS, COMPLETED, FAILED]
+    result:
+      description: >
+        The job result once COMPLETED; null while IN_PROGRESS or on FAILED.
+
+
+        The shape depends on which `async: true` call created the job, and for the
+        provisioning chain it is an ENVELOPE, not the response body itself:
+
+
+        * market create / activate (the chained jobs) — `{ status, body }`, where
+        `status` is the HTTP status the synchronous endpoint would have returned
+        and `body` is that endpoint's body (`SerenityMarket` /
+        `SerenityActivateResponse`). Read `result.body`, NOT `result`: a client
+        reading `result.markets` gets `undefined`, silently, for every market.
+
+        * a provisioning job that ended without chaining — `{ provisioningStatus:
+        'ready' | 'failed' | 'superseded' }`.
+
+        * CSV prompt import — `SerenityCreatePromptsResponse` directly.
+
+
+        COMPLETED means the job RAN, not that it succeeded: a chained job returns a
+        4xx/5xx `status` in its envelope, and a provisioning job returns
+        `provisioningStatus: 'failed'`, rather than throwing — so both reach
+        COMPLETED with `error: null`. A client MUST inspect the result before
+        reporting success.
+    error:
+      description: The failure envelope once FAILED; null otherwise.
+      oneOf:
+        - type: object
+          properties:
+            code: { type: string }
+            message: { type: string }
+        - { type: 'null' }
+

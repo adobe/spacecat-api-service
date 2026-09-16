@@ -286,6 +286,21 @@ const FIXTURES = {
       };
     })(),
   },
+  getSerenityJobStatus: {
+    expectedStatus: 200,
+    controllerMethod: 'getPromptsJobStatus',
+    // Job-type-agnostic alias of the prompts-named path — SAME controller method, which never
+    // inspects the job's type, only its brandId. metadata.brandId MUST match auth.brandUuid
+    // (BRAND) or the controller 404s (jobs are never leaked across brands).
+    params: { jobId: '00000000-0000-4000-8000-000000000000' },
+    asyncJob: {
+      getId: () => '00000000-0000-4000-8000-000000000000',
+      getStatus: () => 'COMPLETED',
+      getResult: () => ({ status: 201, body: { brandId: BRAND, geoTargetId: 2840, languageCode: 'en' } }),
+      getError: () => null,
+      getMetadata: () => ({ brandId: BRAND, jobType: 'serenity-provision-workspace' }),
+    },
+  },
   updateSerenityPrompt: {
     expectedStatus: 200,
     controllerMethod: 'updatePrompt',
@@ -494,13 +509,10 @@ const FIXTURES = {
   activateSerenityBrand: {
     expectedStatus: 200,
     controllerMethod: 'activate',
-    // activate orchestrates per-market subworkspace creates; stubbing the subworkspace
-    // market handler is enough to drive the documented 200 (≥1 live) shape.
-    handlerName: 'handleCreateMarketSubworkspace',
-    handlerResult: {
-      status: 201,
-      body: { brandId: BRAND, geoTargetId: 2840, languageCode: 'en' },
-    },
+    // activate's batch now lives in activate-markets-orchestration.js (PR-C,
+    // LLMO-7352/LLMO-7418), a DIRECT import of serenity.js — esmock cannot reach
+    // handleCreateMarketSubworkspace transitively through it, so the module that owns the
+    // response shape is stubbed instead (see the childmock below).
     data: {
       brandDomain: 'adobe.com',
       brandNames: ['Adobe'],
@@ -1224,12 +1236,37 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
             }),
             getBrandCompetitors: () => Promise.resolve([]),
             updateBrand: () => Promise.resolve({ getId: () => 'brand-x' }),
+            // PR-C (LLMO-7352/LLMO-7418): activate's synchronous branch now guards against a
+            // concurrent async provisioning attempt before touching Semrush. It reads the
+            // provisioning columns through the postgrest client, which this file fakes only far
+            // enough for the calls it already made — stub the guard itself rather than widen the
+            // fake, matching how every other storage call here is handled.
+            guardAgainstConcurrentProvisioning: () => Promise.resolve(),
+            getBrandProvisioningState: () => Promise.resolve(null),
+            cancelProvisioningAttempt: () => Promise.resolve(true),
           },
           // activate's all-or-nothing flip REQUIRES the brand_sites mirror to
           // succeed; stub it to a site id so the documented 200 (full success)
           // shape is exercised rather than the 207/502 partial-failure paths. Must
           // be a valid UUID — it is now also written as the brand's baseSiteId,
           // which the response schema types as format: uuid.
+          '../../src/support/serenity/handlers/activate-markets-orchestration.js': {
+            orchestrateActivateMarkets: () => Promise.resolve({
+              status: 200,
+              body: {
+                brandId: BRAND,
+                status: 'active',
+                baseSiteId: '00000000-0000-4000-8000-000000000000',
+                markets: [{
+                  market: 'US',
+                  languageCode: 'en',
+                  status: 201,
+                  body: { brandId: BRAND, geoTargetId: 2840, languageCode: 'en' },
+                }],
+              },
+              generationInputs: [],
+            }),
+          },
           '../../src/support/serenity/site-linkage.js': {
             ensureMarketSite: () => Promise.resolve('00000000-0000-4000-8000-000000000000'),
           },

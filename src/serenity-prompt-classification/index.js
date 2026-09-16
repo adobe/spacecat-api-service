@@ -49,6 +49,14 @@ import {
   PROVISION_WORKSPACE_JOB_TYPE,
 } from '../support/serenity/handlers/provision-workspace-job.js';
 import {
+  createMarketJobHandler,
+  CREATE_MARKET_JOB_TYPE,
+} from '../support/serenity/handlers/create-market-job.js';
+import {
+  activateMarketsJobHandler,
+  ACTIVATE_MARKETS_JOB_TYPE,
+} from '../support/serenity/handlers/activate-markets-job.js';
+import {
   isRateLimited,
   isSemrushTransportError,
 } from '../support/serenity/errors.js';
@@ -115,11 +123,12 @@ export const vaultOpts = {
  * first-and-persist promise-token handling, terminal-state invalidation).
  * Per-consumer job logic — serenity-docs#33's prompt intent classification
  * (classify -> create-with-tags -> publish) — lives in
- * `../support/serenity/handlers/classify-prompts-job.js`; bulk tag operations
- * live in `../support/serenity/handlers/bulk-tags-job.js`; and LLMO-7352/
- * LLMO-7418's async Semrush sub-workspace provisioning lives in
- * `../support/serenity/handlers/provision-workspace-job.js`. All three are
- * registered below.
+ * `../support/serenity/handlers/classify-prompts-job.js`; bulk tag operations live in
+ * `../support/serenity/handlers/bulk-tags-job.js`; LLMO-7352/LLMO-7418's async Semrush
+ * sub-workspace provisioning lives in `../support/serenity/handlers/provision-workspace-job.js`;
+ * and PR-C's two chained market-creation phases (workspace ready -> create the market/run the
+ * activate batch against it) live in `../support/serenity/handlers/create-market-job.js` and
+ * `../support/serenity/handlers/activate-markets-job.js`. All five are registered below.
  *
  * A deferred-exchange handler receives a null token and exchanges it itself.
  * @type {Record<string, (context: object, job: object,
@@ -130,6 +139,8 @@ const HANDLERS = {
   [BULK_TAGS_JOB_TYPE]: bulkTagsHandler,
   [SEMRUSH_MARKET_GENERATION_JOB_TYPE]: semrushMarketGenerationHandler,
   [PROVISION_WORKSPACE_JOB_TYPE]: provisionWorkspaceHandler,
+  [CREATE_MARKET_JOB_TYPE]: createMarketJobHandler,
+  [ACTIVATE_MARKETS_JOB_TYPE]: activateMarketsJobHandler,
 };
 
 /**
@@ -138,8 +149,28 @@ const HANDLERS = {
  * SQS at-least-once delivery). A delivery that cannot win the lease is dropped;
  * a delivery that cannot even attempt the claim (no PostgREST client / query
  * error) fails closed and is redelivered rather than processed unguarded.
+ *
+ * PR-C (LLMO-7352/LLMO-7418): all three provisioning job types belong here for the
+ * same two reasons the generation job does — each carries a `promiseToken`/
+ * `promisePair` in its metadata that the runner exchanges (so a replayed delivery
+ * replays a live token), and each writes to Semrush (sub-workspace create, project
+ * create, project publish). Their own compare-and-set discipline is not a
+ * substitute: CAS makes a duplicate delivery's DB write lose, but only AFTER the
+ * upstream Semrush call has already happened, so a concurrent redelivery still
+ * creates a real sub-workspace or project that then has to be cleaned up. The
+ * lease stops the second delivery before it reaches Semrush at all.
+ *
+ * Safe for the self-requeue and chain hops: the lease is per-job, and every hop is
+ * a NEW AsyncJob with its own id, so a hop never contends with its own successor.
+ * The runner releases the lease on a retryable failure and scrubs it on every
+ * terminal path, so a redelivery can always re-claim.
  */
-const LEASE_REQUIRED_JOB_TYPES = new Set([SEMRUSH_MARKET_GENERATION_JOB_TYPE]);
+const LEASE_REQUIRED_JOB_TYPES = new Set([
+  SEMRUSH_MARKET_GENERATION_JOB_TYPE,
+  PROVISION_WORKSPACE_JOB_TYPE,
+  CREATE_MARKET_JOB_TYPE,
+  ACTIVATE_MARKETS_JOB_TYPE,
+]);
 
 /**
  * Job types whose write-scoped access token is exchanged INSIDE the handler,
@@ -328,13 +359,28 @@ export async function run(message, context) {
   try {
     const result = await handler(context, job, accessToken);
     job.setStatus('COMPLETED');
-    job.setResult(result ?? null);
     // A handler that self-requeues (e.g. classify-prompts-job.js's
     // `requeuePending`) forwards this job's CURRENT promise token onto the new
     // job's metadata, rather than minting a fresh one — the worker has no HTTP
     // context to mint from. Revocation is by identity, so invalidating here
-    // would also kill the requeued job's copy before it ever runs.
-    tokenOwnershipTransferred = Boolean(result?.requeuedJobId);
+    // would also kill the requeued job's copy before it ever runs. A CHAINED job
+    // (PR-C, LLMO-7418: provision-workspace-job.js enqueuing a follow-up job after
+    // promoting to ready) forwards the SAME token for the identical reason, so it
+    // counts here too — a chainedJobId with no live token would strand the chained
+    // job on its very first hop with a dead promise token.
+    // A handler may also hand this job's token to jobs it enqueued itself (the chained market
+    // handlers forward it to prompt-generation jobs). Those jobs are not "the chain" in the
+    // requeue/chain sense, so they need their own signal — without it the invalidate below kills
+    // the token by identity and every generation job it just created fails its exchange.
+    tokenOwnershipTransferred = Boolean(
+      result?.requeuedJobId || result?.chainedJobId || result?.tokenHandedOff,
+    );
+    // Internal signal only: stripped BEFORE the result is stored, so it never reaches a client
+    // polling this job.
+    if (result && typeof result === 'object' && 'tokenHandedOff' in result) {
+      delete (/** @type {any} */ (result)).tokenHandedOff;
+    }
+    job.setResult(result ?? null);
   } catch (error) {
     if (isRetryableJobError(error)) {
       log.warn(`[serenity-job-runner] Job ${jobId} remains IN_PROGRESS for SQS retry: ${error.message}`);
