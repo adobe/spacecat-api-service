@@ -15,16 +15,22 @@
 import { hasText } from '@adobe/spacecat-shared-utils';
 import { iso31661Alpha2ToNumeric } from 'iso-3166';
 
-// Reusable English region-name formatter (ICU-backed, built into Node). Used
-// for the `location_name` we send upstream — matches the form Semrush stores
-// on existing projects (`United States`, `Germany`, `Türkiye`).
-const ENGLISH_REGION_NAMES = new Intl.DisplayNames(['en'], { type: 'region' });
+import { GOOGLE_GEO_TARGET_NAMES } from './google-geo-target-names.js';
 
 /**
  * Resolves an ISO 3166-1 alpha-2 country code to a Google Ads Geo Target ID
- * (`criterion_id = 2000 + ISO numeric` for countries) plus an English display
- * name suitable for `location_name` on the upstream create-project body.
+ * (`criterion_id = 2000 + ISO numeric` for countries) plus the name Google Ads
+ * itself uses for that geo-target, for `location_name` on the upstream
+ * create-project body.
  * Returns null on unknown / unassigned codes; the controller maps that to 400.
+ *
+ * `location_name` is NOT a display string: Google AI Mode / AI Overview resolve
+ * it against Google Ads geo-targets at collection time, and a name Google cannot
+ * match means those two providers silently collect nothing. It therefore comes
+ * from Google's own published geo-targets data ({@link GOOGLE_GEO_TARGET_NAMES}),
+ * never from CLDR / `Intl.DisplayNames` — those disagree on 31 countries
+ * (`Trinidad & Tobago` vs `Trinidad and Tobago`, `Hong Kong SAR China` vs
+ * `Hong Kong`, …) and also shift with the runtime's bundled ICU version.
  *
  * Shared by the create path (handlers/markets.js — writes `location_id` onto
  * new projects) and the read path (subworkspace-projects.js `geoOf` — derives
@@ -65,9 +71,20 @@ export function resolveLocation(market) {
   if (!numeric) {
     return null;
   }
+  // Guarantee the name at the boundary, not just via a test elsewhere: the id
+  // resolves off `iso-3166` but the name off the hand-maintained map, and the
+  // whole point of this module is that a missing/unmatched name silently breaks
+  // Google AI collection. If the two datasets ever diverge (e.g. an `iso-3166`
+  // bump adds a code the map lacks), fail loud here — the caller maps null to a
+  // 400 — rather than shipping `location_name: undefined` to Semrush. Today the
+  // map is total over the ISO set (enforced by a test), so this never triggers.
+  const locationName = GOOGLE_GEO_TARGET_NAMES[alpha2];
+  if (!locationName) {
+    return null;
+  }
   return {
     geoTargetId: 2000 + Number(numeric),
-    locationName: ENGLISH_REGION_NAMES.of(alpha2),
+    locationName,
   };
 }
 

@@ -20,6 +20,20 @@ export const EVENT_JOB_MAP = {
 };
 
 /**
+ * Resolves a human-readable display name for a requested team, falling
+ * slug -> name -> 'unknown'. Unlike a plain `??` chain, this treats an
+ * empty or whitespace-only slug/name as absent, so a `''` slug does not
+ * render an empty team name in the skip reason.
+ *
+ * @param {object} team - The requested_team object from the webhook payload
+ * @returns {string} The team slug, else its name, else 'unknown'
+ */
+function teamDisplayName(team) {
+  const nonBlank = (v) => (typeof v === 'string' && v.trim() !== '' ? v : undefined);
+  return nonBlank(team?.slug) ?? nonBlank(team?.name) ?? 'unknown';
+}
+
+/**
  * Determines whether a GitHub webhook event should be skipped.
  * Returns a human-readable skip reason string, or null if the event should be processed.
  *
@@ -44,8 +58,30 @@ export function getSkipReason(data, action, reviewerLogin) {
   // configured reviewer login (a plain user, EMU user, or App bot - whatever
   // the registry pins per destination).
   if (action === 'review_requested') {
+    // GitHub sends EITHER requested_reviewer (a user/bot) OR requested_team
+    // (a team) on this action - never both. A team-routed request (e.g. a
+    // branch-protection rule or CODEOWNERS entry that names a team Mysticat
+    // happens to be a member of) previously fell through to the reviewer
+    // check below with requested_reviewer entirely absent, producing the
+    // indistinguishable-from-a-real-mismatch "reviewer undefined is not
+    // <login>" - which silently dropped every team-routed request for
+    // hours with no diagnostic signal (adobe/mysticat-github-service#123).
+    // Name it explicitly instead: team-based triggers are a real, distinct,
+    // unsupported case, not a wrong-reviewer no-op.
+    // A present, matching direct reviewer takes precedence over the
+    // team-skip branch. GitHub normally sends EITHER requested_reviewer OR
+    // requested_team, but a malformed or replayed payload can carry BOTH;
+    // a legitimate direct-reviewer request (requested_reviewer.login ===
+    // reviewerLogin) must not be misclassified as a team skip just because
+    // a requested_team is also present. We therefore only consider the
+    // team-skip / wrong-reviewer branches when the reviewer does NOT match -
+    // which still covers the normal team-routed case, where
+    // requested_reviewer is absent entirely.
     const reviewer = data.requested_reviewer?.login;
     if (reviewer !== reviewerLogin) {
+      if (data.requested_team) {
+        return `review requested via team ${teamDisplayName(data.requested_team)} - team-based triggers not supported`;
+      }
       return `reviewer ${reviewer} is not ${reviewerLogin}`;
     }
   }
@@ -108,6 +144,9 @@ export function skipReasonLabel(reason) {
   }
   if (reason.startsWith('auto-trigger not yet supported')) {
     return 'auto_trigger';
+  }
+  if (reason.startsWith('review requested via team')) {
+    return 'team_reviewer_unsupported';
   }
   if (reason.startsWith('reviewer ')) {
     return 'wrong_reviewer';
