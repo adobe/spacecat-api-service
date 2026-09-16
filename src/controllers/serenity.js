@@ -298,6 +298,15 @@ function publicErrorDetails(code, details) {
       maxTagFilterValues: value.maxTagFilterValues,
     };
   }
+  if (code === ERROR_CODES.TAG_TREE_LIMIT_EXCEEDED
+    && ['parents', 'nodes', 'pages', 'duration'].includes(value.budget)
+    && Number.isInteger(value.maximum)
+    && value.maximum > 0) {
+    return {
+      budget: value.budget,
+      maximum: value.maximum,
+    };
+  }
   return undefined;
 }
 

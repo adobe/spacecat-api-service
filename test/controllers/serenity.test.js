@@ -1312,6 +1312,29 @@ describe('SerenityController', () => {
       expect((await readBody(response)).message).to.equal('invalid search');
     });
 
+    it('searchTags exposes the documented traversal budget details', async () => {
+      const error = new ErrorWithStatusCode('Unable to read the complete tag tree', 503);
+      error.code = ERROR_CODES.TAG_TREE_LIMIT_EXCEEDED;
+      error.details = { budget: 'nodes', maximum: 10_000, internal: 'not-public' };
+      handlers.handleSearchTags.rejects(error);
+      const controller = SerenityController(
+        { env: { SERENITY_TAG_SEARCH_CURSOR_SECRET: 'search-secret' } },
+        fakeLog(),
+        {},
+      );
+
+      const response = await controller.searchTags(fakeContext({
+        env: { SERENITY_TAG_SEARCH_CURSOR_SECRET: 'search-secret' },
+      }));
+
+      expect(response.status).to.equal(503);
+      expect(await readBody(response)).to.deep.equal({
+        error: ERROR_CODES.TAG_TREE_LIMIT_EXCEEDED,
+        message: 'Unable to read the complete tag tree',
+        details: { budget: 'nodes', maximum: 10_000 },
+      });
+    });
+
     it('listModels dispatches to handleListModels and wraps the result in ok()', async () => {
       handlers.handleListModels.resolves({ items: [] });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
