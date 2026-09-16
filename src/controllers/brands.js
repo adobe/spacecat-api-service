@@ -1857,6 +1857,13 @@ function BrandsController(ctx, log, env) {
           return createResponse(
             {
               ...withSerenityState(existing, serenityScopes),
+              // `jobType` whenever this is a 202, even when there is no job id to poll:
+              // `semrush_provisioning_job_id` is written best-effort, and an attempt that
+              // resolved on its first hop never wrote one, so a replay can legitimately have a
+              // live attempt and no id. A client must still be able to tell that provisioning is
+              // in flight — the brand's own `semrushProvisioningStatus` says `pending` too — and
+              // must NOT read a missing id as "nothing is running" and start a second attempt.
+              ...(isStillProvisioning ? { jobType: PROVISION_WORKSPACE_JOB_TYPE } : {}),
               ...(isStillProvisioning && hasText(provisioning?.provisioningJobId)
                 ? { jobId: provisioning.provisioningJobId }
                 : {}),

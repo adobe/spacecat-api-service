@@ -5477,6 +5477,39 @@ describe('Brands Controller', () => {
           expect(enqueueStub).to.not.have.been.called;
         });
 
+        it('replays an in-flight attempt that never recorded a job id: still 202, still says provisioning', async () => {
+          // `semrush_provisioning_job_id` is written best-effort, and an attempt that resolved on
+          // its first hop never wrote one — so a replay can legitimately find a LIVE attempt with
+          // no id to poll. The response must still say provisioning is in flight, or a client
+          // reads the missing id as "nothing is running" and starts a second attempt against the
+          // first (the dashboard did exactly that: it skipped polling and activated the remaining
+          // markets, which the backend then 409'd as a batch).
+          const enqueueStub = sinon.stub().resolves({ getId: () => 'job-new' });
+          const beginStub = sinon.stub().resolves(true);
+          const controller = await buildController({
+            createAndEnqueueJob: enqueueStub,
+            beginProvisioningAttempt: beginStub,
+            getBrandById: sinon.stub().resolves({ id: 'existing-brand', name: 'New Brand', status: 'pending' }),
+            getBrandProvisioningState: sinon.stub().resolves({
+              provisioningStatus: 'pending', provisioningJobId: null,
+            }),
+          });
+
+          const response = await controller.createBrandForOrg({
+            ...withKey('client-key-nojob'),
+            data: { ...semrushData },
+          });
+
+          expect(response.status).to.equal(202);
+          const body = await response.json();
+          expect(body.jobId).to.equal(undefined);
+          // The signal that survives a missing job id.
+          expect(body.jobType).to.equal('serenity-provision-workspace');
+          // And still nothing new started.
+          expect(beginStub).to.not.have.been.called;
+          expect(enqueueStub).to.not.have.been.called;
+        });
+
         it('replays a settled create as 201, with no job id to poll', async () => {
           // Provisioning already finished, so there is nothing left to wait on. 201 (not 200):
           // a 200 would read as "your create did not happen".

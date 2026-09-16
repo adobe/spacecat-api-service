@@ -15109,7 +15109,12 @@ V2BrandProvisioningAccepted:
   allOf:
     - $ref: '#/V2Brand'
     - type: object
-      required: [id, status, jobId, jobType]
+      # `jobId` is NOT required: it is written best-effort, and an attempt that resolved on its
+      # first hop never wrote one, so an idempotent REPLAY can legitimately answer 202 with a live
+      # attempt and no id to poll. `jobType` and the brand's own `semrushProvisioningStatus`
+      # (`pending`) both still say provisioning is in flight — a client must not read a missing
+      # `jobId` as "nothing is running" and start a second attempt.
+      required: [id, status, jobType]
       properties:
         jobId:
           type: string
