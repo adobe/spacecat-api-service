@@ -122,7 +122,11 @@ v2-brands-for-org:
             whitespace-insensitive) in this organization
             (`code: brand_duplicate_active_name`).
           - (PR-C, `async: true` only) a provisioning attempt is already in flight
-            for this brand (`error: semrushProvisioningInProgress`).
+            for this brand (`code: semrush_provisioning_in_progress`). The same
+            token is returned by `POST .../serenity/markets` and
+            `POST .../serenity/activate`, so a client has one string to branch on.
+            Distinct from the market-slice 409, which IS idempotent success — this
+            one means nothing was started and the caller should retry shortly.
         headers:
           X-Error:
             $ref: './headers.yaml#/xError'

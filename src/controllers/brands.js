@@ -2112,10 +2112,13 @@ function BrandsController(ctx, log, env) {
           throw beginError;
         }
         if (!began) {
+          // Same token the guard above throws, so a client has ONE string to branch on for
+          // "an attempt is already in flight" regardless of which check caught it. (`code`,
+          // not `error`, matches this controller's own envelope — cf. brand_duplicate_active_name.)
           return createResponse(
             {
-              error: 'semrushProvisioningInProgress',
-              message: 'Unable to start Semrush provisioning for the new brand',
+              code: 'semrush_provisioning_in_progress',
+              message: 'A Semrush sub-workspace provisioning attempt is already in progress for this brand; please retry shortly.',
             },
             409,
           );

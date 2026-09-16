@@ -5559,6 +5559,32 @@ describe('Brands Controller', () => {
           expect(beginStub).to.not.have.been.called;
           expect(enqueueStub).to.not.have.been.called;
         });
+
+        it('409s with the SAME token when the CAS itself loses the race (guard/CAS interleave)', async () => {
+          // The guard narrows this window but cannot close it: another request can mint an
+          // attempt between the guard's read and this CAS. Both rejections must speak with one
+          // voice, or a client has two strings to branch on for one condition — and the frontend
+          // must never mistake either for the market-slice 409, which IS idempotent success.
+          const enqueueStub = sinon.stub().resolves({ getId: () => 'job-xyz' });
+          const controller = await buildController({
+            upsertBrand: sinon.stub().resolves({ id: 'forced-id', name: 'New Brand' }),
+            beginProvisioningAttempt: sinon.stub().resolves(false),
+            createAndEnqueueJob: enqueueStub,
+          });
+
+          const response = await controller.createBrandForOrg({
+            ...context,
+            params: { spaceCatId: ORGANIZATION_ID },
+            data: { ...semrushData },
+            dataAccess: mockDataAccess,
+            attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+          });
+
+          expect(response.status).to.equal(409);
+          const body = await response.json();
+          expect(body.code).to.equal('semrush_provisioning_in_progress');
+          expect(enqueueStub).to.not.have.been.called;
+        });
       });
 
       it('rejects a Semrush-mode create with 403 when serenity is inactive for the org (no provisioning, no row write)', async () => {
