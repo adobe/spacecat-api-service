@@ -1657,4 +1657,92 @@ describe('llmo-referral-traffic — rotation (demo sites)', () => {
     expect(client.rpc.getCall(0).args[1].p_start_date).to.equal('2026-01-01');
     expect(client.rpc.getCall(0).args[1].p_end_date).to.equal('2026-01-28');
   });
+
+  // ── platform multi-select (Serenity, LLMO-7616) ────────────────────────────
+  // parseParams/commonRpcParams resolve `platform` into exactly one of the scalar
+  // `p_platform` (single/all/legacy — byte-identical) or the array `p_platforms`
+  // (a real comma multi-select). Unknown codes are silently dropped.
+  describe('platform multi-select (Serenity)', () => {
+    it('maps a single platform to scalar p_platform and omits p_platforms (byte-identical)', async () => {
+      const client = makeRpcClient({ data: [] });
+      const ctx = makeContext({ client });
+      ctx.data = { platform: 'openai' };
+      await createReferralTrafficKpisHandler(stubbedValidateAccess)(ctx);
+      const rpcArgs = client.rpc.getCall(0).args[1];
+      expect(rpcArgs.p_platform).to.equal('openai');
+      expect(rpcArgs).to.not.have.property('p_platforms');
+    });
+
+    it('maps a comma list to p_platforms and nulls the scalar p_platform', async () => {
+      const client = makeRpcClient({ data: [] });
+      const ctx = makeContext({ client });
+      ctx.data = { platform: 'openai,gemini' };
+      await createReferralTrafficKpisHandler(stubbedValidateAccess)(ctx);
+      const rpcArgs = client.rpc.getCall(0).args[1];
+      // gemini maps to the DB value 'google' via PLATFORM_CODE_TO_DB.
+      expect(rpcArgs.p_platforms).to.deep.equal(['openai', 'google']);
+      expect(rpcArgs.p_platform).to.equal(null);
+    });
+
+    it('treats an explicit "all" anywhere in the list as no platform filter', async () => {
+      const client = makeRpcClient({ data: [] });
+      const ctx = makeContext({ client });
+      ctx.data = { platform: 'openai,all' };
+      await createReferralTrafficKpisHandler(stubbedValidateAccess)(ctx);
+      const rpcArgs = client.rpc.getCall(0).args[1];
+      expect(rpcArgs.p_platform).to.equal(null);
+      expect(rpcArgs).to.not.have.property('p_platforms');
+    });
+
+    it('collapses a ≤1-token list back to the single scalar path (byte-identical)', async () => {
+      for (const platform of ['openai,', 'openai,openai', 'openai,bogus']) {
+        const client = makeRpcClient({ data: [] });
+        const ctx = makeContext({ client });
+        ctx.data = { platform };
+        // eslint-disable-next-line no-await-in-loop
+        await createReferralTrafficKpisHandler(stubbedValidateAccess)(ctx);
+        const rpcArgs = client.rpc.getCall(0).args[1];
+        expect(rpcArgs.p_platform, platform).to.equal('openai');
+        expect(rpcArgs, platform).to.not.have.property('p_platforms');
+      }
+    });
+
+    it('silently drops an all-unknown list (no p_platforms, scalar null)', async () => {
+      const client = makeRpcClient({ data: [] });
+      const ctx = makeContext({ client });
+      ctx.data = { platform: 'bogus,nope' };
+      await createReferralTrafficKpisHandler(stubbedValidateAccess)(ctx);
+      const rpcArgs = client.rpc.getCall(0).args[1];
+      expect(rpcArgs.p_platform).to.equal(null);
+      expect(rpcArgs).to.not.have.property('p_platforms');
+    });
+
+    it('is prototype-safe: inherited keys never leak into the RPC params', async () => {
+      const client = makeRpcClient({ data: [] });
+      const ctx = makeContext({ client });
+      ctx.data = { platform: 'constructor,toString' };
+      await createReferralTrafficKpisHandler(stubbedValidateAccess)(ctx);
+      const rpcArgs = client.rpc.getCall(0).args[1];
+      expect(rpcArgs.p_platform).to.equal(null);
+      expect(rpcArgs).to.not.have.property('p_platforms');
+    });
+
+    it('forwards p_platforms through by-url', async () => {
+      const client = makeRpcClient({ data: [] });
+      const ctx = makeContext({ client });
+      ctx.data = { platform: 'openai,gemini' };
+      await createReferralTrafficByUrlHandler(stubbedValidateAccess)(ctx);
+      expect(client.rpc.getCall(0).args[1].p_platforms).to.deep.equal(['openai', 'google']);
+    });
+
+    it('forwards p_platforms through url-trend while still omitting p_url_path_prefix', async () => {
+      const client = makeRpcClient({ data: [] });
+      const ctx = makeContext({ client });
+      ctx.data = { platform: 'openai,gemini', urlPath: '/blog' };
+      await createReferralTrafficUrlTrendHandler(stubbedValidateAccess)(ctx);
+      const rpcArgs = client.rpc.getCall(0).args[1];
+      expect(rpcArgs.p_platforms).to.deep.equal(['openai', 'google']);
+      expect(rpcArgs).to.not.have.property('p_url_path_prefix');
+    });
+  });
 });
