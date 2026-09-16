@@ -2094,7 +2094,8 @@ export async function listRegions(postgrestClient) {
 // here just to store it as `provisioningCandidateWorkspaceId`, which no caller ever consulted, was
 // dead weight presented as a real recovery path.
 const PROVISIONING_SELECT = 'id, semrush_provisioning_status, semrush_provisioning_attempt_id, '
-  + 'semrush_provisioning_job_id, semrush_sub_workspace_id, status, site_id, updated_at';
+  + 'semrush_provisioning_job_id, semrush_provisioning_started_at, semrush_sub_workspace_id, '
+  + 'status, site_id, updated_at';
 
 /**
  * Reads a brand's current async-provisioning state. Plain read, no compare-and-set — used by the
@@ -2151,6 +2152,7 @@ export async function getBrandProvisioningState(brandId, postgrestClient) {
     provisioningAttemptId: data.semrush_provisioning_attempt_id,
     provisioningJobId: data.semrush_provisioning_job_id,
     updatedAt: data.updated_at,
+    provisioningStartedAt: data.semrush_provisioning_started_at,
   };
 }
 
@@ -2284,6 +2286,8 @@ export async function promoteProvisioningReady({
     .update({
       semrush_sub_workspace_id: workspaceId,
       semrush_provisioning_status: 'ready',
+      // The attempt is over; its start time must not outlive it.
+      semrush_provisioning_started_at: null,
       ...(hasSiteAnchor ? { status: 'active' } : {}),
       updated_by: updatedBy,
     })
@@ -2342,6 +2346,8 @@ export async function promoteProvisioningFailed({
     .from('brands')
     .update({
       semrush_provisioning_status: 'failed',
+      // The attempt is over; its start time must not outlive it.
+      semrush_provisioning_started_at: null,
       semrush_provisioning_error: failureReason,
     })
     .eq('id', brandId)
@@ -2390,6 +2396,8 @@ export async function cancelProvisioningAttempt({ brandId, postgrestClient }) {
     .from('brands')
     .update({
       semrush_provisioning_status: 'failed',
+      // The attempt is over; its start time must not outlive it.
+      semrush_provisioning_started_at: null,
       semrush_provisioning_error: 'Brand was deactivated while a provisioning attempt was in '
         + 'flight; the attempt was cancelled',
     })
@@ -2440,6 +2448,10 @@ export async function beginProvisioningAttempt({
     .update({
       semrush_provisioning_status: 'pending',
       semrush_provisioning_attempt_id: attemptId,
+      // Staleness is measured from THIS, never from `updated_at`: a row-level BEFORE UPDATE
+      // trigger bumps `updated_at` on ANY edit to the brand, so an unrelated change would
+      // reset the staleness clock on a dead attempt and keep it looking fresh forever.
+      semrush_provisioning_started_at: new Date().toISOString(),
       semrush_provisioning_job_id: null,
       // Cleared even though nothing reads it back (LLMO-7418 external-review Finding 7): a stale
       // non-null value left over from a PRIOR attempt would otherwise permanently block
@@ -2488,6 +2500,8 @@ export async function recordFreshBrandProvisioningStartFailure({
     .from('brands')
     .update({
       semrush_provisioning_status: 'failed',
+      // The attempt is over; its start time must not outlive it.
+      semrush_provisioning_started_at: null,
       semrush_provisioning_error: failureReason,
     })
     .eq('id', brandId);
@@ -2562,7 +2576,13 @@ export async function guardAgainstConcurrentProvisioning(brandId, postgrestClien
     return;
   }
 
-  const ageMs = Date.now() - new Date(state.updatedAt).getTime();
+  // Measured from when the ATTEMPT began, not from the row's `updated_at`: a row-level BEFORE
+  // UPDATE trigger bumps `updated_at` on ANY edit to the brand, so an unrelated change (a rename,
+  // a site link, an alias sync) would reset the clock on an attempt that is already dead and keep
+  // it looking fresh here forever. Falls back to `updatedAt` only for a row written before this
+  // column existed, where it is the best available signal and no worse than the old behaviour.
+  const attemptStartedAt = state.provisioningStartedAt ?? state.updatedAt;
+  const ageMs = Date.now() - new Date(attemptStartedAt).getTime();
   // A missing/unparseable updatedAt yields NaN, and NaN is never < the threshold — falling
   // through to "stale, reconcile" would then kill a genuinely fresh, healthy attempt (LLMO-7418
   // external-review Finding 11). Treat an unparseable age as "assume fresh" (the safer

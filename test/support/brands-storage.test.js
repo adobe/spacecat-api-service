@@ -4782,6 +4782,7 @@ describe('brands-storage', () => {
               semrush_provisioning_status: 'pending',
               semrush_provisioning_attempt_id: ATTEMPT_ID,
               semrush_provisioning_job_id: JOB_ID,
+              semrush_provisioning_started_at: '2026-09-08T11:55:00.000Z',
               // Deliberately present in the raw row but absent from PROVISIONING_SELECT/the
               // mapped result below (LLMO-7418 external-review Finding 7) — asserts the
               // candidate column is genuinely not read back, not just coincidentally absent from
@@ -4797,6 +4798,9 @@ describe('brands-storage', () => {
         const result = await getBrandProvisioningState(BRAND_ID, postgrestClient);
 
         expect(result).to.deep.equal({
+          // Staleness is measured from THIS, not from `updated_at` — a row-level trigger
+          // bumps `updated_at` on any brand edit and would reset the clock on a dead attempt.
+          provisioningStartedAt: '2026-09-08T11:55:00.000Z',
           id: BRAND_ID,
           status: 'pending',
           siteId: 'a-site-id',
@@ -5010,6 +5014,7 @@ describe('brands-storage', () => {
           row: {
             semrush_sub_workspace_id: CANONICAL_WS,
             semrush_provisioning_status: 'ready',
+            semrush_provisioning_started_at: null,
             status: 'active',
             updated_by: 'serenity-provision-worker',
           },
@@ -5067,6 +5072,7 @@ describe('brands-storage', () => {
           row: {
             semrush_sub_workspace_id: CANONICAL_WS,
             semrush_provisioning_status: 'ready',
+            semrush_provisioning_started_at: null,
             updated_by: 'serenity-provision-worker',
           },
         }]);
@@ -5158,6 +5164,7 @@ describe('brands-storage', () => {
           table: 'brands',
           row: {
             semrush_provisioning_status: 'failed',
+            semrush_provisioning_started_at: null,
             semrush_provisioning_error: 'workspace provisioning failed',
           },
         }]);
@@ -5199,6 +5206,7 @@ describe('brands-storage', () => {
           table: 'brands',
           row: {
             semrush_provisioning_status: 'failed',
+            semrush_provisioning_started_at: null,
             semrush_provisioning_error: 'Brand was deactivated while a provisioning attempt was '
               + 'in flight; the attempt was cancelled',
           },
@@ -5240,17 +5248,23 @@ describe('brands-storage', () => {
         });
 
         expect(result).to.equal(true);
-        expect(postgrestClient.capturedCalls.update).to.deep.equal([{
-          table: 'brands',
-          row: {
-            semrush_provisioning_status: 'pending',
-            semrush_provisioning_attempt_id: ATTEMPT_ID,
-            semrush_provisioning_job_id: null,
-            semrush_provisioning_candidate_workspace_id: null,
-            semrush_provisioning_error: null,
-            updated_by: 'serenity-create-market',
-          },
-        }]);
+        // `semrush_provisioning_started_at` is a wall-clock value, so it is asserted separately
+        // rather than frozen into the deep-equal. It is what staleness is measured from — NOT
+        // `updated_at`, which a row-level trigger bumps on any brand edit and which would
+        // therefore reset the clock on an attempt that is already dead.
+        const [beginWrite] = postgrestClient.capturedCalls.update;
+        const { semrush_provisioning_started_at: startedAt, ...beginRow } = beginWrite.row;
+        expect(postgrestClient.capturedCalls.update).to.have.lengthOf(1);
+        expect(beginWrite.table).to.equal('brands');
+        expect(beginRow).to.deep.equal({
+          semrush_provisioning_status: 'pending',
+          semrush_provisioning_attempt_id: ATTEMPT_ID,
+          semrush_provisioning_job_id: null,
+          semrush_provisioning_candidate_workspace_id: null,
+          semrush_provisioning_error: null,
+          updated_by: 'serenity-create-market',
+        });
+        expect(Date.now() - new Date(startedAt).getTime()).to.be.lessThan(5_000);
         expect(postgrestClient.capturedCalls.or).to.deep.equal([{
           table: 'brands',
           filter: 'semrush_provisioning_status.is.null,semrush_provisioning_status.eq.ready,'
@@ -5321,6 +5335,56 @@ describe('brands-storage', () => {
         expect(caught.code).to.equal('semrush_provisioning_in_progress');
       });
 
+      // THE case the dedicated column exists for. `brands.updated_at` is bumped by a row-level
+      // BEFORE UPDATE trigger on ANY edit to the brand, so a rename or a site link on a brand
+      // whose attempt died an hour ago makes the row look edited-just-now. Measuring from
+      // `updated_at` would call that attempt fresh and 409 every retry forever, with no sweep to
+      // rescue it. Measuring from the attempt's own start time is immune to that.
+      it('reconciles a stale attempt even when an unrelated edit just bumped updated_at', async () => {
+        const staleAge = PROVISIONING_STALE_THRESHOLD_MS + 1000;
+        const staleStart = new Date(Date.now() - staleAge).toISOString();
+        const postgrestClient = createCapturingClient({
+          brands: [
+            {
+              data: stateWith({
+                semrush_provisioning_started_at: staleStart,
+                // An unrelated edit landed a moment ago; the trigger bumped this.
+                updated_at: new Date().toISOString(),
+              }),
+              error: null,
+            },
+            { data: { id: BRAND_ID }, error: null },
+          ],
+        });
+
+        // Reconciles rather than throwing 409.
+        await guardAgainstConcurrentProvisioning(BRAND_ID, postgrestClient, console);
+
+        expect(postgrestClient.capturedCalls.update).to.have.lengthOf(1);
+        expect(postgrestClient.capturedCalls.update[0].row.semrush_provisioning_status)
+          .to.equal('failed');
+      });
+
+      it('still 409s a genuinely fresh attempt whose row has NOT been edited', async () => {
+        const freshStart = new Date(Date.now() - 1000).toISOString();
+        const postgrestClient = createCapturingClient({
+          brands: [{
+            data: stateWith({ semrush_provisioning_started_at: freshStart }),
+            error: null,
+          }],
+        });
+
+        let caught;
+        try {
+          await guardAgainstConcurrentProvisioning(BRAND_ID, postgrestClient, console);
+        } catch (e) {
+          caught = e;
+        }
+
+        expect(caught?.status).to.equal(409);
+        expect(postgrestClient.capturedCalls.update).to.have.lengthOf(0);
+      });
+
       it('reconciles a STALE attempt to failed and returns without throwing', async () => {
         const staleAgeMs = PROVISIONING_STALE_THRESHOLD_MS + 1000;
         const staleUpdatedAt = new Date(Date.now() - staleAgeMs).toISOString();
@@ -5338,6 +5402,7 @@ describe('brands-storage', () => {
           table: 'brands',
           row: {
             semrush_provisioning_status: 'failed',
+            semrush_provisioning_started_at: null,
             semrush_provisioning_error: 'Provisioning attempt went stale (no update within the '
               + 'expected window) and was reconciled by a later request',
           },
