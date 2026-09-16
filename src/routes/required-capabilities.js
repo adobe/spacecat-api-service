@@ -63,6 +63,7 @@ export const INTERNAL_ROUTES = [
   'DELETE /sites/:siteId/geo-experiments/:geoExperimentId',
   'POST /sites/:siteId/geo-experiments/:geoExperimentId/trigger-impact-measurement',
   'POST /sites/:siteId/geo-experiments/:geoExperimentId/validate',
+  'POST /sites/:siteId/geo-experiments/:geoExperimentId/cancel',
 
   // Slack - event subscriptions and commands are authenticated by the Slack request
   // signature (slackSignatureWrapper), not by a SpaceCat capability.

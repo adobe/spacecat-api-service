@@ -1193,6 +1193,7 @@ describe('getRouteHandlers', () => {
       'DELETE /sites/:siteId/geo-experiments/:geoExperimentId',
       'POST /sites/:siteId/geo-experiments/:geoExperimentId/trigger-impact-measurement',
       'POST /sites/:siteId/geo-experiments/:geoExperimentId/validate',
+      'POST /sites/:siteId/geo-experiments/:geoExperimentId/cancel',
       'GET /sites/:siteId/traffic/paid',
       'GET /sites/:siteId/traffic/paid/page-type-platform-campaign',
       'GET /sites/:siteId/traffic/paid/url-page-type',
