@@ -213,13 +213,18 @@ export function resolveBrandName(body) {
  * @param {object} [params.promiseToken] - pre-minted token; required off the request path.
  * @param {string} [params.callerId]
  * @param {string} [params.imsOrgId]
+ * @returns {Promise<number>} how many generation jobs were actually enqueued. A caller running
+ *   on the WORKER path must check this: a forwarded `promiseToken` now belongs to those jobs, and
+ *   the runner invalidates this job's token by identity on terminal state — which would kill the
+ *   forwarded copy before it is ever exchanged. See `tokenHandedOff` in the chained handlers.
  */
 export async function enqueueMarketGenerations(context, {
   inputs, markets, transport, brandUuid, log, promiseToken, callerId, imsOrgId,
 }) {
   if (!Array.isArray(inputs) || inputs.length === 0) {
-    return;
+    return 0;
   }
+  let enqueuedCount = 0;
   let resolvedImsOrgId = imsOrgId;
   if (!resolvedImsOrgId) {
     try {
@@ -243,6 +248,9 @@ export async function enqueueMarketGenerations(context, {
           ...(promiseToken ? { promiseToken } : {}),
         },
       });
+      if (promptGeneration) {
+        enqueuedCount += 1;
+      }
       if (promptGeneration && Array.isArray(markets)) {
         const entry = markets.find((m) => m.market === input.market
           && m.languageCode === input.languageCode);
@@ -256,4 +264,5 @@ export async function enqueueMarketGenerations(context, {
       });
     }
   }
+  return enqueuedCount;
 }

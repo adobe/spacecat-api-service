@@ -359,7 +359,6 @@ export async function run(message, context) {
   try {
     const result = await handler(context, job, accessToken);
     job.setStatus('COMPLETED');
-    job.setResult(result ?? null);
     // A handler that self-requeues (e.g. classify-prompts-job.js's
     // `requeuePending`) forwards this job's CURRENT promise token onto the new
     // job's metadata, rather than minting a fresh one — the worker has no HTTP
@@ -369,7 +368,19 @@ export async function run(message, context) {
     // promoting to ready) forwards the SAME token for the identical reason, so it
     // counts here too — a chainedJobId with no live token would strand the chained
     // job on its very first hop with a dead promise token.
-    tokenOwnershipTransferred = Boolean(result?.requeuedJobId || result?.chainedJobId);
+    // A handler may also hand this job's token to jobs it enqueued itself (the chained market
+    // handlers forward it to prompt-generation jobs). Those jobs are not "the chain" in the
+    // requeue/chain sense, so they need their own signal — without it the invalidate below kills
+    // the token by identity and every generation job it just created fails its exchange.
+    tokenOwnershipTransferred = Boolean(
+      result?.requeuedJobId || result?.chainedJobId || result?.tokenHandedOff,
+    );
+    // Internal signal only: stripped BEFORE the result is stored, so it never reaches a client
+    // polling this job.
+    if (result && typeof result === 'object' && 'tokenHandedOff' in result) {
+      delete (/** @type {any} */ (result)).tokenHandedOff;
+    }
+    job.setResult(result ?? null);
   } catch (error) {
     if (isRetryableJobError(error)) {
       log.warn(`[serenity-job-runner] Job ${jobId} remains IN_PROGRESS for SQS retry: ${error.message}`);

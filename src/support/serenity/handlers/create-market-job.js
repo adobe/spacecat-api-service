@@ -108,6 +108,7 @@ export async function createMarketJobHandler(context, job, accessToken) {
   // The token is the reason this cannot simply call the same helper the controller does: there
   // is no request here, so `getIMSPromiseToken` has no Authorization header to mint from. Pass
   // the one this job already holds, exactly as the chain's own hops forward it.
+  let tokenHandedOff = false;
   if (result.generationInputs) {
     try {
       const org = await dataAccess.Organization?.findById?.(orgId);
@@ -127,6 +128,10 @@ export async function createMarketJobHandler(context, job, accessToken) {
       );
       if (promptGeneration) {
         result.body = { ...result.body, promptGeneration };
+        // This job's promise token now belongs to the generation job too. Say so, or the runner
+        // invalidates it by identity on terminal state and that job's copy is dead before it is
+        // ever exchanged — the runner strips this flag before storing the result.
+        tokenHandedOff = true;
       }
     } catch (e) {
       // Best-effort, same as the synchronous path: the market is created and published, and a
@@ -141,5 +146,5 @@ export async function createMarketJobHandler(context, job, accessToken) {
   // brand's Semrush workspace id and alias set -- internal state this epic is otherwise careful
   // never to expose (see the job-status endpoint's "secret-free by design" contract).
   const { generationInputs: _, ...jobResult } = result;
-  return jobResult;
+  return tokenHandedOff ? { ...jobResult, tokenHandedOff: true } : jobResult;
 }

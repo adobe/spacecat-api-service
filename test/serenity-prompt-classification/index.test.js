@@ -234,6 +234,46 @@ describe('serenity-prompt-classification worker entry', () => {
     expect(invalidateStub).to.have.been.called;
   });
 
+  // The chained market handlers forward this job's promise token to the prompt-generation jobs
+  // they enqueue. Invalidation is BY IDENTITY and kills every token in the exchange chain, so
+  // without an explicit signal the runner would kill the copy those jobs are holding before any
+  // of them exchanges it.
+  describe('token hand-off to jobs a handler enqueued itself', () => {
+    it('does NOT invalidate the token when the handler reports a hand-off', async () => {
+      createMarketJobHandlerStub.resolves({ status: 201, body: {}, tokenHandedOff: true });
+      const job = makeJob('IN_PROGRESS', 'serenity-create-market');
+      const context = makeContext(job);
+      exchangeAndPersistStub.resolves('access-token');
+
+      await run({ jobId: 'job-123', type: 'serenity-create-market' }, context);
+
+      expect(invalidateStub).to.not.have.been.called;
+      expect(job.getStatus()).to.equal('COMPLETED');
+    });
+
+    it('STRIPS the signal from the stored result — it is internal, never client-facing', async () => {
+      createMarketJobHandlerStub.resolves({ status: 201, body: {}, tokenHandedOff: true });
+      const job = makeJob('IN_PROGRESS', 'serenity-create-market');
+      const context = makeContext(job);
+      exchangeAndPersistStub.resolves('access-token');
+
+      await run({ jobId: 'job-123', type: 'serenity-create-market' }, context);
+
+      expect(job.getResult()).to.deep.equal({ status: 201, body: {} });
+    });
+
+    it('still invalidates when the handler reports no hand-off (unchanged path)', async () => {
+      createMarketJobHandlerStub.resolves({ status: 201, body: {} });
+      const job = makeJob('IN_PROGRESS', 'serenity-create-market');
+      const context = makeContext(job);
+      exchangeAndPersistStub.resolves('access-token');
+
+      await run({ jobId: 'job-123', type: 'serenity-create-market' }, context);
+
+      expect(invalidateStub).to.have.been.called;
+    });
+  });
+
   it('dispatches serenity-activate-markets to activateMarketsJobHandler (PR-C, LLMO-7352/LLMO-7418)', async () => {
     // The third registered provisioning handler had no dispatch test and was not even mocked
     // here, so the real module was pulled in and its registration was never actually exercised.

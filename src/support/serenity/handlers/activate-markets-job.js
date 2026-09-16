@@ -91,7 +91,7 @@ export async function activateMarketsJobHandler(context, job, accessToken) {
   // Same handoff the synchronous activate performs, through the SAME helper, so the two paths
   // cannot drift (#3194/#3252). The token is the one difference: there is no request here to
   // mint from, so forward the one this job already holds.
-  await enqueueMarketGenerations(
+  const generationsEnqueued = await enqueueMarketGenerations(
     { ...context, params: { ...(context.params || {}), spaceCatId: orgId } },
     {
       inputs: result.generationInputs,
@@ -108,5 +108,8 @@ export async function activateMarketsJobHandler(context, job, accessToken) {
   // Strip the internal handoff before this becomes the AsyncJob's stored result — it is served
   // verbatim to any client polling the job and carries the brand's workspace id and aliases.
   const { generationInputs: _, ...jobResult } = result;
-  return jobResult;
+  // Any generation job enqueued above carries THIS job's promise token. Tell the runner, or it
+  // invalidates that token by identity on terminal state and every one of those jobs fails its
+  // exchange. The runner strips this flag before storing the result.
+  return generationsEnqueued > 0 ? { ...jobResult, tokenHandedOff: true } : jobResult;
 }

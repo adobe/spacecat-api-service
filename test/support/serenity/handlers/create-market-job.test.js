@@ -32,6 +32,7 @@ function makeJob(metadata) {
 describe('handlers/create-market-job.js (PR-C, LLMO-7352/LLMO-7418)', () => {
   let orchestrateCreateMarketSubworkspaceStub;
   let assertChainedJobStillAppliesStub;
+  let maybeEnqueueMarketGenerationStub;
   let createTransportStub;
   let transport;
   let context;
@@ -43,6 +44,7 @@ describe('handlers/create-market-job.js (PR-C, LLMO-7352/LLMO-7418)', () => {
       .resolves({ status: 201, body: { brandId: BRAND_ID, geoTargetId: 2840, languageCode: 'en' } });
     // Default: the brand is still bound to the workspace this job was enqueued against.
     assertChainedJobStillAppliesStub = sinon.stub().resolves({ ok: true });
+    maybeEnqueueMarketGenerationStub = sinon.stub().resolves({ jobId: 'gen-job-1' });
     context = {
       env: {},
       log: fakeLog(),
@@ -61,6 +63,9 @@ describe('handlers/create-market-job.js (PR-C, LLMO-7352/LLMO-7418)', () => {
       '../../../../src/support/serenity/handlers/chained-job-guard.js': {
         assertChainedJobStillApplies: assertChainedJobStillAppliesStub,
       },
+      '../../../../src/support/serenity/async-prompt-gen.js': {
+        maybeEnqueueMarketGeneration: maybeEnqueueMarketGenerationStub,
+      },
     });
   }
 
@@ -74,6 +79,63 @@ describe('handlers/create-market-job.js (PR-C, LLMO-7352/LLMO-7418)', () => {
       ...overrides,
     };
   }
+
+  // The prompt-generation handoff (#3194/#3252). This block had NO coverage at all, and it hands
+  // this job's live promise token to the generation job it enqueues. The runner invalidates a
+  // job's token by identity on terminal state, so without an explicit ownership signal the
+  // generation job's copy is dead before it ever exchanges — every async-created market would
+  // silently get no generated prompts.
+  describe('prompt-generation handoff', () => {
+    function withGeneration() {
+      orchestrateCreateMarketSubworkspaceStub.resolves({
+        status: 201,
+        body: { brandId: BRAND_ID, geoTargetId: 2840, languageCode: 'en' },
+        generationInputs: { market: 'us', languageCode: 'en', brandId: BRAND_ID },
+      });
+    }
+
+    it('forwards THIS job\'s promise token to the generation job', async () => {
+      withGeneration();
+      const { createMarketJobHandler } = await loadHandler();
+
+      await createMarketJobHandler(context, makeJob(makeMetadata({ promiseToken: { promise_token: 'ptok' } })), 'token');
+
+      expect(maybeEnqueueMarketGenerationStub).to.have.been.calledOnce;
+      const { producerParams } = maybeEnqueueMarketGenerationStub.firstCall.args[1];
+      expect(producerParams.promiseToken).to.deep.equal({ promise_token: 'ptok' });
+    });
+
+    it('signals tokenHandedOff so the runner does NOT invalidate the forwarded token', async () => {
+      withGeneration();
+      const { createMarketJobHandler } = await loadHandler();
+
+      const result = await createMarketJobHandler(context, makeJob(makeMetadata()), 'token');
+
+      expect(result.tokenHandedOff).to.equal(true);
+    });
+
+    it('does NOT signal a handoff when no generation job was enqueued', async () => {
+      // Nothing to protect, and claiming otherwise would leak this job's token past its own
+      // terminal state for no reason.
+      withGeneration();
+      maybeEnqueueMarketGenerationStub.resolves(null);
+      const { createMarketJobHandler } = await loadHandler();
+
+      const result = await createMarketJobHandler(context, makeJob(makeMetadata()), 'token');
+
+      expect(result.tokenHandedOff).to.equal(undefined);
+    });
+
+    it('NEVER leaks generationInputs into the stored result — it carries the workspace id and aliases', async () => {
+      withGeneration();
+      const { createMarketJobHandler } = await loadHandler();
+
+      const result = await createMarketJobHandler(context, makeJob(makeMetadata()), 'token');
+
+      expect(result).to.not.have.property('generationInputs');
+      expect(result.body.promptGeneration).to.deep.equal({ jobId: 'gen-job-1' });
+    });
+  });
 
   // A deactivate can land between the provisioning worker promoting this workspace and this
   // chained job running: it decommissions the workspace, clears the pointer and tombstones the
