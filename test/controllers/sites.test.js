@@ -142,6 +142,7 @@ describe('Sites Controller', () => {
     'getTopPages',
     'getSiteMetricsBySource',
     'getPageMetricsBySource',
+    'getSiteKeywordCpc',
     'resolveSite',
     'triggerBrandProfile',
     'getGraph',
@@ -3754,6 +3755,121 @@ describe('Sites Controller', () => {
 
     expect(result.status).to.equal(404);
     expect(error).to.have.property('message', 'Site not found');
+  });
+
+  it('get site keyword cpc returns the site organic keywords with cpc', async () => {
+    const siteId = sites[0].getId();
+    const getOrganicKeywords = sinon.stub().resolves({
+      result: {
+        keywords: [
+          // Extra fields (position, url, traffic) are intentionally dropped by the controller.
+          {
+            keyword: 'modular sofa', volume: 1000, cpc: 320, position: 3,
+          },
+          {
+            keyword: 'foam beanbag', volume: 500, cpc: 150, position: 5,
+          },
+        ],
+      },
+      fullAuditRef: 'https://api.example.com/organic?key=REDACTED',
+    });
+    const createFrom = sinon.stub().returns({ getOrganicKeywords });
+
+    const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+      '@adobe/mysticat-shared-seo-client': { default: { createFrom } },
+    });
+    const controller = sitesControllerMock.default(context, loggerStub, context.env);
+
+    const resp = await (await controller.getSiteKeywordCpc({
+      params: { siteId },
+      data: { country: 'US', limit: '50' },
+    })).json();
+
+    expect(resp).to.deep.equal({
+      baseURL: 'https://site1.com',
+      keywords: [
+        { keyword: 'modular sofa', volume: 1000, cpc: 320 },
+        { keyword: 'foam beanbag', volume: 500, cpc: 150 },
+      ],
+    });
+    // country is lowercased for the Semrush database, and the parsed limit is forwarded.
+    expect(getOrganicKeywords).to.have.been.calledOnceWith('https://site1.com', { limit: 50, country: 'us' });
+  });
+
+  it('get site keyword cpc defaults the limit and omits country when not provided', async () => {
+    const siteId = sites[0].getId();
+    const getOrganicKeywords = sinon.stub().resolves({ result: { keywords: [] }, fullAuditRef: '' });
+    const createFrom = sinon.stub().returns({ getOrganicKeywords });
+
+    const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+      '@adobe/mysticat-shared-seo-client': { default: { createFrom } },
+    });
+    const controller = sitesControllerMock.default(context, loggerStub, context.env);
+
+    const resp = await (await controller.getSiteKeywordCpc({ params: { siteId } })).json();
+
+    expect(resp).to.deep.equal({ baseURL: 'https://site1.com', keywords: [] });
+    expect(getOrganicKeywords).to.have.been.calledOnceWith('https://site1.com', { limit: 1000 });
+  });
+
+  it('get site keyword cpc returns bad request when siteId is missing', async () => {
+    const result = await sitesController.getSiteKeywordCpc({ params: {} });
+    const error = await result.json();
+
+    expect(result.status).to.equal(400);
+    expect(error).to.have.property('message', 'Site ID required');
+  });
+
+  it('get site keyword cpc returns bad request when limit is not a positive integer', async () => {
+    const siteId = sites[0].getId();
+
+    const result = await sitesController.getSiteKeywordCpc({
+      params: { siteId },
+      data: { limit: 'abc' },
+    });
+    const error = await result.json();
+
+    expect(result.status).to.equal(400);
+    expect(error).to.have.property('message', 'limit must be a positive integer');
+  });
+
+  it('get site keyword cpc returns not found when site is not found', async () => {
+    const siteId = sites[0].getId();
+    mockDataAccess.Site.findById.resolves(null);
+
+    const result = await sitesController.getSiteKeywordCpc({ params: { siteId } });
+    const error = await result.json();
+
+    expect(result.status).to.equal(404);
+    expect(error).to.have.property('message', 'Site not found');
+  });
+
+  it('get site keyword cpc returns forbidden for a non-belonging organization', async () => {
+    const siteId = sites[0].getId();
+    sandbox.stub(AccessControlUtil.prototype, 'hasAccess').returns(false);
+    sandbox.stub(context.attributes.authInfo, 'hasOrganization').returns(false);
+
+    const result = await sitesController.getSiteKeywordCpc({ params: { siteId } });
+    const error = await result.json();
+
+    expect(result.status).to.equal(403);
+    expect(error).to.have.property('message', 'Only users belonging to the organization can view its metrics');
+  });
+
+  it('get site keyword cpc returns internal server error when the seo client fails', async () => {
+    const siteId = sites[0].getId();
+    const createFrom = sinon.stub().throws(new Error('SEO_API_KEY is required'));
+
+    const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+      '@adobe/mysticat-shared-seo-client': { default: { createFrom } },
+    });
+    const controller = sitesControllerMock.default(context, loggerStub, context.env);
+
+    const result = await controller.getSiteKeywordCpc({ params: { siteId } });
+    const error = await result.json();
+
+    expect(result.status).to.equal(500);
+    expect(error).to.have.property('message', 'SEO_API_KEY is required');
   });
 
   it('get site metrics for non belonging to the organization', async () => {
