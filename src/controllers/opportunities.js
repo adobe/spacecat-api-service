@@ -26,10 +26,12 @@ import {
   isValidUUID,
 } from '@adobe/spacecat-shared-utils';
 import { Opportunity as OpportunityModel } from '@adobe/spacecat-shared-data-access';
+import { AzureEmbeddingClient } from '@adobe/spacecat-shared-gpt-client';
 import { OpportunityDto } from '../dto/opportunity.js';
 import { isValidLocale } from '../utils/validations.js';
 import { applyFieldProjection } from '../utils/field-projection.js';
 import { lookupByUrl } from '../support/lookup-by-url.js';
+import { lookupByTopic, DEFAULT_MIN_SCORE } from '../support/lookup-by-topic.js';
 import { requirePostgrestClient } from '../support/postgrest-availability.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { filterOpportunitiesByFacsComposite } from '../support/facs-composite-resolvers.js';
@@ -265,6 +267,94 @@ function OpportunitiesController(ctx) {
   };
 
   /**
+   * Looks up opportunities semantically related to the supplied topics, per site, via a pgvector
+   * nearest-neighbour search. POST body:
+   * `{ topics: [...], k?, minScore?, status?, fields?, locale? }`
+   * (all parameters travel in the body, mirroring by-url). See the Lookup Service architecture doc
+   * ("Offsite Intelligence - Funneling"), section 4.3.
+   * @param {Object} context of the request
+   * @returns {Promise<Response>} Normalized per-topic ranked results + opportunities map.
+   */
+  const getByTopic = async (context) => {
+    const siteId = context.params?.siteId;
+    const locale = context.data?.locale ?? null;
+
+    if (!isValidLocale(locale)) {
+      return badRequest('Invalid locale format');
+    }
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('Only users belonging to the organization of the site can view its opportunities');
+    }
+
+    const postgrestClient = dataAccess.services?.postgrestClient;
+    const guard = requirePostgrestClient(postgrestClient, {
+      errorMessage: 'Topic lookup requires Postgres (DATA_SERVICE_PROVIDER=postgres)',
+    });
+    if (guard) {
+      return guard;
+    }
+
+    // Unlike by-url, the read path embeds the query text; a missing/misconfigured embedding
+    // deployment makes the endpoint unusable, surfaced as the same 503 as a missing DB.
+    let embeddingClient;
+    try {
+      embeddingClient = AzureEmbeddingClient.createFrom(context);
+    } catch (e) {
+      ctx.log?.error?.(`[opportunities.getByTopic] embedding client unavailable: ${e.message}`);
+      return createResponse({ message: 'Topic lookup requires an embedding deployment (AZURE_EMBEDDING_DEPLOYMENT)' }, 503);
+    }
+
+    const parsedMinScore = Number(context.env?.LOOKUP_TOPIC_MIN_SCORE);
+    const defaultMinScore = Number.isFinite(parsedMinScore)
+      && parsedMinScore >= 0 && parsedMinScore <= 1
+      ? parsedMinScore
+      : DEFAULT_MIN_SCORE;
+
+    const { response, error } = await lookupByTopic(postgrestClient, embeddingClient, {
+      siteId,
+      rawTopics: context.data?.topics,
+      params: context.data ?? {},
+      defaultMinScore,
+      log: ctx.log,
+      validStatuses: Object.values(OpportunityModel.STATUSES),
+      defaultExcludedStatuses: [OpportunityModel.STATUSES.IGNORED],
+      fetchEntities: async (ids) => {
+        const { data } = await Opportunity.batchGetByKeys(ids.map((id) => ({ opportunityId: id })));
+        return data ?? [];
+      },
+      // Site-ownership check first (the index row is derived, best-effort-written data, and must
+      // never be the sole authority for a tenancy decision), then Summit-PLG + D4 FACS composite.
+      filterEntities: async (opptys) => {
+        const owned = opptys.filter((o) => o.getSiteId() === siteId);
+        if (owned.length !== opptys.length) {
+          ctx.log?.warn?.(`[opportunities.getByTopic] dropped ${opptys.length - owned.length} opportunity(ies) `
+            + `whose siteId did not match the requested site ${siteId} - the opportunity_semantic_embedding index may be stale`);
+        }
+        const permitted = await filterForSummitPlg(site, owned, context);
+        return filterOpportunitiesByFacsComposite(context, permitted);
+      },
+      getId: (oppty) => oppty.getId(),
+      getStatus: (oppty) => oppty.getStatus(),
+      toFullDto: (oppty) => OpportunityDto.toJSON(oppty, locale),
+      lightweightFields: OPPORTUNITY_BY_URL_LIGHTWEIGHT_FIELDS,
+      mapKey: 'opportunities',
+    });
+    if (error) {
+      return badRequest(error);
+    }
+    return ok(response);
+  };
+
+  /**
    * Gets an opportunity for a given site type and opportunity ID.
    * @param {Object} context of the request
    * @returns {Promise<Response>} Opportunity response.
@@ -490,6 +580,7 @@ function OpportunitiesController(ctx) {
     getByID,
     getByStatus,
     getByUrl,
+    getByTopic,
     patchOpportunity,
     removeOpportunity,
   };

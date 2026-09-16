@@ -359,6 +359,8 @@ paths:
     $ref: './site-opportunities.yaml#/site-opportunities'
   /sites/{siteId}/opportunities/by-urls:
     $ref: './site-opportunities.yaml#/site-opportunities-by-urls'
+  /sites/{siteId}/opportunities/by-topics:
+    $ref: './site-opportunities.yaml#/site-opportunities-by-topics'
   /sites/{siteId}/suggestions/by-urls:
     $ref: './site-opportunities.yaml#/site-suggestions-by-urls'
   /sites/{siteId}/opportunities/by-status/{status}:

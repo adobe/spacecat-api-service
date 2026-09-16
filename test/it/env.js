@@ -111,6 +111,15 @@ export function buildEnv(publicKeyB64) {
     POSTGREST_SCHEMA: 'public',
     POSTGREST_API_KEY: POSTGREST_WRITER_JWT,
 
+    // Semantic by-topics: AzureEmbeddingClient.createFrom() only validates these are present at
+    // construction. The by-topics IT seeds semantic_query_embedding so every query is a durable-
+    // cache HIT — createEmbeddings() is never called, so no real Azure endpoint is reached and
+    // these are IT-only dummies (never Vault / deployed config).
+    AZURE_EMBEDDING_ENDPOINT: 'https://it-azure-embedding.example.com',
+    AZURE_EMBEDDING_KEY: 'it-azure-embedding-key',
+    AZURE_EMBEDDING_API_VERSION: '2024-02-01',
+    AZURE_EMBEDDING_DEPLOYMENT: 'text-embedding-3-small',
+
     // ── Serenity E2E: Semrush vendor mocks ──────────────────────────────────
     // NONE of the vars below require Vault / deployed-env config: SEMRUSH_USERS_BASE_URL
     // falls back to SEMRUSH_PROJECTS_BASE_URL when unset, and the rest are IT-only.
