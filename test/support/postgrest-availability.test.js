@@ -16,6 +16,7 @@ import {
   requirePostgrest,
   requirePostgrestForV2Config,
   requirePostgrestForFacsMappings,
+  requirePostgrestClient,
 } from '../../src/support/postgrest-availability.js';
 
 describe('postgrest-availability', () => {
@@ -84,6 +85,25 @@ describe('postgrest-availability', () => {
     it('returns null when postgrest is available', () => {
       const guard = requirePostgrestForFacsMappings(ctxWith({ from: () => {} }));
       expect(guard).to.equal(null);
+    });
+  });
+
+  describe('requirePostgrestClient', () => {
+    it('returns null when the client has a callable .from', () => {
+      const guard = requirePostgrestClient({ from: () => {} }, { errorMessage: 'irrelevant' });
+      expect(guard).to.equal(null);
+    });
+
+    it('returns a 503 Response with the supplied error message when the client lacks .from', async () => {
+      const guard = requirePostgrestClient({}, { errorMessage: 'feature requires Postgres' });
+      expect(guard).to.have.property('status', 503);
+      const body = await guard.json();
+      expect(body).to.deep.equal({ message: 'feature requires Postgres' });
+    });
+
+    it('returns 503 when the client is undefined', () => {
+      const guard = requirePostgrestClient(undefined, { errorMessage: 'nope' });
+      expect(guard.status).to.equal(503);
     });
   });
 });

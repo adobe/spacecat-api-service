@@ -26,6 +26,13 @@
  */
 export const SERENITY_CLASSIFY_JOB_ID = 'eeee3333-3333-4333-a333-333333333333';
 
+// An IN_PROGRESS, lease-free classifyPrompts job used by the anti-replay lease
+// CAS integration test (test/it/shared/tests/lease-cas.js). It carries NO `lease`
+// sub-object in metadata, so the first atomic claim wins and the second (or a
+// concurrent) claim loses the compare-and-set. IN_PROGRESS is required: the CAS
+// guard only matches a still-running job.
+export const LEASE_CAS_JOB_ID = 'eeee5555-5555-4555-a555-555555555555';
+
 // A COMPLETED preflight job owned by SITE_3 (organization ORG_2 — the "denied" org
 // for the `user` persona). Used to assert that GET /preflight/jobs/{jobId} returns
 // 404 (no existence disclosure) for a caller who does not own the job's site.
@@ -83,6 +90,16 @@ export const asyncJobs = [
     },
     started_at: '2025-02-01T09:00:00.000Z',
     ended_at: '2025-02-01T09:01:00.000Z',
+  },
+  {
+    id: LEASE_CAS_JOB_ID,
+    status: 'IN_PROGRESS',
+    metadata: {
+      jobType: 'classifyPrompts',
+      authMode: 'subworkspace',
+      tags: ['serenity-classify-prompts'],
+    },
+    started_at: '2025-03-01T09:00:00.000Z',
   },
   {
     id: SITE_3_PREFLIGHT_JOB_ID,

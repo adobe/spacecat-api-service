@@ -1,3 +1,46 @@
+# [1.816.0](https://github.com/adobe/spacecat-api-service/compare/v1.815.0...v1.816.0) (2026-09-16)
+
+
+### Features
+
+* add opportunities and suggestions by-url lookup endpoints ([#3192](https://github.com/adobe/spacecat-api-service/issues/3192)) ([0a5edd6](https://github.com/adobe/spacecat-api-service/commit/0a5edd6f3bd92a1dc0ffae983cf9f33901954f5a))
+
+# [1.815.0](https://github.com/adobe/spacecat-api-service/compare/v1.814.3...v1.815.0) (2026-09-16)
+
+
+### Features
+
+* **referral-traffic:** parse multi-select platform list | LLMO-7616 ([#3284](https://github.com/adobe/spacecat-api-service/issues/3284)) ([b823a7f](https://github.com/adobe/spacecat-api-service/commit/b823a7fd73806af1da5e2348e3e0251c106ffb66))
+
+## [1.814.3](https://github.com/adobe/spacecat-api-service/compare/v1.814.2...v1.814.3) (2026-09-15)
+
+
+### Bug Fixes
+
+* **serenity:** cap faceted prompt corpus walk to fail fast on large brands ([#3285](https://github.com/adobe/spacecat-api-service/issues/3285)) ([10eef6a](https://github.com/adobe/spacecat-api-service/commit/10eef6a3f78471da6d8824c1cdcdf62faae3a22f)), closes [#3279](https://github.com/adobe/spacecat-api-service/issues/3279) [#3280](https://github.com/adobe/spacecat-api-service/issues/3280) [#3280](https://github.com/adobe/spacecat-api-service/issues/3280) [Hi#level](https://github.com/Hi/issues/level) [#3283](https://github.com/adobe/spacecat-api-service/issues/3283) [#3283](https://github.com/adobe/spacecat-api-service/issues/3283) [#3279](https://github.com/adobe/spacecat-api-service/issues/3279) [#3280](https://github.com/adobe/spacecat-api-service/issues/3280)
+
+## [1.814.2](https://github.com/adobe/spacecat-api-service/compare/v1.814.1...v1.814.2) (2026-09-15)
+
+
+### Bug Fixes
+
+* **prompts:** bulk-delete the whole batch in one round-trip ([#3280](https://github.com/adobe/spacecat-api-service/issues/3280)) ([e81b60d](https://github.com/adobe/spacecat-api-service/commit/e81b60d7d646b8d1230fbf524d88c9f9cc3d7af8)), closes [Hi#level](https://github.com/Hi/issues/level)
+
+## [1.814.1](https://github.com/adobe/spacecat-api-service/compare/v1.814.0...v1.814.1) (2026-09-15)
+
+
+### Bug Fixes
+
+* **github-trigger-rules:** correctly diagnose team-routed review requests ([#3275](https://github.com/adobe/spacecat-api-service/issues/3275)) ([566f421](https://github.com/adobe/spacecat-api-service/commit/566f4219f4fb3b3738d8241e1adea676fb38b8bc)), closes [#3234](https://github.com/adobe/spacecat-api-service/issues/3234) [#3235](https://github.com/adobe/spacecat-api-service/issues/3235) [#3236](https://github.com/adobe/spacecat-api-service/issues/3236) [#3236](https://github.com/adobe/spacecat-api-service/issues/3236) [Hi#level](https://github.com/Hi/issues/level) [adobe/mysticat-github-service#123](https://github.com/adobe/mysticat-github-service/issues/123) [adobe-rnd/llmo-data-retrieval-service#3234](https://github.com/adobe-rnd/llmo-data-retrieval-service/issues/3234) [#3235](https://github.com/adobe/spacecat-api-service/issues/3235) [#3234](https://github.com/adobe/spacecat-api-service/issues/3234) [#3235](https://github.com/adobe/spacecat-api-service/issues/3235) [#3236](https://github.com/adobe/spacecat-api-service/issues/3236)
+* **serenity:** source project location_name from Google Ads geo-targets, not CLDR [LLMO-7614] ([#3278](https://github.com/adobe/spacecat-api-service/issues/3278)) ([29d0c74](https://github.com/adobe/spacecat-api-service/commit/29d0c74e547216b017e86ad1f21538b743b07c7c)), closes [#2610](https://github.com/adobe/spacecat-api-service/issues/2610)
+
+# [1.814.0](https://github.com/adobe/spacecat-api-service/compare/v1.813.1...v1.814.0) (2026-09-15)
+
+
+### Features
+
+* **serenity:** scheduled probe emitting StuckInProgressJobs + NeedsReauthBacklog ([#3277](https://github.com/adobe/spacecat-api-service/issues/3277)) ([20195f1](https://github.com/adobe/spacecat-api-service/commit/20195f1f13f79d410478f40084df74112ec41edb)), closes [#7](https://github.com/adobe/spacecat-api-service/issues/7) [Hi#level](https://github.com/Hi/issues/level)
+
 ## [1.813.1](https://github.com/adobe/spacecat-api-service/compare/v1.813.0...v1.813.1) (2026-09-15)
 
 

@@ -1,6 +1,6 @@
 {
   "name": "@adobe/spacecat-api-service",
-  "version": "1.813.1",
+  "version": "1.816.0",
   "description": "SpaceCat API Service",
   "main": "src/index.js",
   "type": "module",
@@ -31,6 +31,10 @@
     "deploy:worker": "hedy -v --deploy --entryFile=src/serenity-prompt-classification/index.js --name=spacecat-services/serenity-job-runner --aws-deploy-bucket=spacecat-prod-deploy --pkgVersion=latest -p AWS_ENV=prod",
     "deploy-stage:worker": "hedy -v --deploy --entryFile=src/serenity-prompt-classification/index.js --name=spacecat-services/serenity-job-runner --aws-deploy-bucket=spacecat-stage-deploy --pkgVersion=latest -p AWS_ENV=stage",
     "deploy-dev:worker": "hedy -v --deploy --entryFile=src/serenity-prompt-classification/index.js --name=spacecat-services/serenity-job-runner --pkgVersion=latest$CI_BUILD_NUM -l latest --aws-deploy-bucket=spacecat-dev-deploy --cleanup-ci=24h -p AWS_ENV=dev",
+    "build:probe": "hedy -v --test-bundle --entryFile=src/serenity-market-probe/index.js --name=spacecat-services/serenity-market-probe",
+    "deploy:probe": "hedy -v --deploy --entryFile=src/serenity-market-probe/index.js --name=spacecat-services/serenity-market-probe --aws-deploy-bucket=spacecat-prod-deploy --pkgVersion=latest -p AWS_ENV=prod",
+    "deploy-stage:probe": "hedy -v --deploy --entryFile=src/serenity-market-probe/index.js --name=spacecat-services/serenity-market-probe --aws-deploy-bucket=spacecat-stage-deploy --pkgVersion=latest -p AWS_ENV=stage",
+    "deploy-dev:probe": "hedy -v --deploy --entryFile=src/serenity-market-probe/index.js --name=spacecat-services/serenity-market-probe --pkgVersion=latest$CI_BUILD_NUM -l latest --aws-deploy-bucket=spacecat-dev-deploy --cleanup-ci=24h -p AWS_ENV=dev",
     "docs": "npm run docs:lint && npm run docs:build",
     "docs:build": "npx @redocly/cli build-docs -o ./docs/index.html --config docs/openapi/redocly-config.yaml",
     "docs:lint": "npx @redocly/cli lint --config docs/openapi/redocly-config.yaml",
