@@ -1711,36 +1711,11 @@ site-fixes:
     - $ref: './parameters.yaml#/siteId'
     - $ref: './parameters.yaml#/locale'
     - name: status
-      description: |
-        Optional fix status to filter by. Accepts a single value (e.g. `PENDING`,
-        `FAILED`) or a comma-separated list (e.g. `DEPLOYED,PUBLISHED`) to return
-        the union of several statuses in one request.
+      description: Optional fix status to filter by (e.g. `PENDING`, `FAILED`).
       in: query
       required: false
       schema:
         type: string
-        example: DEPLOYED,PUBLISHED
-    - name: from
-      description: |
-        Optional start of a deploy-time window (ISO-8601 date-time, inclusive). Fixes are
-        anchored on `deployedAt` (falling back to `executedAt`); a fix with neither
-        timestamp is excluded when a window is supplied.
-      in: query
-      required: false
-      schema:
-        type: string
-        format: date-time
-        example: '2026-08-01T00:00:00.000Z'
-    - name: to
-      description: |
-        Optional end of a deploy-time window (ISO-8601 date-time, inclusive). Anchored on
-        `deployedAt` (falling back to `executedAt`).
-      in: query
-      required: false
-      schema:
-        type: string
-        format: date-time
-        example: '2026-09-01T00:00:00.000Z'
     - name: limit
       description: |
         Maximum number of fixes to return. The aggregation spans every opportunity
@@ -1760,9 +1735,8 @@ site-fixes:
       Retrieve all fixes for a site, across every opportunity
     description: |
       Aggregates fixes across every opportunity belonging to the site, avoiding the need to
-      enumerate opportunities and fetch fixes per-opportunity. Optionally filtered by status
-      (single value or comma-separated list) and by a `from`/`to` deploy-time window
-      (anchored on `deployedAt ?? executedAt`). Capped by `limit` (default 200, max 1000).
+      enumerate opportunities and fetch fixes per-opportunity. Optionally filtered by status.
+      Capped by `limit` (default 200, max 1000).
     tags:
       - opportunity-fixes
     responses:
@@ -1772,6 +1746,65 @@ site-fixes:
           application/json:
             schema:
               $ref: './schemas.yaml#/FixList'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - session_token: [ ]
+
+site-deployed-opportunities:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - name: from
+      description: |
+        Optional start of a deploy-time window (ISO-8601 date-time, inclusive). Deploys are
+        anchored on `deployedAt` (falling back to `executedAt`).
+      in: query
+      required: false
+      schema:
+        type: string
+        format: date-time
+        example: '2026-08-01T00:00:00.000Z'
+    - name: to
+      description: |
+        Optional end of a deploy-time window (ISO-8601 date-time, inclusive). Anchored on
+        `deployedAt` (falling back to `executedAt`).
+      in: query
+      required: false
+      schema:
+        type: string
+        format: date-time
+        example: '2026-09-01T00:00:00.000Z'
+  get:
+    operationId: getDeployedOpportunitiesForSite
+    summary: |
+      Retrieve a site's deployed opportunities grouped by deploy date
+    description: |
+      Returns the site's deployed opportunities grouped by deploy date, for the Overview
+      "deployed opportunities" timeline overlay. A deploy is a fix in `DEPLOYED` or
+      `PUBLISHED` status; its date is `deployedAt` (falling back to `executedAt`). Each fix
+      is joined to its opportunity title. Optionally windowed by `from`/`to`. Fixes with no
+      anchor timestamp are excluded.
+    tags:
+      - opportunity-fixes
+    responses:
+      '200':
+        description: Deployed opportunities grouped by date, ascending
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/DeployedOpportunitiesTimeline'
       '400':
         $ref: './responses.yaml#/400'
       '401':

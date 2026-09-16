@@ -118,7 +118,7 @@ function permittedValues(bindings, capability) {
  */
 export function isOpportunityDerivedCollectionRoute(routePattern) {
   return typeof routePattern === 'string'
-    && (/^GET\s.*\/(opportunities(\/by-status\/[^/]+|\/top-paid)?|fixes|edge-deployed-urls)$/.test(routePattern)
+    && (/^GET\s.*\/(opportunities(\/by-status\/[^/]+|\/top-paid)?|fixes|edge-deployed-urls|deployed-opportunities)$/.test(routePattern)
       || /^POST\s.*\/(opportunities|suggestions)\/by-urls$/.test(routePattern));
 }
 

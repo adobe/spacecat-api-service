@@ -36,7 +36,7 @@ import {
 } from '@adobe/spacecat-shared-utils';
 import { FixEntity as FixEntityModel } from '@adobe/spacecat-shared-data-access';
 import AccessControlUtil from '../support/access-control-util.js';
-import { FixDto } from '../dto/fix.js';
+import { FixDto, withLegacyDocumentPath } from '../dto/fix.js';
 import { SuggestionDto } from '../dto/suggestion.js';
 import { isValidLocale } from '../utils/validations.js';
 import { resolveDocumentPath } from '../support/document-path-resolver.js';
@@ -220,22 +220,19 @@ export class FixesController {
   /**
    * Gets all fixes for a given site, across every opportunity, by fetching the site's
    * opportunity IDs and filtering fixes on opportunityId IN (...). Optionally filtered
-   * by status (comma-separated list, applied in-memory since the underlying query only
-   * supports one filter condition at a time) and by a deploy-time window (`from`/`to`,
-   * ISO-8601 date-times, anchored on `deployedAt ?? executedAt`). The result set is
-   * capped by `limit` (default DEFAULT_SITE_FIXES_LIMIT, max MAX_SITE_FIXES_LIMIT) since
-   * the aggregation is multiplicative across a site's opportunities and fixes.
+   * by status (applied in-memory, since the underlying query only supports one filter
+   * condition at a time). The result set is capped by `limit` (default
+   * DEFAULT_SITE_FIXES_LIMIT, max MAX_SITE_FIXES_LIMIT) since the aggregation is
+   * multiplicative across a site's opportunities and fixes.
    *
    * @param {RequestContext} context - request context
    * @returns {Promise<Response>} Array of fixes response.
    */
   async getAllForSite(context) {
     const { siteId } = context.params;
-    const statusParam = context.data?.status ?? null;
+    const status = context.data?.status ?? null;
     const locale = context.data?.locale ?? null;
     const limitParam = context.data?.limit ?? null;
-    const from = context.data?.from ?? null;
-    const to = context.data?.to ?? null;
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -250,32 +247,10 @@ export class FixesController {
       return badRequest('Invalid locale format');
     }
 
-    // `status` accepts a comma-separated list (e.g. `DEPLOYED,PUBLISHED`) so callers
-    // can pull the "already-live" set in one request; a single value still works.
     const validStatuses = Object.values(FixEntityModel.STATUSES);
-    const statuses = hasText(statusParam)
-      ? statusParam.split(',').map((s) => s.trim()).filter(Boolean)
-      : [];
-    const invalidStatuses = statuses.filter((s) => !validStatuses.includes(s));
-    if (invalidStatuses.length > 0) {
-      return badRequest(`Invalid status value: ${invalidStatuses.join(', ')}. Valid: ${validStatuses.join(', ')}`);
+    if (hasText(status) && !validStatuses.includes(status)) {
+      return badRequest(`Invalid status value: ${status}. Valid: ${validStatuses.join(', ')}`);
     }
-
-    // Optional deploy-time window (ISO-8601 date-times). Fixes are anchored on
-    // `deployedAt ?? executedAt` — the deploy moment — so the window answers "what was
-    // deployed on these dates". This deliberately differs from `getAllForOpportunity`'s
-    // `fixCreatedDate` anchor (`executedAt ?? createdAt`, chosen in #2501 to match the UI
-    // accordion buckets): this endpoint reports deploys, not accordion membership.
-    // A fix with neither timestamp is excluded when a window is requested, since it
-    // cannot be placed on a date.
-    if (hasText(from) && !isIsoDate(from)) {
-      return badRequest('from must be an ISO-8601 date-time');
-    }
-    if (hasText(to) && !isIsoDate(to)) {
-      return badRequest('to must be an ISO-8601 date-time');
-    }
-    const fromTime = hasText(from) ? new Date(from).getTime() : null;
-    const toTime = hasText(to) ? new Date(to).getTime() : null;
 
     const parsedLimit = hasText(limitParam) ? parseInt(limitParam, 10) : DEFAULT_SITE_FIXES_LIMIT;
     if (!Number.isInteger(parsedLimit) || parsedLimit <= 0) {
@@ -297,17 +272,80 @@ export class FixesController {
       ? await this.#FixEntity.allByOpportunityIds(opportunityIds)
       : [];
 
-    if (statuses.length > 0) {
-      fixEntities = fixEntities.filter((fix) => statuses.includes(fix.getStatus()));
+    if (hasText(status)) {
+      fixEntities = fixEntities.filter((fix) => fix.getStatus() === status);
     }
 
-    if (fromTime !== null || toTime !== null) {
-      fixEntities = fixEntities.filter((fix) => {
-        const ts = fix.getDeployedAt() ?? fix.getExecutedAt();
-        if (!ts) {
+    fixEntities = fixEntities.slice(0, effectiveLimit);
+
+    await this.#enrichFixesWithUserNames(fixEntities);
+    return ok(fixEntities.map((fix) => FixDto.toJSON(fix, locale)));
+  }
+
+  /**
+   * Returns a site's opportunities deployed per date, for the (experiment) overview
+   * "deployed opportunities" timeline overlay. A deploy is a fix in DEPLOYED/PUBLISHED
+   * status; its date is `deployedAt ?? executedAt` (the deploy moment). Optionally
+   * windowed by `from`/`to` (ISO-8601 date-times, inclusive). Each fix is joined to its
+   * opportunity title server-side, so the client renders markers without a second fetch.
+   *
+   * This is a purpose-shaped, experiment-scoped endpoint kept separate from
+   * `getAllForSite` (the stable generic fixes list) so it can evolve or be removed with
+   * the experiment. Response: `[{ date: 'YYYY-MM-DD', deployments: [{ opportunityId,
+   * opportunityTitle, type, status, fixId, deployedAt, changeDetails }] }]`, sorted
+   * ascending by date. Fixes with no anchor timestamp are excluded (can't be placed on a
+   * date). Bounded by MAX_SITE_FIXES_LIMIT deploys before grouping.
+   *
+   * @param {RequestContext} context - request context
+   * @returns {Promise<Response>} Deploy-timeline buckets response.
+   */
+  async getDeployedOpportunitiesForSite(context) {
+    const { siteId } = context.params;
+    const from = context.data?.from ?? null;
+    const to = context.data?.to ?? null;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    const res = await this.#checkAccess(siteId);
+    if (res) {
+      return res;
+    }
+
+    if (hasText(from) && !isIsoDate(from)) {
+      return badRequest('from must be an ISO-8601 date-time');
+    }
+    if (hasText(to) && !isIsoDate(to)) {
+      return badRequest('to must be an ISO-8601 date-time');
+    }
+    const fromTime = hasText(from) ? new Date(from).getTime() : null;
+    const toTime = hasText(to) ? new Date(to).getTime() : null;
+
+    // FACS composite scope (see getAllForSite) + opportunity-title lookup for the join.
+    const opportunities = filterOpportunitiesByFacsComposite(
+      context,
+      await this.#Opportunity.allBySiteId(siteId),
+    );
+    const titleByOpportunityId = new Map(opportunities.map((o) => [o.getId(), o.getTitle()]));
+    const opportunityIds = opportunities.map((o) => o.getId());
+
+    const fixEntities = opportunityIds.length > 0
+      ? await this.#FixEntity.allByOpportunityIds(opportunityIds)
+      : [];
+
+    // Keep only already-live deploys with a usable anchor inside the window, ordered by
+    // deploy time so the cap is deterministic (earliest kept).
+    const deploys = fixEntities
+      .map((fix) => ({ fix, anchor: fix.getDeployedAt() ?? fix.getExecutedAt() }))
+      .filter(({ fix, anchor }) => {
+        if (!ACTIVE_FIX_STATUSES.includes(fix.getStatus())) {
           return false;
         }
-        const t = new Date(ts).getTime();
+        if (!anchor) {
+          return false;
+        }
+        const t = new Date(anchor).getTime();
         if (Number.isNaN(t)) {
           return false;
         }
@@ -318,13 +356,35 @@ export class FixesController {
           return false;
         }
         return true;
-      });
-    }
+      })
+      .sort((a, b) => new Date(a.anchor).getTime() - new Date(b.anchor).getTime())
+      .slice(0, MAX_SITE_FIXES_LIMIT);
 
-    fixEntities = fixEntities.slice(0, effectiveLimit);
+    // Group by UTC deploy day.
+    const bucketsByDate = new Map();
+    deploys.forEach(({ fix, anchor }) => {
+      const date = new Date(anchor).toISOString().slice(0, 10);
+      const deployment = {
+        opportunityId: fix.getOpportunityId(),
+        opportunityTitle: titleByOpportunityId.get(fix.getOpportunityId()) ?? null,
+        type: fix.getType(),
+        status: fix.getStatus(),
+        fixId: fix.getId(),
+        deployedAt: anchor,
+        changeDetails: withLegacyDocumentPath(fix.getChangeDetails()),
+      };
+      if (bucketsByDate.has(date)) {
+        bucketsByDate.get(date).push(deployment);
+      } else {
+        bucketsByDate.set(date, [deployment]);
+      }
+    });
 
-    await this.#enrichFixesWithUserNames(fixEntities);
-    return ok(fixEntities.map((fix) => FixDto.toJSON(fix, locale)));
+    const buckets = [...bucketsByDate.entries()]
+      .sort(([a], [b]) => (a < b ? -1 : 1))
+      .map(([date, deployments]) => ({ date, deployments }));
+
+    return ok(buckets);
   }
 
   /**

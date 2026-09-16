@@ -42,6 +42,7 @@ export const fixes = [
     status: 'DEPLOYED',
     change_details: { file: '/blocks/footer/footer.js', diff: '-old +new' },
     origin: 'spacecat',
+    deployed_at: '2026-08-15T10:00:00.000Z',
   },
   {
     id: 'cc333333-3333-4333-b333-333333333333',
@@ -50,6 +51,7 @@ export const fixes = [
     status: 'DEPLOYED',
     change_details: { file: '/blocks/header/header.js', diff: '-a +b' },
     origin: 'spacecat',
+    deployed_at: '2026-08-15T14:00:00.000Z',
   },
   {
     id: 'cc444444-4444-4444-a444-444444444444',
