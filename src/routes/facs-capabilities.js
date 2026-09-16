@@ -771,6 +771,9 @@ const routeFacsCapabilities = {
       'GET /sites/:siteId/metrics/:metric/:source': 'llmo/can_view',
       'GET /sites/:siteId/metrics/:metric/:source/by-url/:base64PageUrl': 'llmo/can_view',
       'GET /sites/:siteId/opportunities': 'llmo/can_view',
+      // POST-for-read lookups (body carries the query); reads, not writes.
+      'POST /sites/:siteId/opportunities/by-urls': 'llmo/can_view',
+      'POST /sites/:siteId/suggestions/by-urls': 'llmo/can_view',
       'GET /sites/:siteId/opportunities/:opportunityId': 'llmo/can_view',
       'GET /sites/:siteId/opportunities/:opportunityId/fixes': 'llmo/can_view',
       'GET /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': 'llmo/can_view',
@@ -1102,6 +1105,9 @@ const routeFacsCapabilities = {
       'GET /sites/:siteId/opportunities': 'aso/can_view',
       'GET /sites/:siteId/opportunities/top-paid': 'aso/can_view',
       'GET /sites/:siteId/opportunities/by-status/:status': 'aso/can_view',
+      // POST-for-read lookups (body carries the query); reads, not writes.
+      'POST /sites/:siteId/opportunities/by-urls': 'aso/can_view',
+      'POST /sites/:siteId/suggestions/by-urls': 'aso/can_view',
       'GET /sites/:siteId/opportunities/:opportunityId': 'aso/can_view',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions': 'aso/can_view',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/paged/:limit': 'aso/can_view',

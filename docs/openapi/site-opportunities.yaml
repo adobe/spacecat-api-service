@@ -2114,3 +2114,115 @@ site-opportunity-status:
               $ref: './schemas.yaml#/FixStatusUpdateListResponse'
     security:
       - session_token: [ ]
+
+site-opportunities-by-urls:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  post:
+    operationId: getSiteOpportunitiesByUrls
+    summary: |
+      Look up opportunities backed by any of the supplied source URLs
+    description: |
+      Returns opportunities across all of the site's opportunity types whose stored source
+      URL matches (after canonicalization) any URL in the request body. This is a POST used
+      for reading: all parameters (`urls`, `fields`, `status`, `limit`, `cursor`, `locale`)
+      travel in the JSON body - this endpoint accepts no query parameters. Input URLs are
+      never dereferenced — they are opaque match keys. The response is normalized (results
+      reference ids; entities appear once in `opportunities`). `unmatchedUrls` (first page
+      only) is the definitive list of URLs backing no opportunity across the whole result set;
+      an empty `opportunityIds` array in `results` is page-relative and does not by itself mean
+      "no match" once `pagination.hasMore` is true. Returns `503` when this deployment has no
+      Postgres-backed URL index configured.
+    tags:
+      - opportunities
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/LookupByUrlRequest'
+          examples:
+            opportunities-by-urls-request:
+              $ref: './examples.yaml#/opportunities-by-urls-request'
+    responses:
+      '200':
+        description: Normalized results, an opportunities map keyed by id, and a pagination block.
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/OpportunitiesByUrlResponse'
+            examples:
+              opportunities-by-urls-response:
+                $ref: './examples.yaml#/opportunities-by-urls-response'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - session_token: [ ]
+
+site-suggestions-by-urls:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  post:
+    operationId: getSiteSuggestionsByUrls
+    summary: |
+      Look up suggestions backed by any of the supplied source URLs
+    description: |
+      Returns suggestions across ALL of the site's opportunities whose stored source URL
+      matches (after canonicalization) any URL in the request body, keyset-paginated over the
+      immutable `(opportunityId, id)`. This is a POST used for reading: all parameters
+      (including `locale`) travel in the JSON body - this endpoint accepts no query
+      parameters. Each returned suggestion carries its `opportunityId`. `unmatchedUrls`
+      (first page only) is the definitive list of URLs backing no suggestion. On a
+      Summit-PLG-enabled site, an ungranted suggestion is excluded from the response exactly
+      like every other suggestion read endpoint, and (like a FACS-filtered-out suggestion) is
+      indistinguishable from a genuine no-match. Returns `503` when this deployment has no
+      Postgres-backed URL index configured.
+    tags:
+      - opportunity-suggestions
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/LookupByUrlRequest'
+          examples:
+            suggestions-by-urls-request:
+              $ref: './examples.yaml#/suggestions-by-urls-request'
+    responses:
+      '200':
+        description: Normalized results, a suggestions map keyed by id, unmatchedUrls, and a pagination block.
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/SuggestionsByUrlResponse'
+            examples:
+              suggestions-by-urls-response:
+                $ref: './examples.yaml#/suggestions-by-urls-response'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - session_token: [ ]
