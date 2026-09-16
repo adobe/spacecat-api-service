@@ -63,6 +63,30 @@ const MAX_ONBOARD_HISTORY = 10;
  * @param {string} value - The execution name to sanitize.
  * @returns {string} The sanitized execution name.
  */
+/**
+ * Case-insensitive header read that tolerates both shapes this codebase sees: a `Headers`-like
+ * object with `.get()`, and the plain object the Lambda adapter hands over. Lives here rather
+ * than privately in a controller because more than one controller needs it (serenity.js's
+ * idempotency-key/if-match reads, brands.js's idempotency-key read) and two copies of a
+ * header-matching rule is exactly how the two drift apart.
+ *
+ * @param {object|undefined} headers
+ * @param {string} name - header name, matched case-insensitively
+ * @returns {string|undefined}
+ */
+export const headerValue = (headers, name) => {
+  if (!headers || typeof headers !== 'object') {
+    return undefined;
+  }
+  if (typeof headers.get === 'function') {
+    return headers.get(name) ?? undefined;
+  }
+  const wanted = name.toLowerCase();
+  const entry = Object.entries(headers)
+    .find(([key]) => key.toLowerCase() === wanted);
+  return entry?.[1];
+};
+
 export const sanitizeExecutionName = (value) => {
   const sanitizedInput = (value || `agent-${Date.now()}`).replace(/[^A-Za-z0-9-_]/g, '');
   const executionName = sanitizedInput.length > 0 ? sanitizedInput : `agent-${Date.now()}`;

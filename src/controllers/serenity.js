@@ -57,6 +57,7 @@ import {
 } from '../support/serenity/async-prompt-gen.js';
 import { loadJobScopedToCaller } from '../support/async-job-access.js';
 import { claimJobForReauth } from '../support/serenity/job-lease.js';
+import { ACTIVATE_BRAND_WORKSPACE_JOB_TYPE } from '../support/serenity/handlers/activate-brand-workspace-job.js';
 import { ORIGIN_VALUE } from '../support/serenity/prompt-tags.js';
 import {
   BULK_TAGS_JOB_TYPE,
@@ -105,7 +106,10 @@ import {
   handleTagImpactSubworkspace,
 } from '../support/serenity/handlers/tags.js';
 import { ensureSubworkspace, decommissionBrandWorkspace } from '../support/serenity/workspace-lifecycle.js';
-import { isSerenityActiveForBrand } from '../support/serenity/serenity-active.js';
+import {
+  isSerenityActiveForBrand,
+  isAsyncProvisioningEnabled,
+} from '../support/serenity/serenity-active.js';
 import { marketForGeoTargetId } from '../support/serenity/locations.js';
 import { brandNeedles, classifyBrandedTag } from '../support/serenity/branded-classifier.js';
 import { computeWriteDeadline } from '../support/serenity/intent-classification.js';
@@ -119,6 +123,7 @@ import {
 } from '../support/brands-storage.js';
 import {
   ErrorWithStatusCode,
+  headerValue,
   resolveSemrushImsToken as resolveImsTokenViaPromise,
   getIMSPromiseToken,
   resolvePromisePair,
@@ -147,19 +152,6 @@ const MAX_MARKETS = 50;
  */
 function safeError(msg) {
   return cleanupHeaderValue(String(msg || '')).slice(0, MAX_ERR_MSG_LEN);
-}
-
-function headerValue(headers, name) {
-  if (!headers || typeof headers !== 'object') {
-    return undefined;
-  }
-  if (typeof headers.get === 'function') {
-    return headers.get(name) ?? undefined;
-  }
-  const wanted = name.toLowerCase();
-  const entry = Object.entries(headers)
-    .find(([key]) => key.toLowerCase() === wanted);
-  return entry?.[1];
 }
 
 /**
@@ -1015,7 +1007,7 @@ function SerenityController(context, log, env) {
           /** @type {string} */ (auth.workspaceId),
           ctx.data || {},
           callerId,
-          idempotencyKey,
+          idempotencyKey ?? null,
           log,
           rotatedPromiseToken,
           /** @type {string} */ (promisePair),
@@ -1029,7 +1021,7 @@ function SerenityController(context, log, env) {
           /** @type {string} */ (auth.workspaceId),
           ctx.data || {},
           callerId,
-          idempotencyKey,
+          idempotencyKey ?? null,
           log,
           rotatedPromiseToken,
           /** @type {string} */ (promisePair),
@@ -1171,7 +1163,7 @@ function SerenityController(context, log, env) {
         // `createPrompts`'s flag, this one is NOT a permanent dual-mode feature: the
         // synchronous branch is the LLMO-7352 bug pattern itself, not a valid alternative, and
         // is slated for removal once every known caller has migrated to `async: true`.
-        if (validateAsync(requestBody)) {
+        if (validateAsync(requestBody) && isAsyncProvisioningEnabled(ctx.env || env)) {
           // The worker's existing-pointer fast path (provision-workspace-job.js) polls THIS
           // brand's already-canonical workspace rather than provisioning a new one — every
           // brand reaching this branch already has one (`auth.mode === 'subworkspace'` IS that
@@ -1202,7 +1194,7 @@ function SerenityController(context, log, env) {
               + 'brand; please retry shortly.',
               409,
             );
-            err.code = 'semrush_provisioning_in_progress';
+            err.code = ERROR_CODES.SEMRUSH_PROVISIONING_IN_PROGRESS;
             throw err;
           }
           // N2 note: no `title` is passed here deliberately. This branch runs only in
@@ -1268,6 +1260,17 @@ function SerenityController(context, log, env) {
           ctx.dataAccess.services.postgrestClient,
           log,
         );
+        // LLMO-7352 migration telemetry: this is the SYNCHRONOUS provisioning path — the bug
+        // pattern the epic was filed for, kept only until every caller migrates. It is reached
+        // whenever a caller does not send `async: true`, or while the global switch is off, so
+        // during the dormant period it sees ALL traffic. One line per hit is what makes the
+        // consumer list knowable: without it there is no way to tell who is still on this path,
+        // and therefore no evidence on which to ever delete it.
+        log?.info?.('serenity: SYNCHRONOUS provisioning path taken (LLMO-7352 migration)', {
+          endpoint: 'POST .../serenity/markets',
+          orgId: ctx?.params?.spaceCatId,
+          callerId: resolveCallerId(ctx),
+        });
         const result = await orchestrateCreateMarketSubworkspace({
           dataAccess: ctx.dataAccess,
           env: ctx.env,
@@ -1341,7 +1344,7 @@ function SerenityController(context, log, env) {
           + 'available until provisioning completes.',
           409,
         );
-        err.code = 'semrush_provisioning_incomplete';
+        err.code = ERROR_CODES.SEMRUSH_PROVISIONING_INCOMPLETE;
         throw err;
       }
       // Flat handler self-derives brandDomain from siteId (it has Site access).
@@ -1835,6 +1838,75 @@ function SerenityController(context, log, env) {
         if (!existingSiteId) {
           throw new ErrorWithStatusCode(`Brand has no onboarded primary site: ${brandUuid}`, 400);
         }
+        // Phase 4 (LLMO-7352/LLMO-7418): opt-in only (mirrors this endpoint's own
+        // project-activation branch below, and createMarket's/createBrandForOrg's `async` flag).
+        // Absent/false runs the EXACT synchronous pending->active flip this branch has always
+        // run. `async: true` hands the sub-workspace-ensure + status flip off to the
+        // `provision-workspace-job` ->
+        // `serenity-activate-brand-workspace` job chain instead.
+        if (validateAsync(body) && isAsyncProvisioningEnabled(ctx.env || env)) {
+          // LLMO-7418 external-review Finding 9: see createMarket's async branch for the full
+          // rationale — reconcile a stale in-flight attempt (reusing the sync guard's own logic)
+          // before minting a new one, since beginProvisioningAttempt's own CAS has no staleness
+          // awareness on its own.
+          await guardAgainstConcurrentProvisioning(
+            brandUuid,
+            ctx.dataAccess.services.postgrestClient,
+            log,
+          );
+          const attemptId = randomUUID();
+          const began = await beginProvisioningAttempt({
+            brandId: brandUuid,
+            attemptId,
+            postgrestClient: ctx.dataAccess.services.postgrestClient,
+            updatedBy: 'serenity-activate',
+          });
+          if (!began) {
+            const err = new ErrorWithStatusCode(
+              'A Semrush sub-workspace provisioning attempt is already in progress for this '
+              + 'brand; please retry shortly.',
+              409,
+            );
+            err.code = ERROR_CODES.SEMRUSH_PROVISIONING_IN_PROGRESS;
+            throw err;
+          }
+          const job = await createAndEnqueueJob(ctx, {
+            jobType: PROVISION_WORKSPACE_JOB_TYPE,
+            // Fail-closed pair binding (Gap 1, #3252): this job writes to Semrush, so refuse to
+            // enqueue it on anything but the Semrush pair rather than mint a token on the wrong
+            // delegated credential. Same binding as the sibling async branches — these three were
+            // added by this phase after the others were bound, and were missed.
+            requirePair: PROMISE_PAIR_SEMRUSH,
+            metadata: {
+              brandId: brandUuid,
+              attemptId,
+              parentWorkspaceId: auth.parentWorkspaceId ?? '',
+              // LLMO-7418 external-review Finding 4: this branch's brand is GUARANTEED
+              // pointer-less (a pending brand never has a workspace pointer), so the worker
+              // ALWAYS takes the create-or-adopt path here, never the existing-pointer fast
+              // path — omitting `title` would call Semrush with an untitled sub-workspace on
+              // every single pending->active async activation.
+              title: brand.getName?.() ?? '',
+              chainedJobType: ACTIVATE_BRAND_WORKSPACE_JOB_TYPE,
+              chainedJobMetadata: { brandId: brandUuid, wasPending: true },
+            },
+          });
+          // LLMO-7418 external-review Finding 17: records the first-hop job id, best-effort,
+          // so it isn't left permanently NULL until the worker's own self-requeue hop writes it.
+          await updateProvisioningJobId({
+            brandId: brandUuid,
+            attemptId,
+            jobId: job.getId(),
+            postgrestClient: ctx.dataAccess.services.postgrestClient,
+          }).catch((updateError) => {
+            log.error('activate: failed to record the first-hop job id (best-effort)', {
+              brandId: brandUuid, attemptId, jobId: job.getId(), error: updateError?.message,
+            });
+          });
+          return accepted({
+            jobId: job.getId(), jobType: PROVISION_WORKSPACE_JOB_TYPE, status: job.getStatus(),
+          });
+        }
         // PR-C guard (LLMO-7352/LLMO-7418): this branch stays synchronous, but a market-creating
         // endpoint may have an async provisioning attempt in flight for this SAME brand — without
         // this check, ensureSubworkspace below could independently create a second workspace.
@@ -1843,6 +1915,17 @@ function SerenityController(context, log, env) {
           ctx.dataAccess.services.postgrestClient,
           log,
         );
+        // LLMO-7352 migration telemetry: this is the SYNCHRONOUS provisioning path — the bug
+        // pattern the epic was filed for, kept only until every caller migrates. It is reached
+        // whenever a caller does not send `async: true`, or while the global switch is off, so
+        // during the dormant period it sees ALL traffic. One line per hit is what makes the
+        // consumer list knowable: without it there is no way to tell who is still on this path,
+        // and therefore no evidence on which to ever delete it.
+        log?.info?.('serenity: SYNCHRONOUS provisioning path taken (LLMO-7352 migration)', {
+          endpoint: 'POST .../serenity/activate (pending->active)',
+          orgId: ctx?.params?.spaceCatId,
+          callerId: resolveCallerId(ctx),
+        });
         const pendingWorkspaceId = await ensureSubworkspace(
           transport,
           brand,
@@ -1912,12 +1995,90 @@ function SerenityController(context, log, env) {
         if (generatePrompts) {
           throw new ErrorWithStatusCode('A primary URL is required to generate prompts', 400);
         }
+        // Phase 4 (LLMO-7352/LLMO-7418): opt-in only — see the wasPending branch above for the
+        // full rationale. `wasPending: false` in the chained metadata distinguishes this
+        // already-active no-op re-affirm from a real pending->active transition, so
+        // activate-brand-workspace-job.js's save-divergence handling matches this branch's own
+        // 207-not-502 contract.
+        if (validateAsync(body) && isAsyncProvisioningEnabled(ctx.env || env)) {
+          // LLMO-7418 external-review Finding 9: see createMarket's async branch (and the
+          // wasPending branch above) for the full rationale.
+          await guardAgainstConcurrentProvisioning(
+            brandUuid,
+            ctx.dataAccess.services.postgrestClient,
+            log,
+          );
+          const attemptId = randomUUID();
+          const began = await beginProvisioningAttempt({
+            brandId: brandUuid,
+            attemptId,
+            postgrestClient: ctx.dataAccess.services.postgrestClient,
+            updatedBy: 'serenity-activate',
+          });
+          if (!began) {
+            const err = new ErrorWithStatusCode(
+              'A Semrush sub-workspace provisioning attempt is already in progress for this '
+              + 'brand; please retry shortly.',
+              409,
+            );
+            err.code = ERROR_CODES.SEMRUSH_PROVISIONING_IN_PROGRESS;
+            throw err;
+          }
+          const job = await createAndEnqueueJob(ctx, {
+            jobType: PROVISION_WORKSPACE_JOB_TYPE,
+            // Fail-closed pair binding (Gap 1, #3252): this job writes to Semrush, so refuse to
+            // enqueue it on anything but the Semrush pair rather than mint a token on the wrong
+            // delegated credential. Same binding as the sibling async branches — these three were
+            // added by this phase after the others were bound, and were missed.
+            requirePair: PROMISE_PAIR_SEMRUSH,
+            metadata: {
+              brandId: brandUuid,
+              attemptId,
+              parentWorkspaceId: auth.parentWorkspaceId ?? '',
+              // LLMO-7418 external-review Finding 4: see the wasPending branch above — an
+              // already-active brand isn't as reliably pointer-less as a pending one, but the
+              // SYNCHRONOUS twin of this exact branch still defensively calls the general-purpose
+              // `ensureSubworkspace` (create-or-existing), so the async path must be able to
+              // create with a real title too, not assume the existing-pointer fast path always
+              // applies.
+              title: brand.getName?.() ?? '',
+              chainedJobType: ACTIVATE_BRAND_WORKSPACE_JOB_TYPE,
+              chainedJobMetadata: { brandId: brandUuid, wasPending: false },
+            },
+          });
+          // LLMO-7418 external-review Finding 17: records the first-hop job id, best-effort,
+          // so it isn't left permanently NULL until the worker's own self-requeue hop writes it.
+          await updateProvisioningJobId({
+            brandId: brandUuid,
+            attemptId,
+            jobId: job.getId(),
+            postgrestClient: ctx.dataAccess.services.postgrestClient,
+          }).catch((updateError) => {
+            log.error('activate: failed to record the first-hop job id (best-effort)', {
+              brandId: brandUuid, attemptId, jobId: job.getId(), error: updateError?.message,
+            });
+          });
+          return accepted({
+            jobId: job.getId(), jobType: PROVISION_WORKSPACE_JOB_TYPE, status: job.getStatus(),
+          });
+        }
         // PR-C guard (LLMO-7352/LLMO-7418): see the wasPending branch above for rationale.
         await guardAgainstConcurrentProvisioning(
           brandUuid,
           ctx.dataAccess.services.postgrestClient,
           log,
         );
+        // LLMO-7352 migration telemetry: this is the SYNCHRONOUS provisioning path — the bug
+        // pattern the epic was filed for, kept only until every caller migrates. It is reached
+        // whenever a caller does not send `async: true`, or while the global switch is off, so
+        // during the dormant period it sees ALL traffic. One line per hit is what makes the
+        // consumer list knowable: without it there is no way to tell who is still on this path,
+        // and therefore no evidence on which to ever delete it.
+        log?.info?.('serenity: SYNCHRONOUS provisioning path taken (LLMO-7352 migration)', {
+          endpoint: 'POST .../serenity/activate (bare reactivation)',
+          orgId: ctx?.params?.spaceCatId,
+          callerId: resolveCallerId(ctx),
+        });
         const bareWorkspaceId = await ensureSubworkspace(
           transport,
           brand,
@@ -1983,7 +2144,7 @@ function SerenityController(context, log, env) {
       // LLMO-7352 bug pattern itself (this is one of the 3 real conversion candidates — the
       // in-request settle-poll + project-create/publish sequence), slated for removal once every
       // known caller has migrated to `async: true`.
-      if (validateAsync(body)) {
+      if (validateAsync(body) && isAsyncProvisioningEnabled(ctx.env || env)) {
         // LLMO-7418 external-review Finding 9: see the createMarket async branch above for the
         // full rationale — reconcile a stale in-flight attempt before minting a new one, since
         // beginProvisioningAttempt's own CAS has no staleness awareness.
@@ -2005,7 +2166,7 @@ function SerenityController(context, log, env) {
             + 'brand; please retry shortly.',
             409,
           );
-          err.code = 'semrush_provisioning_in_progress';
+          err.code = ERROR_CODES.SEMRUSH_PROVISIONING_IN_PROGRESS;
           throw err;
         }
         const job = await createAndEnqueueJob(ctx, {

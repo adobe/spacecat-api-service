@@ -8107,17 +8107,21 @@ V2BrandInput:
       type: boolean
       default: false
       description: >
-        PR-C (LLMO-7352/LLMO-7418). Only meaningful when `semrushMarket` is
-        supplied. When true, the brand row is persisted first (visible,
-        non-active — "Setting up"), then the sub-workspace ready-check and the
-        initial market's project create/publish are enqueued to a background
-        job chain instead of running inline, and the endpoint returns 202 with
-        a job id to poll via `GET .../serenity/jobs/{jobId}`. Omitted/false
-        processes synchronously as today (still 201) — this is opt-in only and
-        not yet the default. Unlike `SerenityCreatePromptsRequest`'s `async`
+        PR-C (LLMO-7352/LLMO-7418), extended by Phase 4 (LLMO-6405 "B"). Meaningful on
+        either of this endpoint's two Semrush-provisioning creates: with `semrushMarket`
+        supplied (sub-workspace ready-check + initial market's project create/publish,
+        enqueued as a job chain), or without it, for a sub-workspace-only active create
+        anchored by `baseSiteId` (sub-workspace create/adopt only, no project). In both
+        cases, true persists the brand row first (visible, non-active — "Setting up")
+        and returns 202 with a job id to poll via `GET .../serenity/jobs/{jobId}`.
+        Ignored (no error, brand created synchronously) when the organization is not
+        serenity-active (a flat/brandalf org) or the brand is created `pending` (a
+        pending brand always defers ALL Semrush provisioning regardless of this flag).
+        Omitted/false processes synchronously as today (still 201) — this is opt-in
+        only and not yet the default. Unlike `SerenityCreatePromptsRequest`'s `async`
         flag, this one is not intended to be a permanent dual-mode feature: the
-        synchronous path is the LLMO-7352 bug pattern itself, and is expected
-        to be retired once known callers have migrated to `async: true`.
+        synchronous path is the LLMO-7352 bug pattern itself, and is expected to be
+        retired once known callers have migrated to `async: true`.
 
 V2BrandUpdateInput:
   type: object
@@ -12788,6 +12792,21 @@ SerenityActivateRequest:
             description: >-
               Optional AI model (LLM) ids to attach to this market's project
               (already-active brand reactivation).
+    async:
+      type: boolean
+      default: false
+      description: >
+        PR-C (LLMO-7352/LLMO-7418), extended by Phase 4. Meaningful on all three
+        activation shapes this endpoint supports: the already-active-brand,
+        markets-supplied path (sub-workspace ready-check + per-market project
+        create/publish + site-link + active flip, enqueued as a job chain); the
+        pending→active activation (sub-workspace create/adopt only, enqueued as
+        `provision-workspace-job` -> `activate-brand-workspace-job`); and bare
+        reactivation of an already-active, pointer-less brand (same chain). In
+        every case, true enqueues the work to a background job chain instead of
+        running inline, and the endpoint returns 202 with a job id to poll via
+        `GET .../serenity/jobs/{jobId}`. Omitted/false processes synchronously as
+        today — this is opt-in only and not yet the default.
 
 SerenityActivateResponse:
   type: object
@@ -12918,6 +12937,23 @@ SerenityCreateMarketRequest:
         e.g. www.nba.com/kings). Written to Semrush `settings.ai.primary_url` via
         a best-effort PATCH before publish (serenity-docs#348). Optional — falls
         back to `brandDomain` (host-only) when omitted.
+    async:
+      type: boolean
+      default: false
+      description: >
+        PR-C (LLMO-7352/LLMO-7418). When true, and only for a sub-workspace-mode
+        brand, the sub-workspace-ready check and the project create/publish are
+        enqueued to a background job chain instead of running inline, and the
+        endpoint returns 202 with a job id to poll via
+        `GET .../serenity/jobs/{jobId}`. Ignored (no error, market created
+        synchronously) for a flat-mode brand — flat mode has no sub-workspace
+        readiness to await, so there is nothing to defer. Omitted/false
+        processes synchronously as today — this is opt-in only and not yet the
+        default. Unlike
+        `SerenityCreatePromptsRequest`'s `async` flag, this one is not intended
+        to be a permanent dual-mode feature: the synchronous path is the
+        LLMO-7352 bug pattern itself, and is expected to be retired once known
+        callers have migrated to `async: true`.
 
 SerenityTag:
   type: object
@@ -15065,19 +15101,21 @@ V2BrandProvisioningAccepted:
 
     Unlike the other async 202s this returns the brand itself: the row is ALREADY
     persisted when the 202 is sent, so the UI can render it immediately. `status`
-    is therefore the BRAND's status (`pending` — shown as "Setting up"), NOT the
-    job's; the brand carries no workspace pointer yet. The sub-workspace and the
+    is therefore the BRAND's real persisted status, NOT the job's, and it is not
+    overridden here — it is whatever the row was actually written with (typically
+    `pending`, shown as "Setting up"). The brand carries no workspace pointer yet. The sub-workspace and the
     initial market are provisioned by the job chain named by `jobId`/`jobType` —
     poll it at `GET .../serenity/jobs/{jobId}`.
   allOf:
     - $ref: '#/V2Brand'
     - type: object
-      required: [id, status, jobId, jobType]
+      # `jobId` is NOT required: it is written best-effort, and an attempt that resolved on its
+      # first hop never wrote one, so an idempotent REPLAY can legitimately answer 202 with a live
+      # attempt and no id to poll. `jobType` and the brand's own `semrushProvisioningStatus`
+      # (`pending`) both still say provisioning is in flight — a client must not read a missing
+      # `jobId` as "nothing is running" and start a second attempt.
+      required: [id, status, jobType]
       properties:
-        status:
-          type: string
-          description: Always `pending` on this response — the brand is not active yet.
-          enum: [pending]
         jobId:
           type: string
           format: uuid

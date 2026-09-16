@@ -12,7 +12,7 @@
 
 // @ts-check
 
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 
 import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
 import BrandClient, { BrandGovernanceClient } from '@adobe/spacecat-shared-brand-client';
@@ -33,7 +33,9 @@ import {
   siteIdentityFromUrlString,
 } from '@adobe/spacecat-shared-utils';
 
-import { ErrorWithStatusCode, getImsUserToken, resolveSemrushImsToken } from '../support/utils.js';
+import {
+  ErrorWithStatusCode, getImsUserToken, headerValue, resolveSemrushImsToken,
+} from '../support/utils.js';
 import { hostnameFromUrlString } from '../support/url-utils.js';
 import { BRAND_GUIDANCE_MAX_LENGTH, codePointLength } from '../support/brand-guidance.js';
 import {
@@ -61,6 +63,7 @@ import {
   deleteBrand,
   setBrandStatus,
   getBrandById,
+  getBrandProvisioningState,
   getBrandBySite,
   getBrandCompetitors,
   getBrandAliases,
@@ -68,6 +71,7 @@ import {
   withSerenityState,
   beginProvisioningAttempt,
   guardAgainstConcurrentProvisioning,
+  updateProvisioningJobId,
   promoteProvisioningFailed,
   recordFreshBrandProvisioningStartFailure,
 } from '../support/brands-storage.js';
@@ -89,7 +93,9 @@ import {
 } from '../support/serenity/mapping-rows.js';
 import { propagateSiteUrlToSemrush } from '../support/serenity/site-url-propagation.js';
 import { createSerenityTransport } from '../support/serenity/rest-transport.js';
-import { isSemrushTransportError, unwrapTransportCause } from '../support/serenity/errors.js';
+import {
+  ERROR_CODES, isSemrushTransportError, unwrapTransportCause,
+} from '../support/serenity/errors.js';
 import { logUpstreamError } from '../support/serenity/upstream-log.js';
 import { buildBrandMarketsResponse } from '../support/serenity/brand-markets.js';
 import { syncBrandUrlsAcrossMarkets } from '../support/serenity/brand-urls.js';
@@ -99,6 +105,7 @@ import {
   isSerenityActiveForBrand,
   isSerenityActiveForOrg,
   isSerenityUiActiveForOrg,
+  isAsyncProvisioningEnabled,
 } from '../support/serenity/serenity-active.js';
 import {
   buildReservedIdentities,
@@ -1704,6 +1711,48 @@ function BrandsController(ctx, log, env) {
     }
   };
 
+  /**
+   * Derives a STABLE brand id from the organization and the caller's `Idempotency-Key`.
+   *
+   * Create Brand had no idempotency of any kind: every request minted a fresh random id, so a
+   * client that retried after a lost response -- the edge timing out on a 202 is the realistic
+   * case, and the async path widens that window rather than narrowing it -- got a second brand
+   * AND a second Semrush sub-workspace. The only thing that ever caught a duplicate was the
+   * partial unique index on the primary site, which skips NULLs, leaving a bare create entirely
+   * unguarded.
+   *
+   * Deriving the id rather than storing the key means no schema change and no second source of
+   * truth to keep consistent: the same key always lands on the same row, so the replay check is
+   * a plain read, and even a genuinely concurrent duplicate collides on the primary key instead
+   * of creating a sibling.
+   *
+   * Hashed rather than used raw because the key is caller-supplied: this has to yield a valid
+   * UUID whatever the client sends, and must not let a client choose a row id directly. The
+   * organization is mixed in for the same reason -- a key minted by one organization can never
+   * address another's brand. SHA-256 truncated and stamped with the RFC 4122 version/variant
+   * nibbles, i.e. the shape of a v5 UUID; the hash is for distribution and opacity, not secrecy.
+   *
+   * @param {string} organizationId
+   * @param {string} idempotencyKey
+   * @returns {string} a deterministic UUID
+   */
+  function deriveIdempotentBrandId(organizationId, idempotencyKey) {
+    const digest = createHash('sha256')
+      .update(`brand:${organizationId}:${idempotencyKey}`)
+      .digest('hex');
+    const version = `5${digest.slice(13, 16)}`;
+    // Variant nibble must be one of 8/9/a/b.
+    const variantNibble = ['8', '9', 'a', 'b'][parseInt(digest[16], 16) % 4];
+    const variant = `${variantNibble}${digest.slice(17, 20)}`;
+    return [
+      digest.slice(0, 8),
+      digest.slice(8, 12),
+      version,
+      variant,
+      digest.slice(20, 32),
+    ].join('-');
+  }
+
   // ── Brand CRUD (v2) ──
 
   const createBrandForOrg = async (context) => {
@@ -1731,6 +1780,12 @@ function BrandsController(ctx, log, env) {
     // hoisted so the catch can mark that persisted-but-not-yet-provisioning row visibly failed if
     // starting the attempt itself throws (see the catch's compensation).
     let asyncMarketProvisioning = null;
+    // Phase 4 (LLMO-7352/LLMO-7418): the bare-create (no semrushMarket) sibling of
+    // asyncMarketProvisioning above — same "non-null after the row is persisted means start an
+    // attempt" contract, just with no chained job (a bare sub-workspace has no project to create
+    // afterward). Mutually exclusive with asyncMarketProvisioning (they're set in sibling
+    // if/else branches of the same hasSemrushMarket check).
+    let asyncBareProvisioning = null;
 
     try {
       if (!hasText(spaceCatId)) {
@@ -1765,6 +1820,57 @@ function BrandsController(ctx, log, env) {
 
       const { postgrestClient } = context.dataAccess.services;
       const updatedBy = context.attributes?.authInfo?.profile?.email || 'system';
+
+      // ---- Idempotent create (LLMO-7352 acceptance criteria) ----
+      // "Duplicate Create Brand submissions for the same affected Semrush brand return the
+      // existing brand/current provisioning attempt rather than creating duplicate brands or
+      // workspaces, including when the original 202 response is lost."
+      //
+      // Opt-in by header, so no existing caller changes behaviour: send no key and this is
+      // exactly today's random-id create. Send the same key twice and both requests resolve to
+      // the same row.
+      const idempotencyKey = headerValue(context?.pathInfo?.headers, 'idempotency-key') ?? '';
+      const idempotentBrandId = hasText(idempotencyKey)
+        ? deriveIdempotentBrandId(spaceCatId, idempotencyKey)
+        : null;
+      if (idempotentBrandId) {
+        // The replay check. A brand already sitting at this id means the earlier request DID
+        // land, even though its response never reached the client. Return that brand and
+        // whatever provisioning is currently attached to it, instead of starting a second brand
+        // and a second Semrush sub-workspace for one user action.
+        const existing = await getBrandById(spaceCatId, idempotentBrandId, postgrestClient);
+        if (existing) {
+          const provisioning = await getBrandProvisioningState(idempotentBrandId, postgrestClient)
+            .catch(() => null); // a state-read blip must not turn a correct replay into a duplicate
+          const serenityScopes = await readSerenityFlagScopes(spaceCatId, postgrestClient);
+          log.info('brands: idempotent create replay - returning the existing brand', {
+            spaceCatId,
+            brandId: idempotentBrandId,
+            provisioningStatus: provisioning?.provisioningStatus ?? null,
+          });
+          // Mirrors the original response rather than inventing one: 202 with the job id while
+          // provisioning is still in flight, so a replaying client polls the SAME job it was
+          // already handed, and 201 once there is nothing left to wait for. A 200 here would
+          // read as "your create did not happen".
+          const isStillProvisioning = provisioning?.provisioningStatus === 'pending';
+          return createResponse(
+            {
+              ...withSerenityState(existing, serenityScopes),
+              // `jobType` whenever this is a 202, even when there is no job id to poll:
+              // `semrush_provisioning_job_id` is written best-effort, and an attempt that
+              // resolved on its first hop never wrote one, so a replay can legitimately have a
+              // live attempt and no id. A client must still be able to tell that provisioning is
+              // in flight — the brand's own `semrushProvisioningStatus` says `pending` too — and
+              // must NOT read a missing id as "nothing is running" and start a second attempt.
+              ...(isStillProvisioning ? { jobType: PROVISION_WORKSPACE_JOB_TYPE } : {}),
+              ...(isStillProvisioning && hasText(provisioning?.provisioningJobId)
+                ? { jobId: provisioning.provisioningJobId }
+                : {}),
+            },
+            isStillProvisioning ? 202 : 201,
+          );
+        }
+      }
 
       // Semrush-prompts mode (serenity dual-mode): the UI sends an initial market
       // (location + language). Provision the brand's Semrush sub-workspace +
@@ -1870,7 +1976,7 @@ function BrandsController(ctx, log, env) {
           // job chain, the same shared path Add Market uses. Unlike createPrompts's flag, this one
           // is NOT permanent: the synchronous branch is the LLMO-7352 bug pattern itself, slated
           // for removal once every known caller has migrated to `async: true`.
-          if (validateAsync(brandData)) {
+          if (validateAsync(brandData) && isAsyncProvisioningEnabled(context.env || env)) {
             // brandAliases/urls/competitors are NOT read here (unlike the sync branch below): the
             // brand row this section persists below (upsertBrand) writes them to storage, and the
             // async chain's orchestration reads them back from there — the same DB-backed source
@@ -1882,7 +1988,7 @@ function BrandsController(ctx, log, env) {
             if (!parentWorkspaceId || !hasText(parentWorkspaceId)) {
               return badRequest('Organization has no Semrush workspace configured');
             }
-            provisionedBrandId = randomUUID();
+            provisionedBrandId = idempotentBrandId ?? randomUUID();
             asyncMarketProvisioning = {
               market, languageCode, modelIds, parentWorkspaceId,
             };
@@ -1907,7 +2013,18 @@ function BrandsController(ctx, log, env) {
               socialAccounts: brandData.socialAccounts,
               earnedContent: brandData.earnedContent,
             };
-            provisionedBrandId = randomUUID();
+            provisionedBrandId = idempotentBrandId ?? randomUUID();
+            // LLMO-7352 migration telemetry: this is the SYNCHRONOUS provisioning path — the bug
+            // pattern the epic was filed for, kept only until every caller migrates. It is reached
+            // whenever a caller does not send `async: true`, or while the global switch is off, so
+            // during the dormant period it sees ALL traffic. One line per hit is what makes the
+            // consumer list knowable: without it there is no way to tell who is still on this path,
+            // and therefore no evidence on which to ever delete it.
+            log?.info?.('serenity: SYNCHRONOUS provisioning path taken (LLMO-7352 migration)', {
+              endpoint: 'POST /v2/orgs/:spaceCatId/brands (with market)',
+              orgId: spaceCatId,
+              callerId: resolveCallerId(context),
+            });
             const provisioned = await provisionBrandSubworkspace(context, {
               spaceCatId,
               brandId: provisionedBrandId,
@@ -1968,12 +2085,45 @@ function BrandsController(ctx, log, env) {
               }
             }
           }
+        } else if (validateAsync(brandData) && isAsyncProvisioningEnabled(context.env || env)) {
+          // B (LLMO-6405): sub-workspace-only active create — no market supplied, so
+          // no project is provisioned. Markets are added afterwards from the Markets
+          // tab. The brand is anchored by its primary site (baseSiteId, persisted by
+          // upsertBrand below) AND by its Semrush sub-workspace.
+          //
+          // Phase 4 (LLMO-7352/LLMO-7418): opt-in only (mirrors the hasSemrushMarket branch's own
+          // `async` flag above). Absent/false runs the EXACT bespoke synchronous
+          // provisionBrandSubworkspaceBare call this branch has always run. `async: true` persists
+          // the brand row FIRST (visible, active, no workspace pointer yet), then hands the bare
+          // sub-workspace provisioning off to provision-workspace-job — no chained job, since a
+          // bare create has no project to create once the workspace is ready.
+          //
+          // Resolved and validated HERE, before any write — same rationale as the
+          // hasSemrushMarket branch: a missing org workspace config must never leave a
+          // persisted, permanently-inert brand row behind.
+          const parentWorkspaceId = await resolveWorkspaceId(context, spaceCatId);
+          if (!parentWorkspaceId || !hasText(parentWorkspaceId)) {
+            return badRequest('Organization has no Semrush workspace configured');
+          }
+          provisionedBrandId = idempotentBrandId ?? randomUUID();
+          asyncBareProvisioning = { parentWorkspaceId };
         } else {
           // B (LLMO-6405): sub-workspace-only active create — no market supplied, so
           // no project is provisioned. Markets are added afterwards from the Markets
           // tab. The brand is anchored by its primary site (baseSiteId, persisted by
           // upsertBrand below) AND by its Semrush sub-workspace.
-          provisionedBrandId = randomUUID();
+          provisionedBrandId = idempotentBrandId ?? randomUUID();
+          // LLMO-7352 migration telemetry: this is the SYNCHRONOUS provisioning path — the bug
+          // pattern the epic was filed for, kept only until every caller migrates. It is reached
+          // whenever a caller does not send `async: true`, or while the global switch is off, so
+          // during the dormant period it sees ALL traffic. One line per hit is what makes the
+          // consumer list knowable: without it there is no way to tell who is still on this path,
+          // and therefore no evidence on which to ever delete it.
+          log?.info?.('serenity: SYNCHRONOUS provisioning path taken (LLMO-7352 migration)', {
+            endpoint: 'POST /v2/orgs/:spaceCatId/brands (bare)',
+            orgId: spaceCatId,
+            callerId: resolveCallerId(context),
+          });
           const bare = await provisionBrandSubworkspaceBare(context, {
             spaceCatId,
             brandId: provisionedBrandId,
@@ -2117,8 +2267,8 @@ function BrandsController(ctx, log, env) {
           // not `error`, matches this controller's own envelope — cf. brand_duplicate_active_name.)
           return createResponse(
             {
-              code: 'semrush_provisioning_in_progress',
-              message: 'A Semrush sub-workspace provisioning attempt is already in progress for this brand; please retry shortly.',
+              error: ERROR_CODES.SEMRUSH_PROVISIONING_IN_PROGRESS,
+              message: 'Unable to start Semrush provisioning for the new brand',
             },
             409,
           );
@@ -2156,10 +2306,21 @@ function BrandsController(ctx, log, env) {
               },
             },
           });
+          // LLMO-7418 external-review Finding 17: records the first-hop job id, best-effort,
+          // so it isn't left permanently NULL until the worker's own self-requeue hop writes it.
+          await updateProvisioningJobId({
+            brandId: asyncBrandId,
+            attemptId,
+            jobId: job.getId(),
+            postgrestClient,
+          }).catch((updateError) => {
+            log.error('brands: failed to record the first-hop job id (best-effort)', {
+              brandId: asyncBrandId, attemptId, jobId: job.getId(), error: updateError?.message,
+            });
+          });
           return createResponse(
             {
               ...withSerenityState(created, serenityScopes),
-              status: 'pending',
               jobId: job.getId(),
               jobType: PROVISION_WORKSPACE_JOB_TYPE,
             },
@@ -2170,6 +2331,93 @@ function BrandsController(ctx, log, env) {
           // started for it — mark it visibly failed rather than leaving a silently-inert row
           // nothing will ever revisit (the reconciliation sweep only looks for STUCK `pending`
           // attempts, and this row never reached `pending` for one to find).
+          log.error('brands: failed to start async Semrush provisioning after brand row was persisted', {
+            brandId: asyncBrandId, error: enqueueError?.message,
+          });
+          await promoteProvisioningFailed({
+            brandId: asyncBrandId,
+            attemptId,
+            error: 'Failed to start Semrush provisioning',
+            postgrestClient,
+          }).catch((failError) => {
+            log.error('brands: failed to record the provisioning-start failure itself', {
+              brandId: asyncBrandId, error: failError?.message,
+            });
+          });
+          throw enqueueError;
+        }
+      }
+
+      // Phase 4 (LLMO-7352/LLMO-7418): bare-create's async sibling of the block above — same
+      // shape, no chained job (no project to create once the workspace is ready).
+      if (asyncBareProvisioning) {
+        const asyncBrandId = /** @type {string} */ (provisionedBrandId);
+        const { parentWorkspaceId } = asyncBareProvisioning;
+        const attemptId = randomUUID();
+        let began;
+        try {
+          began = await beginProvisioningAttempt({
+            brandId: asyncBrandId,
+            attemptId,
+            postgrestClient,
+            updatedBy,
+          });
+        } catch (beginError) {
+          log.error('brands: failed to begin the provisioning attempt after brand row was persisted', {
+            brandId: asyncBrandId, error: beginError?.message,
+          });
+          await recordFreshBrandProvisioningStartFailure({
+            brandId: asyncBrandId,
+            error: 'Failed to start Semrush provisioning',
+            postgrestClient,
+          }).catch((failError) => {
+            log.error('brands: failed to record the provisioning-start failure itself', {
+              brandId: asyncBrandId, error: failError?.message,
+            });
+          });
+          throw beginError;
+        }
+        if (!began) {
+          return createResponse(
+            {
+              error: ERROR_CODES.SEMRUSH_PROVISIONING_IN_PROGRESS,
+              message: 'Unable to start Semrush provisioning for the new brand',
+            },
+            409,
+          );
+        }
+        try {
+          const job = await createAndEnqueueJob(context, {
+            jobType: PROVISION_WORKSPACE_JOB_TYPE,
+            // Fail-closed pair binding (Gap 1, #3252): this job writes to Semrush, so refuse to
+            // enqueue it on anything but the Semrush pair rather than mint a token on the wrong
+            // delegated credential. Same binding as the sibling async branches — these three were
+            // added by this phase after the others were bound, and were missed.
+            requirePair: PROMISE_PAIR_SEMRUSH,
+            metadata: {
+              brandId: asyncBrandId,
+              attemptId,
+              parentWorkspaceId,
+              title: brandData.name,
+            },
+          });
+          // LLMO-7418 external-review Finding 17: records the first-hop job id, best-effort,
+          // so it isn't left permanently NULL until the worker's own self-requeue hop writes it.
+          await updateProvisioningJobId({
+            brandId: asyncBrandId,
+            attemptId,
+            jobId: job.getId(),
+            postgrestClient,
+          }).catch((updateError) => {
+            log.error('brands: failed to record the first-hop job id (best-effort)', {
+              brandId: asyncBrandId, attemptId, jobId: job.getId(), error: updateError?.message,
+            });
+          });
+          return createResponse(
+            { ...withSerenityState(created, serenityScopes), jobId: job.getId() },
+            202,
+          );
+        } catch (enqueueError) {
           log.error('brands: failed to start async Semrush provisioning after brand row was persisted', {
             brandId: asyncBrandId, error: enqueueError?.message,
           });

@@ -5332,7 +5332,7 @@ describe('brands-storage', () => {
 
         expect(caught).to.exist;
         expect(caught.status).to.equal(409);
-        expect(caught.code).to.equal('semrush_provisioning_in_progress');
+        expect(caught.code).to.equal('semrushProvisioningInProgress');
       });
 
       // THE case the dedicated column exists for. `brands.updated_at` is bumped by a row-level

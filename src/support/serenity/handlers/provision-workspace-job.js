@@ -38,6 +38,42 @@ import {
  */
 export const PROVISION_WORKSPACE_JOB_TYPE = 'serenity-provision-workspace';
 
+// LLMO-7418 external-review Finding 14: retry classification for a status-poll failure.
+// `SerenityTransportError` always carries a numeric `.status` (the upstream HTTP status);
+// a raw network-level failure (fetch itself throwing — DNS, connection reset, timeout) has
+// none. Only these are treated as transient and routed through the existing bounded
+// self-requeue ladder below; everything else (a permanent 4xx like an expired/invalid IMS
+// token, or an unexpected non-transport error) keeps today's fail-fast behavior via the
+// outer catch.
+const RETRYABLE_TRANSPORT_STATUSES = new Set([429, 500, 502, 503, 504]);
+/**
+ * @param {any} error - the thrown workspace-status error.
+ * @param {object} [log] - optional logger; used to surface a status-less error on the FIRST hop.
+ * @returns {boolean} whether the self-requeue ladder should retry.
+ */
+function isRetryableWorkspaceStatusError(error, log = undefined) {
+  const { status } = error ?? {};
+  if (typeof status !== 'number') {
+    // No upstream status at all. This is USUALLY a genuine network-level failure, but it is also
+    // what a programming error (a TypeError/ReferenceError from the transport layer) looks like
+    // — and those would then burn the whole self-requeue ladder before failing as "workspace
+    // never settled", hiding the real cause (Luis review, PR #3249).
+    //
+    // Deliberately NOT narrowed by error type: Node's own fetch throws `TypeError: fetch failed`
+    // for DNS failures, connection resets and timeouts, so excluding TypeError would make the
+    // exact case this branch exists for non-retryable. Log loudly instead, so a programming
+    // error is visible on the FIRST hop rather than inferred from an exhausted ladder.
+    log?.warn?.('provision-workspace-job: workspace-status error carried no upstream status; retrying as transient', {
+      errorName: error?.name,
+      errorMessage: error?.message,
+      // A real network failure from undici carries a `cause`; a bare programming error does not.
+      hasCause: Boolean(error?.cause),
+    });
+    return true;
+  }
+  return RETRYABLE_TRANSPORT_STATUSES.has(status);
+}
+
 /**
  * Hard cap on self-requeue depth. Live-verified settle time for a SUCCESSFUL create is
  * seconds, not minutes (LLMO-7352 incident data: ~10s); this ladder exists for the
@@ -474,7 +510,25 @@ export async function provisionWorkspaceHandler(context, job, accessToken) {
       }
     }
 
-    const statusResult = await transport.getWorkspaceStatus(candidate.workspaceId);
+    let statusResult;
+    try {
+      statusResult = await transport.getWorkspaceStatus(candidate.workspaceId);
+    } catch (error) {
+      if (!isRetryableWorkspaceStatusError(error, log)) {
+        throw error;
+      }
+      // Transient upstream/network failure — leave `statusResult` undefined so `status`
+      // below is `undefined`, which is neither ready nor terminal-failure, and this hop
+      // falls straight into the existing "still settling" self-requeue branch below (same
+      // bounded backoff/depth cap already used for an actual `not ready` poll result).
+      log?.warn?.('provision-workspace-job: transient error polling workspace status; treating as not-ready and self-requeuing', {
+        brandId,
+        attemptId,
+        semrushWorkspaceId: candidate.workspaceId,
+        error: error?.message,
+        status: error?.status,
+      });
+    }
     const status = statusResult?.status;
 
     if (isWorkspaceReady(status)) {
