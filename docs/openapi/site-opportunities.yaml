@@ -1786,6 +1786,19 @@ site-deployed-opportunities:
         type: string
         format: date-time
         example: '2026-09-01T00:00:00.000Z'
+    - name: limit
+      description: |
+        Maximum number of deploys to include (before grouping). The aggregation spans every
+        opportunity belonging to the site, so the result is capped to bound response size;
+        when the cap bites, the **most recent** deploys are kept.
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 1000
+        default: 200
+        example: 200
   get:
     operationId: getDeployedOpportunitiesForSite
     summary: |
@@ -1795,7 +1808,8 @@ site-deployed-opportunities:
       "deployed opportunities" timeline overlay. A deploy is a fix in `DEPLOYED` or
       `PUBLISHED` status; its date is `deployedAt` (falling back to `executedAt`). Each fix
       is joined to its opportunity title. Optionally windowed by `from`/`to`. Fixes with no
-      anchor timestamp are excluded.
+      anchor timestamp are excluded. Capped by `limit` (default 200, max 1000), keeping the
+      most recent deploys when the cap is reached.
     tags:
       - opportunity-fixes
     responses:

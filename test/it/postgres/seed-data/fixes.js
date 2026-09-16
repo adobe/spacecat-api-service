@@ -15,9 +15,11 @@
  * FIX_1..FIX_3 are under OPPTY_1 (SITE_1, accessible).
  *
  * - FIX_1: CODE_CHANGE, PENDING — linked to SUGG_1 via junction
- * - FIX_2: CODE_CHANGE, DEPLOYED — different status for by-status filter
+ * - FIX_2: CODE_CHANGE, DEPLOYED — different status for by-status filter; carries a
+ *   deployed_at (2026-08-15) so it surfaces on the deployed-opportunities timeline
  * - FIX_3: CODE_CHANGE, DEPLOYED — NO junction entry; must still be returned
- *   with an empty suggestions array (the silent-drop bug this PR fixes)
+ *   with an empty suggestions array (the silent-drop bug this PR fixes); also carries a
+ *   deployed_at (2026-08-15) for the deployed-opportunities timeline
  * - FIX_4: CODE_CHANGE, FAILED — under OPPTY_4 (also SITE_1), for site-wide
  *   aggregation tests that need fixes spread across more than one opportunity
  *

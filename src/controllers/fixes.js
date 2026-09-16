@@ -58,7 +58,8 @@ const IMS_ENRICH_BATCH_SIZE = 5;
 const DEFAULT_SITE_FIXES_LIMIT = 200;
 const MAX_SITE_FIXES_LIMIT = 1000;
 
-// Fix statuses that count as an already-live deployment for dedupe purposes.
+// Fix statuses that count as an already-live deployment (used for dedupe and by the
+// deployed-opportunities timeline).
 const ACTIVE_FIX_STATUSES = [
   FixEntityModel.STATUSES.DEPLOYED,
   FixEntityModel.STATUSES.PUBLISHED,
@@ -294,7 +295,9 @@ export class FixesController {
    * the experiment. Response: `[{ date: 'YYYY-MM-DD', deployments: [{ opportunityId,
    * opportunityTitle, type, status, fixId, deployedAt, changeDetails }] }]`, sorted
    * ascending by date. Fixes with no anchor timestamp are excluded (can't be placed on a
-   * date). Bounded by MAX_SITE_FIXES_LIMIT deploys before grouping.
+   * date). The aggregation is multiplicative across a site's opportunities, so it is
+   * capped by `limit` (default DEFAULT_SITE_FIXES_LIMIT, max MAX_SITE_FIXES_LIMIT),
+   * keeping the **most recent** deploys when the cap bites.
    *
    * @param {RequestContext} context - request context
    * @returns {Promise<Response>} Deploy-timeline buckets response.
@@ -303,6 +306,7 @@ export class FixesController {
     const { siteId } = context.params;
     const from = context.data?.from ?? null;
     const to = context.data?.to ?? null;
+    const limitParam = context.data?.limit ?? null;
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -322,6 +326,12 @@ export class FixesController {
     const fromTime = hasText(from) ? new Date(from).getTime() : null;
     const toTime = hasText(to) ? new Date(to).getTime() : null;
 
+    const parsedLimit = hasText(limitParam) ? parseInt(limitParam, 10) : DEFAULT_SITE_FIXES_LIMIT;
+    if (!Number.isInteger(parsedLimit) || parsedLimit <= 0) {
+      return badRequest('limit must be a positive integer');
+    }
+    const effectiveLimit = Math.min(parsedLimit, MAX_SITE_FIXES_LIMIT);
+
     // FACS composite scope (see getAllForSite) + opportunity-title lookup for the join.
     const opportunities = filterOpportunitiesByFacsComposite(
       context,
@@ -335,7 +345,8 @@ export class FixesController {
       : [];
 
     // Keep only already-live deploys with a usable anchor inside the window, ordered by
-    // deploy time so the cap is deterministic (earliest kept).
+    // deploy time DESCENDING so the cap keeps the most recent deploys (the end of the
+    // timeline the overlay most wants) rather than the oldest.
     const deploys = fixEntities
       .map((fix) => ({ fix, anchor: fix.getDeployedAt() ?? fix.getExecutedAt() }))
       .filter(({ fix, anchor }) => {
@@ -357,8 +368,8 @@ export class FixesController {
         }
         return true;
       })
-      .sort((a, b) => new Date(a.anchor).getTime() - new Date(b.anchor).getTime())
-      .slice(0, MAX_SITE_FIXES_LIMIT);
+      .sort((a, b) => new Date(b.anchor).getTime() - new Date(a.anchor).getTime())
+      .slice(0, effectiveLimit);
 
     // Group by UTC deploy day.
     const bucketsByDate = new Map();
@@ -382,7 +393,13 @@ export class FixesController {
 
     const buckets = [...bucketsByDate.entries()]
       .sort(([a], [b]) => (a < b ? -1 : 1))
-      .map(([date, deployments]) => ({ date, deployments }));
+      .map(([date, deployments]) => ({
+        date,
+        // Chronological within a day (the retained set is newest-first from the cap sort).
+        deployments: deployments.sort(
+          (x, y) => new Date(x.deployedAt).getTime() - new Date(y.deployedAt).getTime(),
+        ),
+      }));
 
     return ok(buckets);
   }

@@ -1302,6 +1302,64 @@ describe('Fixes Controller', () => {
       const body = await response.json();
       expect(body[0].deployments[0].opportunityTitle).to.equal(null);
     });
+
+    it('responds 400 for a non-positive limit', async () => {
+      dataAccess.Opportunity.allBySiteId.resolves([oppStub(opportunityId, 'A')]);
+      requestContext.data = { limit: '0' };
+      const response = await fixesController.getDeployedOpportunitiesForSite(requestContext);
+      expect(response).includes({ status: 400 });
+      expect(await response.json()).deep.equals({ message: 'limit must be a positive integer' });
+    });
+
+    it('caps to the most recent deploys when limit truncates', async () => {
+      const older = await fixEntityCollection.create({
+        type: Suggestion.TYPES.CONTENT_UPDATE,
+        opportunityId,
+        status: FixEntity.STATUSES.DEPLOYED,
+        deployedAt: '2026-08-10T10:00:00.000Z',
+      });
+      const newer = await fixEntityCollection.create({
+        type: Suggestion.TYPES.CONTENT_UPDATE,
+        opportunityId,
+        status: FixEntity.STATUSES.DEPLOYED,
+        deployedAt: '2026-08-20T10:00:00.000Z',
+      });
+      dataAccess.Opportunity.allBySiteId.resolves([oppStub(opportunityId, 'A')]);
+      fixEntityCollection.allByOpportunityIds.resolves([older, newer]);
+
+      requestContext.data = { limit: '1' };
+      const response = await fixesController.getDeployedOpportunitiesForSite(requestContext);
+      const body = await response.json();
+      expect(body).to.have.lengthOf(1);
+      expect(body[0].date).to.equal('2026-08-20');
+      expect(body[0].deployments[0].fixId).to.equal(newer.getId());
+    });
+
+    it("narrows deploys to the caller's permitted composite types (D4)", async () => {
+      const securityFix = await fixEntityCollection.create({
+        type: Suggestion.TYPES.CONTENT_UPDATE,
+        opportunityId,
+        status: FixEntity.STATUSES.DEPLOYED,
+        deployedAt: '2026-08-15T10:00:00.000Z',
+      });
+      dataAccess.Opportunity.allBySiteId.resolves([
+        { getId: () => opportunityId, getType: () => 'security', getTitle: () => 'Security oppty' },
+        { getId: () => opportunityId2, getType: () => 'meta-tags', getTitle: () => 'Meta oppty' },
+      ]);
+      fixEntityCollection.allByOpportunityIds.withArgs([opportunityId]).resolves([securityFix]);
+      requestContext.attributes = { facsComposite: { values: ['security'] } };
+
+      const response = await fixesController.getDeployedOpportunitiesForSite(requestContext);
+      expect(response).includes({ status: 200 });
+      const body = await response.json();
+      expect(body).to.have.lengthOf(1);
+      expect(body[0].deployments).to.have.lengthOf(1);
+      expect(body[0].deployments[0].fixId).to.equal(securityFix.getId());
+      expect(body[0].deployments[0].opportunityTitle).to.equal('Security oppty');
+      // The non-permitted (meta-tags) opportunity id is never queried for fixes.
+      expect(fixEntityCollection.allByOpportunityIds)
+        .to.have.been.calledOnceWithExactly([opportunityId]);
+    });
   });
 
   describe('getting fixes by status', () => {

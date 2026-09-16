@@ -242,6 +242,22 @@ export default function fixTests(getHttpClient, resetData) {
         expect(res.body).to.be.an('array').with.lengthOf(0);
       });
 
+      it('user: caps the result with limit, keeping the most recent deploy', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`${DEPLOYED_BASE}?limit=1`);
+        expect(res.status).to.equal(200);
+        // FIX_2 (10:00) + FIX_3 (14:00) on the same day; limit=1 keeps the most recent (FIX_3).
+        expect(res.body).to.be.an('array').with.lengthOf(1);
+        expect(res.body[0].deployments).to.have.lengthOf(1);
+        expect(res.body[0].deployments[0].fixId).to.equal(FIX_3_ID);
+      });
+
+      it('returns 400 for a non-positive limit', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`${DEPLOYED_BASE}?limit=0`);
+        expect(res.status).to.equal(400);
+      });
+
       it('user: includes deploys inside the from/to window', async () => {
         const http = getHttpClient();
         const res = await http.user.get(`${DEPLOYED_BASE}?from=2026-08-01T00:00:00.000Z&to=2026-09-01T00:00:00.000Z`);
