@@ -1163,6 +1163,8 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/opportunities/top-paid',
       'GET /sites/:siteId/opportunities/by-status/:status',
       'GET /sites/:siteId/opportunities/:opportunityId',
+      'POST /sites/:siteId/opportunities/by-urls',
+      'POST /sites/:siteId/suggestions/by-urls',
       'POST /sites/:siteId/page-relationships/search',
       'POST /sites/:siteId/opportunities',
       'PATCH /sites/:siteId/opportunities/:opportunityId',

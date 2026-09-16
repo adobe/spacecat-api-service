@@ -5672,7 +5672,7 @@ llmo-referral-traffic-kpis:
         schema: { $ref: './schemas.yaml#/ReferralTrafficSource' }
       - { name: startDate, in: query, schema: { type: string, format: date } }
       - { name: endDate, in: query, schema: { type: string, format: date } }
-      - { name: platform, in: query, schema: { type: string } }
+      - $ref: './parameters.yaml#/referralPlatform'
       - { name: region, in: query, schema: { type: string } }
       - { name: pageIntent, in: query, description: 'Snake alias: page_intent', schema: { type: string } }
       - { name: deviceType, in: query, description: 'Aliases: device_type, device', schema: { type: string } }
@@ -5713,7 +5713,7 @@ llmo-referral-traffic-trend:
         schema: { $ref: './schemas.yaml#/ReferralTrafficSource' }
       - { name: startDate, in: query, schema: { type: string, format: date } }
       - { name: endDate, in: query, schema: { type: string, format: date } }
-      - { name: platform, in: query, schema: { type: string } }
+      - $ref: './parameters.yaml#/referralPlatform'
       - { name: region, in: query, schema: { type: string } }
       - { name: pageIntent, in: query, description: 'Snake alias: page_intent', schema: { type: string } }
       - { name: deviceType, in: query, description: 'Aliases: device_type, device', schema: { type: string } }
@@ -5753,7 +5753,7 @@ llmo-referral-traffic-by-platform:
         schema: { $ref: './schemas.yaml#/ReferralTrafficSource' }
       - { name: startDate, in: query, schema: { type: string, format: date } }
       - { name: endDate, in: query, schema: { type: string, format: date } }
-      - { name: platform, in: query, schema: { type: string } }
+      - $ref: './parameters.yaml#/referralPlatform'
       - { name: region, in: query, schema: { type: string } }
       - { name: pageIntent, in: query, description: 'Snake alias: page_intent', schema: { type: string } }
       - { name: deviceType, in: query, description: 'Aliases: device_type, device', schema: { type: string } }
@@ -5790,7 +5790,7 @@ llmo-referral-traffic-by-region:
         schema: { $ref: './schemas.yaml#/ReferralTrafficSource' }
       - { name: startDate, in: query, schema: { type: string, format: date } }
       - { name: endDate, in: query, schema: { type: string, format: date } }
-      - { name: platform, in: query, schema: { type: string } }
+      - $ref: './parameters.yaml#/referralPlatform'
       - { name: region, in: query, schema: { type: string } }
       - { name: pageIntent, in: query, description: 'Snake alias: page_intent', schema: { type: string } }
       - { name: deviceType, in: query, description: 'Aliases: device_type, device', schema: { type: string } }
@@ -5827,7 +5827,7 @@ llmo-referral-traffic-by-page-intent:
         schema: { $ref: './schemas.yaml#/ReferralTrafficSource' }
       - { name: startDate, in: query, schema: { type: string, format: date } }
       - { name: endDate, in: query, schema: { type: string, format: date } }
-      - { name: platform, in: query, schema: { type: string } }
+      - $ref: './parameters.yaml#/referralPlatform'
       - { name: region, in: query, schema: { type: string } }
       - { name: pageIntent, in: query, description: 'Snake alias: page_intent', schema: { type: string } }
       - { name: deviceType, in: query, description: 'Aliases: device_type, device', schema: { type: string } }
@@ -5878,7 +5878,7 @@ llmo-referral-traffic-by-url:
         in: query
         description: Range end (`YYYY-MM-DD`). Required if `startDate` is set; span with `startDate` must be <= 62 days.
         schema: { type: string, format: date }
-      - { name: platform, in: query, schema: { type: string } }
+      - $ref: './parameters.yaml#/referralPlatform'
       - { name: region, in: query, schema: { type: string } }
       - { name: pageIntent, in: query, description: 'Snake alias: page_intent', schema: { type: string } }
       - { name: deviceType, in: query, description: 'Aliases: device_type, device', schema: { type: string } }
@@ -5954,7 +5954,7 @@ llmo-referral-traffic-by-url-trend:
         in: query
         description: Range end (`YYYY-MM-DD`). Required if `startDate` is set; span with `startDate` must be <= 62 days.
         schema: { type: string, format: date }
-      - { name: platform, in: query, schema: { type: string } }
+      - $ref: './parameters.yaml#/referralPlatform'
       - { name: region, in: query, schema: { type: string } }
       - { name: pageIntent, in: query, description: 'Snake alias: page_intent', schema: { type: string } }
       - { name: deviceType, in: query, description: 'Aliases: device_type, device', schema: { type: string } }
@@ -5999,7 +5999,7 @@ llmo-referral-traffic-by-device:
         schema: { $ref: './schemas.yaml#/ReferralTrafficSource' }
       - { name: startDate, in: query, schema: { type: string, format: date } }
       - { name: endDate, in: query, schema: { type: string, format: date } }
-      - { name: platform, in: query, schema: { type: string } }
+      - $ref: './parameters.yaml#/referralPlatform'
       - { name: region, in: query, schema: { type: string } }
       - { name: pageIntent, in: query, description: 'Snake alias: page_intent', schema: { type: string } }
       - { name: deviceType, in: query, description: 'Aliases: device_type, device', schema: { type: string } }
@@ -6052,7 +6052,7 @@ llmo-referral-traffic-business-impact:
         in: query
         description: Range end (`YYYY-MM-DD`). Required if `startDate` is set; span with `startDate` must be <= 62 days.
         schema: { type: string, format: date }
-      - { name: platform, in: query, schema: { type: string } }
+      - $ref: './parameters.yaml#/referralPlatform'
       - { name: region, in: query, schema: { type: string } }
       - { name: pageIntent, in: query, description: 'Snake alias: page_intent', schema: { type: string } }
       - { name: deviceType, in: query, description: 'Aliases: device_type, device', schema: { type: string } }

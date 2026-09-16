@@ -562,6 +562,8 @@ const routeRequiredCapabilities = {
   'GET /sites/:siteId/opportunities/top-paid': 'opportunity:read',
   'GET /sites/:siteId/opportunities/by-status/:status': 'opportunity:read',
   'GET /sites/:siteId/opportunities/:opportunityId': 'opportunity:read',
+  'POST /sites/:siteId/opportunities/by-urls': 'opportunity:read',
+  'POST /sites/:siteId/suggestions/by-urls': 'suggestion:read',
   'POST /sites/:siteId/opportunities': 'opportunity:write',
   'PATCH /sites/:siteId/opportunities/:opportunityId': 'opportunity:write',
   'DELETE /sites/:siteId/opportunities/:opportunityId': 'opportunity:write',

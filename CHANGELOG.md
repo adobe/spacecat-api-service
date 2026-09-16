@@ -1,3 +1,24 @@
+# [1.817.0](https://github.com/adobe/spacecat-api-service/compare/v1.816.0...v1.817.0) (2026-09-16)
+
+
+### Features
+
+* deploy serenity-market worker under a dedicated role ([#787](https://github.com/adobe/spacecat-api-service/issues/787)) ([#3296](https://github.com/adobe/spacecat-api-service/issues/3296)) ([4c19929](https://github.com/adobe/spacecat-api-service/commit/4c199290f69eb2c624944824ecf960f74b00e776)), closes [Hi#level](https://github.com/Hi/issues/level) [#798](https://github.com/adobe/spacecat-api-service/issues/798) [#3240](https://github.com/adobe/spacecat-api-service/issues/3240) [#798](https://github.com/adobe/spacecat-api-service/issues/798) [#798](https://github.com/adobe/spacecat-api-service/issues/798) [#798](https://github.com/adobe/spacecat-api-service/issues/798) [#798](https://github.com/adobe/spacecat-api-service/issues/798) [#798](https://github.com/adobe/spacecat-api-service/issues/798) [#798](https://github.com/adobe/spacecat-api-service/issues/798) [#793](https://github.com/adobe/spacecat-api-service/issues/793) [#3240](https://github.com/adobe/spacecat-api-service/issues/3240) [#798](https://github.com/adobe/spacecat-api-service/issues/798) [#798](https://github.com/adobe/spacecat-api-service/issues/798)
+
+# [1.816.0](https://github.com/adobe/spacecat-api-service/compare/v1.815.0...v1.816.0) (2026-09-16)
+
+
+### Features
+
+* add opportunities and suggestions by-url lookup endpoints ([#3192](https://github.com/adobe/spacecat-api-service/issues/3192)) ([0a5edd6](https://github.com/adobe/spacecat-api-service/commit/0a5edd6f3bd92a1dc0ffae983cf9f33901954f5a))
+
+# [1.815.0](https://github.com/adobe/spacecat-api-service/compare/v1.814.3...v1.815.0) (2026-09-16)
+
+
+### Features
+
+* **referral-traffic:** parse multi-select platform list | LLMO-7616 ([#3284](https://github.com/adobe/spacecat-api-service/issues/3284)) ([b823a7f](https://github.com/adobe/spacecat-api-service/commit/b823a7fd73806af1da5e2348e3e0251c106ffb66))
+
 ## [1.814.3](https://github.com/adobe/spacecat-api-service/compare/v1.814.2...v1.814.3) (2026-09-15)
 
 
