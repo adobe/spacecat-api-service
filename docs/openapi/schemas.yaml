@@ -15101,8 +15101,9 @@ V2BrandProvisioningAccepted:
 
     Unlike the other async 202s this returns the brand itself: the row is ALREADY
     persisted when the 202 is sent, so the UI can render it immediately. `status`
-    is therefore the BRAND's status (`pending` — shown as "Setting up"), NOT the
-    job's; the brand carries no workspace pointer yet. The sub-workspace and the
+    is therefore the BRAND's real persisted status, NOT the job's, and it is not
+    overridden here — it is whatever the row was actually written with (typically
+    `pending`, shown as "Setting up"). The brand carries no workspace pointer yet. The sub-workspace and the
     initial market are provisioned by the job chain named by `jobId`/`jobType` —
     poll it at `GET .../serenity/jobs/{jobId}`.
   allOf:
@@ -15110,10 +15111,6 @@ V2BrandProvisioningAccepted:
     - type: object
       required: [id, status, jobId, jobType]
       properties:
-        status:
-          type: string
-          description: Always `pending` on this response — the brand is not active yet.
-          enum: [pending]
         jobId:
           type: string
           format: uuid

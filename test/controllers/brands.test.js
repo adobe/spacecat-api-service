@@ -5760,7 +5760,7 @@ describe('Brands Controller', () => {
         it('409s without minting an attempt or enqueuing when a LIVE attempt is already in flight', async () => {
           const liveAttempt = Object.assign(
             new Error('A Semrush sub-workspace provisioning attempt is already in progress for this brand; please retry shortly.'),
-            { status: 409, code: 'semrush_provisioning_in_progress' },
+            { status: 409, code: 'semrushProvisioningInProgress' },
           );
           const beginStub = sinon.stub().resolves(true);
           const enqueueStub = sinon.stub().resolves({ getId: () => 'job-xyz' });
@@ -5781,7 +5781,7 @@ describe('Brands Controller', () => {
 
           expect(response.status).to.equal(409);
           const body = await response.json();
-          expect(body.code).to.equal('semrush_provisioning_in_progress');
+          expect(body.code).to.equal('semrushProvisioningInProgress');
           // No second attempt, and above all no second job racing the live one.
           expect(beginStub).to.not.have.been.called;
           expect(enqueueStub).to.not.have.been.called;
@@ -5809,7 +5809,9 @@ describe('Brands Controller', () => {
 
           expect(response.status).to.equal(409);
           const body = await response.json();
-          expect(body.code).to.equal('semrush_provisioning_in_progress');
+          // ERROR_CODES.SEMRUSH_PROVISIONING_IN_PROGRESS — the one registered spelling, under
+          // the `error` key this controller's envelope uses for a token.
+          expect(body.error).to.equal('semrushProvisioningInProgress');
           expect(enqueueStub).to.not.have.been.called;
         });
       });
