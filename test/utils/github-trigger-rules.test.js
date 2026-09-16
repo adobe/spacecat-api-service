@@ -70,6 +70,81 @@ describe('github-trigger-rules', () => {
         };
         expect(getSkipReason(data, 'review_requested', 'mysticat-bot[bot]')).to.be.null;
       });
+
+      it('returns a team-specific skip reason for a team-routed request, not the generic mismatch', () => {
+        // GitHub sends requested_team instead of requested_reviewer when a
+        // team (not a user/bot) is requested — regression coverage for
+        // adobe/mysticat-github-service#123, where this fell through to
+        // "reviewer undefined is not MysticatBot" and silently dropped the
+        // request with no distinguishable diagnostic.
+        const data = {
+          ...baseData,
+          action: 'review_requested',
+          requested_team: { slug: 'drs-team', name: 'DRS Team' },
+        };
+        const reason = getSkipReason(data, 'review_requested', REVIEWER);
+        expect(reason).to.include('drs-team');
+        expect(reason).to.not.include('undefined');
+      });
+
+      it('falls back to the team name when slug is absent', () => {
+        const data = {
+          ...baseData,
+          action: 'review_requested',
+          requested_team: { name: 'DRS Team' },
+        };
+        const reason = getSkipReason(data, 'review_requested', REVIEWER);
+        expect(reason).to.include('DRS Team');
+      });
+
+      it('falls back to "unknown" when the team has neither slug nor name', () => {
+        // Defensive fallback: an identifiable-but-empty team object must not
+        // reintroduce the same "undefined" ambiguity this fix exists to
+        // eliminate.
+        const data = {
+          ...baseData,
+          action: 'review_requested',
+          requested_team: {},
+        };
+        const reason = getSkipReason(data, 'review_requested', REVIEWER);
+        expect(reason).to.include('unknown');
+        expect(reason).to.not.include('undefined');
+      });
+
+      it('lets a matching requested_reviewer win even when requested_team is also present', () => {
+        // GitHub sends EITHER field, but a malformed or replayed payload can
+        // carry BOTH. A present, matching direct reviewer is a legitimate
+        // request and must not be misclassified as a team skip.
+        const data = {
+          ...baseData,
+          action: 'review_requested',
+          requested_reviewer: { login: REVIEWER },
+          requested_team: { slug: 'drs-team', name: 'DRS Team' },
+        };
+        expect(getSkipReason(data, 'review_requested', REVIEWER)).to.be.null;
+      });
+
+      it('treats an empty-string slug as absent, yielding "unknown" (not an empty team name)', () => {
+        // `??` only treats null/undefined as absent, so a `''` slug would
+        // render an empty team name. It must fall through to name, and a
+        // blank name through to 'unknown'.
+        const data = {
+          ...baseData,
+          action: 'review_requested',
+          requested_team: { slug: '' },
+        };
+        const reason = getSkipReason(data, 'review_requested', REVIEWER);
+        expect(reason).to.include('via team unknown');
+        expect(reason).to.not.include('via team  -');
+
+        // An empty slug with a present name falls through to the name.
+        const withName = {
+          ...baseData,
+          action: 'review_requested',
+          requested_team: { slug: '', name: 'DRS Team' },
+        };
+        expect(getSkipReason(withName, 'review_requested', REVIEWER)).to.include('DRS Team');
+      });
     });
 
     describe('labeled trigger (disabled)', () => {
@@ -222,6 +297,15 @@ describe('github-trigger-rules', () => {
         expect(reason).to.include('auto-trigger');
         expect(isMysticatTargetedSkip(reason)).to.be.false;
       });
+
+      it('classifies the team-routed reason as silent (no Slack notification)', () => {
+        // Team-routed skips get a correctly diagnosable log line and metric
+        // label (skipReasonLabel), but deliberately no standalone Slack
+        // note - same silent treatment as a foreign-reviewer skip.
+        const data = { ...base, requested_team: { slug: 'drs-team' } };
+        const reason = getSkipReason(data, 'review_requested', REVIEWER);
+        expect(isMysticatTargetedSkip(reason)).to.be.false;
+      });
     });
   });
 
@@ -244,6 +328,11 @@ describe('github-trigger-rules', () => {
 
     it('returns wrong_reviewer for reviewer mismatch reason', () => {
       expect(skipReasonLabel('reviewer some-human is not MysticatBot')).to.equal('wrong_reviewer');
+    });
+
+    it('returns team_reviewer_unsupported for a team-routed reason', () => {
+      expect(skipReasonLabel('review requested via team drs-team - team-based triggers not supported'))
+        .to.equal('team_reviewer_unsupported');
     });
 
     it('returns unsupported_action for unsupported action reason', () => {

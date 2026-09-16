@@ -3615,8 +3615,32 @@ describe('prompts-storage', () => {
       ).to.be.rejectedWith('PostgREST client is required');
     });
 
-    it('soft-deletes all prompts successfully', async () => {
-      const client = { from: () => makeChain({ data: { id: 'row-id' }, error: null }) };
+    it('returns a no-op result for an empty id list without querying', async () => {
+      let fromCalls = 0;
+      const client = {
+        from: () => {
+          fromCalls += 1;
+          return makeChain({ data: [], error: null });
+        },
+      };
+      const result = await bulkDeletePrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        promptIds: [],
+        postgrestClient: client,
+      });
+      expect(fromCalls).to.equal(0);
+      expect(result.metadata).to.deep.equal({ total: 0, success: 0, failure: 0 });
+      expect(result.failures).to.deep.equal([]);
+    });
+
+    it('soft-deletes the whole batch (ids echoed back count as success)', async () => {
+      const client = {
+        from: () => makeChain({
+          data: [{ prompt_id: 'p1' }, { prompt_id: 'p2' }, { prompt_id: 'p3' }],
+          error: null,
+        }),
+      };
       const result = await bulkDeletePrompts({
         organizationId: ORG_ID,
         brandUuid: BRAND_UUID,
@@ -3629,8 +3653,89 @@ describe('prompts-storage', () => {
       expect(result.failures).to.deep.equal([]);
     });
 
-    it('reports not found prompts as failures', async () => {
-      const client = { from: () => makeChain({ data: null, error: null }) };
+    it('issues a single UPDATE round-trip for the whole batch, not one per id', async () => {
+      let fromCalls = 0;
+      let updateCalls = 0;
+      const chain = {
+        eq: () => chain,
+        in: () => chain,
+        select: () => Promise.resolve({
+          data: [{ prompt_id: 'p1' }, { prompt_id: 'p2' }, { prompt_id: 'p3' }],
+          error: null,
+        }),
+      };
+      chain.update = () => {
+        updateCalls += 1;
+        return chain;
+      };
+      const client = {
+        from: () => {
+          fromCalls += 1;
+          return chain;
+        },
+      };
+      const result = await bulkDeletePrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        promptIds: ['p1', 'p2', 'p3'],
+        postgrestClient: client,
+      });
+      expect(fromCalls).to.equal(1);
+      expect(updateCalls).to.equal(1);
+      expect(result.metadata.success).to.equal(3);
+    });
+
+    it('chunks a batch larger than the PostgREST cap and still counts every id', async () => {
+      let fromCalls = 0;
+      const client = {
+        from: () => {
+          fromCalls += 1;
+          let inIds = [];
+          const chain = {
+            update: () => chain,
+            eq: () => chain,
+            in: (_col, ids) => {
+              inIds = ids;
+              return chain;
+            },
+            select: () => Promise.resolve({
+              data: inIds.map((id) => ({ prompt_id: id })),
+              error: null,
+            }),
+          };
+          return chain;
+        },
+      };
+      const promptIds = Array.from({ length: 1200 }, (_, i) => `p${i}`);
+      const result = await bulkDeletePrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        promptIds,
+        postgrestClient: client,
+      });
+      expect(result.metadata.total).to.equal(1200);
+      expect(result.metadata.success).to.equal(1200);
+      expect(result.metadata.failure).to.equal(0);
+      // 1200 ids chunked at 500 -> 3 round-trips (500 + 500 + 200).
+      expect(fromCalls).to.equal(3);
+    });
+
+    it('reports ids the update did not echo back as not-found failures', async () => {
+      const client = { from: () => makeChain({ data: [{ prompt_id: 'p1' }], error: null }) };
+      const result = await bulkDeletePrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        promptIds: ['p1', 'p2'],
+        postgrestClient: client,
+      });
+      expect(result.metadata.total).to.equal(2);
+      expect(result.metadata.success).to.equal(1);
+      expect(result.metadata.failure).to.equal(1);
+      expect(result.failures).to.deep.equal([{ promptId: 'p2', reason: 'Prompt not found' }]);
+    });
+
+    it('reports every id as not-found when the update matches nothing', async () => {
+      const client = { from: () => makeChain({ data: [], error: null }) };
       const result = await bulkDeletePrompts({
         organizationId: ORG_ID,
         brandUuid: BRAND_UUID,
@@ -3644,47 +3749,38 @@ describe('prompts-storage', () => {
       expect(result.failures[0].reason).to.equal('Prompt not found');
     });
 
-    it('reports DB errors as failures', async () => {
+    it('counts a duplicate existing id as success, keeping total = success + failure', async () => {
+      const client = { from: () => makeChain({ data: [{ prompt_id: 'p1' }], error: null }) };
+      const result = await bulkDeletePrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        promptIds: ['p1', 'p1'],
+        postgrestClient: client,
+      });
+      expect(result.metadata.total).to.equal(2);
+      expect(result.metadata.success).to.equal(2);
+      expect(result.metadata.failure).to.equal(0);
+      expect(result.failures).to.deep.equal([]);
+    });
+
+    it('fans a batch DB error out to every id', async () => {
       const client = { from: () => makeChain({ data: null, error: { message: 'DB error' } }) };
       const result = await bulkDeletePrompts({
         organizationId: ORG_ID,
         brandUuid: BRAND_UUID,
-        promptIds: ['p1'],
+        promptIds: ['p1', 'p2'],
         postgrestClient: client,
       });
-      expect(result.metadata.total).to.equal(1);
+      expect(result.metadata.total).to.equal(2);
       expect(result.metadata.success).to.equal(0);
-      expect(result.metadata.failure).to.equal(1);
-      expect(result.failures[0].reason).to.equal('DB error');
+      expect(result.metadata.failure).to.equal(2);
+      expect(result.failures.map((f) => f.reason)).to.deep.equal(['DB error', 'DB error']);
     });
 
-    it('catches thrown exceptions as failures', async () => {
+    it('fans a thrown exception out to every id', async () => {
       const client = {
         from: () => {
           throw new Error('Connection lost');
-        },
-      };
-      const result = await bulkDeletePrompts({
-        organizationId: ORG_ID,
-        brandUuid: BRAND_UUID,
-        promptIds: ['p1'],
-        postgrestClient: client,
-      });
-      expect(result.metadata.total).to.equal(1);
-      expect(result.metadata.success).to.equal(0);
-      expect(result.metadata.failure).to.equal(1);
-      expect(result.failures[0].reason).to.equal('Connection lost');
-    });
-
-    it('handles mix of success and failure', async () => {
-      let callCount = 0;
-      const client = {
-        from: () => {
-          callCount += 1;
-          if (callCount === 1) {
-            return makeChain({ data: { id: 'row-id' }, error: null });
-          }
-          return makeChain({ data: null, error: null });
         },
       };
       const result = await bulkDeletePrompts({
@@ -3694,8 +3790,9 @@ describe('prompts-storage', () => {
         postgrestClient: client,
       });
       expect(result.metadata.total).to.equal(2);
-      expect(result.metadata.success).to.equal(1);
-      expect(result.metadata.failure).to.equal(1);
+      expect(result.metadata.success).to.equal(0);
+      expect(result.metadata.failure).to.equal(2);
+      expect(result.failures[0].reason).to.equal('Connection lost');
     });
   });
 

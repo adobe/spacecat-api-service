@@ -224,11 +224,11 @@ jobs:
             exit 0
           fi
           CHANGED_FILES=$(git diff --name-only "$BEFORE_SHA" "${{ github.sha }}")
-          if echo "$CHANGED_FILES" | grep -qE '^(src/serenity-prompt-classification/|src/support/|package\.json$|package-lock\.json$)'; then
+          if echo "$CHANGED_FILES" | grep -qE '^(src/serenity-prompt-classification/|src/serenity-market-probe/|src/support/|package\.json$|package-lock\.json$)'; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
           else
             echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::No changes under the worker's bundled paths — skipping worker deploy for this push"
+            echo "::notice::No changes under the worker/probe bundled paths — skipping second-Lambda deploys for this push"
           fi
 
       # steps.paths-check.outputs.changed is an empty string (not 'false') on
@@ -255,6 +255,35 @@ jobs:
       - name: Deploy worker
         # dev -> deploy-dev:worker, stage -> deploy-stage:worker,
         # prod -> deploy:worker (see package.json scripts).
+        #
+        # DEDICATED EXECUTION ROLE (#787) — PROD ONLY: only deploy:worker (prod) pins
+        # the worker Lambda's execution role to spacecat-role-serenity-market-worker,
+        # via a per-invocation `--aws-role!important` override. deploy-stage:worker and
+        # deploy-dev:worker carry NO override, so stage + dev fall back to the shared
+        # spacecat-role-lambda-generic (the pkgConf hlx.awsRole!important the main
+        # api-service Lambda and the serenity-market-probe also use). The `!important`
+        # suffix on the prod override is required: a plain `--aws-role` is silently
+        # clobbered by the pkgConf hlx.awsRole!important. ${env.AWS_ACCOUNT_ID} in that
+        # ARN resolves from the AWS_ACCOUNT_ID env below (the prod account).
+        #
+        # WHY PROD-ONLY: infra #798 wires the dedicated role's DRS cross-account-invoke
+        # + SSM readiness-read GRANTS in prod only; dev + stage keep those grants on the
+        # generic role (coherent with DRS #3240, which scopes dev's reciprocal invoke
+        # policy to the generic role). #798 does create the role and grant iam:PassRole
+        # in ALL envs, so a stage/dev worker pinned to the dedicated role would deploy
+        # cleanly but then fail FUNCTIONALLY at runtime (that role lacks the invoke/
+        # readiness grants there) — hence stage + dev stay on generic.
+        #
+        # DEPLOY DEPENDENCY (prod): the deploy identity (spacecat-role-github-actions,
+        # assumed by configure-aws above) needs iam:PassRole on
+        # spacecat-role-serenity-market-worker, and that role must exist with the
+        # worker's full permission set, or hedy's UpdateFunctionConfiguration /
+        # CreateFunction fails. Both are provisioned by #798 as scoped IaC — the
+        # PassRole grant is inline on spacecat-role-github-actions, limited to this role
+        # and iam:PassedToService=lambda.amazonaws.com. Ordering rule: #798 is applied
+        # before this deploy runs. On merge-to-main the worker auto-deploys to PROD only
+        # (the matrix is ["prod"] on push); stage + dev worker deploys are manual
+        # workflow_dispatch, and both now use the generic role.
         if: steps.paths-check.outputs.changed != 'false'
         run: npm run ${{ (matrix.environment == 'dev' && 'deploy-dev:worker') || (matrix.environment == 'stage' && 'deploy-stage:worker') || (matrix.environment == 'prod' && 'deploy:worker') }}
         env:
@@ -263,6 +292,29 @@ jobs:
           # AWS_REGION/AWS_DEFAULT_REGION (those only configure the AWS SDK
           # client) - the reusable service-ci workflow sets this at its own
           # workflow level, which this repo-local job doesn't inherit.
+          HLX_AWS_REGION: us-east-1
+          AWS_ACCOUNT_ID: ${{ (matrix.environment == 'dev' && secrets.AWS_ACCOUNT_ID_DEV) || (matrix.environment == 'stage' && secrets.AWS_ACCOUNT_ID_STAGE) || (matrix.environment == 'prod' && secrets.AWS_ACCOUNT_ID_PROD) }}
+          VPC_SUBNET_1: ${{ secrets.VPC_SUBNET_1 }}
+          VPC_SUBNET_2: ${{ secrets.VPC_SUBNET_2 }}
+          VPC_SG_ID: ${{ secrets.VPC_SG_ID }}
+
+      # serenity-market-probe scheduled Lambda (issue #786, task #7). A THIRD
+      # api-service Lambda (distinct `hedy --entryFile`, deployed as
+      # spacecat-services--serenity-market-probe) that emits the StuckInProgressJobs
+      # (PAGED) + NeedsReauthBacklog metrics the infra alarms in
+      # spacecat-infrastructure modules/serenity_market_worker/alarms.tf read. It
+      # shares the worker's bundled paths (src/support/**, package.json), so the
+      # same paths-check gate and matrix drive it — keeping it in lockstep with the
+      # worker rather than drifting behind api-service. DEPLOY != ROLLOUT: rollout is
+      # gated by the infra EventBridge schedule (per env, `enabled`), and the probe
+      # Lambda must be deploy-assigned before that EventBridge target ARN resolves.
+      - name: Deploy probe
+        # dev -> deploy-dev:probe, stage -> deploy-stage:probe,
+        # prod -> deploy:probe (see package.json scripts).
+        if: steps.paths-check.outputs.changed != 'false'
+        run: npm run ${{ (matrix.environment == 'dev' && 'deploy-dev:probe') || (matrix.environment == 'stage' && 'deploy-stage:probe') || (matrix.environment == 'prod' && 'deploy:probe') }}
+        env:
+          AWS_REGION: us-east-1
           HLX_AWS_REGION: us-east-1
           AWS_ACCOUNT_ID: ${{ (matrix.environment == 'dev' && secrets.AWS_ACCOUNT_ID_DEV) || (matrix.environment == 'stage' && secrets.AWS_ACCOUNT_ID_STAGE) || (matrix.environment == 'prod' && secrets.AWS_ACCOUNT_ID_PROD) }}
           VPC_SUBNET_1: ${{ secrets.VPC_SUBNET_1 }}

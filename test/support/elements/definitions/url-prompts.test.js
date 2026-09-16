@@ -93,6 +93,108 @@ describe('url-prompts definitions', () => {
       expect(advancedVal(payload, 'CBF_tags')).to.equal('category__Brand');
     });
 
+    // LLMO-7553 subset multi-model support. The single-model shape MUST stay byte-identical.
+    describe('subset multi-model (LLMO-7553)', () => {
+      it('BYTE-IDENTICAL: a single model still produces the exact pre-change payload (bare eq)', () => {
+        // Full-payload parity assertion: this is the exact object the single-model path
+        // emitted before multi-model support (bare CBF_model eq, unshifted to the front).
+        expect(buildUrlPromptsPayload({
+          url: URL, model: 'openai', startDate: '2026-06-29', endDate: '2026-07-26',
+        })).to.deep.equal({
+          filters: {
+            simple: { CBF_source: URL },
+            advanced: {
+              op: 'and',
+              filters: [
+                { op: 'eq', val: 'chatgpt-paid', col: 'CBF_model' },
+                { op: 'eq', val: URL, col: 'CBF_source' },
+                { op: 'gte', val: '2026-06-29', col: 'CBF_date__start' },
+                { op: 'lte', val: '2026-07-26', col: 'CBF_date__end' },
+              ],
+            },
+          },
+        });
+      });
+
+      it('keeps a single model as a bare CBF_model eq (NOT wrapped in an or)', () => {
+        const payload = buildUrlPromptsPayload({ url: URL, model: 'openai' });
+        const modelNodes = payload.filters.advanced.filters.filter((f) => f.col === 'CBF_model');
+        expect(modelNodes).to.deep.equal([{ op: 'eq', val: 'chatgpt-paid', col: 'CBF_model' }]);
+        expect(payload.filters.advanced.filters.some((f) => f.op === 'or')).to.equal(false);
+      });
+
+      it('emits an N-member CBF_model OR for a comma-separated subset', () => {
+        const payload = buildUrlPromptsPayload({ url: URL, platform: 'openai,gemini' });
+        const orNode = payload.filters.advanced.filters.find((f) => f.op === 'or');
+        expect(orNode).to.deep.equal({
+          op: 'or',
+          filters: [
+            { op: 'eq', val: 'chatgpt-paid', col: 'CBF_model' },
+            { op: 'eq', val: 'gemini-2.5-flash', col: 'CBF_model' },
+          ],
+        });
+      });
+
+      it('dedupes a subset down to a single bare eq (byte-identical to the single case)', () => {
+        // `openai,openai` resolves to one model, so it must fall back to the bare-eq form.
+        const payload = buildUrlPromptsPayload({ url: URL, model: 'openai,openai' });
+        const modelNodes = payload.filters.advanced.filters.filter((f) => f.col === 'CBF_model');
+        expect(modelNodes).to.deep.equal([{ op: 'eq', val: 'chatgpt-paid', col: 'CBF_model' }]);
+        expect(payload.filters.advanced.filters.some((f) => f.op === 'or')).to.equal(false);
+      });
+
+      it('still OMITS CBF_model for the `all` sentinel (multi-model does not change the union case)', () => {
+        const payload = buildUrlPromptsPayload({ url: URL, model: 'all' });
+        expect(payload.filters.advanced.filters.some((f) => f.col === 'CBF_model' || f.op === 'or'))
+          .to.equal(false);
+      });
+
+      it('OMITS CBF_model when `all` appears anywhere in a mixed CSV (all,openai)', () => {
+        // `all` anywhere in the list wins → all-models union, NOT search-gpt+openai OR.
+        const payload = buildUrlPromptsPayload({ url: URL, model: 'all,openai' });
+        expect(payload.filters.advanced.filters.some((f) => f.col === 'CBF_model' || f.op === 'or'))
+          .to.equal(false);
+      });
+
+      it('OMITS CBF_model for `all` at the end of a mixed CSV (openai,all)', () => {
+        const payload = buildUrlPromptsPayload({ url: URL, platform: 'openai,all' });
+        expect(payload.filters.advanced.filters.some((f) => f.col === 'CBF_model' || f.op === 'or'))
+          .to.equal(false);
+      });
+
+      it('emits a 3-member CBF_model OR for a 3-model subset (order-preserving)', () => {
+        const payload = buildUrlPromptsPayload({ url: URL, platform: 'openai,gemini,perplexity' });
+        const orNode = payload.filters.advanced.filters.find((f) => f.op === 'or');
+        expect(orNode).to.deep.equal({
+          op: 'or',
+          filters: [
+            { op: 'eq', val: 'chatgpt-paid', col: 'CBF_model' },
+            { op: 'eq', val: 'gemini-2.5-flash', col: 'CBF_model' },
+            { op: 'eq', val: 'perplexity', col: 'CBF_model' },
+          ],
+        });
+      });
+
+      it('unshifts the multi-model OR to the FRONT of advanced.filters alongside a category tag', () => {
+        const payload = buildUrlPromptsPayload({
+          url: URL, platform: 'openai,gemini', category: 'category__Brand',
+        });
+        // The model OR is unshifted to the front; the category tag is pushed after the dates.
+        expect(payload.filters.advanced.filters[0].op).to.equal('or');
+        expect(payload.filters.advanced.filters.some(
+          (f) => f.col === 'CBF_tags' && f.val === 'category__Brand',
+        )).to.equal(true);
+      });
+
+      it('keeps the multi-model OR and scopes the market via top-level project_id', () => {
+        const payload = buildUrlPromptsPayload({
+          url: URL, model: 'openai,gemini', projectId: 'proj-123',
+        });
+        expect(payload.project_id).to.equal('proj-123');
+        expect(payload.filters.advanced.filters.some((f) => f.op === 'or')).to.equal(true);
+      });
+    });
+
     it('sends the date window as CBF_date__start (gte) / CBF_date__end (lte) in advanced', () => {
       const payload = buildUrlPromptsPayload({
         url: URL, startDate: '2026-06-29', endDate: '2026-07-26',

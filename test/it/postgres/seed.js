@@ -21,7 +21,9 @@ import { facsAccessMappings } from './seed-data/facs-access-mappings.js';
 import { sites } from './seed-data/sites.js';
 import { audits } from './seed-data/audits.js';
 import { opportunities } from './seed-data/opportunities.js';
+import { opportunityUrls } from './seed-data/opportunity-urls.js';
 import { suggestions } from './seed-data/suggestions.js';
+import { suggestionUrls } from './seed-data/suggestion-urls.js';
 import { fixes, fixEntitySuggestions } from './seed-data/fixes.js';
 import { experiments } from './seed-data/experiments.js';
 import { siteTopPages } from './seed-data/site-top-pages.js';
@@ -283,6 +285,7 @@ async function seed() {
     insertRows('sentiment_guidelines', sentimentGuidelines),
     insertRows('brand_sites', brandSites),
     insertRows('tickets', tickets),
+    insertRows('opportunity_urls', opportunityUrls),
   ]);
 
   // Level 4: depend on fix_entities + suggestions + tickets
@@ -290,6 +293,7 @@ async function seed() {
     insertRows('fix_entity_suggestions', fixEntitySuggestions),
     insertRows('ticket_suggestions', ticketSuggestions),
     insertRows('oae_validations', oaeValidations),
+    insertRows('suggestion_urls', suggestionUrls),
   ]);
 }
 
