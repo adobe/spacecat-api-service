@@ -4636,13 +4636,13 @@ describe('LlmoController', () => {
       };
     });
 
-    it('validates LLMO access before handling feedback', async () => {
+    it('validates site access before handling feedback', async () => {
       const result = await controller.submitBrandClaimsFeedback(reqCtx);
       expect(result.status).to.equal(400);
       expect((await result.json()).message).to.equal('eventId must be a valid UUID');
     });
 
-    it('returns 403 when LLMO access validation fails', async () => {
+    it('returns 403 when site access validation fails', async () => {
       const controllerDenied = controllerWithAccessDenied(mockContext);
       const result = await controllerDenied.submitBrandClaimsFeedback(reqCtx);
       expect(result.status).to.equal(403);

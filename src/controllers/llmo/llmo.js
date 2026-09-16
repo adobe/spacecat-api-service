@@ -1461,12 +1461,14 @@ function LlmoController(ctx) {
     const { log } = context;
     const { siteId } = context.params;
     try {
-      const siteValidation = await getSiteAndValidateLlmo(context);
-      if (siteValidation.status) {
-        return siteValidation;
+      const site = await context.dataAccess.Site.findById(siteId);
+      if (!site) {
+        return notFound(`Site not found: ${siteId}`);
       }
-
-      return await handleBrandClaimsFeedback(context, siteValidation.site);
+      if (!await accessControlUtil.hasAccess(site)) {
+        return forbidden('Only users belonging to the organization can view its sites');
+      }
+      return await handleBrandClaimsFeedback(context, site);
     } catch (error) {
       log.error(`Error submitting Brand Claims feedback for site ${siteId}: ${error.message}`);
       return internalServerError('Unable to submit Brand Claims feedback');
