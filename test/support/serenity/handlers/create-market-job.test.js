@@ -31,6 +31,7 @@ function makeJob(metadata) {
 
 describe('handlers/create-market-job.js (PR-C, LLMO-7352/LLMO-7418)', () => {
   let orchestrateCreateMarketSubworkspaceStub;
+  let assertChainedJobStillAppliesStub;
   let createTransportStub;
   let transport;
   let context;
@@ -40,6 +41,8 @@ describe('handlers/create-market-job.js (PR-C, LLMO-7352/LLMO-7418)', () => {
     createTransportStub = sinon.stub().returns(transport);
     orchestrateCreateMarketSubworkspaceStub = sinon.stub()
       .resolves({ status: 201, body: { brandId: BRAND_ID, geoTargetId: 2840, languageCode: 'en' } });
+    // Default: the brand is still bound to the workspace this job was enqueued against.
+    assertChainedJobStillAppliesStub = sinon.stub().resolves({ ok: true });
     context = {
       env: {},
       log: fakeLog(),
@@ -55,6 +58,9 @@ describe('handlers/create-market-job.js (PR-C, LLMO-7352/LLMO-7418)', () => {
       '../../../../src/support/serenity/handlers/create-market-orchestration.js': {
         orchestrateCreateMarketSubworkspace: orchestrateCreateMarketSubworkspaceStub,
       },
+      '../../../../src/support/serenity/handlers/chained-job-guard.js': {
+        assertChainedJobStillApplies: assertChainedJobStillAppliesStub,
+      },
     });
   }
 
@@ -68,6 +74,59 @@ describe('handlers/create-market-job.js (PR-C, LLMO-7352/LLMO-7418)', () => {
       ...overrides,
     };
   }
+
+  // A deactivate can land between the provisioning worker promoting this workspace and this
+  // chained job running: it decommissions the workspace, clears the pointer and tombstones the
+  // brand's mapping rows. Acting anyway creates and PUBLISHES a live project inside a workspace
+  // that was just torn down, and writes a fresh mapping row for a brand that points nowhere —
+  // the epic's "a late worker cannot recreate, repoint, or reactivate" criterion.
+  //
+  // The orchestration cannot catch this: this handler passes `preResolvedWorkspaceId`, which
+  // makes ensureSubworkspace skip its own pointer read entirely.
+  describe('stands down when the brand moved on mid-chain', () => {
+    it('asks about THIS brand and THIS workspace — the wiring the stand-down depends on', async () => {
+      // Guards the call itself: a wrong brandId or workspaceId here would make the guard compare
+      // the wrong pair and wave every job through, with the stand-down tests below still green.
+      const { createMarketJobHandler } = await loadHandler();
+
+      await createMarketJobHandler(context, makeJob(makeMetadata()), 'token');
+
+      expect(assertChainedJobStillAppliesStub).to.have.been.calledOnce;
+      const args = assertChainedJobStillAppliesStub.firstCall.args[0];
+      expect(args.brandId).to.equal(BRAND_ID);
+      expect(args.workspaceId).to.equal(WORKSPACE_ID);
+      expect(args.postgrestClient).to.equal(context.dataAccess.services.postgrestClient);
+    });
+
+    it('does not touch Semrush when the brand moved on, and reports 207 rather than success', async () => {
+      assertChainedJobStillAppliesStub.resolves({ ok: false, reason: 'workspace-repointed-or-cleared' });
+      const { createMarketJobHandler } = await loadHandler();
+
+      const result = await createMarketJobHandler(context, makeJob(makeMetadata()), 'token');
+
+      expect(orchestrateCreateMarketSubworkspaceStub).to.not.have.been.called;
+      expect(result.status).to.equal(207);
+      expect(result.body.status).to.equal('superseded');
+    });
+
+    it('does not touch Semrush when the brand no longer exists', async () => {
+      assertChainedJobStillAppliesStub.resolves({ ok: false, reason: 'brand-deleted' });
+      const { createMarketJobHandler } = await loadHandler();
+
+      await createMarketJobHandler(context, makeJob(makeMetadata()), 'token');
+
+      expect(orchestrateCreateMarketSubworkspaceStub).to.not.have.been.called;
+    });
+
+    it('PROCEEDS when the guard says the job still applies', async () => {
+      assertChainedJobStillAppliesStub.resolves({ ok: true });
+      const { createMarketJobHandler } = await loadHandler();
+
+      await createMarketJobHandler(context, makeJob(makeMetadata()), 'token');
+
+      expect(orchestrateCreateMarketSubworkspaceStub).to.have.been.calledOnce;
+    });
+  });
 
   it('runs the orchestration with the pre-resolved (already-ready) workspace id, skipping ensureSubworkspace', async () => {
     const { createMarketJobHandler } = await loadHandler();

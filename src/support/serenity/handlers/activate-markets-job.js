@@ -13,6 +13,7 @@
 // @ts-check
 
 import { createSerenityTransport } from '../rest-transport.js';
+import { assertChainedJobStillApplies } from './chained-job-guard.js';
 import { orchestrateActivateMarkets } from './activate-markets-orchestration.js';
 import { enqueueMarketGenerations } from '../async-prompt-gen.js';
 
@@ -55,6 +56,22 @@ export async function activateMarketsJobHandler(context, job, accessToken) {
     requestBody,
     callerId = 'unknown',
   } = metadata;
+
+  // A deactivate can land between the provisioning worker promoting this workspace and this
+  // chained job running. Deactivate decommissions the workspace and clears the pointer; acting
+  // anyway would create and publish a live project inside it. The orchestration cannot catch
+  // this for us — we pass `preResolvedWorkspaceId`, which makes ensureSubworkspace skip its own
+  // pointer read entirely.
+  const stillApplies = await assertChainedJobStillApplies({
+    brandId,
+    workspaceId,
+    postgrestClient: dataAccess?.services?.postgrestClient,
+    log,
+    jobName: 'activate-markets-job',
+  });
+  if (!stillApplies.ok) {
+    return { status: 207, body: { brandId, status: 'superseded', markets: [] } };
+  }
 
   const transport = createSerenityTransport({ env, imsToken: accessToken });
 

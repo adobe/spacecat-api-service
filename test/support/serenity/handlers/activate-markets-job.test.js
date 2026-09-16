@@ -31,6 +31,7 @@ function makeJob(metadata) {
 
 describe('handlers/activate-markets-job.js (PR-C, LLMO-7352/LLMO-7418)', () => {
   let orchestrateActivateMarketsStub;
+  let assertChainedJobStillAppliesStub;
   let createTransportStub;
   let transport;
   let context;
@@ -40,6 +41,8 @@ describe('handlers/activate-markets-job.js (PR-C, LLMO-7352/LLMO-7418)', () => {
     createTransportStub = sinon.stub().returns(transport);
     orchestrateActivateMarketsStub = sinon.stub()
       .resolves({ status: 200, body: { brandId: BRAND_ID, status: 'active', markets: [] } });
+    // Default: the brand is still bound to the workspace this job was enqueued against.
+    assertChainedJobStillAppliesStub = sinon.stub().resolves({ ok: true });
     context = {
       env: {},
       log: fakeLog(),
@@ -54,6 +57,9 @@ describe('handlers/activate-markets-job.js (PR-C, LLMO-7352/LLMO-7418)', () => {
       },
       '../../../../src/support/serenity/handlers/activate-markets-orchestration.js': {
         orchestrateActivateMarkets: orchestrateActivateMarketsStub,
+      },
+      '../../../../src/support/serenity/handlers/chained-job-guard.js': {
+        assertChainedJobStillApplies: assertChainedJobStillAppliesStub,
       },
     });
   }
@@ -70,6 +76,60 @@ describe('handlers/activate-markets-job.js (PR-C, LLMO-7352/LLMO-7418)', () => {
       ...overrides,
     };
   }
+
+  // A deactivate can land between the provisioning worker promoting this workspace and this
+  // chained job running: it decommissions the workspace and clears the pointer. Activating
+  // markets anyway publishes live projects inside a workspace that was just torn down — the
+  // epic's "a late worker cannot recreate, repoint, or reactivate" criterion. The orchestration
+  // cannot catch it: this handler passes `preResolvedWorkspaceId`, so ensureSubworkspace skips
+  // its own pointer read entirely.
+  describe('stands down when the brand moved on mid-chain', () => {
+    it('asks about THIS brand and THIS workspace — the wiring the stand-down depends on', async () => {
+      // Guards the call itself: a wrong brandId or workspaceId here would make the guard compare
+      // the wrong pair and wave every job through, with the stand-down tests below still green.
+      const { activateMarketsJobHandler } = await loadHandler();
+
+      await activateMarketsJobHandler(context, makeJob(makeMetadata()), 'token');
+
+      expect(assertChainedJobStillAppliesStub).to.have.been.calledOnce;
+      const args = assertChainedJobStillAppliesStub.firstCall.args[0];
+      expect(args.brandId).to.equal(BRAND_ID);
+      expect(args.workspaceId).to.equal(WORKSPACE_ID);
+      expect(args.postgrestClient).to.equal(context.dataAccess.services.postgrestClient);
+    });
+
+    it('does not activate markets when the brand moved on, and reports 207 rather than success', async () => {
+      assertChainedJobStillAppliesStub.resolves({ ok: false, reason: 'workspace-repointed-or-cleared' });
+      const { activateMarketsJobHandler } = await loadHandler();
+
+      const result = await activateMarketsJobHandler(context, makeJob(makeMetadata()), 'token');
+
+      expect(orchestrateActivateMarketsStub).to.not.have.been.called;
+      expect(result.status).to.equal(207);
+      expect(result.body.status).to.equal('superseded');
+    });
+
+    it('does not build a Semrush transport at all when standing down', async () => {
+      // The stand-down returns before the transport is constructed, so a token that is already
+      // expired by the time this late job runs cannot produce a spurious failure.
+      assertChainedJobStillAppliesStub.resolves({ ok: false, reason: 'brand-deleted' });
+      const { activateMarketsJobHandler } = await loadHandler();
+
+      await activateMarketsJobHandler(context, makeJob(makeMetadata()), 'token');
+
+      expect(createTransportStub).to.not.have.been.called;
+      expect(orchestrateActivateMarketsStub).to.not.have.been.called;
+    });
+
+    it('PROCEEDS when the guard says the job still applies', async () => {
+      assertChainedJobStillAppliesStub.resolves({ ok: true });
+      const { activateMarketsJobHandler } = await loadHandler();
+
+      await activateMarketsJobHandler(context, makeJob(makeMetadata()), 'token');
+
+      expect(orchestrateActivateMarketsStub).to.have.been.calledOnce;
+    });
+  });
 
   it('runs the orchestration with the pre-resolved (already-ready) workspace id, skipping ensureSubworkspace', async () => {
     const { activateMarketsJobHandler } = await loadHandler();
