@@ -1,3 +1,10 @@
+# [1.816.0](https://github.com/adobe/spacecat-api-service/compare/v1.815.0...v1.816.0) (2026-09-16)
+
+
+### Features
+
+* add opportunities and suggestions by-url lookup endpoints ([#3192](https://github.com/adobe/spacecat-api-service/issues/3192)) ([0a5edd6](https://github.com/adobe/spacecat-api-service/commit/0a5edd6f3bd92a1dc0ffae983cf9f33901954f5a))
+
 # [1.815.0](https://github.com/adobe/spacecat-api-service/compare/v1.814.3...v1.815.0) (2026-09-16)
 
 
