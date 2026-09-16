@@ -1885,6 +1885,11 @@ function SerenityController(context, log, env) {
           }
           const job = await createAndEnqueueJob(ctx, {
             jobType: PROVISION_WORKSPACE_JOB_TYPE,
+            // Fail-closed pair binding (Gap 1, #3252): this job writes to Semrush, so refuse to
+            // enqueue it on anything but the Semrush pair rather than mint a token on the wrong
+            // delegated credential. Same binding as the sibling async branches — these three were
+            // added by this phase after the others were bound, and were missed.
+            requirePair: PROMISE_PAIR_SEMRUSH,
             metadata: {
               brandId: brandUuid,
               attemptId,
@@ -1911,7 +1916,9 @@ function SerenityController(context, log, env) {
               brandId: brandUuid, attemptId, jobId: job.getId(), error: updateError?.message,
             });
           });
-          return accepted({ jobId: job.getId(), status: job.getStatus() });
+          return accepted({
+            jobId: job.getId(), jobType: PROVISION_WORKSPACE_JOB_TYPE, status: job.getStatus(),
+          });
         }
         // PR-C guard (LLMO-7352/LLMO-7418): this branch stays synchronous, but a market-creating
         // endpoint may have an async provisioning attempt in flight for this SAME brand — without
@@ -2032,6 +2039,11 @@ function SerenityController(context, log, env) {
           }
           const job = await createAndEnqueueJob(ctx, {
             jobType: PROVISION_WORKSPACE_JOB_TYPE,
+            // Fail-closed pair binding (Gap 1, #3252): this job writes to Semrush, so refuse to
+            // enqueue it on anything but the Semrush pair rather than mint a token on the wrong
+            // delegated credential. Same binding as the sibling async branches — these three were
+            // added by this phase after the others were bound, and were missed.
+            requirePair: PROMISE_PAIR_SEMRUSH,
             metadata: {
               brandId: brandUuid,
               attemptId,
@@ -2059,7 +2071,9 @@ function SerenityController(context, log, env) {
               brandId: brandUuid, attemptId, jobId: job.getId(), error: updateError?.message,
             });
           });
-          return accepted({ jobId: job.getId(), status: job.getStatus() });
+          return accepted({
+            jobId: job.getId(), jobType: PROVISION_WORKSPACE_JOB_TYPE, status: job.getStatus(),
+          });
         }
         // PR-C guard (LLMO-7352/LLMO-7418): see the wasPending branch above for rationale.
         await guardAgainstConcurrentProvisioning(

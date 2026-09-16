@@ -2624,6 +2624,11 @@ describe('SerenityController', () => {
       }));
 
       expect(response.status).to.equal(202);
+      // The published 202 contract (SerenityProvisioningJobAccepted) requires jobType; these two
+      // phase-4 branches were added after the sibling branches got it, and shipped without it.
+      expect(await readBody(response)).to.deep.equal({
+        jobId: 'job-abc', jobType: 'serenity-provision-workspace', status: 'IN_PROGRESS',
+      });
       expect(ensureSubworkspaceStub).to.not.have.been.called;
       // LLMO-7418 external-review Finding 9: reconciles a stale in-flight attempt first.
       expect(guardAgainstConcurrentProvisioningStub).to.have.been.calledOnceWith(BRAND);
@@ -2728,11 +2733,18 @@ describe('SerenityController', () => {
       }));
 
       expect(response.status).to.equal(202);
+      // The published 202 contract (SerenityProvisioningJobAccepted) requires jobType; these two
+      // phase-4 branches were added after the sibling branches got it, and shipped without it.
+      expect(await readBody(response)).to.deep.equal({
+        jobId: 'job-abc', jobType: 'serenity-provision-workspace', status: 'IN_PROGRESS',
+      });
       expect(ensureSubworkspaceStub).to.not.have.been.called;
       // LLMO-7418 external-review Finding 9: reconciles a stale in-flight attempt first.
       expect(guardAgainstConcurrentProvisioningStub).to.have.been.calledOnceWith(BRAND);
       expect(createAndEnqueueJobStub).to.have.been.calledOnce;
       const [, enqueueArgs] = createAndEnqueueJobStub.firstCall.args;
+      // Fail-closed pair binding (Gap 1, #3252) — missing on this branch until now.
+      expect(enqueueArgs.requirePair).to.equal('SEMRUSH');
       expect(enqueueArgs.metadata.chainedJobType).to.equal('serenity-activate-brand-workspace');
       expect(enqueueArgs.metadata.chainedJobMetadata)
         .to.deep.equal({ brandId: BRAND, wasPending: false });

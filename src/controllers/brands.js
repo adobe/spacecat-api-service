@@ -2384,6 +2384,11 @@ function BrandsController(ctx, log, env) {
         try {
           const job = await createAndEnqueueJob(context, {
             jobType: PROVISION_WORKSPACE_JOB_TYPE,
+            // Fail-closed pair binding (Gap 1, #3252): this job writes to Semrush, so refuse to
+            // enqueue it on anything but the Semrush pair rather than mint a token on the wrong
+            // delegated credential. Same binding as the sibling async branches — these three were
+            // added by this phase after the others were bound, and were missed.
+            requirePair: PROMISE_PAIR_SEMRUSH,
             metadata: {
               brandId: asyncBrandId,
               attemptId,
