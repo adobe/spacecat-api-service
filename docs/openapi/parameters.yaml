@@ -579,3 +579,18 @@ referralUrlPathPrefix:
     type: string
     maxLength: 512
     example: '/knicks'
+
+referralPlatform:
+  name: platform
+  in: query
+  required: false
+  description: >-
+    UI platform code mapped to the DB `trf_platform` value. A single value
+    (e.g. `openai`) filters to that platform. Serenity multi-select passes a
+    comma-separated list (e.g. `openai,google`); results are the additive union
+    across the listed platforms. `all` anywhere in the list, an unknown code, or
+    an empty value means no platform filter. Unknown codes in a list are dropped;
+    a list that collapses to one known code behaves identically to a single value.
+  schema:
+    type: string
+    example: 'openai,google'

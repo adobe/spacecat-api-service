@@ -89,6 +89,56 @@ const PLATFORM_CODE_TO_DB = {
   mistral: 'mistral',
 };
 
+// A comma in the `platform` param signals a multi-select (Serenity). Returns the
+// trimmed non-empty tokens, or null when the value is a single value / absent —
+// which keeps the single-platform path byte-identical to before.
+function splitPlatformList(raw) {
+  if (typeof raw !== 'string' || !raw.includes(',')) {
+    return null;
+  }
+  return raw.split(',').map((t) => t.trim()).filter(Boolean);
+}
+
+// Prototype-safe UI-code → DB-value lookup: a raw like `toString`/`constructor` must not
+// resolve to an inherited Object.prototype member (which would leak a Function into the
+// RPC param). Own-property check only.
+function toDbPlatform(code) {
+  return Object.hasOwn(PLATFORM_CODE_TO_DB, code) ? PLATFORM_CODE_TO_DB[code] : null;
+}
+
+// Resolves the `platform` param into exactly one of two shapes:
+//   single  → { platform: <db value|null>, platforms: null }   (unchanged, fail-open)
+//   multi   → { platform: null, platforms: <db values[]|null> } (comma list; 'all' → no filter)
+// Unknown codes are silently dropped (matches the project-wide whitelist-filter
+// convention: silent-drop rather than 400 — see #2290). A result of 0 or 1 real tokens
+// collapses to the SINGLE path, so a trailing/bare comma, a dup, or an unknown-heavy list
+// (`openai,` / `openai,openai` / `openai,bogus`) stays byte-identical to `openai` — scalar
+// `p_platform`, not `p_platforms`. The scalar and array RPC params AND-intersect, so a real
+// multi selection nulls the scalar.
+function parsePlatforms(raw) {
+  const tokens = splitPlatformList(raw);
+  if (!tokens) {
+    return { platform: toDbPlatform(raw), platforms: null };
+  }
+  // An explicit 'all' anywhere in the list means "no platform filter".
+  if (tokens.includes('all')) {
+    return { platform: null, platforms: null };
+  }
+  const mapped = [...new Set(tokens.map(toDbPlatform).filter(Boolean))];
+  if (mapped.length >= 2) {
+    return { platform: null, platforms: mapped };
+  }
+  // 0 → fail-open (no filter); 1 → single path (byte-identical to a scalar request).
+  return { platform: mapped[0] ?? null, platforms: null };
+}
+
+// Spread into every referral RPC param set. Only present for a real multi-select, so a
+// single-platform request omits it entirely (byte-identical, and works against a
+// pre-migration RPC signature).
+function buildPlatformRpcParam(parsed) {
+  return parsed.platforms ? { p_platforms: parsed.platforms } : {};
+}
+
 function defaultDateRange() {
   const end = new Date();
   const start = new Date();
@@ -148,11 +198,20 @@ function parseParams(context) {
   const defaults = defaultDateRange();
   const rawSource = q.source;
   const source = VALID_SOURCES.has(rawSource) ? rawSource : DEFAULT_SOURCE;
+  const { platform, platforms } = parsePlatforms(q.platform);
+  // Keep the silent-drop observable: a comma list that matched no known platform
+  // (and isn't the explicit 'all') falls open to all platforms — log it.
+  if (typeof q.platform === 'string' && q.platform.includes(',') && !platform && !platforms
+    && !q.platform.split(',').some((t) => t.trim() === 'all')) {
+    context.log?.debug?.(`referral-traffic: platform list "${q.platform}" matched no known platforms — no platform filter applied`);
+  }
   return {
     source,
     startDate: q.startDate || q.start_date || defaults.startDate,
     endDate: q.endDate || q.end_date || defaults.endDate,
-    platform: PLATFORM_CODE_TO_DB[q.platform] ?? null,
+    platform,
+    // Additive multi-select inclusion list (Serenity). null → single/absent.
+    platforms,
     region: q.region || null,
     pageIntent: q.pageIntent || q.page_intent || null,
     deviceType: q.deviceType || q.device_type || q.device || null,
@@ -177,6 +236,9 @@ function commonRpcParams(siteId, parsed) {
     p_category_name: parsed.category,
     // LLMO-7315: optional url-path-prefix scope; null = no filter (unchanged).
     p_url_path_prefix: parsed.urlPathPrefix,
+    // Additive multi-select platform inclusion list; only present for a real
+    // multi-select, so single/all/legacy requests stay byte-identical.
+    ...buildPlatformRpcParam(parsed),
   };
 }
 
