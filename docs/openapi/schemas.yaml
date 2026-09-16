@@ -262,6 +262,20 @@ SlackConfig:
       description: Slack URL of the channel to send notifications to
       type: string
       example: 'https://example-workspace.slack.com/archives/C1234567890'
+TeamsConfig:
+  type: object
+  additionalProperties: true
+  properties:
+    channel:
+      description: The Microsoft Teams channel name for collaboration
+      type: string
+      example: 'General'
+    link:
+      description: >-
+        The Microsoft Teams channel deep link. Unlike Slack, a Teams channel link is a
+        single opaque URL and cannot be decomposed into a separate workspace + channel pair.
+      type: string
+      example: 'https://teams.microsoft.com/l/channel/19%3Aabc123%40thread.tacv2/General?groupId=00000000-0000-0000-0000-000000000000&tenantId=00000000-0000-0000-0000-000000000000'
 Config:
   type: object
   additionalProperties: true
@@ -269,6 +283,9 @@ Config:
     slack:
       description: Optional. The Slack configuration
       $ref: '#/SlackConfig'
+    teams:
+      description: Optional. The Microsoft Teams configuration
+      $ref: '#/TeamsConfig'
     handlers:
       description: Optional. The Alert configuration
       $ref: '#/HandlerConfig'
@@ -668,6 +685,9 @@ Site:
       slack:
         channel: 'C1234567890'
         workspace: 'example-workspace'
+      teams:
+        channel: 'General'
+        link: 'https://teams.microsoft.com/l/channel/19%3Aabc123%40thread.tacv2/General?groupId=00000000-0000-0000-0000-000000000000&tenantId=00000000-0000-0000-0000-000000000000'
       handlers:
         '404':
           mentions:
@@ -818,7 +838,7 @@ SiteListItem:
       type: [object, 'null']
       description: |
         Slim configuration subset returned by `ConfigDto.toListJSON` (selected llmo,
-        edgeOptimizeConfig, slack, brandConfig, fetchConfig, handlers fields).
+        edgeOptimizeConfig, slack, teams, brandConfig, fetchConfig, handlers fields).
       additionalProperties: true
   required:
     - id
