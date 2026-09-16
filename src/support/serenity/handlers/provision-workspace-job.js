@@ -112,6 +112,41 @@ const defaultSleep = (ms) => new Promise((resolve) => {
 });
 
 /**
+ * Runs `enqueue` with the same bounded retry the chained-job enqueue uses, then rethrows.
+ *
+ * Deliberately rethrows on exhaustion rather than swallowing: unlike the chained enqueue — whose
+ * workspace is already promoted, so a lost chain must not re-fail the brand — a lost self-requeue
+ * means this attempt has no future hop, and the caller's outer catch is what records that. The
+ * retry only removes the single-blip case, it does not change the terminal behaviour.
+ *
+ * @param {() => Promise<object>} enqueue
+ * @param {object} ctx - `{ log, brandId, attemptId, sleep }`; `sleep` is injectable for tests.
+ * @returns {Promise<object>} the enqueued job.
+ */
+async function enqueueWithRetry(enqueue, {
+  log, brandId, attemptId, sleep = defaultSleep,
+}) {
+  let lastError;
+  for (let attempt = 0; attempt < CHAINED_JOB_ENQUEUE_ATTEMPTS; attempt += 1) {
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      return await enqueue();
+    } catch (error) {
+      lastError = error;
+      const isLastAttempt = attempt === CHAINED_JOB_ENQUEUE_ATTEMPTS - 1;
+      log?.warn?.('provision-workspace-job: self-requeue enqueue failed', {
+        brandId, attemptId, attempt: attempt + 1, willRetry: !isLastAttempt, error: error?.message,
+      });
+      if (!isLastAttempt) {
+        // eslint-disable-next-line no-await-in-loop
+        await sleep(CHAINED_JOB_ENQUEUE_RETRY_DELAYS_MS[attempt]);
+      }
+    }
+  }
+  throw lastError;
+}
+
+/**
  * Enqueues the follow-up job named in `metadata.chainedJobType` (PR-C, LLMO-7352/LLMO-7418) once
  * the sub-workspace this attempt was provisioning is confirmed `ready` — e.g. the
  * `serenity-create-market` job that runs {@link orchestrateCreateMarketSubworkspace} against the
@@ -581,7 +616,13 @@ export async function provisionWorkspaceHandler(context, job, accessToken) {
 
     const nextDepth = requeueDepth + 1;
     const nextDelaySeconds = computeProvisioningBackoffSeconds(nextDepth - 1);
-    const newJob = await createAndEnqueueJob(context, {
+    // Bounded retry, exactly like the chained-job enqueue above (Finding 12) and for a sharper
+    // reason. A bare enqueue that throws here reaches the outer catch with `requeueEnqueued`
+    // still false, so a single transient SQS failure does not merely lose a hop: it runs
+    // `cleanupIfOwned` on the workspace this attempt just created, and marks a perfectly healthy
+    // attempt failed. Nothing rescues it either — this handler never throws a retryable job
+    // error, so the runner marks the job FAILED and stops rather than letting SQS redeliver.
+    const newJob = await enqueueWithRetry(() => createAndEnqueueJob(context, {
       jobType: PROVISION_WORKSPACE_JOB_TYPE,
       // Forward the CURRENT job's already-exchanged promise token explicitly — this worker has
       // no HTTP request context, so createAndEnqueueJob cannot mint a fresh one itself.
@@ -614,7 +655,7 @@ export async function provisionWorkspaceHandler(context, job, accessToken) {
         } : {}),
       },
       delaySeconds: nextDelaySeconds,
-    });
+    }), { log, brandId, attemptId });
     // LLMO-7418 external-review Finding 16: the self-requeue succeeded — a future hop now owns
     // `candidate` (forwarded in its metadata above) and will poll/use it, so the outer catch
     // must not clean it up even if the freshness-optimization write just below throws.

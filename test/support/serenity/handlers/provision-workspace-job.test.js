@@ -647,6 +647,38 @@ describe('handlers/provision-workspace-job.js (LLMO-7352 / LLMO-7418)', () => {
         expect(createAndEnqueueJobStub.callCount).to.equal(2);
       });
 
+      // The self-requeue had NO retry while the chained enqueue had three, and the asymmetry
+      // was dangerous in the wrong direction: a bare throw here reaches the outer catch with
+      // `requeueEnqueued` still false, so one transient SQS blip empties the workspace this
+      // attempt just created and marks a healthy attempt failed. Nothing rescues it either —
+      // this handler never throws a retryable job error, so the runner stops rather than
+      // letting SQS redeliver.
+      it('recovers on a retry after one transient SELF-REQUEUE enqueue failure', async () => {
+        transport.getWorkspaceStatus.resolves({ status: 'not_ready' });
+        createAndEnqueueJobStub
+          .onFirstCall().rejects(new Error('transient sqs blip'))
+          .onSecondCall().resolves({ getId: () => 'requeued-job-retry-1' });
+        const { provisionWorkspaceHandler } = await loadHandler();
+
+        const result = await provisionWorkspaceHandler(context, makeJob(makeMetadata()), 'token');
+
+        expect(result.requeuedJobId).to.equal('requeued-job-retry-1');
+        expect(createAndEnqueueJobStub.callCount).to.equal(2);
+        // The whole point: the workspace this attempt created was NOT torn down.
+        expect(emptyWorkspaceBestEffortStub).to.not.have.been.called;
+      });
+
+      it('still fails the attempt when the self-requeue enqueue fails every time', async () => {
+        // The retry removes the single-blip case; it must not change the terminal behaviour.
+        transport.getWorkspaceStatus.resolves({ status: 'not_ready' });
+        createAndEnqueueJobStub.rejects(new Error('sqs down'));
+        const { provisionWorkspaceHandler } = await loadHandler();
+
+        await expect(provisionWorkspaceHandler(context, makeJob(makeMetadata()), 'token'))
+          .to.be.rejectedWith('sqs down');
+        expect(createAndEnqueueJobStub.callCount).to.equal(3);
+      });
+
       it('threads chainedJobType/chainedJobMetadata forward across a self-requeue hop', async () => {
         transport.getWorkspaceStatus.resolves({ status: 'not_ready' });
         const { provisionWorkspaceHandler } = await loadHandler();
