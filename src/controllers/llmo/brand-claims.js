@@ -436,6 +436,12 @@ export async function handleBrandClaimsFeedback(context, site) {
   };
   const markerKey = `${PRODUCT_FEEDBACK_PREFIX}/idempotency/${eventId}.json`;
   let recordToStore = record;
+  // Local S3 emulators used by integration tests do not configure a KMS backend
+  // for explicit SSE headers. AWS environments have no custom endpoint and must
+  // keep the bucket-policy-required AES256 header.
+  const encryption = env.AWS_ENDPOINT_URL_S3
+    ? {}
+    : { ServerSideEncryption: 'AES256' };
 
   try {
     await s3.s3Client.send(new s3.PutObjectCommand({
@@ -443,7 +449,7 @@ export async function handleBrandClaimsFeedback(context, site) {
       Key: markerKey,
       Body: JSON.stringify(record),
       ContentType: 'application/json',
-      ServerSideEncryption: 'AES256',
+      ...encryption,
       IfNoneMatch: '*',
     }));
   } catch (error) {
@@ -480,7 +486,7 @@ export async function handleBrandClaimsFeedback(context, site) {
       Key: key,
       Body: JSON.stringify(recordToStore),
       ContentType: 'application/json',
-      ServerSideEncryption: 'AES256',
+      ...encryption,
       IfNoneMatch: '*',
     }));
   } catch (error) {

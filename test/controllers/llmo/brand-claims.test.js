@@ -1093,6 +1093,20 @@ describe('handleBrandClaimsFeedback', () => {
     expect(record.abv_id).to.equal(expectedAbvId);
   });
 
+  it('omits the explicit encryption header for a local S3 emulator', async () => {
+    const result = await handleBrandClaimsFeedback({
+      ...context,
+      env: {
+        ...context.env,
+        AWS_ENDPOINT_URL_S3: 'http://localhost:9100',
+      },
+    }, site);
+
+    expect(result.status).to.equal(202);
+    expect(s3Send.firstCall.args[0].input).not.to.have.property('ServerSideEncryption');
+    expect(s3Send.secondCall.args[0].input).not.to.have.property('ServerSideEncryption');
+  });
+
   it('rejects invalid ids, rating, and comment shape before writing', async () => {
     const results = await Promise.all([
       { ...context.data, eventId: 'bad' },
