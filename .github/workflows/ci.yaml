@@ -255,6 +255,23 @@ jobs:
       - name: Deploy worker
         # dev -> deploy-dev:worker, stage -> deploy-stage:worker,
         # prod -> deploy:worker (see package.json scripts).
+        #
+        # DEDICATED EXECUTION ROLE (#787): unlike the main api-service Lambda and
+        # the serenity-market-probe (both on the shared spacecat-role-lambda-generic
+        # via hlx.awsRole!important), the worker deploy scripts pin the Lambda's
+        # execution role to spacecat-role-serenity-market-worker with a per-invocation
+        # `--aws-role!important` override. The `!important` suffix is required: a plain
+        # `--aws-role` is silently clobbered by the pkgConf hlx.awsRole!important. The
+        # ${env.AWS_ACCOUNT_ID} in that ARN resolves from the AWS_ACCOUNT_ID env below,
+        # so it targets the correct per-env account.
+        #
+        # DEPLOY DEPENDENCY: the deploy identity (spacecat-role-github-actions, assumed
+        # by configure-aws above) MUST hold iam:PassRole on
+        # spacecat-role-serenity-market-worker, and that role MUST exist with the
+        # worker's full permission set, or hedy's UpdateFunctionConfiguration /
+        # CreateFunction fails. Both are provisioned by the companion
+        # spacecat-infrastructure PR; this deploy path first exercises the new role in
+        # stage/prod (api-service has no CI dev-deploy path).
         if: steps.paths-check.outputs.changed != 'false'
         run: npm run ${{ (matrix.environment == 'dev' && 'deploy-dev:worker') || (matrix.environment == 'stage' && 'deploy-stage:worker') || (matrix.environment == 'prod' && 'deploy:worker') }}
         env:
