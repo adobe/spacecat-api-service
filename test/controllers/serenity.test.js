@@ -3220,6 +3220,37 @@ describe('SerenityController', () => {
           expect(body.result).to.deep.equal(finalResult);
         });
 
+        // Luis review, PR #3246: the ORIGINAL job is ownership-checked before the chain-follow
+        // loop, but followed hops were not. Chain pointers are worker-written and never
+        // caller-supplied, so this is defence in depth — but the handler is now a generic
+        // "serve any job in this brand's chain" surface, and a pointer resolving to another
+        // brand's job must not hand that job's result to this caller.
+        it('stops following a chain hop that belongs to a DIFFERENT brand, and never serves its result', async () => {
+          const controller = SerenityController({ env: {} }, fakeLog(), {});
+          const foreignResult = { status: 201, body: { projectId: 'someone-elses-project' } };
+          const ctx = ctxWithChain({
+            [JOB]: makeAsyncJob({
+              id: JOB,
+              status: 'COMPLETED',
+              jobType: 'serenity-provision-workspace',
+              result: { provisioningStatus: 'ready', chainedJobId: CHAINED_JOB },
+            }),
+            [CHAINED_JOB]: makeAsyncJob({
+              id: CHAINED_JOB,
+              status: 'COMPLETED',
+              result: foreignResult,
+              brandId: 'a-different-brand',
+            }),
+          });
+
+          const response = await controller.getPromptsJobStatus(ctx);
+          const body = await readBody(response);
+
+          // Stops at the last hop it owns and reports THAT, rather than the foreign result.
+          expect(body.jobId).to.equal(JOB);
+          expect(body.result).to.not.deep.equal(foreignResult);
+        });
+
         it('follows a requeuedJobId and reports IN_PROGRESS while the chain is still settling', async () => {
           const controller = SerenityController({ env: {} }, fakeLog(), {});
           const ctx = ctxWithChain({

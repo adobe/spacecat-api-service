@@ -2272,6 +2272,14 @@ function SerenityController(context, log, env) {
         if (!nextJob) {
           break;
         }
+        // Re-assert ownership on every followed hop, not just the original job (Luis review,
+        // PR #3246). Chain pointers are written by the worker and are never caller-supplied, so
+        // this is defence in depth rather than a live IDOR — but this handler is now a generic
+        // "serve any job in this brand's chain" surface, and a corrupt pointer resolving to
+        // another brand's job would otherwise return that job's result to this caller.
+        if (nextJob.getMetadata?.()?.brandId !== auth.brandUuid) {
+          break;
+        }
         job = nextJob;
       }
       /** @type {'classifyPrompts' | 'bulkTags' | 'tagImpact' | 'provisionWorkspace'} */
