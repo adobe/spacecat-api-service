@@ -46,10 +46,12 @@ export default function brandClaimsFeedbackTests(getHttpClient, resetData) {
 
     beforeEach(() => resetData());
     after(async () => {
-      await Promise.all(eventIds.map(({ key }) => s3().send(new DeleteObjectCommand({
-        Bucket: BUCKET,
-        Key: key,
-      })).catch(() => {})));
+      await Promise.all(eventIds
+        .flatMap(({ keys }) => keys)
+        .map((key) => s3().send(new DeleteObjectCommand({
+          Bucket: BUCKET,
+          Key: key,
+        })).catch(() => {})));
     });
 
     it('stores feedback for an authorized viewer', async () => {
@@ -65,15 +67,14 @@ export default function brandClaimsFeedbackTests(getHttpClient, resetData) {
       expect(res.status).to.equal(202);
       expect(res.body.id).to.equal(eventId);
 
-      const today = new Date().toISOString().slice(0, 10);
-      const prefix = `product_feedback/brand_claims/up/paid/${today}/`;
       const listed = await s3().send(new ListObjectsV2Command({
         Bucket: BUCKET,
-        Prefix: prefix,
+        Prefix: 'product_feedback/brand_claims/',
       }));
       const key = listed.Contents?.find((item) => item.Key?.endsWith(`_${eventId}.json`))?.Key;
       expect(key).to.be.a('string');
-      eventIds.push({ key });
+      const markerKey = `product_feedback/brand_claims/idempotency/${eventId}.json`;
+      eventIds.push({ keys: [key, markerKey] });
       const object = await s3().send(new GetObjectCommand({ Bucket: BUCKET, Key: key }));
       const record = JSON.parse(await object.Body.transformToString());
       expect(record).to.include({
