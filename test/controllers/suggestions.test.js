@@ -12525,9 +12525,11 @@ describe('Suggestions Controller', () => {
         params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
       });
 
-      expect(response.status).to.equal(204);
+      expect(response.status).to.equal(200);
       expect(rollbackStub).to.not.have.been.called;
       expect(disableScheduleStub).to.have.been.calledOnceWithExactly(SITE_ID, 'pre-sched-1');
+      const body = await response.json();
+      expect(body).to.deep.equal({ status: STATUSES.CANCELLED, rolledBackUrls: [], failedRollbackUrls: [] });
     });
 
     it('rolls back suggestions from edge and deletes the post-schedule when deployed', async () => {
@@ -12550,10 +12552,16 @@ describe('Suggestions Controller', () => {
         params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
       });
 
-      expect(response.status).to.equal(204);
+      expect(response.status).to.equal(200);
       expect(rollbackStub).to.have.been.calledOnce;
       expect(disableScheduleStub).to.have.been.calledWith(SITE_ID, 'post-sched-1');
       expect(disableScheduleStub).to.have.been.calledWith(SITE_ID, 'pre-sched-1');
+      const body = await response.json();
+      expect(body).to.deep.equal({
+        status: STATUSES.CANCELLED,
+        rolledBackUrls: [suggestion.getData().url],
+        failedRollbackUrls: [],
+      });
     });
 
     it('still cancels (marks the experiment CANCELLED) when DRS schedule disable fails', async () => {
@@ -12571,13 +12579,13 @@ describe('Suggestions Controller', () => {
         params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
       });
 
-      expect(response.status).to.equal(204);
+      expect(response.status).to.equal(200);
       expect(geoExperiment.setStatus).to.have.been.calledOnceWithExactly(STATUSES.CANCELLED);
       expect(geoExperiment.save).to.have.been.calledOnce;
       expect(context.log.error).to.have.been.calledWithMatch(/geo-experiment-cancel-failed.*DRS unavailable/);
     });
 
-    it('still cancels (marks the experiment CANCELLED) when suggestion rollback fails', async () => {
+    it('still cancels (marks the experiment CANCELLED) and reports failed URLs when suggestion rollback fails', async () => {
       const suggestion = mockSuggestionEntity(suggs[0]);
       mockSuggestion.allByOpportunityId.resolves([suggestion]);
       const geoExperiment = createMockGeoExperiment({
@@ -12594,10 +12602,16 @@ describe('Suggestions Controller', () => {
         params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
       });
 
-      expect(response.status).to.equal(204);
+      expect(response.status).to.equal(200);
       expect(geoExperiment.setStatus).to.have.been.calledOnceWithExactly(STATUSES.CANCELLED);
       expect(geoExperiment.save).to.have.been.calledOnce;
       expect(context.log.error).to.have.been.calledWithMatch(/geo-experiment-cancel-failed.*rollback boom/);
+      const body = await response.json();
+      expect(body).to.deep.equal({
+        status: STATUSES.CANCELLED,
+        rolledBackUrls: [],
+        failedRollbackUrls: [suggestion.getData().url],
+      });
     });
 
     it('deletes the atomic strategy and marks the experiment CANCELLED on success', async () => {
@@ -12622,7 +12636,7 @@ describe('Suggestions Controller', () => {
         params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
       });
 
-      expect(response.status).to.equal(204);
+      expect(response.status).to.equal(200);
       expect(deleteAtomicStrategyStub).to.have.been.calledOnceWithExactly({
         siteId: SITE_ID,
         strategyId: GEO_EXP_ID,

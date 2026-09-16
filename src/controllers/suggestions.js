@@ -3200,15 +3200,26 @@ function SuggestionsController(ctx, sqs, env) {
 
     context.log.info(`[geo-experiment-cancel] site: ${siteId}, GeoExperiment ${geoExperimentId}, status: ${status}, isDeployed: ${isDeployed}, suggestions: ${experimentSuggestions.length}`);
 
+    const suggestionUrl = (suggestion) => suggestion.getData()?.url;
+    let rolledBackUrls = [];
+    let failedRollbackUrls = [];
+
     if (isDeployed && opportunity && isNonEmptyArray(experimentSuggestions)) {
       try {
         const tokowakaClient = TokowakaClient.createFrom(context);
-        await tokowakaClient.rollbackSuggestions(site, opportunity, experimentSuggestions, {
-          allSuggestions,
-          updatedBy,
-        });
+        const rollbackResult = await tokowakaClient.rollbackSuggestions(
+          site,
+          opportunity,
+          experimentSuggestions,
+          { allSuggestions, updatedBy },
+        );
+        rolledBackUrls = (rollbackResult.succeededSuggestions || [])
+          .map(suggestionUrl).filter(Boolean);
+        failedRollbackUrls = (rollbackResult.failedSuggestions || [])
+          .map((item) => suggestionUrl(item.suggestion || item)).filter(Boolean);
       } catch (error) {
         context.log.error(`[geo-experiment-cancel-failed] site: ${siteId}, GeoExperiment ${geoExperimentId}, Error rolling back suggestions from edge: ${error.message}`, error);
+        failedRollbackUrls = experimentSuggestions.map(suggestionUrl).filter(Boolean);
       }
     }
 
@@ -3257,7 +3268,11 @@ function SuggestionsController(ctx, sqs, env) {
 
     context.log.info(`[geo-experiment-cancel] Successfully cancelled GeoExperiment ${geoExperimentId} for site ${siteId} by ${updatedBy}`);
 
-    return noContent();
+    return ok({
+      status: GeoExperimentModel.STATUSES.CANCELLED,
+      rolledBackUrls,
+      failedRollbackUrls,
+    });
   };
 
   /**
