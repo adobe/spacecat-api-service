@@ -1228,6 +1228,35 @@ describe('Fixes Controller', () => {
       expect(fixEntityCollection.allByOpportunityIds).to.not.have.been.called;
     });
 
+    it('responds 400 for a non-ISO to value', async () => {
+      dataAccess.Opportunity.allBySiteId.resolves([{ getId: () => opportunityId }]);
+      requestContext.data = { to: '2026-09-01' };
+
+      const response = await fixesController.getAllForSite(requestContext);
+
+      expect(response).includes({ status: 400 });
+      expect(await response.json()).deep.equals({ message: 'to must be an ISO-8601 date-time' });
+      expect(fixEntityCollection.allByOpportunityIds).to.not.have.been.called;
+    });
+
+    it('excludes a fix whose anchor is after the to bound', async () => {
+      const afterWindow = await fixEntityCollection.create({
+        type: Suggestion.TYPES.CONTENT_UPDATE,
+        opportunityId,
+        changeDetails: { arbitrary: 'after' },
+        deployedAt: '2026-10-01T10:00:00.000Z',
+        executedAt: '2026-10-01T10:00:00.000Z',
+      });
+      dataAccess.Opportunity.allBySiteId.resolves([{ getId: () => opportunityId }]);
+      fixEntityCollection.allByOpportunityIds.resolves([afterWindow]);
+
+      requestContext.data = { from: '2026-08-01T00:00:00.000Z', to: '2026-09-01T00:00:00.000Z' };
+      const response = await fixesController.getAllForSite(requestContext);
+
+      expect(response).includes({ status: 200 });
+      expect(await response.json()).deep.equals([]);
+    });
+
     it('skips (200, not 500) a fix whose anchor timestamp is unparseable when windowed', async () => {
       const malformed = await fixEntityCollection.create({
         type: Suggestion.TYPES.CONTENT_UPDATE,
