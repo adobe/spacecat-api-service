@@ -1534,11 +1534,7 @@ function SerenityController(context, log, env) {
       }
       const transport = buildTransport(ctx, imsToken);
       const cursorSecret = ctx.env?.SERENITY_TAG_SEARCH_CURSOR_SECRET
-        || ctx.env?.IMS_CLIENT_SECRET
-        || ctx.env?.AUTOFIX_CRYPT_SECRET
-        || env?.SERENITY_TAG_SEARCH_CURSOR_SECRET
-        || env?.IMS_CLIENT_SECRET
-        || env?.AUTOFIX_CRYPT_SECRET;
+        || env?.SERENITY_TAG_SEARCH_CURSOR_SECRET;
       const result = auth.mode === 'subworkspace'
         ? await handleSearchTagsSubworkspace(
           transport,

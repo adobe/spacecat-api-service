@@ -42,6 +42,10 @@ import {
   invalidateTagCacheForProject,
   listProjectTagTree,
 } from '../../../src/support/serenity/handlers/markets.js';
+import {
+  MAX_TREE_PARENT_READS,
+  TAG_TREE_PAGE_SIZE,
+} from '../../../src/support/serenity/tag-search-constants.js';
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -584,7 +588,8 @@ describe('remaining plain-tags regression coverage', () => {
     });
 
     it('fails closed with tagTreeLimitExceeded when the parent-read budget is exceeded', async () => {
-      const roots = Array.from({ length: 201 }, (_, index) => (
+      const rootCount = MAX_TREE_PARENT_READS + 1;
+      const roots = Array.from({ length: rootCount }, (_, index) => (
         tagNode(`root-${index}`, `Root ${index}`, null, null, 1)
       ));
       const listProjectTags = pagedTreeStub({ '': roots });
@@ -594,7 +599,16 @@ describe('remaining plain-tags regression coverage', () => {
           expect(error.status).to.equal(503);
           expect(error.code).to.equal('tagTreeLimitExceeded');
         });
-      expect(listProjectTags.callCount).to.be.at.most(201);
+
+      // Legacy (non-strict) traversal reads serially, one parent request at a
+      // time — every request that DOES go out is a real upstream call, so the
+      // invariant is an exact count, not a loose ceiling: the paginated root
+      // level (rootCount items at TAG_TREE_PAGE_SIZE/page, rounded up) plus
+      // EXACTLY MAX_TREE_PARENT_READS parent expansions — the budget refuses
+      // the (MAX_TREE_PARENT_READS + 1)-th expansion before ever calling
+      // upstream for it, so it never adds a call.
+      const expectedRootPages = Math.ceil(rootCount / TAG_TREE_PAGE_SIZE);
+      expect(listProjectTags.callCount).to.equal(expectedRootPages + MAX_TREE_PARENT_READS);
     });
 
     it('classifies canonical nodes and ambiguous sibling paths from one complete snapshot', async () => {

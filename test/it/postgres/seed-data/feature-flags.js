@@ -15,11 +15,12 @@ import { ORG_1_ID } from '../../shared/seed-ids.js';
 /**
  * Baseline feature flags for IT tests.
  *
- * ORG_1 has the org-wide `LLMO/serenity` rollout flag ON so the serenity suite
- * (which drives the REAL controller through `isSerenityActiveForOrg`) reaches
- * its handlers. The feature-flags suite asserts membership via `.find()` (not an
- * exact count) and uses ORG_2 for its "no flags" case, so this extra row is
- * inert there. Cascade-deleted with `organizations` on reset.
+ * ORG_1 has the org-wide Serenity rollout and unbounded-tag-authoring flags ON
+ * so the Serenity suite reaches its handlers and can exercise depth-4 tag
+ * creation through the real controller. The feature-flags suite asserts
+ * membership via `.find()` (not an exact count) and uses ORG_2 for its "no
+ * flags" case, so these rows are inert there. Cascade-deleted with
+ * `organizations` on reset.
  *
  * Format: snake_case (v3 / PostgreSQL / PostgREST).
  */
@@ -28,6 +29,13 @@ export const featureFlags = [
     organization_id: ORG_1_ID,
     product: 'LLMO',
     flag_name: 'serenity',
+    flag_value: true,
+    updated_by: 'seed',
+  },
+  {
+    organization_id: ORG_1_ID,
+    product: 'LLMO',
+    flag_name: 'serenity_unbounded_tag_authoring',
     flag_value: true,
     updated_by: 'seed',
   },

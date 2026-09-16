@@ -26,6 +26,36 @@ import {
 } from '../tag-search-constants.js';
 import { normalizeGeoTargetId, normalizeLanguageCode } from '../validation.js';
 
+/** @typedef {import('../rest-transport.js').SerenityTransport} SerenityTransport */
+/**
+ * @typedef {import('../tag-tree.js').TagTreeSnapshotItem} TagTreeSnapshotItem
+ */
+/**
+ * @typedef {object} ParsedTagSearchQuery
+ * @property {number} geoTargetId
+ * @property {string} languageCode
+ * @property {string} q - normalized (NFKC, trimmed, lower-cased) search text.
+ * @property {number} limit
+ * @property {string | null} cursor - opaque, HMAC-signed pagination cursor.
+ */
+/**
+ * @typedef {object} TagSearchMatch
+ * @property {string} id
+ * @property {string} name
+ * @property {string | null} parentId
+ * @property {number} depth
+ * @property {string[]} path - ancestor names, root-dimension entry excluded.
+ * @property {'exact' | 'prefix' | 'substring' | 'path'} match
+ */
+/**
+ * @typedef {object} TagSearchResult
+ * @property {TagSearchMatch[]} items
+ * @property {string | null} cursor - opaque cursor for the next page, or `null`
+ *   when this page reached the end of the result set.
+ * @property {true} complete - always `true`: a partial/incomplete traversal
+ *   throws instead of returning (see {@link searchProjectTags}).
+ */
+
 export {
   TAG_SEARCH_CURSOR_VERSION,
   DEFAULT_TAG_SEARCH_LIMIT,
@@ -157,6 +187,15 @@ function revisionOf(items) {
   return createHash('sha256').update(JSON.stringify(tuples)).digest('base64url');
 }
 
+/**
+ * @param {TagTreeSnapshotItem} item
+ * @param {string} query - already-normalized search text.
+ * @returns {{
+ *   rank: number,
+ *   match: 'exact' | 'prefix' | 'substring' | 'path',
+ *   normalizedPath: string,
+ * } | null}
+ */
 function matchOf(item, query) {
   const normalizedName = normalizeSearchText(item.name);
   const normalizedPath = item.fullPath.slice(1)
@@ -177,6 +216,38 @@ function matchOf(item, query) {
   return null;
 }
 
+/**
+ * @typedef {{
+ *   rank: number,
+ *   match: 'exact' | 'prefix' | 'substring' | 'path',
+ *   normalizedPath: string,
+ *   item: TagTreeSnapshotItem,
+ * }} TagSearchMatchEntry
+ */
+/**
+ * Type-guard for `.filter()`: `Array.prototype.filter(Boolean)` does not
+ * narrow away `null` under `strictNullChecks`, so the sort/map that follows
+ * would otherwise see `TagSearchMatchEntry | null`.
+ *
+ * @param {TagSearchMatchEntry | null} entry
+ * @returns {entry is TagSearchMatchEntry}
+ */
+function isMatchEntry(entry) {
+  return entry !== null;
+}
+
+/**
+ * Filters a complete tag-tree snapshot to plain-tag (root-dimension `tag`,
+ * depth > 1 — the root itself never matches) descendants matching `query`,
+ * ranked exact > prefix > substring > path, tied by normalized path then id.
+ *
+ * @param {{ items: TagTreeSnapshotItem[] }} snapshot - see
+ *   {@link import('../tag-tree.js').loadTagTreeSnapshot}.
+ * @param {string} query - already-normalized (NFKC, trimmed, lower-cased)
+ *   search text; see {@link normalizeSearchText}.
+ * @returns {TagSearchMatch[]} rank-ordered matches (no `rank` field — that is
+ *   sort-only and dropped from the returned shape).
+ */
 export function searchTagSnapshot(snapshot, query) {
   return snapshot.items
     .filter((item) => item.rootName === DIMENSION.TAG && item.depth > 1)
@@ -184,7 +255,7 @@ export function searchTagSnapshot(snapshot, query) {
       const matched = matchOf(item, query);
       return matched ? { item, ...matched } : null;
     })
-    .filter(Boolean)
+    .filter(isMatchEntry)
     .sort((a, b) => a.rank - b.rank
       || compareText(a.normalizedPath, b.normalizedPath)
       || compareText(a.item.id, b.item.id))
@@ -198,6 +269,22 @@ export function searchTagSnapshot(snapshot, query) {
     }));
 }
 
+/**
+ * Runs one complete-tree, cacheless, fail-closed tag search against a
+ * resolved project, deriving/validating the opaque pagination cursor.
+ *
+ * @param {SerenityTransport} transport
+ * @param {string} workspaceId - Semrush (sub-)workspace id.
+ * @param {string} projectId - AIO project id.
+ * @param {ParsedTagSearchQuery} query - already-validated/normalized query
+ *   (see {@link parseSearchQuery}); `cursor`, if present, has NOT yet been
+ *   decoded/verified — that happens here, against `cursorSecret`.
+ * @param {object} [log] - logger.
+ * @param {string} [cursorSecret] - HMAC key signing the opaque cursor; a
+ *   falsy value fails closed with 503 `TAG_SEARCH_UNAVAILABLE` before any
+ *   traversal or cursor decode is attempted.
+ * @returns {Promise<TagSearchResult>}
+ */
 async function searchProjectTags(
   transport,
   workspaceId,
@@ -231,7 +318,9 @@ async function searchProjectTags(
       workspaceId,
       projectId,
       log,
-      { forceRefresh: true, cacheResult: false, rootName: DIMENSION.TAG },
+      {
+        forceRefresh: true, cacheResult: false, rootName: DIMENSION.TAG, strict: true,
+      },
     );
   } catch (error) {
     log?.warn?.('handleSearchTags: complete-tree traversal failed', {
@@ -275,6 +364,8 @@ async function searchProjectTags(
     resultCount: matches.length,
     returnedCount: items.length,
     matchCounts,
+    offset,
+    nextOffset,
     durationMs: Date.now() - startedAt,
     cacheBypass: true,
   });
@@ -301,6 +392,24 @@ function marketNotFound() {
   );
 }
 
+/**
+ * `GET /serenity/tags/search` (flat/brand-level mode): resolves the project
+ * for a brand's (geoTargetId, languageCode) market slice, then runs
+ * {@link searchProjectTags} against it.
+ *
+ * @param {SerenityTransport} transport
+ * @param {{ BrandSemrushProject: {
+ *   findBySlice: (brandId: string, geoTargetId: number, languageCode: string)
+ *     => Promise<{ getSemrushProjectId: () => string } | null>,
+ * } }} dataAccess
+ * @param {string} brandId
+ * @param {string} workspaceId - Semrush (sub-)workspace id.
+ * @param {object} query - raw, unvalidated request query params; validated
+ *   and normalized internally via {@link parseSearchQuery}.
+ * @param {object} [log] - logger.
+ * @param {string} [cursorSecret] - see {@link searchProjectTags}.
+ * @returns {Promise<TagSearchResult>}
+ */
 export async function handleSearchTags(
   transport,
   dataAccess,
@@ -329,6 +438,19 @@ export async function handleSearchTags(
   );
 }
 
+/**
+ * `GET /serenity/tags/search` (sub-workspace mode): resolves the project for
+ * a (geoTargetId, languageCode) slice directly under the workspace (no brand
+ * row), then runs {@link searchProjectTags} against it.
+ *
+ * @param {SerenityTransport} transport
+ * @param {string} workspaceId - Semrush (sub-)workspace id.
+ * @param {object} query - raw, unvalidated request query params; validated
+ *   and normalized internally via {@link parseSearchQuery}.
+ * @param {object} [log] - logger.
+ * @param {string} [cursorSecret] - see {@link searchProjectTags}.
+ * @returns {Promise<TagSearchResult>}
+ */
 export async function handleSearchTagsSubworkspace(
   transport,
   workspaceId,

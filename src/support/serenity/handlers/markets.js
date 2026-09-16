@@ -855,8 +855,24 @@ export async function listTagsForProject(transport, semrushWorkspaceId, projectI
  *   requested. Callers that only need to test membership (e.g. resolve-or-
  *   create) pass this to avoid paginating the whole tree; omit it to collect
  *   every item, as every pre-existing caller does.
- * @param {{ page?: number, limit?: number, explicit?: boolean }} [paging] -
- *   explicit upstream pagination for the nested tree endpoint.
+ * @param {{
+ *   page?: number,
+ *   limit?: number,
+ *   explicit?: boolean,
+ *   onBeforePage?: () => void,
+ *   signal?: AbortSignal,
+ * }} [paging] - explicit upstream pagination for the nested tree endpoint.
+ *   `onBeforePage`, when supplied, is invoked synchronously immediately before
+ *   EVERY upstream page request this call issues (the single explicit-page
+ *   request, or each page of the internal accumulate-the-level loop) — a
+ *   caller enforcing a traversal-wide deadline (see `loadTagTreeSnapshot`)
+ *   throws from it to stop before the next page goes out, rather than only
+ *   between whole-level reads. Throwing from it propagates as this call's
+ *   rejection; a callback that does not throw is a no-op. `signal`, when
+ *   supplied, is forwarded to EVERY upstream `transport.listProjectTags` call
+ *   this issues (same pages as `onBeforePage`) so an already-in-flight page
+ *   request — not just the next one — is itself abortable; `onBeforePage`
+ *   alone cannot cancel a request that has already gone out.
  * @returns {Promise<{ items: Array<{
  *   id: string, name: string, parentId: string | null,
  *   childrenCount: number, promptsCount: number,
@@ -872,6 +888,7 @@ export async function listProjectTagTree(
   stopWhen = undefined,
   paging = {},
 ) {
+  const { onBeforePage, signal } = paging;
   const requestedPage = typeof paging.page === 'number'
     && Number.isInteger(paging.page) && paging.page > 0 ? paging.page : 1;
   const requestedLimit = typeof paging.limit === 'number'
@@ -879,8 +896,13 @@ export async function listProjectTagTree(
     ? Math.min(paging.limit, 100)
     : 100;
   if (paging?.explicit) {
+    onBeforePage?.();
     const resp = await transport.listProjectTags(semrushWorkspaceId, projectId, {
-      parentId, page: requestedPage, limit: requestedLimit, draft: true,
+      parentId,
+      page: requestedPage,
+      limit: requestedLimit,
+      draft: true,
+      ...(signal ? { signal } : {}),
     });
     const batch = Array.isArray(resp?.items) ? resp.items : [];
     // eslint-disable-next-line no-use-before-define
@@ -920,9 +942,10 @@ export async function listProjectTagTree(
     throw error;
   };
   while (page <= PAGE_LIMIT) {
+    onBeforePage?.();
     // eslint-disable-next-line no-await-in-loop
     const resp = await transport.listProjectTags(semrushWorkspaceId, projectId, {
-      parentId, page, limit: LIMIT, draft: true,
+      parentId, page, limit: LIMIT, draft: true, ...(signal ? { signal } : {}),
     });
     if (!resp || !Array.isArray(resp.items)) {
       failIncomplete('malformedPage');

@@ -10,6 +10,8 @@
  * governing permissions and limitations under the License.
  */
 
+// @ts-check
+
 export const TAG_SEARCH_CURSOR_VERSION = 1;
 export const DEFAULT_TAG_SEARCH_LIMIT = 25;
 export const MAX_TAG_SEARCH_LIMIT = 100;

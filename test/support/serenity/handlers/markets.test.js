@@ -1525,6 +1525,66 @@ describe('handlers/markets.js — handleListTags / handleListModels', () => {
     );
   });
 
+  it('listProjectTagTree invokes onBeforePage before every page of the accumulate loop, '
+    + 'stopping further pages once it throws', async () => {
+    const fullPage = (page) => Array.from({ length: 100 }, (_, i) => ({
+      id: `tag-p${page}-${i}`, name: `Tag ${page}-${i}`, parent_id: null, children_count: 0,
+    }));
+    const listProjectTags = sinon.stub().callsFake((_workspace, _project, options) => (
+      Promise.resolve({ page: options.page, total: 500, items: fullPage(options.page) })
+    ));
+    let calls = 0;
+    const onBeforePage = sinon.stub().callsFake(() => {
+      calls += 1;
+      if (calls === 3) {
+        throw new Error('deadline exceeded');
+      }
+    });
+
+    await expect(listProjectTagTree(
+      { listProjectTags },
+      WORKSPACE,
+      'proj-tree',
+      '',
+      fakeLog(),
+      undefined,
+      { onBeforePage },
+    )).to.be.rejectedWith('deadline exceeded');
+
+    // onBeforePage fired for pages 1 and 2 (both allowed to proceed) and for the
+    // would-be page 3, where it threw — so only 2 actual upstream page requests
+    // went out, never a 3rd.
+    expect(onBeforePage.callCount).to.equal(3);
+    expect(listProjectTags.callCount).to.equal(2);
+  });
+
+  it('listProjectTagTree invokes onBeforePage once before the explicit single-page request', async () => {
+    const listProjectTags = sinon.stub().resolves({
+      page: 1,
+      total: 1,
+      items: [{
+        id: 'tag-1', name: 'Tag 1', parent_id: null, children_count: 0,
+      }],
+    });
+    const onBeforePage = sinon.stub();
+
+    const result = await listProjectTagTree(
+      { listProjectTags },
+      WORKSPACE,
+      'proj-tree',
+      '',
+      fakeLog(),
+      undefined,
+      {
+        explicit: true, page: 1, limit: 10, onBeforePage,
+      },
+    );
+
+    expect(result.items).to.have.length(1);
+    expect(onBeforePage).to.have.been.calledOnce;
+    expect(listProjectTags).to.have.been.calledOnce;
+  });
+
   it('listModels (no market) unions the models enabled across all the brand\'s projects', async () => {
     const dataAccess = makeDataAccess([
       makeProject({ semrushProjectId: 'proj-a', geoTargetId: 2840, languageCode: 'en' }),

@@ -623,6 +623,129 @@ describe('Serenity custom-tag search', () => {
     });
   });
 
+  it('stops a multi-page parent read mid-pagination once the traversal deadline expires '
+    + '(deterministic fake timers)', async () => {
+    const clock = sinon.useFakeTimers({ now: Date.now() });
+    try {
+      const root = { id: 'tag-root', name: 'tag' };
+      const transport = {
+        listProjectTags: sinon.stub().callsFake((_workspace, _project, options) => {
+          if (!options.parentId) {
+            return Promise.resolve({
+              items: [tag(root.id, root.name, null, 1)],
+              page: 1,
+              total: 1,
+            });
+          }
+          // Every page for the root's children is a FULL page against a large
+          // total, so `listProjectTagTree`'s internal loop keeps requesting more
+          // pages — this is the "in-flight pagination" the deadline must reach.
+          if (options.page === 2) {
+            // Simulate real elapsed time between page 1 and page 2 landing —
+            // deterministic, not a real setTimeout wait.
+            clock.tick(1_000);
+          }
+          const items = Array.from({ length: TAG_TREE_PAGE_SIZE }, (_, index) => tag(
+            `${root.id}-p${options.page}-${index}`,
+            `Leaf ${options.page}-${index}`,
+            root.id,
+            0,
+            [root],
+          ));
+          return Promise.resolve({ items, page: options.page, total: 500 });
+        }),
+      };
+
+      await expect(loadTagTreeSnapshot(
+        transport,
+        WORKSPACE,
+        PROJECT,
+        fakeLog(),
+        { rootName: 'tag', maxDurationMs: 500 },
+      )).to.be.rejected.then((error) => {
+        expect(error.code).to.equal(ERROR_CODES.TAG_TREE_LIMIT_EXCEEDED);
+        expect(error.details).to.deep.equal({ budget: 'duration', maximum: 500 });
+      });
+
+      // Root read (1) + page 1 + page 2 of the parent read = 3 upstream calls.
+      // The clock crossed the 500ms budget while page 2 was in flight, so the
+      // per-page deadline check fires before a page 3 request ever goes out.
+      expect(transport.listProjectTags.callCount).to.equal(3);
+    } finally {
+      clock.restore();
+    }
+  });
+
+  it('bounds an already in-flight parent page request past the real traversal deadline — '
+    + 'not just gates the next page', async () => {
+    // Real (not fake) timers: `AbortSignal.timeout` is a platform timer, not
+    // driven by sinon's faked `setTimeout` — see the fake-timer test above for
+    // the synchronous `onBeforePage` path, and this one for the abort-based
+    // in-flight bound. The parent page's promise NEVER resolves on its own —
+    // only the deadline signal ends it.
+    const root = { id: 'tag-root', name: 'tag' };
+    let pageTwoStarted = false;
+    let capturedSignal;
+    const transport = {
+      listProjectTags: sinon.stub().callsFake((_workspace, _project, options) => {
+        if (!options.parentId) {
+          return Promise.resolve({ items: [tag(root.id, root.name, null, 1)], page: 1, total: 1 });
+        }
+        if (options.page === 2) {
+          pageTwoStarted = true;
+          return Promise.resolve({ items: [], page: 2, total: 0 });
+        }
+        // Page 1 of the parent read: capture the signal `listProjectTagTree`
+        // forwarded, then hang forever — an already-in-flight request against
+        // a sleeping/retrying shared client.
+        capturedSignal = options.signal;
+        return new Promise(() => {});
+      }),
+    };
+
+    await expect(loadTagTreeSnapshot(
+      transport,
+      WORKSPACE,
+      PROJECT,
+      fakeLog(),
+      { rootName: 'tag', maxDurationMs: 30 },
+    )).to.be.rejected.then((error) => {
+      expect(error.status).to.equal(503);
+      expect(error.code).to.equal(ERROR_CODES.TAG_TREE_LIMIT_EXCEEDED);
+      expect(error.details).to.deep.equal({ budget: 'duration', maximum: 30 });
+    });
+
+    expect(capturedSignal).to.exist;
+    expect(capturedSignal.aborted).to.equal(true);
+    // The pending page 1 request never settled — page 2 is never attempted.
+    expect(pageTwoStarted).to.equal(false);
+  });
+
+  it('fails closed when the traversal signal is already expired', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const timeoutStub = sinon.stub(AbortSignal, 'timeout').returns(controller.signal);
+    const transport = {
+      listProjectTags: sinon.stub().resolves({ items: [], page: 1, total: 0 }),
+    };
+
+    try {
+      await expect(loadTagTreeSnapshot(
+        transport,
+        WORKSPACE,
+        PROJECT,
+        fakeLog(),
+        { rootName: 'tag', maxDurationMs: 500 },
+      )).to.be.rejected.then((error) => {
+        expect(error.status).to.equal(503);
+        expect(error.code).to.equal(ERROR_CODES.TAG_TREE_LIMIT_EXCEEDED);
+        expect(error.details).to.deep.equal({ budget: 'duration', maximum: 500 });
+      });
+    } finally {
+      timeoutStub.restore();
+    }
+  });
+
   it('rejects duplicate selected roots and child parent mismatches', async () => {
     await expect(loadTagTreeSnapshot(
       {
@@ -638,7 +761,7 @@ describe('Serenity custom-tag search', () => {
       WORKSPACE,
       PROJECT,
       fakeLog(),
-      { rootName: 'category' },
+      { rootName: 'category', strict: true },
     )).to.be.rejected.then((error) => {
       expect(error.code).to.equal(ERROR_CODES.TAG_TREE_DATA_INTEGRITY);
       expect(error.details).to.deep.equal({ reason: 'ambiguousRoot', rootName: 'category' });
@@ -660,7 +783,7 @@ describe('Serenity custom-tag search', () => {
       WORKSPACE,
       PROJECT,
       fakeLog(),
-      { rootName: 'tag' },
+      { rootName: 'tag', strict: true },
     )).to.be.rejected.then((error) => {
       expect(error.code).to.equal(ERROR_CODES.TAG_TREE_DATA_INTEGRITY);
       expect(error.details).to.deep.equal({ reason: 'parentMismatch', tagId: 'child' });
@@ -756,7 +879,7 @@ describe('Serenity custom-tag search', () => {
     });
   });
 
-  it('rejects repeated ids and cycles as data-integrity failures', async () => {
+  it('rejects repeated ids and cycles as data-integrity failures in strict mode', async () => {
     const root = { id: 'tag-root', name: 'tag' };
     const transport = {
       listProjectTags: sinon.stub().callsFake((_workspace, _project, options) => (
@@ -775,7 +898,7 @@ describe('Serenity custom-tag search', () => {
       WORKSPACE,
       PROJECT,
       fakeLog(),
-      { rootName: 'tag' },
+      { rootName: 'tag', strict: true },
     )).to.be.rejected.then((error) => {
       expect(error.status).to.equal(503);
       expect(error.code).to.equal(ERROR_CODES.TAG_TREE_DATA_INTEGRITY);
@@ -783,7 +906,7 @@ describe('Serenity custom-tag search', () => {
     });
   });
 
-  it('never exceeds the configured Semrush request concurrency', async () => {
+  it('never exceeds the configured Semrush request concurrency in strict mode', async () => {
     const root = { id: 'tag-root', name: 'tag' };
     const parents = Array.from({ length: 8 }, (_, index) => ({
       id: `parent-${index}`,
@@ -833,9 +956,122 @@ describe('Serenity custom-tag search', () => {
       WORKSPACE,
       PROJECT,
       fakeLog(),
-      { rootName: 'tag' },
+      { rootName: 'tag', strict: true },
     );
 
     expect(peak).to.equal(MAX_TREE_CONCURRENCY);
+  });
+
+  describe('legacy (non-strict) traversal — prior tolerant behavior', () => {
+    it('defaults to a single in-flight parent read (no strict option passed)', async () => {
+      const root = { id: 'tag-root', name: 'tag' };
+      const parents = Array.from({ length: 4 }, (_, index) => ({
+        id: `parent-${index}`,
+        name: `Parent ${index}`,
+      }));
+      let active = 0;
+      let peak = 0;
+      const transport = {
+        listProjectTags: sinon.stub().callsFake(async (_workspace, _project, options) => {
+          if (!options.parentId) {
+            return { items: [tag(root.id, root.name, null, 1)], page: 1, total: 1 };
+          }
+          if (options.parentId === root.id) {
+            return {
+              items: parents.map((parent) => tag(parent.id, parent.name, root.id, 1, [root])),
+              page: 1,
+              total: parents.length,
+            };
+          }
+          active += 1;
+          peak = Math.max(peak, active);
+          await new Promise((resolve) => {
+            setTimeout(resolve, 2);
+          });
+          active -= 1;
+          return { items: [], page: 1, total: 0 };
+        }),
+      };
+
+      await loadTagTreeSnapshot(transport, WORKSPACE, PROJECT, fakeLog(), { rootName: 'tag' });
+
+      expect(peak).to.equal(1);
+    });
+
+    it('skips a revisited tag id instead of throwing repeatedTagId', async () => {
+      const root = { id: 'tag-root', name: 'tag' };
+      const transport = {
+        listProjectTags: sinon.stub().callsFake((_workspace, _project, options) => (
+          Promise.resolve({
+            items: options.parentId
+              ? [tag(root.id, 'Cycle', options.parentId, 0, [root])]
+              : [tag(root.id, root.name, null, 1)],
+            page: options.page,
+            total: 1,
+          })
+        )),
+      };
+
+      const snapshot = await loadTagTreeSnapshot(
+        transport,
+        WORKSPACE,
+        PROJECT,
+        fakeLog(),
+        { rootName: 'tag' },
+      );
+
+      // The revisited id is skipped rather than expanded again or thrown on.
+      expect(snapshot.items.map((item) => item.id)).to.deep.equal([root.id]);
+    });
+
+    it('trusts an upstream-supplied path over a parentId disagreement instead of throwing', async () => {
+      const root = { id: 'tag-root', name: 'tag' };
+      const transport = {
+        listProjectTags: sinon.stub().callsFake((_workspace, _project, options) => (
+          Promise.resolve({
+            items: options.parentId
+              ? [tag('child', 'Child', 'wrong-parent', 0, [root])]
+              : [tag(root.id, root.name, null, 1)],
+            page: options.page,
+            total: 1,
+          })
+        )),
+      };
+
+      const snapshot = await loadTagTreeSnapshot(
+        transport,
+        WORKSPACE,
+        PROJECT,
+        fakeLog(),
+        { rootName: 'tag' },
+      );
+
+      const child = snapshot.byId.get('child');
+      expect(child).to.exist;
+      expect(child.fullPath.map((part) => part.id)).to.deep.equal([root.id, 'child']);
+    });
+
+    it('tolerates case-variant and duplicate canonical roots instead of failing closed', async () => {
+      const transport = {
+        listProjectTags: sinon.stub().resolves({
+          items: [
+            tag('tag-root', 'tag', null, 0),
+            tag('variant-root', 'Tag', null, 0),
+          ],
+          page: 1,
+          total: 2,
+        }),
+      };
+
+      const snapshot = await loadTagTreeSnapshot(
+        transport,
+        WORKSPACE,
+        PROJECT,
+        fakeLog(),
+      );
+
+      expect(snapshot.items.map((item) => item.id).sort())
+        .to.deep.equal(['tag-root', 'variant-root']);
+    });
   });
 });

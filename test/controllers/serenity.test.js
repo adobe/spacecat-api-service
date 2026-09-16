@@ -1170,6 +1170,45 @@ describe('SerenityController', () => {
       expect(handlers.handleSearchTags.firstCall.args[6]).to.equal('search-secret');
     });
 
+    it('searchTags does not fall back to unrelated secrets for the cursor secret', async () => {
+      handlers.handleSearchTags.resolves({ items: [], cursor: null, complete: true });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({
+        env: {
+          IMS_CLIENT_SECRET: 'ims-secret',
+          AUTOFIX_CRYPT_SECRET: 'autofix-secret',
+        },
+      });
+      ctx.request = {
+        url: 'https://x?geoTargetId=2840&languageCode=en&q=campaign&limit=10',
+      };
+      const response = await controller.searchTags(ctx);
+      expect(response.status).to.equal(200);
+      expect(handlers.handleSearchTags).to.have.been.calledOnce;
+      expect(handlers.handleSearchTags.firstCall.args[6]).to.equal(undefined);
+    });
+
+    it('searchTags falls back to the constructor env cursor secret when ctx.env omits it, '
+      + 'never to an unrelated constructor secret', async () => {
+      handlers.handleSearchTags.resolves({ items: [], cursor: null, complete: true });
+      const controller = SerenityController(
+        { env: {} },
+        fakeLog(),
+        {
+          SERENITY_TAG_SEARCH_CURSOR_SECRET: 'constructor-secret',
+          IMS_CLIENT_SECRET: 'ims-secret',
+          AUTOFIX_CRYPT_SECRET: 'autofix-secret',
+        },
+      );
+      const ctx = fakeContext();
+      ctx.request = {
+        url: 'https://x?geoTargetId=2840&languageCode=en&q=campaign&limit=10',
+      };
+      const response = await controller.searchTags(ctx);
+      expect(response.status).to.equal(200);
+      expect(handlers.handleSearchTags.firstCall.args[6]).to.equal('constructor-secret');
+    });
+
     it('searchTags returns authorization errors without dispatching', async () => {
       accessControlHasAccessStub.resolves(false);
       const controller = SerenityController({ env: {} }, fakeLog(), {});
