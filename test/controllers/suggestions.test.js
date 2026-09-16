@@ -12511,6 +12511,7 @@ describe('Suggestions Controller', () => {
       });
       mockSuggestion.allByOpportunityId.resolves([suggestion]);
       mockSuggestionDataAccess.GeoExperiment.findById.resolves(createMockGeoExperiment({
+        status: STATUSES.GENERATING_BASELINE,
         phase: PHASES.PRE_ANALYSIS_STARTED,
         suggestionIds: [suggestion.getId()],
         preScheduleId: 'pre-sched-1',

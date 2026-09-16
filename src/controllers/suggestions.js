@@ -3184,13 +3184,9 @@ function SuggestionsController(ctx, sqs, env) {
       return badRequest(`GeoExperiment ${geoExperimentId} is ${status} and cannot be cancelled`);
     }
 
-    const phase = geoExperiment.getPhase();
-    const isDeployed = [
-      GeoExperimentModel.PHASES.DEPLOYMENT_DONE,
-      GeoExperimentModel.PHASES.POST_ANALYSIS_STARTED,
-      GeoExperimentModel.PHASES.POST_ANALYSIS_DONE,
-      GeoExperimentModel.PHASES.IMPACT_MEASUREMENT_STARTED,
-    ].includes(phase);
+    // Keyed on status, not phase: the engine sets IN_PROGRESS exactly once, at deploy, so it
+    // already means "deployed" without tracking individual phases.
+    const isDeployed = status === GeoExperimentModel.STATUSES.IN_PROGRESS;
 
     const opportunityId = geoExperiment.getOpportunityId();
     const opportunity = opportunityId ? await Opportunity.findById(opportunityId) : null;
@@ -3202,7 +3198,7 @@ function SuggestionsController(ctx, sqs, env) {
       (s) => experimentSuggestionIds.includes(s.getId()),
     );
 
-    context.log.info(`[geo-experiment-cancel] site: ${siteId}, GeoExperiment ${geoExperimentId}, phase: ${phase}, status: ${status}, isDeployed: ${isDeployed}, suggestions: ${experimentSuggestions.length}`);
+    context.log.info(`[geo-experiment-cancel] site: ${siteId}, GeoExperiment ${geoExperimentId}, status: ${status}, isDeployed: ${isDeployed}, suggestions: ${experimentSuggestions.length}`);
 
     if (isDeployed && opportunity && isNonEmptyArray(experimentSuggestions)) {
       try {
@@ -3214,7 +3210,10 @@ function SuggestionsController(ctx, sqs, env) {
       } catch (error) {
         context.log.error(`[geo-experiment-cancel-failed] site: ${siteId}, GeoExperiment ${geoExperimentId}, Error rolling back suggestions from edge: ${error.message}`, error);
       }
-    } else if (isNonEmptyArray(experimentSuggestions)) {
+    }
+
+    // Always clear the blocking flag — rollbackSuggestions doesn't touch edgeOptimizeStatus.
+    if (isNonEmptyArray(experimentSuggestions)) {
       await Promise.allSettled(experimentSuggestions.map(async (suggestion) => {
         try {
           const { edgeOptimizeStatus: _, ...rest } = suggestion.getData();
