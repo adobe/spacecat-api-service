@@ -1036,6 +1036,9 @@ site-geo-experiment-cancel:
                   items:
                     type: string
                   description: URLs that were deployed but failed to roll back
+            examples:
+              geo-experiment-cancel-response:
+                $ref: './examples.yaml#/geo-experiment-cancel-response'
       '400':
         $ref: './responses.yaml#/400'
       '401':

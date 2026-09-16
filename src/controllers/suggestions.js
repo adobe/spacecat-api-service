@@ -3206,8 +3206,11 @@ function SuggestionsController(ctx, sqs, env) {
     }
 
     const status = geoExperiment.getStatus();
-    if (status === GeoExperimentModel.STATUSES.COMPLETED
-      || status === GeoExperimentModel.STATUSES.FAILED) {
+    const cancellableStatuses = new Set([
+      GeoExperimentModel.STATUSES.GENERATING_BASELINE,
+      GeoExperimentModel.STATUSES.IN_PROGRESS,
+    ]);
+    if (!cancellableStatuses.has(status)) {
       context.log.warn(`[geo-experiment-cancel-failed] site: ${siteId}, GeoExperiment ${geoExperimentId} is ${status} and cannot be cancelled`);
       return badRequest(`GeoExperiment ${geoExperimentId} is ${status} and cannot be cancelled`);
     }
@@ -3281,7 +3284,12 @@ function SuggestionsController(ctx, sqs, env) {
     // stops being picked up — while the record itself stays queryable for audit/history.
     geoExperiment.setStatus(GeoExperimentModel.STATUSES.CANCELLED);
     geoExperiment.setUpdatedBy(updatedBy);
-    await geoExperiment.save();
+    try {
+      await geoExperiment.save();
+    } catch (error) {
+      context.log.error(`[geo-experiment-cancel-failed] site: ${siteId}, GeoExperiment ${geoExperimentId}, status: ${status}, isDeployed: ${isDeployed}, rolledBackUrls: ${JSON.stringify(rolledBackUrls)}, failedRollbackUrls: ${JSON.stringify(failedRollbackUrls)}, Failed to persist CANCELLED status: ${error.message}`, error);
+      return internalServerError(`Cleanup for GeoExperiment ${geoExperimentId} completed but persisting CANCELLED status failed`);
+    }
 
     context.log.info(`[geo-experiment-cancel] Successfully cancelled GeoExperiment ${geoExperimentId} for site ${siteId} by ${updatedBy}`);
 

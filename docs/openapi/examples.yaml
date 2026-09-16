@@ -1172,3 +1172,10 @@ suggestions-by-urls-response:
       limit: 100
       cursor: null
       hasMore: false
+geo-experiment-cancel-response:
+  description: Example for a successful geo experiment cancellation with a partially rolled back deployment
+  value:
+    status: 'CANCELLED'
+    rolledBackUrls:
+      - 'https://www.example.com/product/example-product'
+    failedRollbackUrls: []

@@ -12528,6 +12528,22 @@ describe('Suggestions Controller', () => {
       expect(disableScheduleStub).to.not.have.been.called;
     });
 
+    it('returns 400 and makes no changes when the experiment is already CANCELLED', async () => {
+      const geoExperiment = createMockGeoExperiment({
+        status: STATUSES.CANCELLED,
+      });
+      mockSuggestionDataAccess.GeoExperiment.findById.resolves(geoExperiment);
+      const response = await suggestionsController.cancelGeoExperiment({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(400);
+      expect(disableScheduleStub).to.not.have.been.called;
+      expect(mockSuggestion.saveMany).to.not.have.been.called;
+      expect(geoExperiment.setStatus).to.not.have.been.called;
+      expect(geoExperiment.save).to.not.have.been.called;
+    });
+
     it('unblocks suggestions (no edge rollback) and deletes the pre-schedule when not yet deployed', async () => {
       const suggestion = mockSuggestionEntity({
         ...suggs[0],
@@ -12664,6 +12680,36 @@ describe('Suggestions Controller', () => {
       expect(deleteAtomicStrategyStub).to.not.have.been.called;
       expect(mockGeoExperiment.setStatus).to.have.been.calledOnceWithExactly(STATUSES.CANCELLED);
       expect(mockGeoExperiment.save).to.have.been.calledOnce;
+    });
+
+    it('returns 500 when persisting the CANCELLED status fails after cleanup has run', async () => {
+      const suggestion = mockSuggestionEntity({
+        ...suggs[0],
+        data: { ...suggs[0].data, edgeOptimizeStatus: 'EXPERIMENT_IN_PROGRESS' },
+      });
+      mockSuggestion.allByOpportunityId.resolves([suggestion]);
+      const geoExperiment = createMockGeoExperiment({
+        status: STATUSES.GENERATING_BASELINE,
+        phase: PHASES.PRE_ANALYSIS_STARTED,
+        suggestionIds: [suggestion.getId()],
+        preScheduleId: 'pre-sched-1',
+        postScheduleId: null,
+      });
+      geoExperiment.save.rejects(new Error('conditional check failed'));
+      mockSuggestionDataAccess.GeoExperiment.findById.resolves(geoExperiment);
+
+      const response = await suggestionsController.cancelGeoExperiment({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+
+      expect(response.status).to.equal(500);
+      // Cleanup (schedule disable, suggestion unblock) already ran before the failed save.
+      expect(disableScheduleStub).to.have.been.calledWith(SITE_ID, 'pre-sched-1');
+      expect(suggestion.getData().edgeOptimizeStatus).to.be.undefined;
+      expect(geoExperiment.setStatus).to.have.been.calledOnceWithExactly(STATUSES.CANCELLED);
+      expect(geoExperiment.save).to.have.been.calledOnce;
+      expect(context.log.error).to.have.been.calledWithMatch(/geo-experiment-cancel-failed.*Failed to persist CANCELLED status.*conditional check failed/);
     });
   });
 
