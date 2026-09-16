@@ -87,7 +87,9 @@ export const UNEXPECTED_ERROR_MESSAGE = 'Semrush sub-workspace provisioning fail
  * an ADOPTED candidate — an adopted workspace may belong to a same-named sibling brand's own
  * still-in-flight provisioning (see `createOrAdoptSubworkspaceCandidate`'s own doc).
  * @param {SerenityTransport} transport
- * @param {{workspaceId: string, freshlyCreated: boolean}} candidate
+ * @param {{workspaceId: string, freshlyCreated: boolean}|undefined} candidate - undefined on
+ *   the abandoned-pointer path, where there is deliberately nothing to clean up; the
+ *   `?.freshlyCreated` guard in the body already handles it.
  * @param {string} parentWorkspaceId
  * @param {object} log
  * @param {string} phase
@@ -280,6 +282,10 @@ export async function provisionWorkspaceHandler(context, job, accessToken) {
   const metadata = job.getMetadata() ?? {};
   const {
     brandId, attemptId, parentWorkspaceId, title, requeueDepth = 0,
+    // Set by a PRIOR hop that found the brand's canonical pointer terminally failed. Makes the
+    // existing-pointer fast path below skip that dead pointer, so this attempt create-or-adopts
+    // a healthy workspace instead of re-polling the corpse forever.
+    abandonedCanonicalPointer = false,
   } = metadata;
 
   /** @type {{workspaceId: string, freshlyCreated: boolean}|undefined} */
@@ -302,6 +308,9 @@ export async function provisionWorkspaceHandler(context, job, accessToken) {
   // already cleans up `candidate` before rethrowing — avoids a harmless but noisy double
   // cleanupIfOwned call from the outer catch below for that specific path.
   let candidateAlreadyCleanedUp = false;
+  // Set when THIS hop abandoned a terminally-failed canonical pointer; threaded into the
+  // self-requeue so the next hop provisions fresh instead of re-adopting the dead one.
+  let abandonedPointerThisHop = false;
   // Set once promoteProvisioningReady succeeds: `candidate` is now the brand's CANONICAL, live
   // workspace, not an orphan. If the chained-job enqueue then throws (Finding 12), the outer
   // catch must NOT clean it up — emptying the canonical workspace would delete live data.
@@ -391,7 +400,7 @@ export async function provisionWorkspaceHandler(context, job, accessToken) {
       // never `pollUntilCreated`'s blocking loop, which would sleep in-Lambda) instead of
       // create-or-adopting a new candidate. `freshlyCreated: false` — this worker did not create
       // it, so it must never be torn down as an orphan on a lost race below.
-      if (hasText(state.semrushSubWorkspaceId)) {
+      if (hasText(state.semrushSubWorkspaceId) && !abandonedCanonicalPointer) {
         candidate = { workspaceId: state.semrushSubWorkspaceId, freshlyCreated: false };
       } else {
         // LLMO-7418 external-review Finding 4: every known caller now supplies `title` at
@@ -497,6 +506,31 @@ export async function provisionWorkspaceHandler(context, job, accessToken) {
     }
 
     if (isWorkspaceTerminalFailure(status)) {
+      // THE RETRY PATH (LLMO-7352 acceptance criterion: "Retry creates or safely adopts at most
+      // one healthy candidate for the current attempt. It does NOT resume a terminally failed
+      // shell."). When the workspace just polled IS the brand's canonical pointer, this brand is
+      // the incident population itself -- already bound to a dead workspace. Recording `failed`
+      // and stopping made every retry re-poll the same corpse, so the Retry button the UI offers
+      // could never succeed for precisely the brands this epic exists to fix.
+      //
+      // Abandon the dead pointer and let this attempt provision a healthy one: requeue with
+      // `abandonedCanonicalPointer` so the next hop's fast path skips it and create-or-adopts.
+      // When that candidate settles, promoteProvisioningReady OVERWRITES the dead pointer (its
+      // CAS does not require the pointer to be null), so no separate pointer-clear is needed.
+      //
+      // Self-limiting and bounded: the next hop's candidate is freshly created, so it can never
+      // re-enter this branch as a canonical pointer, and the ordinary depth cap still applies.
+      // Needs a title to create with; without one, fall through and record the failure as before.
+      if (!candidate.freshlyCreated
+        && candidate.workspaceId === state.semrushSubWorkspaceId
+        && hasText(title)
+        && requeueDepth < MAX_PROVISION_REQUEUE_DEPTH) {
+        log?.warn?.('provision-workspace-job: canonical sub-workspace is terminally failed; abandoning it and provisioning a fresh one', {
+          brandId, attemptId, deadWorkspaceId: candidate.workspaceId, status,
+        });
+        candidate = undefined;
+        abandonedPointerThisHop = true;
+      } else {
       // A terminally-failed shell cannot be deleted (Semrush-side restriction) — no cleanup
       // call here regardless of freshlyCreated; the pointer is simply never promoted to it.
       // The CAS result is load-bearing (Luis review, PR #3233): a `false` means a newer attempt
@@ -504,19 +538,20 @@ export async function provisionWorkspaceHandler(context, job, accessToken) {
       // this brand's current story. Emitting it at ERROR and returning 'failed' would report a
       // terminal failure the row never recorded, and would page on a brand a newer attempt may
       // be provisioning successfully right now.
-      const recorded = await promoteProvisioningFailed({
-        brandId, attemptId, error: TERMINAL_FAILURE_MESSAGE, postgrestClient,
-      });
-      if (!recorded) {
-        log?.info?.('provision-workspace-job: terminal status observed but this attempt was already superseded; not recording', {
+        const recorded = await promoteProvisioningFailed({
+          brandId, attemptId, error: TERMINAL_FAILURE_MESSAGE, postgrestClient,
+        });
+        if (!recorded) {
+          log?.info?.('provision-workspace-job: terminal status observed but this attempt was already superseded; not recording', {
+            brandId, attemptId, semrushWorkspaceId: candidate.workspaceId, status,
+          });
+          return { provisioningStatus: 'superseded' };
+        }
+        log?.error?.('provision-workspace-job: sub-workspace settled to a terminal failure status', {
           brandId, attemptId, semrushWorkspaceId: candidate.workspaceId, status,
         });
-        return { provisioningStatus: 'superseded' };
+        return { provisioningStatus: 'failed' };
       }
-      log?.error?.('provision-workspace-job: sub-workspace settled to a terminal failure status', {
-        brandId, attemptId, semrushWorkspaceId: candidate.workspaceId, status,
-      });
-      return { provisioningStatus: 'failed' };
     }
 
     // Still settling (`not ready`, or an unrecognized status — treated the same: keep waiting,
@@ -533,7 +568,7 @@ export async function provisionWorkspaceHandler(context, job, accessToken) {
         brandId, attemptId, error: REQUEUE_EXHAUSTED_MESSAGE, postgrestClient,
       });
       log?.error?.('provision-workspace-job: requeue depth exhausted; failing the attempt', {
-        brandId, attemptId, semrushWorkspaceId: candidate.workspaceId, requeueDepth,
+        brandId, attemptId, semrushWorkspaceId: candidate?.workspaceId, requeueDepth,
       });
       return { provisioningStatus: 'failed' };
     }
@@ -552,8 +587,16 @@ export async function provisionWorkspaceHandler(context, job, accessToken) {
         parentWorkspaceId,
         title,
         requeueDepth: nextDepth,
-        candidateWorkspaceId: candidate.workspaceId,
-        freshlyCreated: candidate.freshlyCreated,
+        // Omitted when this hop abandoned a terminally-failed canonical pointer: the next hop
+        // must create-or-adopt a fresh workspace, not carry the dead one forward.
+        ...(candidate ? {
+          candidateWorkspaceId: candidate.workspaceId,
+          freshlyCreated: candidate.freshlyCreated,
+        } : {}),
+        // Sticky for the rest of the chain, so no later hop re-adopts the dead pointer either.
+        ...(abandonedCanonicalPointer || abandonedPointerThisHop
+          ? { abandonedCanonicalPointer: true }
+          : {}),
         // Threaded forward so a chain configured on hop 0 survives every backoff hop —
         // otherwise a market-creating conversion endpoint's attempt would silently degrade
         // into a workspace-only one the moment it needed even a single requeue.
@@ -569,10 +612,13 @@ export async function provisionWorkspaceHandler(context, job, accessToken) {
     // must not clean it up even if the freshness-optimization write just below throws.
     requeueEnqueued = true;
 
-    log?.info?.('provision-workspace-job: not ready; self-requeued with backoff', {
+    log?.info?.(abandonedPointerThisHop
+      ? 'provision-workspace-job: abandoned a terminally-failed canonical pointer; self-requeued to provision a fresh workspace'
+      : 'provision-workspace-job: not ready; self-requeued with backoff', {
       brandId,
       attemptId,
-      semrushWorkspaceId: candidate.workspaceId,
+      // Undefined on the abandon path — there is deliberately no candidate to carry forward.
+      semrushWorkspaceId: candidate?.workspaceId,
       requeueDepth: nextDepth,
       delaySeconds: nextDelaySeconds,
       requeuedJobId: newJob.getId(),

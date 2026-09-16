@@ -281,7 +281,14 @@ describe('handlers/provision-workspace-job.js (LLMO-7352 / LLMO-7418)', () => {
       expect(result).to.deep.equal({ provisioningStatus: 'ready' });
     });
 
-    it('promotes to failed, WITHOUT any cleanup call, when the existing pointer has gone terminally failed', async () => {
+    // BEHAVIOUR CHANGE (multi-POV review). This previously asserted "promote to failed and
+    // stop" when the brand's own CANONICAL pointer polls terminally failed. That made the
+    // feature unable to fix the brands it was written for: a brand already bound to a dead
+    // workspace re-polled that same corpse on every retry, so the UI's Retry button could never
+    // succeed. It also violated the epic's explicit criterion — "Retry creates or safely adopts
+    // at most one healthy candidate for the current attempt. It does not resume a terminally
+    // failed shell."
+    it('abandons a terminally-failed CANONICAL pointer and self-requeues to provision a fresh workspace', async () => {
       getBrandProvisioningStateStub.resolves(pendingState({ semrushSubWorkspaceId: EXISTING_WS }));
       transport.getWorkspaceStatus.resolves({ status: 'creation_failed' });
       const { provisionWorkspaceHandler } = await loadHandler();
@@ -289,14 +296,50 @@ describe('handlers/provision-workspace-job.js (LLMO-7352 / LLMO-7418)', () => {
 
       const result = await provisionWorkspaceHandler(context, job, 'token');
 
+      // NOT failed — the attempt continues with a fresh workspace.
+      expect(result).to.deep.equal({ requeuedJobId: 'job-followup' });
+      expect(promoteProvisioningFailedStub).to.not.have.been.called;
+      // A terminally-failed shell cannot be deleted upstream, so still no cleanup call.
       expect(emptyWorkspaceBestEffortStub).to.not.have.been.called;
+
+      // The next hop must NOT carry the dead pointer, and must be told to skip it.
+      const [, enqueueArgs] = createAndEnqueueJobStub.firstCall.args;
+      expect(enqueueArgs.metadata.abandonedCanonicalPointer).to.equal(true);
+      expect(enqueueArgs.metadata.candidateWorkspaceId).to.equal(undefined);
+    });
+
+    it('does NOT re-adopt the dead pointer on the next hop once it has been abandoned', async () => {
+      // The other half of the fix: without this the fast path would pick the same dead pointer
+      // straight back up and the loop would continue.
+      getBrandProvisioningStateStub.resolves(pendingState({ semrushSubWorkspaceId: EXISTING_WS }));
+      transport.getWorkspaceStatus.resolves({ status: 'active' });
+      const { provisionWorkspaceHandler } = await loadHandler();
+      const job = makeJob(makeMetadata({ abandonedCanonicalPointer: true }));
+
+      await provisionWorkspaceHandler(context, job, 'token');
+
+      // It create-or-adopted instead of polling EXISTING_WS.
+      expect(createOrAdoptSubworkspaceCandidateStub).to.have.been.calledOnce;
+      expect(transport.getWorkspaceStatus).to.not.have.been.calledWith(EXISTING_WS);
+    });
+
+    it('still records failed when there is no title to create a replacement with', async () => {
+      // Fallback: abandoning requires being able to provision a replacement. Without a title
+      // the worker cannot create one, so the original record-and-stop behaviour is correct.
+      getBrandProvisioningStateStub.resolves(pendingState({ semrushSubWorkspaceId: EXISTING_WS }));
+      transport.getWorkspaceStatus.resolves({ status: 'creation_failed' });
+      const { provisionWorkspaceHandler } = await loadHandler();
+      const job = makeJob(makeMetadata({ title: undefined }));
+
+      const result = await provisionWorkspaceHandler(context, job, 'token');
+
+      expect(result).to.deep.equal({ provisioningStatus: 'failed' });
       expect(promoteProvisioningFailedStub).to.have.been.calledOnceWith({
         brandId: BRAND_ID,
         attemptId: ATTEMPT_ID,
         error: TERMINAL_FAILURE_MESSAGE,
         postgrestClient,
       });
-      expect(result).to.deep.equal({ provisioningStatus: 'failed' });
     });
 
     it('self-requeues on not-ready, carrying the existing pointer forward as the candidate with freshlyCreated: false', async () => {
