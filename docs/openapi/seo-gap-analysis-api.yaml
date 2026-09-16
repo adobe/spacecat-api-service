@@ -1,0 +1,148 @@
+seo-gap-analysis-jobs:
+  post:
+    tags:
+      - seo-gap-analysis
+    security:
+      - api_key: [ ]
+      - session_token: [ ]
+    summary: Submit a new SEO/GEO/AEO competitor gap analysis job
+    description: |
+      Runs the given keyword through the SERP, discovers the competitor pages ranking for it
+      (excluding the target URL and any `filterDomains`), scrapes and analyzes each competitor
+      page plus the target for SEO / GEO / AEO signals, and produces a structured gap report of
+      the target versus the competitors. The work runs asynchronously — callers receive 202 with
+      a jobId and must poll GET /seo-gap-analysis/jobs/{jobId} for the report.
+    operationId: createSeoGapAnalysisJob
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              keyword:
+                type: string
+                description: The search keyword to analyze.
+                example: best running shoes
+              targetUrl:
+                type: string
+                format: uri
+                description: The URL being optimized.
+                example: https://mybrand.com/running-shoes
+              filterDomains:
+                type: array
+                description: Bare hostnames to exclude from the SERP (owned/partner/noise). Max 50.
+                items:
+                  type: string
+                example: [mybrand.com, partner.com]
+              currentRanking:
+                type: object
+                description: Optional current performance/ranking context, passed through opaquely.
+                additionalProperties: true
+              locale:
+                type: string
+                description: Optional locale hint for the SERP (e.g. "de", "en_us").
+                example: en_us
+            required:
+              - keyword
+              - targetUrl
+    responses:
+      '202':
+        description: SEO gap analysis job accepted
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                jobId:
+                  type: string
+                  format: uuid
+                status:
+                  type: string
+                createdAt:
+                  type: string
+                  format: date-time
+                pollUrl:
+                  type: string
+                  format: uri
+      '400':
+        description: Invalid request (missing keyword, invalid targetUrl, or invalid filterDomains)
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+      '401':
+        $ref: './responses.yaml#/401'
+      '500':
+        $ref: './responses.yaml#/500'
+
+seo-gap-analysis-job-status:
+  parameters:
+    - $ref: './parameters.yaml#/jobId'
+  get:
+    tags:
+      - seo-gap-analysis
+    security:
+      - api_key: [ ]
+      - session_token: [ ]
+    summary: Get SEO gap analysis job status and report
+    description: |
+      Returns the current status and, once completed, the SEO/GEO/AEO gap report for the job.
+      The report contains per-factor diffs of the target versus competitors and a prioritized
+      recommendation list.
+    operationId: getSeoGapAnalysisJobStatus
+    responses:
+      '200':
+        description: Job status and (if available) the gap report
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                jobId:
+                  type: string
+                  format: uuid
+                status:
+                  type: string
+                createdAt:
+                  type: string
+                  format: date-time
+                updatedAt:
+                  type: string
+                  format: date-time
+                result:
+                  type: object
+                  additionalProperties: true
+                  description: The gap report (null until the job completes).
+                error:
+                  type: object
+                  properties:
+                    code:
+                      type: string
+                    message:
+                      type: string
+      '400':
+        description: Invalid jobId format
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+      '401':
+        $ref: './responses.yaml#/401'
+      '404':
+        description: Job not found
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+      '500':
+        $ref: './responses.yaml#/500'

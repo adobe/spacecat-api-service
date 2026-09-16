@@ -502,6 +502,11 @@ describe('getRouteHandlers', () => {
     getSiteDetectionJobStatus: sinon.stub(),
   };
 
+  const mockSeoGapAnalysisController = {
+    createSeoGapAnalysisJob: sinon.stub(),
+    getSeoGapAnalysisJobStatus: sinon.stub(),
+  };
+
   const mockPlgOnboardingController = {
     onboard: sinon.stub(),
     getAllOnboardings: sinon.stub(),
@@ -736,6 +741,7 @@ describe('getRouteHandlers', () => {
       mockEphemeralRunController,
       mockAutofixChecksController,
       mockSiteDetectionController,
+      mockSeoGapAnalysisController,
       mockPlgOnboardingController,
       mockDrsBpPgAuditController,
       mockWebhooksController,
@@ -771,6 +777,7 @@ describe('getRouteHandlers', () => {
       'GET /projects',
       'POST /projects',
       'POST /preflight/jobs',
+      'POST /seo-gap-analysis',
       'POST /sites/detect/jobs',
       'GET /sites',
       'POST /sites',
@@ -1129,6 +1136,7 @@ describe('getRouteHandlers', () => {
       'GET /projects/:projectId/sites',
       'GET /projects/by-project-name/:projectName/sites',
       'GET /preflight/jobs/:jobId',
+      'GET /seo-gap-analysis/jobs/:jobId',
       'GET /sites/detect/jobs/:jobId',
       'GET /sites/:siteId',
       'GET /sites/:siteId/identity',
