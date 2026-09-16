@@ -71,6 +71,7 @@ site-keyword-cpc:
         Defaults to `us` when omitted.
       schema:
         type: string
+        default: us
     - name: limit
       in: query
       required: false

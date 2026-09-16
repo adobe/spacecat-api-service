@@ -3796,6 +3796,25 @@ describe('Sites Controller', () => {
     expect(getOrganicKeywords).to.have.been.calledOnceWith('https://site1.com', { limit: 50, country: 'us' });
   });
 
+  it('get site keyword cpc coerces non-integer volume and cpc to integers', async () => {
+    const siteId = sites[0].getId();
+    const getOrganicKeywords = sinon.stub().resolves({
+      result: { keywords: [{ keyword: 'modular sofa', volume: 499.7, cpc: 149.8 }] },
+      fullAuditRef: '',
+    });
+    const createFrom = sinon.stub().returns({ getOrganicKeywords });
+
+    const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+      '@adobe/mysticat-shared-seo-client': { default: { createFrom } },
+    });
+    const controller = sitesControllerMock.default(context, loggerStub, context.env);
+
+    const resp = await (await controller.getSiteKeywordCpc({ params: { siteId } })).json();
+
+    // The OpenAPI schema declares both volume and cpc as integers.
+    expect(resp.keywords).to.deep.equal([{ keyword: 'modular sofa', volume: 500, cpc: 150 }]);
+  });
+
   it('get site keyword cpc defaults the limit and omits country when not provided', async () => {
     const siteId = sites[0].getId();
     const getOrganicKeywords = sinon.stub().resolves({ result: { keywords: [] }, fullAuditRef: '' });

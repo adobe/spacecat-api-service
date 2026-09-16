@@ -1694,8 +1694,9 @@ function SitesController(ctx, log, env) {
       const { result } = await seoClient.getOrganicKeywords(baseURL, options);
       const keywords = (result?.keywords ?? []).map((kw) => ({
         keyword: kw.keyword,
-        volume: kw.volume,
-        // Guarantee the documented integer-cents contract rather than trusting the client.
+        // Coerce to the documented integer contract (volume, cpc-in-cents) rather than
+        // trusting the client to honour it.
+        volume: Math.round(Number(kw.volume)) || 0,
         cpc: Math.round(Number(kw.cpc)) || 0,
       }));
       return ok({ baseURL, keywords });
