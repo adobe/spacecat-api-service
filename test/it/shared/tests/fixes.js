@@ -230,7 +230,8 @@ export default function fixTests(getHttpClient, resetData) {
           expect(d.opportunityTitle).to.equal('Fix CWV issues');
           expect(d.status).to.be.oneOf(['DEPLOYED', 'PUBLISHED']);
           expect(d).to.have.property('changeDetails');
-          expectISOTimestamp(d.deployedAt, 'deployedAt');
+          // Fixed seed deploy date (not a recent run-time timestamp).
+          expect(d.deployedAt).to.match(/^2026-08-15T/);
         });
       });
 
