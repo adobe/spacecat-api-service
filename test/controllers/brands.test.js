@@ -5457,8 +5457,14 @@ describe('Brands Controller', () => {
 
         expect(response.status).to.equal(202);
         const body = await response.json();
+        // `status` here is the BRAND's status, not the job's — the row is already persisted
+        // and returned in full so the UI can render it as "Setting up" immediately.
         expect(body.status).to.equal('pending');
         expect(body.jobId).to.equal('job-xyz');
+        // The job chain this brand is waiting on starts at the provisioning worker; the
+        // published 202 contract (V2BrandProvisioningAccepted) requires it.
+        expect(body.jobType).to.equal('serenity-provision-workspace');
+        expect(body.id).to.be.a('string');
 
         // The brand row is persisted BEFORE provisioning starts, with no workspace pointer yet.
         expect(upsertStub.calledOnce).to.equal(true);

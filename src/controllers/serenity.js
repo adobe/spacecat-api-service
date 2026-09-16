@@ -1247,7 +1247,9 @@ function SerenityController(context, log, env) {
               brandId: auth.brandUuid, attemptId, jobId: job.getId(), error: updateError?.message,
             });
           });
-          return accepted({ jobId: job.getId(), status: job.getStatus() });
+          return accepted({
+            jobId: job.getId(), jobType: PROVISION_WORKSPACE_JOB_TYPE, status: job.getStatus(),
+          });
         }
         // PR-C guard (LLMO-7352/LLMO-7418): this branch stays synchronous by default, but an
         // `activate` call for this SAME brand may have an async provisioning attempt in flight
@@ -2034,7 +2036,9 @@ function SerenityController(context, log, env) {
             brandId: brandUuid, attemptId, jobId: job.getId(), error: updateError?.message,
           });
         });
-        return accepted({ jobId: job.getId(), status: job.getStatus() });
+        return accepted({
+          jobId: job.getId(), jobType: PROVISION_WORKSPACE_JOB_TYPE, status: job.getStatus(),
+        });
       }
       // PR-C guard (LLMO-7352/LLMO-7418): this branch stays synchronous by default, but a
       // market-creating call for this SAME brand may have an async provisioning attempt in

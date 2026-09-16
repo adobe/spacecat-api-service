@@ -91,7 +91,7 @@ v2-brands-for-org:
         content:
           application/json:
             schema:
-              $ref: './schemas.yaml#/SerenityPromptsJobAccepted'
+              $ref: './schemas.yaml#/V2BrandProvisioningAccepted'
       '400':
         $ref: './responses.yaml#/400'
       '403':

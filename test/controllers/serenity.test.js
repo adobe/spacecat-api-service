@@ -1740,7 +1740,14 @@ describe('SerenityController', () => {
       const body = await readBody(response);
 
       expect(response.status).to.equal(202);
-      expect(body).to.include({ jobId: 'job-abc', status: 'IN_PROGRESS' });
+      // Pinned whole, not `include`: the 202 body is a published contract
+      // (V2BrandProvisioningAccepted's sibling `SerenityProvisioningJobAccepted`, which
+      // requires jobType), and `include` would not notice a required field going missing.
+      // `jobType` is the FIRST hop of the chain — the provisioning worker — not the
+      // market create that follows it.
+      expect(body).to.deep.equal({
+        jobId: 'job-abc', jobType: 'serenity-provision-workspace', status: 'IN_PROGRESS',
+      });
       // LLMO-7418 external-review Finding 9: reconciles a stale in-flight attempt (reusing the
       // sync guard's own logic) before minting a new one — beginProvisioningAttempt's own CAS
       // has no staleness awareness on its own.
@@ -2306,6 +2313,11 @@ describe('SerenityController', () => {
       }));
 
       expect(response.status).to.equal(202);
+      // Same published 202 contract as createMarket's async branch: jobId + jobType + status,
+      // jobType naming the provisioning worker that heads the chain.
+      expect(await readBody(response)).to.deep.equal({
+        jobId: 'job-abc', jobType: 'serenity-provision-workspace', status: 'IN_PROGRESS',
+      });
       expect(orchestrateActivateMarketsStub).to.not.have.been.called;
       // LLMO-7418 external-review Finding 9: the async begin-site now reconciles a stale
       // in-flight attempt first, reusing the sync guard's own logic, before minting a new one.
