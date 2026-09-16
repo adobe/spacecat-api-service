@@ -5499,8 +5499,9 @@ describe('Brands Controller', () => {
         expect(chainedJobMetadata.modelIds).to.deep.equal(['model-a', 'model-b']);
       });
 
-      // LLMO-7418 external-review Finding 9 applied to this endpoint too. `beginProvisioningAttempt`
-      // is a bare CAS with no staleness awareness: on an upsert onto an EXISTING brand stuck at
+      // LLMO-7418 external-review Finding 9 applied to this endpoint too.
+      // `beginProvisioningAttempt` is a bare CAS with no staleness awareness: on an
+      // upsert onto an EXISTING brand stuck at
       // `pending` (a worker that died, or a rollback that left its job unhandled) it returns false
       // forever, and this endpoint would 409 that brand permanently with no way back. The six
       // equivalent call sites in serenity.js already reconcile first; this one did not.
