@@ -149,8 +149,28 @@ const HANDLERS = {
  * SQS at-least-once delivery). A delivery that cannot win the lease is dropped;
  * a delivery that cannot even attempt the claim (no PostgREST client / query
  * error) fails closed and is redelivered rather than processed unguarded.
+ *
+ * PR-C (LLMO-7352/LLMO-7418): all three provisioning job types belong here for the
+ * same two reasons the generation job does — each carries a `promiseToken`/
+ * `promisePair` in its metadata that the runner exchanges (so a replayed delivery
+ * replays a live token), and each writes to Semrush (sub-workspace create, project
+ * create, project publish). Their own compare-and-set discipline is not a
+ * substitute: CAS makes a duplicate delivery's DB write lose, but only AFTER the
+ * upstream Semrush call has already happened, so a concurrent redelivery still
+ * creates a real sub-workspace or project that then has to be cleaned up. The
+ * lease stops the second delivery before it reaches Semrush at all.
+ *
+ * Safe for the self-requeue and chain hops: the lease is per-job, and every hop is
+ * a NEW AsyncJob with its own id, so a hop never contends with its own successor.
+ * The runner releases the lease on a retryable failure and scrubs it on every
+ * terminal path, so a redelivery can always re-claim.
  */
-const LEASE_REQUIRED_JOB_TYPES = new Set([SEMRUSH_MARKET_GENERATION_JOB_TYPE]);
+const LEASE_REQUIRED_JOB_TYPES = new Set([
+  SEMRUSH_MARKET_GENERATION_JOB_TYPE,
+  PROVISION_WORKSPACE_JOB_TYPE,
+  CREATE_MARKET_JOB_TYPE,
+  ACTIVATE_MARKETS_JOB_TYPE,
+]);
 
 /**
  * Job types whose write-scoped access token is exchanged INSIDE the handler,
