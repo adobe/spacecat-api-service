@@ -1215,6 +1215,12 @@ function SerenityController(context, log, env) {
           // one and therefore does pass a title).
           const job = await createAndEnqueueJob(ctx, {
             jobType: PROVISION_WORKSPACE_JOB_TYPE,
+            // Fail-closed pair binding (Gap 1, #3252): this job writes to Semrush, so refuse to
+            // enqueue it on anything but the Semrush pair rather than mint a token on the wrong
+            // delegated credential. Safe for every caller that reaches here — the async branch
+            // only runs for a Serenity-mode request, which always carries the Semrush audience
+            // header the pair is resolved from.
+            requirePair: PROMISE_PAIR_SEMRUSH,
             metadata: {
               brandId: auth.brandUuid,
               attemptId,
@@ -2004,6 +2010,12 @@ function SerenityController(context, log, env) {
         }
         const job = await createAndEnqueueJob(ctx, {
           jobType: PROVISION_WORKSPACE_JOB_TYPE,
+          // Fail-closed pair binding (Gap 1, #3252): this job writes to Semrush, so refuse to
+          // enqueue it on anything but the Semrush pair rather than mint a token on the wrong
+          // delegated credential. Safe for every caller that reaches here — the async branch
+          // only runs for a Serenity-mode request, which always carries the Semrush audience
+          // header the pair is resolved from.
+          requirePair: PROMISE_PAIR_SEMRUSH,
           metadata: {
             brandId: brandUuid,
             attemptId,

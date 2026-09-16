@@ -80,7 +80,7 @@ import { isAsyncPromptGenEnabled, maybeEnqueueMarketGeneration } from '../suppor
 import { computeWriteDeadline } from '../support/serenity/intent-classification.js';
 import { ensureMarketSite } from '../support/serenity/site-linkage.js';
 import { resolveWorkspaceId } from '../support/serenity/workspace-resolver.js';
-import { createAndEnqueueJob } from '../support/serenity/async-job-runner.js';
+import { createAndEnqueueJob, PROMISE_PAIR_SEMRUSH } from '../support/serenity/async-job-runner.js';
 import { PROVISION_WORKSPACE_JOB_TYPE } from '../support/serenity/handlers/provision-workspace-job.js';
 import { CREATE_MARKET_JOB_TYPE } from '../support/serenity/handlers/create-market-job.js';
 import { resolveCallerId, validateAsync } from '../support/serenity/handlers/prompts.js';
@@ -2126,6 +2126,12 @@ function BrandsController(ctx, log, env) {
         try {
           const job = await createAndEnqueueJob(context, {
             jobType: PROVISION_WORKSPACE_JOB_TYPE,
+            // Fail-closed pair binding (Gap 1, #3252): this job writes to Semrush, so refuse to
+            // enqueue it on anything but the Semrush pair rather than mint a token on the wrong
+            // delegated credential. Safe for every caller that reaches here — the async branch
+            // only runs for a Serenity-mode request, which always carries the Semrush audience
+            // header the pair is resolved from.
+            requirePair: PROMISE_PAIR_SEMRUSH,
             metadata: {
               brandId: asyncBrandId,
               attemptId,

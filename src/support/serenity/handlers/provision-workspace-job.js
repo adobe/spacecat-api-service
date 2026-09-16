@@ -14,7 +14,7 @@
 
 import { hasText } from '@adobe/spacecat-shared-utils';
 import { createSerenityTransport } from '../rest-transport.js';
-import { createAndEnqueueJob } from '../async-job-runner.js';
+import { createAndEnqueueJob, PROMISE_PAIR_SEMRUSH } from '../async-job-runner.js';
 import {
   createOrAdoptSubworkspaceCandidate,
   emptyWorkspaceBestEffort,
@@ -154,6 +154,12 @@ async function enqueueChainedJobIfConfigured(
         // context to mint its own, identical to every other self-requeue in this file.
         promiseToken: metadata.promiseToken,
         promisePair: metadata.promisePair,
+        // Fail-closed pair binding (Gap 1, #3252), same as the controller enqueues that start
+        // this chain: the chained job writes to Semrush, so a forwarded pair that is anything
+        // but the Semrush one must refuse to enqueue rather than carry the wrong delegated
+        // credential onward. createAndEnqueueJob persists the resolved pair into each job's
+        // metadata, so what we forward here is the pair the original request resolved.
+        requirePair: PROMISE_PAIR_SEMRUSH,
         metadata: { ...metadata.chainedJobMetadata, workspaceId },
       });
       log?.info?.('provision-workspace-job: chained job enqueued after ready promotion', {
@@ -581,6 +587,8 @@ export async function provisionWorkspaceHandler(context, job, accessToken) {
       // no HTTP request context, so createAndEnqueueJob cannot mint a fresh one itself.
       promiseToken: metadata.promiseToken,
       promisePair: metadata.promisePair,
+      // Fail-closed pair binding (Gap 1, #3252) — see the chained-enqueue above.
+      requirePair: PROMISE_PAIR_SEMRUSH,
       metadata: {
         brandId,
         attemptId,

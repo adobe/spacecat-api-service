@@ -439,6 +439,9 @@ describe('SerenityController', () => {
       },
       '../../src/support/serenity/async-job-runner.js': {
         createAndEnqueueJob: createAndEnqueueJobStub,
+        // Pinned explicitly rather than relying on esmock passthrough, so the fail-closed
+        // pair-binding assertion below compares against a known value.
+        PROMISE_PAIR_SEMRUSH: 'SEMRUSH',
       },
       '../../src/support/serenity/handlers/classify-prompts-job.js': {
         CLASSIFY_PROMPTS_JOB_TYPE: 'serenity-classify-prompts',
@@ -1781,6 +1784,23 @@ describe('SerenityController', () => {
       expect(chainedJobMetadata.requestBody).to.include({ market: 'us', languageCode: 'en', brandDomain: 'x.com' });
       expect(chainedJobMetadata.suppliedSiteIdentity).to.equal(null);
       expect(chainedJobMetadata.suppliedSiteId).to.equal(null);
+    });
+
+    it('binds the provisioning enqueue to the Semrush promise pair (fail-closed, #3252)', async () => {
+      // This job writes to Semrush. Enqueuing it on any other pair would mint a token on the
+      // wrong delegated credential, so the enqueue must refuse rather than carry it onward.
+      const { createMarket } = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({
+        data: {
+          market: 'us', languageCode: 'en', brandDomain: 'x.com', brandNames: ['X'], async: true,
+        },
+      });
+
+      await createMarket(ctx);
+
+      expect(createAndEnqueueJobStub).to.have.been.calledOnce;
+      const [, enqueueArgs] = createAndEnqueueJobStub.firstCall.args;
+      expect(enqueueArgs.requirePair).to.equal('SEMRUSH');
     });
 
     it('createMarket answers 409 without enqueuing anything when a provisioning attempt is already in flight', async () => {
