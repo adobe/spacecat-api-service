@@ -414,6 +414,55 @@ describe('brands-storage', () => {
       expect(flatResult.pendingSemrushProvisioning).to.equal(null);
     });
 
+    it('maps semrush_provisioning_status/error to semrushProvisioningStatus/Error, null when absent (LLMO-7352/LLMO-7418)', async () => {
+      const failedRow = makeBrandRow({
+        semrush_provisioning_status: 'failed',
+        semrush_provisioning_error: 'Semrush sub-workspace provisioning failed and cannot be recovered automatically.',
+      });
+      const failedQuery = createChainableQuery({ data: failedRow, error: null });
+      const failedResult = await getBrandById(
+        ORG_ID,
+        BRAND_ID,
+        { from: sinon.stub().returns(failedQuery) },
+      );
+      expect(failedResult.semrushProvisioningStatus).to.equal('failed');
+      expect(failedResult.semrushProvisioningError).to.equal(
+        'Semrush sub-workspace provisioning failed and cannot be recovered automatically.',
+      );
+
+      // A brand that has never gone through an async provisioning attempt (every brand
+      // created before these columns existed, and every synchronous create/activate).
+      const flatQuery = createChainableQuery({ data: makeBrandRow(), error: null });
+      const flatResult = await getBrandById(
+        ORG_ID,
+        BRAND_ID,
+        { from: sinon.stub().returns(flatQuery) },
+      );
+      expect(flatResult.semrushProvisioningStatus).to.equal(null);
+      expect(flatResult.semrushProvisioningError).to.equal(null);
+    });
+
+    // Luis review, PR #3250: the two states the frontend actually branches on were untested.
+    // `pending` drives the "Setting up" indicator and `ready` is the silent-success case, so a
+    // renamed enum value or a mapping typo in either would have shipped undetected.
+    it('maps the pending and ready provisioning states, with no error on either (LLMO-7352/LLMO-7418)', async () => {
+      for (const status of ['pending', 'ready']) {
+        const row = makeBrandRow({ semrush_provisioning_status: status });
+        const query = createChainableQuery({ data: row, error: null });
+        // eslint-disable-next-line no-await-in-loop
+        const result = await getBrandById(
+          ORG_ID,
+          BRAND_ID,
+          { from: sinon.stub().returns(query) },
+        );
+        expect(result.semrushProvisioningStatus, `status ${status}`).to.equal(status);
+        // beginProvisioningAttempt writes semrush_provisioning_error: null, so a successful
+        // retry atomically clears any prior error — the error field is only ever set alongside
+        // `failed`.
+        expect(result.semrushProvisioningError, `status ${status}`).to.equal(null);
+      }
+    });
+
     it('defaults to empty regions when competitor regions is missing', async () => {
       const dbRow = makeBrandRow({
         competitors: [{ name: 'Rival', url: null }], // no regions key — triggers || []
