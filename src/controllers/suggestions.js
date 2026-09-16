@@ -3183,8 +3183,21 @@ function SuggestionsController(ctx, sqs, env) {
       return notFound('Site not found');
     }
 
+    // Same three-layer gate as deploySuggestionToEdge: org membership, LLMO admin, and site
+    // ownership. Cancelling is the inverse of deploying, so it needs the same authority.
     if (!await accessControlUtil.hasAccess(site)) {
-      return forbidden('User does not have access to this site');
+      context.log.warn(`[geo-experiment-cancel-failed] site: ${siteId}, user does not have access to the site`);
+      return forbidden('User does not belong to the organization');
+    }
+
+    if (!accessControlUtil.isLLMOAdministrator()) {
+      context.log.warn(`[geo-experiment-cancel-failed] site: ${siteId}, user is not an LLMO administrator`);
+      return forbidden('Only LLMO administrators can cancel geo experiments');
+    }
+
+    if (!await accessControlUtil.isOwnerOfSite(site)) {
+      context.log.warn(`[geo-experiment-cancel-failed] site: ${siteId}, user is not the owner of the site`);
+      return forbidden('User does not have access to cancel geo experiments for this site');
     }
 
     const geoExperiment = await GeoExperiment.findById(geoExperimentId);

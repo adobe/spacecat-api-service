@@ -12411,6 +12411,8 @@ describe('Suggestions Controller', () => {
 
     beforeEach(() => {
       sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(true);
+      sandbox.stub(AccessControlUtil.prototype, 'isLLMOAdministrator').returns(true);
+      sandbox.stub(AccessControlUtil.prototype, 'isOwnerOfSite').resolves(true);
 
       mockGeoExperiment = createMockGeoExperiment();
       mockSuggestionDataAccess.GeoExperiment.findById.resolves(mockGeoExperiment);
@@ -12453,6 +12455,26 @@ describe('Suggestions Controller', () => {
     it('returns 403 without site access', async () => {
       AccessControlUtil.prototype.hasAccess.restore();
       sandbox.stub(AccessControlUtil.prototype, 'hasAccess').resolves(false);
+      const response = await suggestionsController.cancelGeoExperiment({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(403);
+    });
+
+    it('returns 403 when the user is not an LLMO administrator', async () => {
+      AccessControlUtil.prototype.isLLMOAdministrator.restore();
+      sandbox.stub(AccessControlUtil.prototype, 'isLLMOAdministrator').returns(false);
+      const response = await suggestionsController.cancelGeoExperiment({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+      expect(response.status).to.equal(403);
+    });
+
+    it('returns 403 when the user is not the owner of the site', async () => {
+      AccessControlUtil.prototype.isOwnerOfSite.restore();
+      sandbox.stub(AccessControlUtil.prototype, 'isOwnerOfSite').resolves(false);
       const response = await suggestionsController.cancelGeoExperiment({
         ...context,
         params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
