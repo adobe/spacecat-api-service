@@ -924,6 +924,102 @@ describe('markets-subworkspace handlers', () => {
       expect(transport.publishProject).to.have.been.calledOnce;
     });
 
+    it('attaches the classified sub-category tag id to a topic\'s prompts when it matches an existing category (adobe/serenity-docs#44)', async () => {
+      // The default fixture tree already carries one existing top-level category,
+      // "Running Shoes" (TAG_IDS.categoryRunningShoes) — a real classifier call is
+      // stubbed out here (esmock) to resolve the generated topic "Trail Running"
+      // against it, isolating this test from any live LLM behavior.
+      const classifyTopicCategories = sinon.stub().resolves(new Map([['Trail Running', 'Running Shoes']]));
+      const { handleCreateMarketSubworkspace: handleCreate } = await esmock(
+        '../../../../src/support/serenity/handlers/markets-subworkspace.js',
+        {
+          '../../../../src/support/serenity/category-classification.js': { classifyTopicCategories },
+        },
+      );
+      const createdSubCategoryId = 'created:running-shoes:Trail Running';
+      const transport = makeTransport({
+        getBrandTopics: sinon.stub().resolves([
+          { topic: 'Trail Running', volume: 900, prompts: ['best trail running shoes'] },
+        ]),
+        listAiModels: sinon.stub().resolves({ items: [] }),
+        // Echoes the created sub-category node, parented under the matched
+        // existing category — the shape `ensureChildren` expects back.
+        createProjectTags: sinon.stub().resolves([{
+          id: createdSubCategoryId,
+          name: 'Trail Running',
+          parent_id: TAG_IDS.categoryRunningShoes,
+          children_count: 0,
+          path: null,
+        }]),
+      });
+      const res = await handleCreate(
+        transport,
+        makeBrand(),
+        PARENT,
+        { ...createBody, brandNames: ['Trail'] },
+        log,
+        null,
+        null,
+        { generateTopics: true, publishMode: 'require' },
+      );
+      expect(res.status).to.equal(201);
+      // classifyTopicCategories is called with the brand's existing top-level
+      // category names, sourced from the tree fixture.
+      expect(classifyTopicCategories).to.have.been.calledOnce;
+      expect(classifyTopicCategories.firstCall.args[0]).to.deep.equal(['Trail Running']);
+      expect(classifyTopicCategories.firstCall.args[1]).to.deep.equal(['Running Shoes']);
+      // The topic name is created as a child under the MATCHED category's id.
+      expect(transport.createProjectTags).to.have.been.calledWith(
+        WS,
+        'new-proj',
+        ['Trail Running'],
+        { parentId: TAG_IDS.categoryRunningShoes },
+      );
+      // The resolved sub-category id rides alongside the standard tag set on
+      // every prompt generated from that topic.
+      expect(transport.createPromptsWithMetadata).to.have.been.calledWithExactly(
+        WS,
+        'new-proj',
+        [genItemMatch('best trail running shoes')],
+        [...GENERATED_IDS, TAG_IDS.typeBranded, createdSubCategoryId],
+      );
+    });
+
+    it('leaves a topic uncategorized (fail-open) when creating its sub-category tag fails', async () => {
+      const classifyTopicCategories = sinon.stub().resolves(new Map([['Trail Running', 'Running Shoes']]));
+      const { handleCreateMarketSubworkspace: handleCreate } = await esmock(
+        '../../../../src/support/serenity/handlers/markets-subworkspace.js',
+        {
+          '../../../../src/support/serenity/category-classification.js': { classifyTopicCategories },
+        },
+      );
+      const transport = makeTransport({
+        getBrandTopics: sinon.stub().resolves([
+          { topic: 'Trail Running', volume: 900, prompts: ['best trail running shoes'] },
+        ]),
+        listAiModels: sinon.stub().resolves({ items: [] }),
+        createProjectTags: sinon.stub().rejects(new SerenityTransportError(502, 'upstream boom')),
+      });
+      const res = await handleCreate(
+        transport,
+        makeBrand(),
+        PARENT,
+        { ...createBody, brandNames: ['Trail'] },
+        log,
+        null,
+        null,
+        { generateTopics: true, publishMode: 'require' },
+      );
+      expect(res.status).to.equal(201);
+      // No category id attached — same shape as an unmatched/no-existing-category topic.
+      expect(transport.createPromptsWithMetadata).to.have.been.calledWithExactly(
+        WS,
+        'new-proj',
+        [genItemMatch('best trail running shoes')],
+        [...GENERATED_IDS, TAG_IDS.typeBranded],
+      );
+    });
+
     it('propagates a fatal model-attach failure (NOT best-effort like URL/competitor enrichment)', async () => {
       // Model attach is a core correctness step: a failure must abort the create
       // (a half-provisioned project must never be reported as success).
