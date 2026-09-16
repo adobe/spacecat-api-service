@@ -138,7 +138,9 @@ function subworkspaceCreationFailedError() {
 
 function subworkspaceCreationTimeoutError() {
   const error = new ErrorWithStatusCode(
-    "Semrush sub-workspace did not settle to 'created' in time",
+    // Success is `created | active | ready` (isWorkspaceReady) since this PR, so naming only
+    // 'created' misdescribes a workspace that timed out at `not ready` (Luis review, PR #3223).
+    'Semrush sub-workspace did not settle to a ready status in time',
     504,
   );
   error.code = ERROR_CODES.SUBWORKSPACE_CREATION_TIMEOUT;
@@ -181,10 +183,17 @@ export async function pollUntilCreated(
   { attempts, intervalMs, sleep },
   log = undefined,
 ) {
+  // Retained for the timeout log below (Luis review, PR #3223): the pre-refactor code logged the
+  // last observed status at timeout and this rewrite dropped it. It does not matter on the
+  // terminal-failure path, which logs `status` at the throw site — but a real timeout is exactly
+  // the case with no other record of what the workspace was stuck reporting (`not ready`, or an
+  // unrecognized string neither predicate matched), which is what triage needs.
+  let lastStatus;
   for (let i = 0; i < attempts; i += 1) {
     // eslint-disable-next-line no-await-in-loop
     const result = await transport.getWorkspaceStatus(workspaceId);
     const status = result?.status;
+    lastStatus = status;
     if (isWorkspaceReady(status)) {
       return;
     }
@@ -204,6 +213,7 @@ export async function pollUntilCreated(
   // mapError — LLMO-7352) and keep the client-facing message id-free.
   log?.error?.('pollUntilCreated: sub-workspace did not settle to a ready status in time', {
     semrushWorkspaceId: workspaceId,
+    lastStatus,
   });
   throw subworkspaceCreationTimeoutError();
 }
@@ -329,7 +339,7 @@ async function findAdoptableFamilyMatch(transport, parentWorkspaceId, title, log
     // query — they are the exact failure mode this status filter absorbs (#2718).
     const ignored = children.filter((w) => w?.title === title && !isWorkspaceReady(w?.status));
     if (ignored.length > 0) {
-      log?.info?.('ensureSubworkspace: ignoring non-created same-title family stub(s)', {
+      log?.info?.('ensureSubworkspace: ignoring non-ready same-title family stub(s)', {
         parentWorkspaceId,
         title,
         ignoredCount: ignored.length,

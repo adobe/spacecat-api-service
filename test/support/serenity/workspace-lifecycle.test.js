@@ -752,7 +752,7 @@ describe('workspace-lifecycle', () => {
         expect(transport.createSubworkspace).to.have.been.calledOnce;
       });
 
-      it('logs the count of ignored non-created same-title stubs and dedupes their statuses', async () => {
+      it('logs the count of ignored non-ready same-title stubs and dedupes their statuses', async () => {
         // Zombies accumulating under a brand should be visible in logs without a
         // manual family query — the proactive find emits an info line. ignoredCount
         // conveys volume; ignoredStatuses is deduped so repeated stubs sharing a
@@ -770,7 +770,7 @@ describe('workspace-lifecycle', () => {
         await ensureSubworkspace(transport, brand, PARENT_WS, localLog, NOOP_TIMING);
 
         const logged = localLog.info.getCalls()
-          .find((c) => /ignoring non-created same-title/.test(c.args[0]));
+          .find((c) => /ignoring non-ready same-title/.test(c.args[0]));
         expect(logged, 'expected an ignored-stub log line').to.exist;
         expect(logged.args[1]).to.include({ ignoredCount: 3 });
         expect(logged.args[1].ignoredStatuses).to.have.members(['not ready', 'invalid subscription']);
@@ -786,7 +786,7 @@ describe('workspace-lifecycle', () => {
         await ensureSubworkspace(transport, brand, PARENT_WS, localLog, NOOP_TIMING);
 
         const logged = localLog.info.getCalls()
-          .find((c) => /ignoring non-created same-title/.test(c.args[0]));
+          .find((c) => /ignoring non-ready same-title/.test(c.args[0]));
         expect(logged, 'expected no ignored-stub log line').to.not.exist;
       });
 
@@ -893,9 +893,12 @@ describe('workspace-lifecycle', () => {
       expect(error.code).to.equal(ERROR_CODES.SUBWORKSPACE_CREATION_TIMEOUT);
       expect(transport.getWorkspaceStatus).to.have.been.calledTwice;
       expect(sleep).to.have.been.calledTwice;
+      // `lastStatus` pins the restored triage field (Luis review, PR #3223): on a REAL timeout
+      // this is the only record of what the workspace was stuck reporting, and the pre-refactor
+      // code logged it. Asserted exactly so a future rewrite cannot drop it again silently.
       expect(localLog.error).to.have.been.calledOnceWithExactly(
         'pollUntilCreated: sub-workspace did not settle to a ready status in time',
-        { semrushWorkspaceId: SUB_WS },
+        { semrushWorkspaceId: SUB_WS, lastStatus: 'not ready' },
       );
     });
 
@@ -925,7 +928,7 @@ describe('workspace-lifecycle', () => {
         expect(err.status).to.equal(502);
         expect(err.code).to.equal(ERROR_CODES.SUBWORKSPACE_CREATION_FAILED);
         // Sanitized: never leaks the raw workspace id into the client-facing message (unlike
-        // the generic 'did not settle to created in time' timeout below).
+        // the generic 'did not settle to a ready status in time' timeout below).
         expect(err.message).to.not.include(SUB_WS);
         // Fails on the very FIRST read — proves this is not just "a shorter timeout": with a
         // 30-attempt/1000ms budget, retrying even once would mean this test's sleep stub was
@@ -1043,7 +1046,7 @@ describe('workspace-lifecycle', () => {
       // Regression guard (LLMO-7352): the pre-fix message embedded `${workspaceId}`, leaking the
       // Semrush UUID to the client through mapError. It must not anymore.
       expect(err.message).to.not.include(SUB_WS);
-      expect(err.message).to.match(/did not settle to 'created'/);
+      expect(err.message).to.match(/did not settle to a ready status/);
       expect(spyLog.error).to.have.been.calledWithMatch(
         sinon.match.string,
         sinon.match({ semrushWorkspaceId: SUB_WS }),
@@ -1060,7 +1063,7 @@ describe('workspace-lifecycle', () => {
       // setTimeout-based sleep once before the bounded poll gives up.
       const timing = { attempts: 1, intervalMs: 0 };
       await expect(ensureSubworkspace(transport, brand, PARENT_WS, log, timing))
-        .to.be.rejectedWith(/did not settle to 'created'/);
+        .to.be.rejectedWith(/did not settle to a ready status/);
     });
 
     it('refuses to re-grant onto a workspace that IS the org parent', async () => {
