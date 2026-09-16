@@ -5376,6 +5376,8 @@ describe('Brands Controller', () => {
         beginProvisioningAttempt = sinon.stub().resolves(true),
         createAndEnqueueJob = sinon.stub().resolves({ getId: () => 'job-abc' }),
         promoteProvisioningFailed = sinon.stub().resolves(true),
+        // Default: no attempt in flight for this brand, so the guard is a no-op.
+        guardAgainstConcurrentProvisioning = sinon.stub().resolves(),
       } = {}) {
         const Mocked = await esmock('../../src/controllers/brands.js', {
           '../../src/support/serenity/brand-provisioning.js': {
@@ -5398,6 +5400,7 @@ describe('Brands Controller', () => {
             ...(upsertBrand ? { upsertBrand } : {}),
             beginProvisioningAttempt,
             promoteProvisioningFailed,
+            guardAgainstConcurrentProvisioning,
           },
         });
         return Mocked.default(context, loggerStub, mockEnv);
@@ -5494,6 +5497,67 @@ describe('Brands Controller', () => {
         expect(chainedJobMetadata.requestBody.brandNames).to.deep.equal(['New Brand']);
         expect(chainedJobMetadata.requestBody.brandDisplayName).to.equal('New Brand');
         expect(chainedJobMetadata.modelIds).to.deep.equal(['model-a', 'model-b']);
+      });
+
+      // LLMO-7418 external-review Finding 9 applied to this endpoint too. `beginProvisioningAttempt`
+      // is a bare CAS with no staleness awareness: on an upsert onto an EXISTING brand stuck at
+      // `pending` (a worker that died, or a rollback that left its job unhandled) it returns false
+      // forever, and this endpoint would 409 that brand permanently with no way back. The six
+      // equivalent call sites in serenity.js already reconcile first; this one did not.
+      describe('stale/concurrent provisioning attempt on the brand-create path', () => {
+        it('reconciles BEFORE minting the attempt — the guard runs first, or it cannot unstick anything', async () => {
+          const guardStub = sinon.stub().resolves();
+          const beginStub = sinon.stub().resolves(true);
+          const controller = await buildController({
+            upsertBrand: sinon.stub().resolves({ id: 'forced-id', name: 'New Brand' }),
+            beginProvisioningAttempt: beginStub,
+            guardAgainstConcurrentProvisioning: guardStub,
+          });
+
+          const response = await controller.createBrandForOrg({
+            ...context,
+            params: { spaceCatId: ORGANIZATION_ID },
+            data: { ...semrushData },
+            dataAccess: mockDataAccess,
+            attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+          });
+
+          expect(response.status).to.equal(202);
+          expect(guardStub).to.have.been.calledOnce;
+          expect(guardStub.firstCall.args[0]).to.be.a('string');
+          // Ordering is the whole point: reconciling AFTER the CAS would be useless.
+          expect(guardStub.calledBefore(beginStub)).to.equal(true);
+        });
+
+        it('409s without minting an attempt or enqueuing when a LIVE attempt is already in flight', async () => {
+          const liveAttempt = Object.assign(
+            new Error('A Semrush sub-workspace provisioning attempt is already in progress for this brand; please retry shortly.'),
+            { status: 409, code: 'semrush_provisioning_in_progress' },
+          );
+          const beginStub = sinon.stub().resolves(true);
+          const enqueueStub = sinon.stub().resolves({ getId: () => 'job-xyz' });
+          const controller = await buildController({
+            upsertBrand: sinon.stub().resolves({ id: 'forced-id', name: 'New Brand' }),
+            beginProvisioningAttempt: beginStub,
+            createAndEnqueueJob: enqueueStub,
+            guardAgainstConcurrentProvisioning: sinon.stub().rejects(liveAttempt),
+          });
+
+          const response = await controller.createBrandForOrg({
+            ...context,
+            params: { spaceCatId: ORGANIZATION_ID },
+            data: { ...semrushData },
+            dataAccess: mockDataAccess,
+            attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+          });
+
+          expect(response.status).to.equal(409);
+          const body = await response.json();
+          expect(body.code).to.equal('semrush_provisioning_in_progress');
+          // No second attempt, and above all no second job racing the live one.
+          expect(beginStub).to.not.have.been.called;
+          expect(enqueueStub).to.not.have.been.called;
+        });
       });
 
       it('rejects a Semrush-mode create with 403 when serenity is inactive for the org (no provisioning, no row write)', async () => {

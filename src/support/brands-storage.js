@@ -2569,9 +2569,10 @@ export async function guardAgainstConcurrentProvisioning(brandId, postgrestClien
   // direction: at worst a later request is briefly 409'd, never a live attempt torn down).
   if (Number.isNaN(ageMs) || ageMs < PROVISIONING_STALE_THRESHOLD_MS) {
     // ErrorWithStatusCode (not a plain Error+.status, unlike this file's other 409s): this guard
-    // is called from BOTH serenity.js's activate (whose mapError only special-cases `instanceof
-    // ErrorWithStatusCode`) and brands.js's createBrandForOrg (whose createErrorResponse accepts
-    // any `.status`-bearing error) — ErrorWithStatusCode satisfies both consumers at once.
+    // is called from serenity.js's createMarket/activate, whose mapError only special-cases
+    // `instanceof ErrorWithStatusCode`, and from brands.js's createBrandForOrg, whose
+    // createErrorResponse accepts any `.status`-bearing error (and surfaces `.code`) —
+    // ErrorWithStatusCode satisfies both consumers at once.
     const err = new ErrorWithStatusCode(
       'A Semrush sub-workspace provisioning attempt is already in progress for this brand; please retry shortly.',
       409,

@@ -67,6 +67,7 @@ import {
   readSerenityFlagScopes,
   withSerenityState,
   beginProvisioningAttempt,
+  guardAgainstConcurrentProvisioning,
   promoteProvisioningFailed,
   recordFreshBrandProvisioningStartFailure,
 } from '../support/brands-storage.js';
@@ -2075,6 +2076,13 @@ function BrandsController(ctx, log, env) {
         const asyncBrandId = /** @type {string} */ (provisionedBrandId);
         const { parentWorkspaceId } = asyncMarketProvisioning;
         const attemptId = randomUUID();
+        // LLMO-7418 external-review Finding 9, applied here too: beginProvisioningAttempt's CAS
+        // has no staleness awareness on its own, so on an upsert onto an EXISTING brand that is
+        // stuck at `pending` (a worker that died, or a rollback that left its job unhandled) it
+        // would return false forever and this endpoint would 409 that brand permanently. The
+        // guard reconciles an attempt older than the stale threshold first, and 409s only a
+        // genuinely live one. For a brand-new row it reads no state and returns immediately.
+        await guardAgainstConcurrentProvisioning(asyncBrandId, postgrestClient, log);
         let began;
         try {
           began = await beginProvisioningAttempt({
