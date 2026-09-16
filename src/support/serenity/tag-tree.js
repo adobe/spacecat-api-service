@@ -732,9 +732,23 @@ export async function findTagsInTree(transport, semrushWorkspaceId, projectId, t
  * Reads the complete draft taxonomy once and derives stable path and
  * compatibility metadata without modifying non-canonical Project Engine data.
  *
- * Resource budgets (`maxParents`/`maxNodes`/`maxDurationMs`) apply the same
- * way to every caller: they guard against a pathological tree regardless of
- * who is reading it, and predate the `strict` split below.
+ * Resource budgets bound every caller, strict or not — they guard against a
+ * pathological tree regardless of who is reading it — but their configuration
+ * and compatibility impact differ:
+ *  - `maxParents` predates the `strict` split: the parent-expansion cap has
+ *    always bounded these walks. Only its error token changed with unbounded
+ *    nesting (`tagTreeReadIncomplete` -> `tagTreeLimitExceeded`, with a
+ *    `details.budget` discriminator).
+ *  - `maxNodes` and `maxDurationMs` are NEW, and deliberately apply to the
+ *    existing tolerant mutation/filter callers too: a tree that large or that
+ *    slow was already on course for a Lambda timeout, so a retryable 503
+ *    `tagTreeLimitExceeded` is the better outcome than an unbounded walk. The
+ *    cost is a behavior change on already-shipped POST/PATCH `/serenity/tags`
+ *    reads, which now fail closed at >`maxNodes` nodes or >`maxDurationMs`
+ *    instead of (slowly) succeeding.
+ *  - Tag search supplies environment-resolved overrides for all budgets,
+ *    including concurrency and pages per parent. Existing mutation/filter
+ *    callers intentionally omit those overrides and retain compiled defaults.
  *
  * `strict` gates only the NEW fail-closed data-integrity behavior added
  * alongside unbounded nesting, and the request concurrency:
@@ -763,6 +777,7 @@ export async function findTagsInTree(transport, semrushWorkspaceId, projectId, t
  * @param {number} [options.maxNodes]
  * @param {number} [options.concurrency]
  * @param {number} [options.maxDurationMs]
+ * @param {number} [options.maxPagesPerParent]
  * @param {boolean} [options.strict=false]
  * @returns {Promise<{
  *   items: TagTreeSnapshotItem[],
@@ -780,6 +795,7 @@ export async function loadTagTreeSnapshot(
     maxNodes = MAX_TREE_NODES,
     concurrency,
     maxDurationMs = MAX_TREE_DURATION_MS,
+    maxPagesPerParent,
     strict = false,
   } = {},
 ) {
@@ -798,7 +814,7 @@ export async function loadTagTreeSnapshot(
       '',
       log,
       undefined,
-      { onBeforePage, signal: deadline },
+      { onBeforePage, signal: deadline, maxPages: maxPagesPerParent },
     ),
     deadline,
     onDeadlineAborted,
@@ -875,7 +891,7 @@ export async function loadTagTreeSnapshot(
             parent.id,
             log,
             undefined,
-            { onBeforePage, signal: deadline },
+            { onBeforePage, signal: deadline, maxPages: maxPagesPerParent },
           ),
         }))),
         deadline,
@@ -979,6 +995,11 @@ export async function loadTagTreeSnapshot(
  * @param {boolean} [options.strict=false] - see {@link loadTagTreeSnapshot}.
  *   Tag search is the only caller that passes `strict: true`; every other
  *   (mutation/filter) caller keeps the prior tolerant, serial behavior.
+ * @param {object} [options.budgets] - optional traversal budget overrides
+ *   (`maxParents`/`maxNodes`/`maxDurationMs`/`concurrency`/
+ *   `maxPagesPerParent`). Tag search supplies runtime environment values via
+ *   {@link import('./tag-search-constants.js').resolveTagTreeBudgets}; legacy
+ *   mutation/filter callers omit this object and retain compiled defaults.
  * @returns {Promise<{
  *   items: TagTreeSnapshotItem[],
  *   byId: Map<string, TagTreeSnapshotItem>,
@@ -990,7 +1011,7 @@ export async function readTagTreeSnapshot(
   projectId,
   log,
   {
-    forceRefresh = false, cacheResult = true, rootName, strict = false,
+    forceRefresh = false, cacheResult = true, rootName, strict = false, budgets,
   } = {},
 ) {
   if (!forceRefresh && rootName === undefined) {
@@ -1004,7 +1025,7 @@ export async function readTagTreeSnapshot(
     semrushWorkspaceId,
     projectId,
     log,
-    { rootName, strict },
+    { ...(budgets ?? {}), rootName, strict },
   );
   if (cacheResult && rootName === undefined) {
     cacheTagTreeSnapshot(semrushWorkspaceId, projectId, pending);

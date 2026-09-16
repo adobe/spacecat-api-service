@@ -44,7 +44,9 @@ import { normalizeGeoTargetId, normalizeLanguageCode } from '../validation.js';
  * @property {string} name
  * @property {string | null} parentId
  * @property {number} depth
- * @property {string[]} path - ancestor names, root-dimension entry excluded.
+ * @property {string[]} path - the tag's ancestry from its top-level ancestor
+ *   down to AND INCLUDING the tag's own name as the last element; only the
+ *   root-dimension entry (`tag`) is excluded.
  * @property {'exact' | 'prefix' | 'substring' | 'path'} match
  */
 /**
@@ -52,8 +54,12 @@ import { normalizeGeoTargetId, normalizeLanguageCode } from '../validation.js';
  * @property {TagSearchMatch[]} items
  * @property {string | null} cursor - opaque cursor for the next page, or `null`
  *   when this page reached the end of the result set.
- * @property {true} complete - always `true`: a partial/incomplete traversal
- *   throws instead of returning (see {@link searchProjectTags}).
+ * @property {true} complete - always `true`: the result is NOT budget-truncated
+ *   (a partial/incomplete traversal throws instead of returning — see
+ *   {@link searchProjectTags}). It is not a point-in-time consistency claim:
+ *   the walk spans many upstream calls, so a mutation landing into an
+ *   already-visited level is simply absent from this snapshot. Reserved as a
+ *   forward-compatible discriminator should a degraded/partial mode ever ship.
  */
 
 export {
@@ -67,6 +73,19 @@ function codedError(message, status, code) {
   const error = new ErrorWithStatusCode(message, status);
   error.code = code;
   return error;
+}
+
+/**
+ * The single 503 `tagSearchUnavailable` shape, shared by the controller's
+ * pre-flight checks (kill switch, missing cursor secret — both raised BEFORE
+ * any data access) and by {@link searchProjectTags}'s own defense-in-depth
+ * re-check, so a caller cannot tell the two apart.
+ *
+ * @param {string} [message]
+ * @returns {Error}
+ */
+export function tagSearchUnavailableError(message = 'Tag search is unavailable') {
+  return codedError(message, 503, ERROR_CODES.TAG_SEARCH_UNAVAILABLE);
 }
 
 function normalizeSearchText(value) {
@@ -95,6 +114,16 @@ function parseSearchQuery(query) {
   }
   if (typeof query?.q !== 'string') {
     throw codedError('q is required', 400, ERROR_CODES.INVALID_REQUEST);
+  }
+  // Bound the RAW input before normalizing: NFKC can EXPAND a string (one
+  // compatibility character folds to several), so normalizing first would let
+  // an over-long input through the allocation the length cap exists to bound.
+  if (Array.from(query.q).length > MAX_TAG_SEARCH_QUERY_LENGTH) {
+    throw codedError(
+      `q must not exceed ${MAX_TAG_SEARCH_QUERY_LENGTH} characters`,
+      400,
+      ERROR_CODES.INVALID_REQUEST,
+    );
   }
   const q = normalizeSearchText(query.q);
   if (!q) {
@@ -175,15 +204,29 @@ function decodeCursor(cursor, secret) {
   }
 }
 
+/**
+ * Content hash of the whole snapshot, binding a cursor to the taxonomy it was
+ * issued against (a change between pages 409s rather than silently shifting
+ * offsets). The per-item JSON key is computed ONCE and sorted on, rather than
+ * re-serializing both operands inside the comparator — the comparator runs
+ * O(n log n) times over up to `maxNodes` items on every request.
+ *
+ * @param {TagTreeSnapshotItem[]} items
+ * @returns {string}
+ */
 function revisionOf(items) {
   const tuples = items
-    .map((item) => [
-      item.id,
-      item.parentId,
-      item.name,
-      item.fullPath.map((part) => [part.id, part.name]),
-    ])
-    .sort((a, b) => compareText(JSON.stringify(a), JSON.stringify(b)));
+    .map((item) => {
+      const tuple = [
+        item.id,
+        item.parentId,
+        item.name,
+        item.fullPath.map((part) => [part.id, part.name]),
+      ];
+      return { key: JSON.stringify(tuple), tuple };
+    })
+    .sort((a, b) => compareText(a.key, b.key))
+    .map(({ tuple }) => tuple);
   return createHash('sha256').update(JSON.stringify(tuples)).digest('base64url');
 }
 
@@ -282,7 +325,11 @@ export function searchTagSnapshot(snapshot, query) {
  * @param {object} [log] - logger.
  * @param {string} [cursorSecret] - HMAC key signing the opaque cursor; a
  *   falsy value fails closed with 503 `TAG_SEARCH_UNAVAILABLE` before any
- *   traversal or cursor decode is attempted.
+ *   traversal or cursor decode is attempted. The key is unversioned, so
+ *   rotating it invalidates every in-flight cursor (the caller restarts at
+ *   page one); use a distinct high-entropy value per environment.
+ * @param {object} [budgets] - per-environment traversal budget overrides; see
+ *   {@link import('../tag-search-constants.js').resolveTagTreeBudgets}.
  * @returns {Promise<TagSearchResult>}
  */
 async function searchProjectTags(
@@ -292,13 +339,10 @@ async function searchProjectTags(
   query,
   log,
   cursorSecret,
+  budgets,
 ) {
   if (!cursorSecret) {
-    throw codedError(
-      'Tag search cursor signing is unavailable',
-      503,
-      ERROR_CODES.TAG_SEARCH_UNAVAILABLE,
-    );
+    throw tagSearchUnavailableError('Tag search cursor signing is unavailable');
   }
   const parsed = query;
   const project = `${workspaceId}:${projectId}`;
@@ -319,7 +363,7 @@ async function searchProjectTags(
       projectId,
       log,
       {
-        forceRefresh: true, cacheResult: false, rootName: DIMENSION.TAG, strict: true,
+        forceRefresh: true, cacheResult: false, rootName: DIMENSION.TAG, strict: true, budgets,
       },
     );
   } catch (error) {
@@ -328,6 +372,8 @@ async function searchProjectTags(
       projectId,
       code: error?.code,
       status: error?.status,
+      budget: /** @type {any} */ (error)?.details?.budget,
+      budgets,
       durationMs: Date.now() - startedAt,
       cacheBypass: true,
     });
@@ -352,10 +398,10 @@ async function searchProjectTags(
   }
   const items = matches.slice(offset, offset + parsed.limit);
   const nextOffset = offset + items.length;
-  const matchCounts = matches.reduce((counts, item) => ({
-    ...counts,
-    [item.match]: (counts[item.match] ?? 0) + 1,
-  }), {});
+  const matchCounts = /** @type {Record<string, number>} */ ({});
+  for (const item of matches) {
+    matchCounts[item.match] = (matchCounts[item.match] ?? 0) + 1;
+  }
   log?.info?.('handleSearchTags: complete-tree search finished', {
     workspaceId,
     projectId,
@@ -408,6 +454,7 @@ function marketNotFound() {
  *   and normalized internally via {@link parseSearchQuery}.
  * @param {object} [log] - logger.
  * @param {string} [cursorSecret] - see {@link searchProjectTags}.
+ * @param {object} [budgets] - see {@link searchProjectTags}.
  * @returns {Promise<TagSearchResult>}
  */
 export async function handleSearchTags(
@@ -418,6 +465,7 @@ export async function handleSearchTags(
   query,
   log,
   cursorSecret,
+  budgets,
 ) {
   const parsed = parseSearchQuery(query);
   const row = await dataAccess.BrandSemrushProject.findBySlice(
@@ -435,6 +483,7 @@ export async function handleSearchTags(
     parsed,
     log,
     cursorSecret,
+    budgets,
   );
 }
 
@@ -449,6 +498,7 @@ export async function handleSearchTags(
  *   and normalized internally via {@link parseSearchQuery}.
  * @param {object} [log] - logger.
  * @param {string} [cursorSecret] - see {@link searchProjectTags}.
+ * @param {object} [budgets] - see {@link searchProjectTags}.
  * @returns {Promise<TagSearchResult>}
  */
 export async function handleSearchTagsSubworkspace(
@@ -457,6 +507,7 @@ export async function handleSearchTagsSubworkspace(
   query,
   log,
   cursorSecret,
+  budgets,
 ) {
   const parsed = parseSearchQuery(query);
   const project = await resolveProject(
@@ -476,5 +527,6 @@ export async function handleSearchTagsSubworkspace(
     parsed,
     log,
     cursorSecret,
+    budgets,
   );
 }

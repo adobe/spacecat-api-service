@@ -578,6 +578,62 @@ export default function serenityTests(
       expect(match.path).to.deep.equal(['Campaign', 'Spring', 'Running Shoes Launch Needle']);
     });
 
+    it('GET /serenity/tags/search pages a cursor round-trip through the real request lifecycle', async () => {
+      await createUsMarket();
+      const createOpenTag = (name, parentId) => getHttpClient().admin.post(`${base}/tags`, {
+        type: 'tag',
+        name,
+        geoTargetId: US_GEO,
+        languageCode: 'en',
+        ...(parentId ? { parentId } : {}),
+      });
+
+      // Three siblings all matching `q`, so limit=2 forces a second page.
+      const family = await createOpenTag('Paging Family');
+      expect(family.status).to.equal(201);
+      const created = [];
+      for (const name of ['Paging Alpha', 'Paging Beta', 'Paging Gamma']) {
+        // eslint-disable-next-line no-await-in-loop
+        const child = await createOpenTag(name, family.body.id);
+        expect(child.status).to.equal(201);
+        created.push(child.body.id);
+      }
+
+      const first = await getHttpClient().admin.get(
+        `${base}/tags/search?geoTargetId=${US_GEO}&languageCode=en&q=paging&limit=2`,
+      );
+      expect(first.status).to.equal(200);
+      expect(first.body.complete).to.equal(true);
+      expect(first.body.items).to.have.length(2);
+      expect(first.body.cursor).to.be.a('string');
+
+      const second = await getHttpClient().admin.get(
+        `${base}/tags/search?geoTargetId=${US_GEO}&languageCode=en&q=paging&limit=2`
+        + `&cursor=${encodeURIComponent(first.body.cursor)}`,
+      );
+      expect(second.status).to.equal(200);
+      expect(second.body.complete).to.equal(true);
+      expect(second.body.cursor).to.equal(null);
+
+      // The two pages partition the match set: no repeats, nothing dropped, and
+      // every authored sibling is reachable by paging (the parent matches `q`
+      // too, hence >= the three children).
+      const paged = [...first.body.items, ...second.body.items].map((item) => item.id);
+      expect(new Set(paged).size).to.equal(paged.length);
+      for (const id of created) {
+        expect(paged).to.include(id);
+      }
+    });
+
+    it('GET /serenity/tags/search 400s a cursor that was not issued by this service', async () => {
+      await createUsMarket();
+      const res = await getHttpClient().admin.get(
+        `${base}/tags/search?geoTargetId=${US_GEO}&languageCode=en&q=paging&cursor=not.acursor`,
+      );
+      expect(res.status).to.equal(400);
+      expect(res.body.error).to.equal('tagSearchCursorInvalid');
+    });
+
     it('GET /serenity/tags/search 400s without a (geoTargetId, languageCode, q) query (error envelope)', async () => {
       await createUsMarket();
       const res = await getHttpClient().admin.get(`${base}/tags/search?geoTargetId=${US_GEO}&languageCode=en`);

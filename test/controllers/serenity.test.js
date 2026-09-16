@@ -189,6 +189,7 @@ describe('SerenityController', () => {
   let resolveWorkspaceIdStub;
   let resolveBrandWorkspaceStub;
   let isSerenityActiveStub;
+  let isTagSearchActiveStub;
   let isUnboundedTagAuthoringActiveStub;
   let createTransportStub;
   let resolveBrandUuidStub;
@@ -224,6 +225,7 @@ describe('SerenityController', () => {
     // existing assertion that drives a brand-level route reaches its handler.
     // The "serenity inactive" describe overrides this to false.
     isSerenityActiveStub = sinon.stub().resolves(true);
+    isTagSearchActiveStub = sinon.stub().resolves(true);
     isUnboundedTagAuthoringActiveStub = sinon.stub().resolves(true);
     decommissionStub = sinon.stub().resolves();
     ensureSubworkspaceStub = sinon.stub().resolves(SUBWS);
@@ -338,6 +340,7 @@ describe('SerenityController', () => {
       },
       '../../src/support/serenity/serenity-active.js': {
         isSerenityActiveForBrand: isSerenityActiveStub,
+        isTagSearchActiveForBrand: isTagSearchActiveStub,
         isUnboundedTagAuthoringActiveForBrand: isUnboundedTagAuthoringActiveStub,
       },
       '../../src/support/access-control-util.js': MockAccessControlUtil,
@@ -1170,7 +1173,8 @@ describe('SerenityController', () => {
       expect(handlers.handleSearchTags.firstCall.args[6]).to.equal('search-secret');
     });
 
-    it('searchTags does not fall back to unrelated secrets for the cursor secret', async () => {
+    it('searchTags 503s before dispatching when no dedicated cursor secret is configured, '
+      + 'never falling back to unrelated secrets', async () => {
       handlers.handleSearchTags.resolves({ items: [], cursor: null, complete: true });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const ctx = fakeContext({
@@ -1183,9 +1187,83 @@ describe('SerenityController', () => {
         url: 'https://x?geoTargetId=2840&languageCode=en&q=campaign&limit=10',
       };
       const response = await controller.searchTags(ctx);
+      expect(response.status).to.equal(503);
+      expect((await readBody(response)).error).to.equal('tagSearchUnavailable');
+      // The secret-presence check is lifted into the controller, so an
+      // unprovisioned environment costs no market/project lookup.
+      expect(handlers.handleSearchTags).not.to.have.been.called;
+      expect(handlers.handleSearchTagsSubworkspace).not.to.have.been.called;
+    });
+
+    it('searchTags 503s without dispatching when the search kill switch is set', async () => {
+      handlers.handleSearchTags.resolves({ items: [], cursor: null, complete: true });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({
+        env: {
+          SERENITY_TAG_SEARCH_CURSOR_SECRET: 'search-secret',
+          SERENITY_TAG_SEARCH_DISABLED: 'true',
+        },
+      });
+      ctx.request = { url: 'https://x?geoTargetId=2840&languageCode=en&q=campaign' };
+      const response = await controller.searchTags(ctx);
+      expect(response.status).to.equal(503);
+      expect((await readBody(response)).error).to.equal('tagSearchUnavailable');
+      expect(handlers.handleSearchTags).not.to.have.been.called;
+    });
+
+    it('searchTags stays dark until the brand rollout flag is enabled', async () => {
+      isTagSearchActiveStub.resolves(false);
+      const controller = SerenityController(
+        { env: { SERENITY_TAG_SEARCH_CURSOR_SECRET: 'search-secret' } },
+        fakeLog(),
+        {},
+      );
+      const ctx = fakeContext({ env: { SERENITY_TAG_SEARCH_CURSOR_SECRET: 'search-secret' } });
+      ctx.request = { url: 'https://x?geoTargetId=2840&languageCode=en&q=campaign' };
+
+      const response = await controller.searchTags(ctx);
+
+      expect(response.status).to.equal(404);
+      expect((await readBody(response)).message).to.equal('Tag search is not active for this brand');
+      expect(isTagSearchActiveStub).to.have.been.calledWith(sinon.match.any, ORG, BRAND);
+      expect(handlers.handleSearchTags).not.to.have.been.called;
+    });
+
+    it('searchTags stays enabled for any kill-switch value other than "true"', async () => {
+      handlers.handleSearchTags.resolves({ items: [], cursor: null, complete: true });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({
+        env: {
+          SERENITY_TAG_SEARCH_CURSOR_SECRET: 'search-secret',
+          SERENITY_TAG_SEARCH_DISABLED: 'false',
+        },
+      });
+      ctx.request = { url: 'https://x?geoTargetId=2840&languageCode=en&q=campaign' };
+      const response = await controller.searchTags(ctx);
       expect(response.status).to.equal(200);
       expect(handlers.handleSearchTags).to.have.been.calledOnce;
-      expect(handlers.handleSearchTags.firstCall.args[6]).to.equal(undefined);
+    });
+
+    it('searchTags passes env-resolved traversal budgets to the handler', async () => {
+      handlers.handleSearchTags.resolves({ items: [], cursor: null, complete: true });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({
+        env: {
+          SERENITY_TAG_SEARCH_CURSOR_SECRET: 'search-secret',
+          SERENITY_TAG_TREE_MAX_PARENTS: '25',
+          SERENITY_TAG_TREE_MAX_DURATION_MS: '4000',
+        },
+      });
+      ctx.request = { url: 'https://x?geoTargetId=2840&languageCode=en&q=campaign' };
+      const response = await controller.searchTags(ctx);
+      expect(response.status).to.equal(200);
+      expect(handlers.handleSearchTags.firstCall.args[7]).to.deep.equal({
+        maxParents: 25,
+        maxNodes: 10_000,
+        maxDurationMs: 4000,
+        concurrency: 6,
+        maxPagesPerParent: 50,
+      });
     });
 
     it('searchTags falls back to the constructor env cursor secret when ctx.env omits it, '
@@ -1221,8 +1299,14 @@ describe('SerenityController', () => {
 
     it('searchTags maps handler errors through the Serenity error envelope', async () => {
       handlers.handleSearchTags.rejects(new ErrorWithStatusCode('invalid search', 400));
-      const controller = SerenityController({ env: {} }, fakeLog(), {});
-      const response = await controller.searchTags(fakeContext());
+      const controller = SerenityController(
+        { env: { SERENITY_TAG_SEARCH_CURSOR_SECRET: 'search-secret' } },
+        fakeLog(),
+        {},
+      );
+      const response = await controller.searchTags(fakeContext({
+        env: { SERENITY_TAG_SEARCH_CURSOR_SECRET: 'search-secret' },
+      }));
 
       expect(response.status).to.equal(400);
       expect((await readBody(response)).message).to.equal('invalid search');

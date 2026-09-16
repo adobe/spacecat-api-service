@@ -30,6 +30,7 @@ import { BRAND_CACHE_TTL_MS, MAX_ENTRIES } from './workspace-resolver.js';
 export const SERENITY_FEATURE_FLAG_PRODUCT = 'LLMO';
 export const SERENITY_FEATURE_FLAG_NAME = 'serenity';
 export const SERENITY_UNBOUNDED_TAG_AUTHORING_FEATURE_FLAG_NAME = 'serenity_unbounded_tag_authoring';
+export const SERENITY_TAG_SEARCH_FEATURE_FLAG_NAME = 'serenity_tag_search';
 
 /**
  * The org-wide switch that pins the org's UI to the Serenity experience, set by
@@ -237,6 +238,31 @@ export async function isUnboundedTagAuthoringActiveForBrand(
     ctx,
     spaceCatId,
     SERENITY_UNBOUNDED_TAG_AUTHORING_FEATURE_FLAG_NAME,
+    log,
+  );
+  if (!scopes) {
+    return false;
+  }
+  return resolveFlagRowForBrand(scopes, brandUuid)?.flag_value === true;
+}
+
+/**
+ * Independent, default-off rollout switch for the cacheless complete-tree tag
+ * search endpoint. This keeps the expensive read path dark until a brand is
+ * deliberately enrolled, without coupling search availability to deeper tag
+ * authoring.
+ *
+ * @param {object} ctx - Request context.
+ * @param {string} spaceCatId - SpaceCat organization UUID.
+ * @param {string} brandUuid - Resolved Postgres brand UUID.
+ * @param {object} [log] - Optional logger.
+ * @returns {Promise<boolean>} `true` only when explicitly enabled for the brand.
+ */
+export async function isTagSearchActiveForBrand(ctx, spaceCatId, brandUuid, log) {
+  const scopes = await readCachedFlagScopes(
+    ctx,
+    spaceCatId,
+    SERENITY_TAG_SEARCH_FEATURE_FLAG_NAME,
     log,
   );
   if (!scopes) {

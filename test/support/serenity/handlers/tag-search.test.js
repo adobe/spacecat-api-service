@@ -1074,4 +1074,139 @@ describe('Serenity custom-tag search', () => {
         .to.deep.equal(['tag-root', 'variant-root']);
     });
   });
+
+  describe('review follow-ups', () => {
+    it('bounds the RAW q length before NFKC normalization', async () => {
+      // 300 x (base letter + combining acute) normalizes to 300 code points —
+      // under the cap — but arrives as 600. The raw bound rejects it first.
+      const raw = 'e\u0301'.repeat(MAX_TAG_SEARCH_QUERY_LENGTH);
+      expect(Array.from(raw).length).to.be.greaterThan(MAX_TAG_SEARCH_QUERY_LENGTH);
+      expect(Array.from(raw.normalize('NFKC')).length).to.equal(MAX_TAG_SEARCH_QUERY_LENGTH);
+
+      const transport = deepTransport();
+      await expect(handleSearchTags(
+        transport,
+        dataAccess(),
+        BRAND,
+        WORKSPACE,
+        { geoTargetId: 2840, languageCode: 'en', q: raw },
+        fakeLog(),
+        SECRET,
+      )).to.be.rejected.then((error) => {
+        expect(error.status).to.equal(400);
+        expect(error.code).to.equal(ERROR_CODES.INVALID_REQUEST);
+      });
+      expect(transport.listProjectTags).to.not.have.been.called;
+    });
+
+    it('returns an explicit empty page rather than a cursor when nothing matches', async () => {
+      const result = await handleSearchTags(
+        deepTransport(),
+        dataAccess(),
+        BRAND,
+        WORKSPACE,
+        { geoTargetId: 2840, languageCode: 'en', q: 'nothing-matches-this' },
+        fakeLog(),
+        SECRET,
+      );
+
+      expect(result).to.deep.equal({ items: [], cursor: null, complete: true });
+    });
+
+    it('never returns a matching tag from the category dimension', async () => {
+      const categoryRoot = { id: 'category-root', name: 'category' };
+      const tagRoot = { id: 'tag-root', name: 'tag' };
+      const transport = {
+        listProjectTags: sinon.stub().callsFake((_workspace, _project, options) => {
+          const levels = {
+            '': [
+              tag(categoryRoot.id, categoryRoot.name, null, 1),
+              tag(tagRoot.id, tagRoot.name, null, 1),
+            ],
+            [categoryRoot.id]: [tag('cat-needle', 'Needle', categoryRoot.id, 0, [categoryRoot])],
+            [tagRoot.id]: [tag('tag-needle', 'Needle', tagRoot.id, 0, [tagRoot])],
+          };
+          const items = levels[options.parentId ?? ''] ?? [];
+          return Promise.resolve({ items, page: options.page, total: items.length });
+        }),
+      };
+
+      const result = await handleSearchTags(
+        transport,
+        dataAccess(),
+        BRAND,
+        WORKSPACE,
+        { geoTargetId: 2840, languageCode: 'en', q: 'needle' },
+        fakeLog(),
+        SECRET,
+      );
+
+      expect(result.items.map((item) => item.id)).to.deep.equal(['tag-needle']);
+    });
+
+    it('applies caller-supplied (env-resolved) traversal budgets to the walk', async () => {
+      const transport = deepTransport();
+      await expect(handleSearchTags(
+        transport,
+        dataAccess(),
+        BRAND,
+        WORKSPACE,
+        { geoTargetId: 2840, languageCode: 'en', q: 'needle' },
+        fakeLog(),
+        SECRET,
+        { maxParents: 1 },
+      )).to.be.rejected.then((error) => {
+        expect(error.status).to.equal(503);
+        expect(error.code).to.equal(ERROR_CODES.TAG_TREE_LIMIT_EXCEEDED);
+        expect(error.details).to.deep.equal({ budget: 'parents', maximum: 1 });
+      });
+    });
+
+    it('completes a traversal that sits exactly on the parent budget', async () => {
+      // deepTransport expands tag-root, Campaign and Spring: three parent reads.
+      const result = await handleSearchTags(
+        deepTransport(),
+        dataAccess(),
+        BRAND,
+        WORKSPACE,
+        { geoTargetId: 2840, languageCode: 'en', q: 'needle' },
+        fakeLog(),
+        SECRET,
+        { maxParents: 3 },
+      );
+
+      expect(result.items.map((item) => item.id)).to.deep.equal(['leaf', 'other-leaf']);
+    });
+
+    it('forwards budgets on the subworkspace route too', async () => {
+      const transport = {
+        ...deepTransport(),
+        listProjects: sinon.stub().resolves({
+          items: [{
+            id: PROJECT,
+            settings: {
+              ai: {
+                location: { id: 2840 },
+                language: { name: 'en' },
+              },
+            },
+          }],
+          page: 1,
+          total: 1,
+        }),
+      };
+
+      await expect(handleSearchTagsSubworkspace(
+        transport,
+        WORKSPACE,
+        { geoTargetId: 2840, languageCode: 'en', q: 'needle' },
+        fakeLog(),
+        SECRET,
+        { maxParents: 1 },
+      )).to.be.rejected.then((error) => {
+        expect(error.status).to.equal(503);
+        expect(error.code).to.equal(ERROR_CODES.TAG_TREE_LIMIT_EXCEEDED);
+      });
+    });
+  });
 });

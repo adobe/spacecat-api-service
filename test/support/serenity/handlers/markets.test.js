@@ -1585,6 +1585,31 @@ describe('handlers/markets.js — handleListTags / handleListModels', () => {
     expect(listProjectTags).to.have.been.calledOnce;
   });
 
+  it('listProjectTagTree reports a caller-supplied page budget as limit exhaustion', async () => {
+    const fullPage = (page) => Array.from({ length: 100 }, (_, i) => ({
+      id: `tag-p${page}-${i}`, name: `Tag ${page}-${i}`, parent_id: null, children_count: 0,
+    }));
+    const listProjectTags = sinon.stub().callsFake((_workspace, _project, options) => (
+      Promise.resolve({ page: options.page, total: 300, items: fullPage(options.page) })
+    ));
+
+    await expect(listProjectTagTree(
+      { listProjectTags },
+      WORKSPACE,
+      'proj-tree',
+      '',
+      fakeLog(),
+      undefined,
+      { maxPages: 2 },
+    )).to.be.rejected.then((error) => {
+      expect(error.status).to.equal(503);
+      expect(error.code).to.equal('tagTreeLimitExceeded');
+      expect(error.details).to.deep.equal({ budget: 'pages', maximum: 2 });
+    });
+
+    expect(listProjectTags.callCount).to.equal(2);
+  });
+
   it('listModels (no market) unions the models enabled across all the brand\'s projects', async () => {
     const dataAccess = makeDataAccess([
       makeProject({ semrushProjectId: 'proj-a', geoTargetId: 2840, languageCode: 'en' }),

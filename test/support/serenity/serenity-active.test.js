@@ -336,6 +336,53 @@ describe('isUnboundedTagAuthoringActiveForBrand', () => {
   });
 });
 
+describe('isTagSearchActiveForBrand', () => {
+  let readScopesStub;
+  let isTagSearchActiveForBrand;
+  let clearSerenityFlagCache;
+  let SERENITY_TAG_SEARCH_FEATURE_FLAG_NAME;
+
+  beforeEach(async () => {
+    readScopesStub = sinon.stub();
+    const mod = await esmock('../../../src/support/serenity/serenity-active.js', {
+      '../../../src/support/feature-flags-storage.js': {
+        readFeatureFlagScopes: readScopesStub,
+      },
+    });
+    ({
+      isTagSearchActiveForBrand,
+      clearSerenityFlagCache,
+      SERENITY_TAG_SEARCH_FEATURE_FLAG_NAME,
+    } = mod);
+    clearSerenityFlagCache();
+  });
+
+  afterEach(() => sinon.restore());
+
+  it('uses the dedicated default-off LLMO feature flag', async () => {
+    readScopesStub.resolves(scopes({ org: false, brands: { [BRAND]: true } }));
+
+    expect(await isTagSearchActiveForBrand(fakeCtx(), ORG, BRAND, fakeLog()))
+      .to.equal(true);
+    expect(SERENITY_TAG_SEARCH_FEATURE_FLAG_NAME).to.equal('serenity_tag_search');
+    expect(readScopesStub.firstCall.args[0]).to.include({
+      organizationId: ORG,
+      product: 'LLMO',
+      flagName: 'serenity_tag_search',
+    });
+  });
+
+  it('defaults off when the flag is absent or cannot be read', async () => {
+    const log = fakeLog();
+    readScopesStub.resolves(scopes());
+    expect(await isTagSearchActiveForBrand(fakeCtx(), ORG, BRAND, log)).to.equal(false);
+
+    clearSerenityFlagCache();
+    readScopesStub.rejects(new Error('boom'));
+    expect(await isTagSearchActiveForBrand(fakeCtx(), ORG, BRAND, log)).to.equal(false);
+  });
+});
+
 describe('isSerenityUiActiveForOrg', () => {
   let readScopesStub;
   let isSerenityActiveForOrg;

@@ -102,10 +102,16 @@ import {
 import {
   handleSearchTags,
   handleSearchTagsSubworkspace,
+  tagSearchUnavailableError,
 } from '../support/serenity/handlers/tag-search.js';
+import {
+  isTagSearchDisabled,
+  resolveTagTreeBudgets,
+} from '../support/serenity/tag-search-constants.js';
 import { ensureSubworkspace, decommissionBrandWorkspace } from '../support/serenity/workspace-lifecycle.js';
 import {
   isSerenityActiveForBrand,
+  isTagSearchActiveForBrand,
   isUnboundedTagAuthoringActiveForBrand,
 } from '../support/serenity/serenity-active.js';
 import { MAX_TOPICS_ON_CREATE } from '../support/serenity/brand-provisioning.js';
@@ -1532,9 +1538,27 @@ function SerenityController(context, log, env) {
       if (auth.error) {
         return auth.error;
       }
-      const transport = buildTransport(ctx, imsToken);
+      const runtimeEnv = { ...(env ?? {}), ...(ctx.env ?? {}) };
+      // These checks run after the normal org/brand authorization gate but
+      // before transport construction and project/market resolution.
+      if (isTagSearchDisabled(runtimeEnv)) {
+        throw tagSearchUnavailableError('Tag search is disabled in this environment');
+      }
+      if (!await isTagSearchActiveForBrand(
+        ctx,
+        ctx.params.spaceCatId,
+        /** @type {string} */ (auth.brandUuid),
+        log,
+      )) {
+        return notFound('Tag search is not active for this brand');
+      }
       const cursorSecret = ctx.env?.SERENITY_TAG_SEARCH_CURSOR_SECRET
         || env?.SERENITY_TAG_SEARCH_CURSOR_SECRET;
+      if (!cursorSecret) {
+        throw tagSearchUnavailableError('Tag search cursor signing is unavailable');
+      }
+      const budgets = resolveTagTreeBudgets(runtimeEnv, log);
+      const transport = buildTransport(ctx, imsToken);
       const result = auth.mode === 'subworkspace'
         ? await handleSearchTagsSubworkspace(
           transport,
@@ -1542,6 +1566,7 @@ function SerenityController(context, log, env) {
           extractQuery(ctx),
           log,
           cursorSecret,
+          budgets,
         )
         : await handleSearchTags(
           transport,
@@ -1551,6 +1576,7 @@ function SerenityController(context, log, env) {
           extractQuery(ctx),
           log,
           cursorSecret,
+          budgets,
         );
       return createResponse(result, 200);
     } catch (e) {

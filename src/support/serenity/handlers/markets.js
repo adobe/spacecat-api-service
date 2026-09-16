@@ -861,6 +861,7 @@ export async function listTagsForProject(transport, semrushWorkspaceId, projectI
  *   explicit?: boolean,
  *   onBeforePage?: () => void,
  *   signal?: AbortSignal,
+ *   maxPages?: number,
  * }} [paging] - explicit upstream pagination for the nested tree endpoint.
  *   `onBeforePage`, when supplied, is invoked synchronously immediately before
  *   EVERY upstream page request this call issues (the single explicit-page
@@ -925,7 +926,11 @@ export async function listProjectTagTree(
   const items = [];
   const seenIds = new Set();
   const LIMIT = TAG_TREE_PAGE_SIZE;
-  const PAGE_LIMIT = MAX_TREE_PAGES_PER_PARENT;
+  const configuredMaxPages = Number.isInteger(paging.maxPages) && Number(paging.maxPages) > 0
+    ? Number(paging.maxPages)
+    : undefined;
+  const PAGE_LIMIT = configuredMaxPages
+    ?? MAX_TREE_PAGES_PER_PARENT;
   let page = 1;
   let expectedTotal;
   let stoppedEarly = false;
@@ -1001,7 +1006,12 @@ export async function listProjectTagTree(
         semrushWorkspaceId, projectId, parentId, pages: PAGE_LIMIT, limit: LIMIT,
       });
       const error = new ErrorWithStatusCode('Unable to read the complete tag tree level', 503);
-      error.code = ERROR_CODES.TAG_TREE_READ_INCOMPLETE;
+      if (configuredMaxPages !== undefined) {
+        error.code = ERROR_CODES.TAG_TREE_LIMIT_EXCEEDED;
+        /** @type {any} */ (error).details = { budget: 'pages', maximum: PAGE_LIMIT };
+      } else {
+        error.code = ERROR_CODES.TAG_TREE_READ_INCOMPLETE;
+      }
       throw error;
     }
     page += 1;
