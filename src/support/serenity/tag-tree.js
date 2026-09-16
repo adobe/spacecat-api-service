@@ -744,17 +744,7 @@ export async function loadTagTreeSnapshot(
     depth: 1,
     fullPath: [{ id: root.id, name: root.name }],
   }));
-  const seenIds = new Set();
-  for (const node of nodes) {
-    if (seenIds.has(node.id)) {
-      throw treeReadError(
-        'Unable to establish a consistent tag tree',
-        ERROR_CODES.TAG_TREE_DATA_INTEGRITY,
-        { reason: 'repeatedTagId', tagId: node.id },
-      );
-    }
-    seenIds.add(node.id);
-  }
+  const seenIds = new Set(nodes.map((node) => node.id));
   if (nodes.length > maxNodes) {
     throw treeReadError(
       'Unable to read the complete tag tree within the node budget',

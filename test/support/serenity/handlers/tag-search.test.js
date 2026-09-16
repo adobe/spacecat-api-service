@@ -233,16 +233,27 @@ describe('Serenity custom-tag search', () => {
     });
     const familyA = { id: 'family-a', name: 'A' };
     const familyB = { id: 'family-b', name: 'B' };
+    const tieFamily = { id: 'family-tie', name: 'Tie' };
     const items = [
       item('exact-b', 'Alpha', [root, familyB, { id: 'exact-b', name: 'Alpha' }]),
+      item('tie-b', 'Alpha', [root, tieFamily, { id: 'tie-b', name: 'Alpha' }]),
       item('path', 'Leaf', [root, { id: 'alpha-path', name: 'Alpha Path' }, { id: 'path', name: 'Leaf' }]),
       item('substring', 'XalphaY', [root, { id: 'family-c', name: 'C' }, { id: 'substring', name: 'XalphaY' }]),
       item('prefix', 'Alphabet', [root, { id: 'family-d', name: 'D' }, { id: 'prefix', name: 'Alphabet' }]),
+      item('tie-a', 'Alpha', [root, tieFamily, { id: 'tie-a', name: 'Alpha' }]),
       item('exact-a', 'Alpha', [root, familyA, { id: 'exact-a', name: 'Alpha' }]),
     ];
 
     expect(searchTagSnapshot({ items }, 'alpha').map((entry) => entry.id))
-      .to.deep.equal(['exact-a', 'exact-b', 'prefix', 'substring', 'path']);
+      .to.deep.equal([
+        'exact-a',
+        'exact-b',
+        'tie-a',
+        'tie-b',
+        'prefix',
+        'substring',
+        'path',
+      ]);
   });
 
   it('keeps pages stable and rejects a cursor after the taxonomy changes', async () => {

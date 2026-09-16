@@ -33,12 +33,9 @@ export {
   MAX_TAG_SEARCH_QUERY_LENGTH,
 };
 
-function codedError(message, status, code, details) {
+function codedError(message, status, code) {
   const error = new ErrorWithStatusCode(message, status);
   error.code = code;
-  if (details) {
-    /** @type {any} */ (error).details = details;
-  }
   return error;
 }
 
