@@ -116,6 +116,81 @@ describe('async-job-runner', () => {
         jobId: 'job-123',
         type: 'serenity-classify-prompts',
       });
+      // No delaySeconds requested -> no messageGroupId, no send options (undefined),
+      // matching every pre-existing caller's behavior exactly.
+      expect(sendMessageStub.firstCall.args).to.deep.equal([
+        'queue-url',
+        { jobId: 'job-123', type: 'serenity-classify-prompts' },
+        undefined,
+        undefined,
+      ]);
+    });
+
+    // LLMO-7418: the async provisioning worker's bounded backoff on a `not ready` poll result.
+    describe('delaySeconds (LLMO-7418 backoff)', () => {
+      it('forwards a valid delaySeconds to sqs.sendMessage as send options', async () => {
+        const job = makeJob();
+        const sendMessageStub = sandbox.stub().resolves();
+        const context = {
+          dataAccess: { AsyncJob: { create: sandbox.stub().resolves(job) } },
+          sqs: { sendMessage: sendMessageStub },
+          env: { SERENITY_JOB_RUNNER_QUEUE_URL: 'queue-url' },
+          log: { error: sandbox.stub(), warn: sandbox.stub() },
+        };
+
+        await createAndEnqueueJob(context, {
+          jobType: 'serenity-provision-workspace',
+          delaySeconds: 30,
+          // Typed token supplied explicitly: main's assertTypedPromiseToken (Gap 2) refuses a
+          // bare string, and these tests are about the delay, not about minting.
+          promiseToken: { promise_token: 'ptok', expires_in: 14399 },
+        });
+
+        expect(sendMessageStub).to.have.been.calledWithExactly(
+          'queue-url',
+          { jobId: 'job-123', type: 'serenity-provision-workspace' },
+          undefined,
+          { delaySeconds: 30 },
+        );
+      });
+
+      it('clamps a delaySeconds above the SQS 900s hard cap', async () => {
+        const job = makeJob();
+        const sendMessageStub = sandbox.stub().resolves();
+        const context = {
+          dataAccess: { AsyncJob: { create: sandbox.stub().resolves(job) } },
+          sqs: { sendMessage: sendMessageStub },
+          env: { SERENITY_JOB_RUNNER_QUEUE_URL: 'queue-url' },
+          log: { error: sandbox.stub(), warn: sandbox.stub() },
+        };
+
+        await createAndEnqueueJob(context, {
+          jobType: 'x',
+          delaySeconds: 3600,
+          promiseToken: { promise_token: 'ptok', expires_in: 14399 },
+        });
+
+        expect(sendMessageStub.firstCall.args[3]).to.deep.equal({ delaySeconds: 900 });
+      });
+
+      it('omits send options for a non-integer delaySeconds (e.g. undefined/NaN)', async () => {
+        const job = makeJob();
+        const sendMessageStub = sandbox.stub().resolves();
+        const context = {
+          dataAccess: { AsyncJob: { create: sandbox.stub().resolves(job) } },
+          sqs: { sendMessage: sendMessageStub },
+          env: { SERENITY_JOB_RUNNER_QUEUE_URL: 'queue-url' },
+          log: { error: sandbox.stub(), warn: sandbox.stub() },
+        };
+
+        await createAndEnqueueJob(context, {
+          jobType: 'x',
+          delaySeconds: NaN,
+          promiseToken: { promise_token: 'ptok', expires_in: 14399 },
+        });
+
+        expect(sendMessageStub.firstCall.args[3]).to.be.undefined;
+      });
     });
 
     it('uses an explicitly-supplied promiseToken instead of minting one, when provided', async () => {
