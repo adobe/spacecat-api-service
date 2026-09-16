@@ -14674,6 +14674,22 @@ UserCapabilitiesResponse:
         items:
           type: string
           enum: [jwt, 'state:user', 'state:org']
+    siteCapabilities:
+      type: array
+      description: |
+        Composite products only (e.g. ASO). Capabilities that enforce site-wide
+        regardless of the opportunity-type qualifier (`can_configure`,
+        `can_manage_users`). Absent for non-composite products.
+      items: { $ref: '#/StateGrantedCapability' }
+    opportunityCapabilities:
+      type: object
+      description: |
+        Composite products only (e.g. ASO). Opportunity capabilities keyed by
+        the composite qualifier value (`all` = every opportunity type on the
+        resource). Absent for non-composite products.
+      additionalProperties:
+        type: array
+        items: { $ref: '#/StateGrantedCapability' }
 
 FacsAuditEvent:
   type: object

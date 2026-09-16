@@ -14,6 +14,11 @@ import { expect, use } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
 import esmock from 'esmock';
+import {
+  siteLevelCapabilities,
+  productHasCompositeSlots,
+} from '../../src/controllers/state-access-mappings.js';
+import { PRODUCTS_CAPABILITIES } from '../../src/routes/facs-capabilities.js';
 
 use(chaiAsPromised);
 
@@ -760,7 +765,28 @@ describe('StateAccessMappingsController', () => {
       });
       const res = await Controller(ctx).createMapping(ctx);
       expect(res.status).to.equal(400);
+      // The scope guard fired (not some other validation) — assert on the message.
+      expect((await res.json()).message).to.contain('Site-level capabilities');
       // Rejected before persistence — no row is written.
+      expect(createStub.called).to.be.false;
+    });
+
+    it('rejects can_manage_users scoped to an opportunity type (ASO)', async () => {
+      // Covers the OTHER site-level capability — a regression that dropped
+      // can_manage_users from the site-level set would otherwise go unnoticed.
+      const createStub = sinon.stub();
+      const { Controller } = await loadController({ createFacsAccessMappings: createStub });
+      const ctx = makeContext({
+        product: 'ASO',
+        body: asoBody({
+          grantedCapabilities: ['aso/can_manage_users'],
+          compositeKeyType1: 'opportunity',
+          compositeKeyValue1: 'security',
+        }),
+      });
+      const res = await Controller(ctx).createMapping(ctx);
+      expect(res.status).to.equal(400);
+      expect((await res.json()).message).to.contain('Site-level capabilities');
       expect(createStub.called).to.be.false;
     });
 
@@ -1481,6 +1507,27 @@ describe('StateAccessMappingsController', () => {
       });
       const res = await Controller(ctx).patchMapping(ctx);
       expect(res.status).to.equal(400);
+      expect((await res.json()).message).to.contain('Site-level capabilities');
+      expect(stubs.updateFacsAccessMappingCapabilities.called).to.be.false;
+    });
+
+    it('rejects adding can_manage_users to a type-scoped row (ASO)', async () => {
+      // The other site-level capability, on the PATCH path.
+      const { Controller, stubs } = await loadController({
+        getFacsAccessMappingById: sinon.stub().resolves(
+          makeRow({
+            product: 'ASO', resource_type: 'site', composite_key_value_1: 'security',
+          }),
+        ),
+      });
+      const ctx = makeContext({
+        product: 'ASO',
+        pathParams: { id: VALID_UUID_MAPPING },
+        body: { grantedCapabilities: ['aso/can_manage_users'] },
+      });
+      const res = await Controller(ctx).patchMapping(ctx);
+      expect(res.status).to.equal(400);
+      expect((await res.json()).message).to.contain('Site-level capabilities');
       expect(stubs.updateFacsAccessMappingCapabilities.called).to.be.false;
     });
 
@@ -2324,6 +2371,41 @@ describe('StateAccessMappingsController', () => {
       const body = await res.json();
       expect(body.siteCapabilities).to.deep.equal(['aso/can_manage_users']);
       expect(body.opportunityCapabilities.all).to.deep.equal(['aso/can_edit']);
+    });
+
+    it('omits the two-tier fields for a non-composite product (LLMO)', async () => {
+      // LLMO has no opportunity-type qualifier, so the bucketed fields would be
+      // misleading — only the flat `capabilities` is returned.
+      const { Controller } = await loadController({
+        listFacsAccessMappings: sinon.stub().resolves([]),
+      });
+      const ctx = makeContext({
+        pathParams: { resourceId: VALID_UUID_RES },
+        facsPermissions: ['llmo/can_manage_users'],
+      });
+      const res = await Controller(ctx).getUserCapabilities(ctx);
+      const body = await res.json();
+      expect(body.capabilities).to.include('llmo/can_manage_users');
+      expect(body.siteCapabilities).to.be.undefined;
+      expect(body.opportunityCapabilities).to.be.undefined;
+    });
+  });
+
+  describe('site-level capability set integrity', () => {
+    it('every site-level capability exists in the product catalog (composite products)', () => {
+      // Drift guard: if siteLevelCapabilities and the product catalog diverge, a
+      // site-level cap could reference a name the product does not actually grant.
+      const compositeProducts = Object.keys(PRODUCTS_CAPABILITIES).filter(
+        (product) => productHasCompositeSlots(product),
+      );
+      expect(compositeProducts).to.not.be.empty;
+      for (const product of compositeProducts) {
+        const catalog = new Set(PRODUCTS_CAPABILITIES[product]);
+        for (const cap of siteLevelCapabilities(product)) {
+          expect(catalog.has(cap), `${cap} missing from ${product} catalog`).to
+            .be.true;
+        }
+      }
     });
   });
 

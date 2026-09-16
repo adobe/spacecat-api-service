@@ -143,7 +143,7 @@ function resolveCompositeKeys(product, compositeKeyType1, compositeKeyValue1) {
  * @param {string} product - Uppercase product code.
  * @returns {Set<string>}
  */
-function siteLevelCapabilities(product) {
+export function siteLevelCapabilities(product) {
   const p = product.toLowerCase();
   return new Set([`${p}/can_configure`, `${p}/can_manage_users`]);
 }
@@ -156,7 +156,7 @@ function siteLevelCapabilities(product) {
  * @param {string} product - Uppercase product code.
  * @returns {boolean}
  */
-function productHasCompositeSlots(product) {
+export function productHasCompositeSlots(product) {
   const slots = routeFacsCapabilities
     .PRODUCTS_FACS_COMPOSITE_RESOURCE?.[product]?.compositeKeySlots ?? [];
   return slots.length > 0;
@@ -1626,12 +1626,18 @@ function StateAccessMappingsController(context) {
       capabilities: Object.keys(provenance).sort(),
       provenance,
       // Additive two-tier view — existing consumers keep reading `capabilities`.
-      siteCapabilities: [...siteCapabilities].sort(),
-      opportunityCapabilities: Object.fromEntries(
-        Object.entries(opportunityCapabilities).map(
-          ([value, caps]) => [value, [...caps].sort()],
-        ),
-      ),
+      // Only emitted for composite products (e.g. ASO): non-composite products
+      // have no opportunity-type qualifier, so the buckets would be misleading.
+      ...(productHasCompositeSlots(product)
+        ? {
+          siteCapabilities: [...siteCapabilities].sort(),
+          opportunityCapabilities: Object.fromEntries(
+            Object.entries(opportunityCapabilities).map(
+              ([value, caps]) => [value, [...caps].sort()],
+            ),
+          ),
+        }
+        : {}),
     });
   }
 
