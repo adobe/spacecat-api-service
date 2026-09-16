@@ -266,12 +266,15 @@ jobs:
         # so it targets the correct per-env account.
         #
         # DEPLOY DEPENDENCY: the deploy identity (spacecat-role-github-actions, assumed
-        # by configure-aws above) MUST hold iam:PassRole on
-        # spacecat-role-serenity-market-worker, and that role MUST exist with the
+        # by configure-aws above) needs iam:PassRole on
+        # spacecat-role-serenity-market-worker, and that role must exist with the
         # worker's full permission set, or hedy's UpdateFunctionConfiguration /
         # CreateFunction fails. Both are provisioned by the companion
-        # spacecat-infrastructure PR; this deploy path first exercises the new role in
-        # stage/prod (api-service has no CI dev-deploy path).
+        # spacecat-infrastructure PR (#798) as scoped IaC — the PassRole grant is
+        # inline on spacecat-role-github-actions, limited to this role and
+        # iam:PassedToService=lambda.amazonaws.com. The only ordering rule is that
+        # #798 is applied before this deploy runs; this deploy path first exercises
+        # the new role in stage/prod (api-service has no CI dev-deploy path).
         if: steps.paths-check.outputs.changed != 'false'
         run: npm run ${{ (matrix.environment == 'dev' && 'deploy-dev:worker') || (matrix.environment == 'stage' && 'deploy-stage:worker') || (matrix.environment == 'prod' && 'deploy:worker') }}
         env:
