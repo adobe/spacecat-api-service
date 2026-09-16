@@ -102,6 +102,8 @@ site-keyword-cpc:
         $ref: './responses.yaml#/400-no-site-id'
       '401':
         $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403-site-access-forbidden'
       '404':
         $ref: './responses.yaml#/404-site-not-found-with-id'
       '500':

@@ -1668,6 +1668,11 @@ function SitesController(ctx, log, env) {
       limit = Math.min(limit, MAX_KEYWORD_CPC_LIMIT);
     }
 
+    // country is optional; when present it must be an ISO 3166-1 alpha-2 code (Semrush database).
+    if (hasText(country) && !/^[a-z]{2}$/i.test(country)) {
+      return badRequest('country must be an ISO 3166-1 alpha-2 code');
+    }
+
     const site = await Site.findById(siteId);
     if (!site) {
       return notFound('Site not found');
@@ -1690,12 +1695,15 @@ function SitesController(ctx, log, env) {
       const keywords = (result?.keywords ?? []).map((kw) => ({
         keyword: kw.keyword,
         volume: kw.volume,
-        cpc: kw.cpc,
+        // Guarantee the documented integer-cents contract rather than trusting the client.
+        cpc: Math.round(Number(kw.cpc)) || 0,
       }));
       return ok({ baseURL, keywords });
     } catch (error) {
+      // Keep the upstream detail in the log only — SeoClient/Semrush errors can carry API keys,
+      // internal URLs, or rate-limit details — and return a generic message to the caller.
       log.error(`Error fetching keyword CPC for site ${siteId}: ${error.message}`);
-      return internalServerError(error.message);
+      return internalServerError('Failed to fetch keyword CPC data');
     }
   };
 

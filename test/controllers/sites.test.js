@@ -3833,6 +3833,60 @@ describe('Sites Controller', () => {
     expect(error).to.have.property('message', 'limit must be a positive integer');
   });
 
+  it('get site keyword cpc returns bad request when limit is zero', async () => {
+    const siteId = sites[0].getId();
+
+    const result = await sitesController.getSiteKeywordCpc({
+      params: { siteId },
+      data: { limit: '0' },
+    });
+    const error = await result.json();
+
+    expect(result.status).to.equal(400);
+    expect(error).to.have.property('message', 'limit must be a positive integer');
+  });
+
+  it('get site keyword cpc returns bad request when limit is negative', async () => {
+    const siteId = sites[0].getId();
+
+    const result = await sitesController.getSiteKeywordCpc({
+      params: { siteId },
+      data: { limit: '-1' },
+    });
+    const error = await result.json();
+
+    expect(result.status).to.equal(400);
+    expect(error).to.have.property('message', 'limit must be a positive integer');
+  });
+
+  it('get site keyword cpc clamps a limit above the maximum to 10000', async () => {
+    const siteId = sites[0].getId();
+    const getOrganicKeywords = sinon.stub().resolves({ result: { keywords: [] }, fullAuditRef: '' });
+    const createFrom = sinon.stub().returns({ getOrganicKeywords });
+
+    const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+      '@adobe/mysticat-shared-seo-client': { default: { createFrom } },
+    });
+    const controller = sitesControllerMock.default(context, loggerStub, context.env);
+
+    await controller.getSiteKeywordCpc({ params: { siteId }, data: { limit: '15000' } });
+
+    expect(getOrganicKeywords).to.have.been.calledOnceWith('https://site1.com', { limit: 10000 });
+  });
+
+  it('get site keyword cpc returns bad request when country is not ISO alpha-2', async () => {
+    const siteId = sites[0].getId();
+
+    const result = await sitesController.getSiteKeywordCpc({
+      params: { siteId },
+      data: { country: 'usa' },
+    });
+    const error = await result.json();
+
+    expect(result.status).to.equal(400);
+    expect(error).to.have.property('message', 'country must be an ISO 3166-1 alpha-2 code');
+  });
+
   it('get site keyword cpc returns not found when site is not found', async () => {
     const siteId = sites[0].getId();
     mockDataAccess.Site.findById.resolves(null);
@@ -3869,7 +3923,9 @@ describe('Sites Controller', () => {
     const error = await result.json();
 
     expect(result.status).to.equal(500);
-    expect(error).to.have.property('message', 'SEO_API_KEY is required');
+    // The generic message is returned to the caller; the raw upstream detail stays in the log only.
+    expect(error).to.have.property('message', 'Failed to fetch keyword CPC data');
+    expect(loggerStub.error).to.have.been.calledWithMatch('SEO_API_KEY is required');
   });
 
   it('get site metrics for non belonging to the organization', async () => {
