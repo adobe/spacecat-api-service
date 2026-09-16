@@ -12638,7 +12638,7 @@ describe('Suggestions Controller', () => {
       });
     });
 
-    it('deletes the atomic strategy and marks the experiment CANCELLED on success', async () => {
+    it('leaves the atomic strategy S3 entry in place and marks the experiment CANCELLED on success', async () => {
       const deleteAtomicStrategyStub = sandbox.stub().resolves({ success: true, removed: true, attempts: 1 });
       const ControllerWithAtomicStub = await esmock('../../src/controllers/suggestions.js', {
         '../../src/support/atomic-strategy-helper.js': {
@@ -12661,12 +12661,7 @@ describe('Suggestions Controller', () => {
       });
 
       expect(response.status).to.equal(200);
-      expect(deleteAtomicStrategyStub).to.have.been.calledOnceWithExactly({
-        siteId: SITE_ID,
-        strategyId: GEO_EXP_ID,
-        s3: context.s3,
-        log: context.log,
-      });
+      expect(deleteAtomicStrategyStub).to.not.have.been.called;
       expect(mockGeoExperiment.setStatus).to.have.been.calledOnceWithExactly(STATUSES.CANCELLED);
       expect(mockGeoExperiment.save).to.have.been.calledOnce;
     });

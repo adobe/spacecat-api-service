@@ -3276,17 +3276,6 @@ function SuggestionsController(ctx, sqs, env) {
       }
     }));
 
-    try {
-      await deleteAtomicStrategy({
-        siteId,
-        strategyId: geoExperimentId,
-        s3: context.s3,
-        log: context.log,
-      });
-    } catch (error) {
-      context.log.error(`[geo-experiment-cancel-failed] site: ${siteId}, GeoExperiment ${geoExperimentId}, Failed to delete atomic strategy: ${error.message}`, error);
-    }
-
     // Marked CANCELLED, not removed: GeoExperiment.allActive() (the IME cron's active-experiment
     // query) only matches GENERATING_BASELINE/IN_PROGRESS, so a cancelled experiment naturally
     // stops being picked up — while the record itself stays queryable for audit/history.
