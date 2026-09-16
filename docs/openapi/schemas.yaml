@@ -13013,6 +13013,38 @@ SerenityLanguageListResponse:
       type: array
       items: { $ref: '#/SerenityLanguage' }
 
+BrandClaimsFeedbackRequest:
+  type: object
+  additionalProperties: false
+  required: [eventId, brandId, rating]
+  properties:
+    eventId:
+      type: string
+      format: uuid
+      description: Client-generated UUIDv4 idempotency key for this submission.
+    brandId:
+      type: string
+      format: uuid
+      description: Brand being reviewed. The service verifies it belongs to the site's organization.
+    rating:
+      type: string
+      enum: [up, down]
+      description: Whether the Brand Claims experience was useful.
+    comment:
+      type: string
+      maxLength: 4000
+      description: Optional additional feedback.
+
+BrandClaimsFeedbackResponse:
+  type: object
+  additionalProperties: false
+  required: [id]
+  properties:
+    id:
+      type: string
+      format: uuid
+      description: Accepted feedback event id.
+
 SerenityUpdateModelsRequest:
   type: object
   description: |

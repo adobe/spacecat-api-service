@@ -338,6 +338,7 @@ describe('getRouteHandlers', () => {
     getBrandClaims: () => null,
     getBrandClaimsWeeks: () => null,
     requestBrandClaims: () => null,
+    submitBrandClaimsFeedback: () => null,
     createOrUpdateEdgeConfig: () => null,
     getEdgeConfig: () => null,
     createOrUpdateStageEdgeConfig: () => null,
@@ -1325,6 +1326,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/llmo/brand-claims',
       'GET /sites/:siteId/llmo/brand-claims/weeks',
       'POST /sites/:siteId/llmo/brand-claims/request',
+      'POST /sites/:siteId/llmo/brand-claims/feedback',
       'GET /sites/:siteId/llmo/strategy/demo/brand-presence',
       'GET /sites/:siteId/llmo/strategy/demo/recommendations',
       'POST /sites/:siteId/llmo/offboard',
@@ -1747,6 +1749,8 @@ describe('getRouteHandlers', () => {
     expect(dynamicRoutes['GET /sites/:siteId/llmo/brand-claims'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/brand-claims/weeks'].handler).to.equal(mockLlmoController.getBrandClaimsWeeks);
     expect(dynamicRoutes['GET /sites/:siteId/llmo/brand-claims/weeks'].paramNames).to.deep.equal(['siteId']);
+    expect(dynamicRoutes['POST /sites/:siteId/llmo/brand-claims/feedback'].handler).to.equal(mockLlmoController.submitBrandClaimsFeedback);
+    expect(dynamicRoutes['POST /sites/:siteId/llmo/brand-claims/feedback'].paramNames).to.deep.equal(['siteId']);
     expect(dynamicRoutes['POST /sites/:siteId/llmo/sheet-data/:dataSource'].handler).to.equal(mockLlmoController.queryLlmoSheetData);
     expect(dynamicRoutes['POST /sites/:siteId/llmo/sheet-data/:dataSource'].paramNames).to.deep.equal(['siteId', 'dataSource']);
     expect(dynamicRoutes['POST /sites/:siteId/llmo/sheet-data/:sheetType/:dataSource'].handler).to.equal(mockLlmoController.queryLlmoSheetData);

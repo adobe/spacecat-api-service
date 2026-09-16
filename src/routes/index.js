@@ -613,6 +613,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/llmo/brand-claims': llmoController.getBrandClaims,
     'GET /sites/:siteId/llmo/brand-claims/weeks': llmoController.getBrandClaimsWeeks,
     'POST /sites/:siteId/llmo/brand-claims/request': llmoController.requestBrandClaims,
+    'POST /sites/:siteId/llmo/brand-claims/feedback': llmoController.submitBrandClaimsFeedback,
     'GET /sites/:siteId/llmo/strategy/demo/brand-presence': llmoController.getDemoBrandPresence,
     'GET /sites/:siteId/llmo/strategy/demo/recommendations': llmoController.getDemoRecommendations,
     'POST /llmo/onboard': llmoController.onboardCustomer,

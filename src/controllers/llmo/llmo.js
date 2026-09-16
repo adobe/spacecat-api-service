@@ -91,7 +91,12 @@ import {
 import { updateModifiedByDetails } from './llmo-config-metadata.js';
 import { notifyOptInIfNeeded } from './cdn-opt-in-notification.js';
 import { handleLlmoRationale } from './llmo-rationale.js';
-import { handleBrandClaims, handleBrandClaimsWeeks, handleRequestBrandClaims } from './brand-claims.js';
+import {
+  handleBrandClaims,
+  handleBrandClaimsFeedback,
+  handleBrandClaimsWeeks,
+  handleRequestBrandClaims,
+} from './brand-claims.js';
 import { handleDemoBrandPresence, handleDemoRecommendations } from './opportunity-workspace-demo.js';
 import { notifyStrategyChanges } from '../../support/opportunity-workspace-notifications.js';
 
@@ -1452,6 +1457,22 @@ function LlmoController(ctx) {
     }
   };
 
+  const submitBrandClaimsFeedback = async (context) => {
+    const { log } = context;
+    const { siteId } = context.params;
+    try {
+      const siteValidation = await getSiteAndValidateLlmo(context);
+      if (siteValidation.status) {
+        return siteValidation;
+      }
+
+      return await handleBrandClaimsFeedback(context, siteValidation.site);
+    } catch (error) {
+      log.error(`Error submitting Brand Claims feedback for site ${siteId}: ${error.message}`);
+      return internalServerError('Unable to submit Brand Claims feedback');
+    }
+  };
+
   // Factory for demo fixture endpoints — validates site/LLMO access then delegates to handler
   const createDemoFixtureHandler = (handler, label) => async (context) => {
     const { log } = context;
@@ -2320,6 +2341,7 @@ function LlmoController(ctx) {
     getBrandClaims,
     getBrandClaimsWeeks,
     requestBrandClaims,
+    submitBrandClaimsFeedback,
     getDemoBrandPresence,
     getDemoRecommendations,
     createOrUpdateEdgeConfig,
