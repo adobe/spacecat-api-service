@@ -12382,7 +12382,7 @@ describe('Suggestions Controller', () => {
     const GEO_EXP_ID = 'b1b2c3d4-e5f6-7890-abcd-ef1234567890';
     const { STATUSES, PHASES } = GeoExperimentModel;
     let mockGeoExperiment;
-    let deleteScheduleStub;
+    let disableScheduleStub;
 
     function createMockGeoExperiment({
       status = STATUSES.IN_PROGRESS,
@@ -12401,7 +12401,9 @@ describe('Suggestions Controller', () => {
         getPreScheduleId: () => preScheduleId,
         getPostScheduleId: () => postScheduleId,
         getOpportunityId: () => opportunityId,
-        remove: sandbox.stub().resolves(),
+        setStatus: sandbox.stub(),
+        setUpdatedBy: sandbox.stub(),
+        save: sandbox.stub().resolves(),
       };
     }
 
@@ -12411,8 +12413,8 @@ describe('Suggestions Controller', () => {
       mockGeoExperiment = createMockGeoExperiment();
       mockSuggestionDataAccess.GeoExperiment.findById.resolves(mockGeoExperiment);
 
-      deleteScheduleStub = sandbox.stub().resolves();
-      sandbox.stub(DrsClient, 'createFrom').returns({ deleteSchedule: deleteScheduleStub });
+      disableScheduleStub = sandbox.stub().resolves();
+      sandbox.stub(DrsClient, 'createFrom').returns({ disableSchedule: disableScheduleStub });
 
       // No strategy blob to delete in these tests — reject with NoSuchKey so
       // deleteAtomicStrategy's idempotent-skip path resolves immediately
@@ -12486,7 +12488,7 @@ describe('Suggestions Controller', () => {
         params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
       });
       expect(response.status).to.equal(400);
-      expect(deleteScheduleStub).to.not.have.been.called;
+      expect(disableScheduleStub).to.not.have.been.called;
       expect(mockSuggestion.saveMany).to.not.have.been.called;
     });
 
@@ -12499,7 +12501,7 @@ describe('Suggestions Controller', () => {
         params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
       });
       expect(response.status).to.equal(400);
-      expect(deleteScheduleStub).to.not.have.been.called;
+      expect(disableScheduleStub).to.not.have.been.called;
     });
 
     it('unblocks suggestions (no edge rollback) and deletes the pre-schedule when not yet deployed', async () => {
@@ -12524,7 +12526,7 @@ describe('Suggestions Controller', () => {
 
       expect(response.status).to.equal(204);
       expect(rollbackStub).to.not.have.been.called;
-      expect(deleteScheduleStub).to.have.been.calledOnceWithExactly(SITE_ID, 'pre-sched-1');
+      expect(disableScheduleStub).to.have.been.calledOnceWithExactly(SITE_ID, 'pre-sched-1');
     });
 
     it('rolls back suggestions from edge and deletes the post-schedule when deployed', async () => {
@@ -12549,12 +12551,12 @@ describe('Suggestions Controller', () => {
 
       expect(response.status).to.equal(204);
       expect(rollbackStub).to.have.been.calledOnce;
-      expect(deleteScheduleStub).to.have.been.calledWith(SITE_ID, 'post-sched-1');
-      expect(deleteScheduleStub).to.have.been.calledWith(SITE_ID, 'pre-sched-1');
+      expect(disableScheduleStub).to.have.been.calledWith(SITE_ID, 'post-sched-1');
+      expect(disableScheduleStub).to.have.been.calledWith(SITE_ID, 'pre-sched-1');
     });
 
-    it('still cancels (removes the experiment) when DRS schedule deletion fails', async () => {
-      deleteScheduleStub.rejects(new Error('DRS unavailable'));
+    it('still cancels (marks the experiment CANCELLED) when DRS schedule disable fails', async () => {
+      disableScheduleStub.rejects(new Error('DRS unavailable'));
       const geoExperiment = createMockGeoExperiment({
         phase: PHASES.INITIATED,
         preScheduleId: 'pre-sched-1',
@@ -12569,11 +12571,12 @@ describe('Suggestions Controller', () => {
       });
 
       expect(response.status).to.equal(204);
-      expect(geoExperiment.remove).to.have.been.calledOnce;
+      expect(geoExperiment.setStatus).to.have.been.calledOnceWithExactly(STATUSES.CANCELLED);
+      expect(geoExperiment.save).to.have.been.calledOnce;
       expect(context.log.error).to.have.been.calledWithMatch(/geo-experiment-cancel-failed.*DRS unavailable/);
     });
 
-    it('still cancels (removes the experiment) when suggestion rollback fails', async () => {
+    it('still cancels (marks the experiment CANCELLED) when suggestion rollback fails', async () => {
       const suggestion = mockSuggestionEntity(suggs[0]);
       mockSuggestion.allByOpportunityId.resolves([suggestion]);
       const geoExperiment = createMockGeoExperiment({
@@ -12591,11 +12594,12 @@ describe('Suggestions Controller', () => {
       });
 
       expect(response.status).to.equal(204);
-      expect(geoExperiment.remove).to.have.been.calledOnce;
+      expect(geoExperiment.setStatus).to.have.been.calledOnceWithExactly(STATUSES.CANCELLED);
+      expect(geoExperiment.save).to.have.been.calledOnce;
       expect(context.log.error).to.have.been.calledWithMatch(/geo-experiment-cancel-failed.*rollback boom/);
     });
 
-    it('deletes the atomic strategy and removes the experiment on success', async () => {
+    it('deletes the atomic strategy and marks the experiment CANCELLED on success', async () => {
       const deleteAtomicStrategyStub = sandbox.stub().resolves({ success: true, removed: true, attempts: 1 });
       const ControllerWithAtomicStub = await esmock('../../src/controllers/suggestions.js', {
         '../../src/support/atomic-strategy-helper.js': {
@@ -12624,7 +12628,8 @@ describe('Suggestions Controller', () => {
         s3: context.s3,
         log: context.log,
       });
-      expect(mockGeoExperiment.remove).to.have.been.calledOnce;
+      expect(mockGeoExperiment.setStatus).to.have.been.calledOnceWithExactly(STATUSES.CANCELLED);
+      expect(mockGeoExperiment.save).to.have.been.calledOnce;
     });
   });
 

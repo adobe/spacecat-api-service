@@ -3140,11 +3140,14 @@ function SuggestionsController(ctx, sqs, env) {
 
   /**
    * Cancels an in-progress GeoExperiment: rolls back any deployed suggestions from the edge,
-   * deletes its DRS schedule(s), cleans up its atomic strategy artifact, and removes the
-   * GeoExperiment record. Terminal experiments (COMPLETED or FAILED) cannot be cancelled.
+   * disables its DRS schedule(s), cleans up its atomic strategy artifact, and marks the
+   * GeoExperiment CANCELLED (not removed — kept for audit/history; GeoExperiment.allActive(),
+   * the IME cron's active-experiment query, only matches GENERATING_BASELINE/IN_PROGRESS, so a
+   * CANCELLED experiment is naturally excluded). Terminal experiments (COMPLETED or FAILED)
+   * cannot be cancelled.
    *
-   * DRS schedule deletion and suggestion cleanup are best-effort: a failure to delete a schedule
-   * or unblock a suggestion is logged but does not prevent the experiment from being removed,
+   * DRS schedule disable and suggestion cleanup are best-effort: a failure to disable a schedule
+   * or unblock a suggestion is logged but does not prevent the experiment from being cancelled,
    * matching the fail-open pattern used elsewhere in this file (e.g. the edge-geo-exp creation
    * failure cleanup path).
    */
@@ -3229,9 +3232,9 @@ function SuggestionsController(ctx, sqs, env) {
       .filter(Boolean);
     await Promise.allSettled(scheduleIds.map(async (scheduleId) => {
       try {
-        await drsClient.deleteSchedule(siteId, scheduleId);
+        await drsClient.disableSchedule(siteId, scheduleId);
       } catch (error) {
-        context.log.error(`[geo-experiment-cancel-failed] site: ${siteId}, GeoExperiment ${geoExperimentId}, Failed to delete DRS schedule ${scheduleId}: ${error.message}`, error);
+        context.log.error(`[geo-experiment-cancel-failed] site: ${siteId}, GeoExperiment ${geoExperimentId}, Failed to disable DRS schedule ${scheduleId}: ${error.message}`, error);
       }
     }));
 
@@ -3246,7 +3249,12 @@ function SuggestionsController(ctx, sqs, env) {
       context.log.error(`[geo-experiment-cancel-failed] site: ${siteId}, GeoExperiment ${geoExperimentId}, Failed to delete atomic strategy: ${error.message}`, error);
     }
 
-    await geoExperiment.remove();
+    // Marked CANCELLED, not removed: GeoExperiment.allActive() (the IME cron's active-experiment
+    // query) only matches GENERATING_BASELINE/IN_PROGRESS, so a cancelled experiment naturally
+    // stops being picked up — while the record itself stays queryable for audit/history.
+    geoExperiment.setStatus(GeoExperimentModel.STATUSES.CANCELLED);
+    geoExperiment.setUpdatedBy(updatedBy);
+    await geoExperiment.save();
 
     context.log.info(`[geo-experiment-cancel] Successfully cancelled GeoExperiment ${geoExperimentId} for site ${siteId} by ${updatedBy}`);
 
