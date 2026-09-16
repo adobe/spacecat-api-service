@@ -51,7 +51,7 @@ describe('handlers/chained-job-guard.js (LLMO-7352/LLMO-7418)', () => {
   });
 
   it('allows the job when the brand is still bound to the same workspace', async () => {
-    getBrandProvisioningStateStub.resolves({ semrushSubWorkspaceId: WORKSPACE_ID });
+    getBrandProvisioningStateStub.resolves({ status: 'active', semrushSubWorkspaceId: WORKSPACE_ID });
     const { assertChainedJobStillApplies } = await load();
 
     expect(await call(assertChainedJobStillApplies)).to.deep.equal({ ok: true });
@@ -61,7 +61,7 @@ describe('handlers/chained-job-guard.js (LLMO-7352/LLMO-7418)', () => {
   // the workspace and the chained job running. It decommissions the workspace and clears the
   // pointer; creating a project anyway puts live data inside a torn-down workspace.
   it('stops the job when the pointer was CLEARED (brand deactivated mid-chain)', async () => {
-    getBrandProvisioningStateStub.resolves({ semrushSubWorkspaceId: null });
+    getBrandProvisioningStateStub.resolves({ status: 'active', semrushSubWorkspaceId: null });
     const { assertChainedJobStillApplies } = await load();
 
     const result = await call(assertChainedJobStillApplies);
@@ -71,10 +71,40 @@ describe('handlers/chained-job-guard.js (LLMO-7352/LLMO-7418)', () => {
   });
 
   it('stops the job when the brand was REPOINTED to a different workspace', async () => {
-    getBrandProvisioningStateStub.resolves({ semrushSubWorkspaceId: 'a-different-ws' });
+    getBrandProvisioningStateStub.resolves({ status: 'active', semrushSubWorkspaceId: 'a-different-ws' });
     const { assertChainedJobStillApplies } = await load();
 
     expect((await call(assertChainedJobStillApplies)).ok).to.equal(false);
+  });
+
+  // A brand DELETE is a soft write: it sets `status = 'deleted'` and renames the row, but
+  // deliberately leaves `semrush_sub_workspace_id` in place. So a deleted brand is still returned
+  // by the state read and still matches the pointer, which means a pointer-only guard waves the
+  // job through and publishes a live, billable Semrush project for a brand the customer deleted.
+  // `promoteProvisioningReady` already refuses this on its own write; this path did not.
+  [
+    ['deleted (soft delete)', 'deleted'],
+    ['offboarded', 'ignored'],
+  ].forEach(([label, status]) => {
+    it(`stops the job when the brand is ${label}, even though the pointer still matches`, async () => {
+      getBrandProvisioningStateStub.resolves({ status, semrushSubWorkspaceId: WORKSPACE_ID });
+      const { assertChainedJobStillApplies } = await load();
+
+      const result = await call(assertChainedJobStillApplies);
+
+      expect(result.ok).to.equal(false);
+      expect(result.reason).to.equal('brand-not-live');
+    });
+  });
+
+  it('allows a brand that is still pending — provisioning is exactly when it is not yet active', async () => {
+    // Guards the check from the other side: `pending` is the normal state for a brand whose
+    // first market is still being provisioned, so treating it as "not live" would stand down
+    // on every healthy first-market chain.
+    getBrandProvisioningStateStub.resolves({ status: 'pending', semrushSubWorkspaceId: WORKSPACE_ID });
+    const { assertChainedJobStillApplies } = await load();
+
+    expect(await call(assertChainedJobStillApplies)).to.deep.equal({ ok: true });
   });
 
   it('stops the job when the brand no longer exists', async () => {

@@ -24,6 +24,10 @@ import { getBrandProvisioningState } from '../../brands-storage.js';
  * brand that no longer points anywhere — the "a late worker cannot recreate, repoint, or
  * reactivate" acceptance criterion, violated.
  *
+ * A DELETE or an offboard is the same hazard reached a different way, and needs its own check:
+ * both are soft writes that change `status` and leave the workspace pointer in place, so the
+ * pointer comparison alone does not see them.
+ *
  * The chained handlers cannot rely on the orchestration to catch this: they pass
  * `preResolvedWorkspaceId`, which makes `ensureSubworkspace` skip its own pointer read entirely.
  *
@@ -58,6 +62,20 @@ export async function assertChainedJobStillApplies({
   if (!state) {
     log?.info?.(`${jobName}: brand no longer exists; standing down without touching Semrush`, { brandId });
     return { ok: false, reason: 'brand-deleted' };
+  }
+  // A brand delete is a SOFT delete: `deleteBrand` writes `status = 'deleted'` and renames the
+  // row, but deliberately leaves `semrush_sub_workspace_id` intact. So a deleted brand is still
+  // returned by the state read AND still matches the pointer check below — checking only the
+  // pointer would wave this job straight through and publish a live, billable Semrush project
+  // for a brand the customer just deleted. Offboarding (`status = 'ignored'`) is the same shape.
+  //
+  // This mirrors the predicate `promoteProvisioningReady` already uses on its own write
+  // (`status IN ('pending','active')`); the promotion path was protected and this one was not.
+  if (state.status !== 'pending' && state.status !== 'active') {
+    log?.info?.(`${jobName}: brand is no longer active or pending; standing down without touching Semrush`, {
+      brandId, brandStatus: state.status,
+    });
+    return { ok: false, reason: 'brand-not-live' };
   }
   if (state.semrushSubWorkspaceId !== workspaceId) {
     log?.info?.(`${jobName}: brand is no longer bound to this workspace; standing down without touching Semrush`, {
