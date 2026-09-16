@@ -12,7 +12,7 @@
 
 import { expect } from 'chai';
 import {
-  ORG_1_ID, BRAND_1_ID, SITE_1_ID, SITE_2_ID,
+  ORG_1_ID, ORG_3_ID, BRAND_1_ID, SITE_1_ID, SITE_2_ID,
 } from '../seed-ids.js';
 import { INTENT_ROOT_NAME } from '../../../../src/support/serenity/prompt-tags.js';
 import { SERENITY_CLASSIFY_JOB_ID } from '../../postgres/seed-data/async-jobs.js';
@@ -166,7 +166,7 @@ export default function serenityTests(
 
     it('brand-level GET tags/search returns 403 without organization:read access', async () => {
       const res = await getHttpClient().user.get(
-        `/v2/orgs/${ORG_1_ID}/brands/${BRAND_1_ID}/serenity/tags/search?geoTargetId=2840&languageCode=en&q=tag`,
+        `/v2/orgs/${ORG_3_ID}/brands/${BRAND_1_ID}/serenity/tags/search?geoTargetId=2840&languageCode=en&q=tag`,
       );
       expect(res.status).to.equal(403);
     });
