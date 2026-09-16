@@ -942,6 +942,24 @@ describe('handlers/provision-workspace-job.js (LLMO-7352 / LLMO-7418)', () => {
       expect(result).to.deep.equal({ requeuedJobId: 'job-followup' });
     });
 
+    // Luis review, PR #3249: a status-less error is USUALLY a network failure but is also what a
+    // programming error in the transport looks like, and those previously burned the whole
+    // requeue ladder before failing as "workspace never settled". The retry stays (the test
+    // above pins why: Node's fetch throws TypeError for real network failures, so narrowing by
+    // error type would break the genuine case) — the diagnostic is what was missing.
+    it('logs a warning when a status-less error is retried, so a programming error is visible on the first hop', async () => {
+      transport.getWorkspaceStatus.rejects(new TypeError('cannot read properties of undefined'));
+      const { provisionWorkspaceHandler } = await loadHandler();
+      const job = makeJob(makeMetadata({ requeueDepth: 0 }));
+
+      await provisionWorkspaceHandler(context, job, 'token');
+
+      const warned = context.log.warn.getCalls()
+        .find((c) => /carried no upstream status/.test(String(c.args[0])));
+      expect(warned, 'expected a status-less-error warning').to.not.equal(undefined);
+      expect(warned.args[1]).to.include({ errorName: 'TypeError', hasCause: false });
+    });
+
     it('still fails fast on a permanent 401 (expired/invalid IMS token), never self-requeuing it', async () => {
       const err = new Error('Semrush GET .../status failed: 401');
       err.status = 401;

@@ -1172,7 +1172,7 @@ function SerenityController(context, log, env) {
             return createResponse(
               {
                 error: 'asyncProvisioningDisabled',
-                message: 'Async provisioning is temporarily disabled for this organization; retry without async: true',
+                message: 'Async provisioning is temporarily disabled for this organization; please contact support',
               },
               503,
             );
@@ -1853,7 +1853,7 @@ function SerenityController(context, log, env) {
             return createResponse(
               {
                 error: 'asyncProvisioningDisabled',
-                message: 'Async provisioning is temporarily disabled for this organization; retry without async: true',
+                message: 'Async provisioning is temporarily disabled for this organization; please contact support',
               },
               503,
             );
@@ -2002,7 +2002,7 @@ function SerenityController(context, log, env) {
             return createResponse(
               {
                 error: 'asyncProvisioningDisabled',
-                message: 'Async provisioning is temporarily disabled for this organization; retry without async: true',
+                message: 'Async provisioning is temporarily disabled for this organization; please contact support',
               },
               503,
             );
@@ -2139,7 +2139,7 @@ function SerenityController(context, log, env) {
           return createResponse(
             {
               error: 'asyncProvisioningDisabled',
-              message: 'Async provisioning is temporarily disabled for this organization; retry without async: true',
+              message: 'Async provisioning is temporarily disabled for this organization; please contact support',
             },
             503,
           );

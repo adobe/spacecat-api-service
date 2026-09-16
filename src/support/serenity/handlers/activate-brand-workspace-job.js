@@ -66,6 +66,12 @@ export async function activateBrandWorkspaceJobHandler(context, job) {
   }
   const currentStatus = brand.getStatus?.();
 
+  // `markets: []` is correct, not a gap (Luis review, PR #3249): this job type is chained ONLY
+  // from activate's two skip-mode branches — pending->active and bare reactivation — both of
+  // which are sub-workspace-only and create no markets. The project-activation branch chains
+  // ACTIVATE_MARKETS_JOB_TYPE instead, which does return real market results. Do not "fix" this
+  // by hydrating markets from the DB; it would make this job's result diverge from the
+  // synchronous bare-workspace branch whose contract it mirrors.
   if (currentStatus === 'active') {
     return { status: 200, body: { brandId, status: 'active', markets: [] } };
   }

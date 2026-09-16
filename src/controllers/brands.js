@@ -1978,7 +1978,7 @@ function BrandsController(ctx, log, env) {
               return createResponse(
                 {
                   error: 'asyncProvisioningDisabled',
-                  message: 'Async provisioning is temporarily disabled for this organization; retry without async: true',
+                  message: 'Async provisioning is temporarily disabled for this organization; please contact support',
                 },
                 503,
               );
@@ -2099,7 +2099,7 @@ function BrandsController(ctx, log, env) {
             return createResponse(
               {
                 error: 'asyncProvisioningDisabled',
-                message: 'Async provisioning is temporarily disabled for this organization; retry without async: true',
+                message: 'Async provisioning is temporarily disabled for this organization; please contact support',
               },
               503,
             );

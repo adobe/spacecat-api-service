@@ -46,10 +46,29 @@ export const PROVISION_WORKSPACE_JOB_TYPE = 'serenity-provision-workspace';
 // token, or an unexpected non-transport error) keeps today's fail-fast behavior via the
 // outer catch.
 const RETRYABLE_TRANSPORT_STATUSES = new Set([429, 500, 502, 503, 504]);
-function isRetryableWorkspaceStatusError(error) {
+/**
+ * @param {any} error - the thrown workspace-status error.
+ * @param {object} [log] - optional logger; used to surface a status-less error on the FIRST hop.
+ * @returns {boolean} whether the self-requeue ladder should retry.
+ */
+function isRetryableWorkspaceStatusError(error, log = undefined) {
   const { status } = error ?? {};
   if (typeof status !== 'number') {
-    // No upstream status at all — a network-level failure, not an application error.
+    // No upstream status at all. This is USUALLY a genuine network-level failure, but it is also
+    // what a programming error (a TypeError/ReferenceError from the transport layer) looks like
+    // — and those would then burn the whole self-requeue ladder before failing as "workspace
+    // never settled", hiding the real cause (Luis review, PR #3249).
+    //
+    // Deliberately NOT narrowed by error type: Node's own fetch throws `TypeError: fetch failed`
+    // for DNS failures, connection resets and timeouts, so excluding TypeError would make the
+    // exact case this branch exists for non-retryable. Log loudly instead, so a programming
+    // error is visible on the FIRST hop rather than inferred from an exhausted ladder.
+    log?.warn?.('provision-workspace-job: workspace-status error carried no upstream status; retrying as transient', {
+      errorName: error?.name,
+      errorMessage: error?.message,
+      // A real network failure from undici carries a `cause`; a bare programming error does not.
+      hasCause: Boolean(error?.cause),
+    });
     return true;
   }
   return RETRYABLE_TRANSPORT_STATUSES.has(status);
@@ -495,7 +514,7 @@ export async function provisionWorkspaceHandler(context, job, accessToken) {
     try {
       statusResult = await transport.getWorkspaceStatus(candidate.workspaceId);
     } catch (error) {
-      if (!isRetryableWorkspaceStatusError(error)) {
+      if (!isRetryableWorkspaceStatusError(error, log)) {
         throw error;
       }
       // Transient upstream/network failure — leave `statusResult` undefined so `status`
