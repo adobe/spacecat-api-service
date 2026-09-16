@@ -105,7 +105,6 @@ import {
   isSerenityActiveForBrand,
   isSerenityActiveForOrg,
   isSerenityUiActiveForOrg,
-  isAsyncProvisioningKillSwitched,
   isAsyncProvisioningEnabled,
 } from '../support/serenity/serenity-active.js';
 import {
@@ -1978,18 +1977,6 @@ function BrandsController(ctx, log, env) {
           // is NOT permanent: the synchronous branch is the LLMO-7352 bug pattern itself, slated
           // for removal once every known caller has migrated to `async: true`.
           if (validateAsync(brandData) && isAsyncProvisioningEnabled(context.env || env)) {
-            // LLMO-7418 external-review Finding 15: server-side kill switch — lets ops disable
-            // the async path for this organization without a deploy if it misbehaves in
-            // production. The caller falls back to the synchronous path on its own retry.
-            if (await isAsyncProvisioningKillSwitched(context, spaceCatId, log)) {
-              return createResponse(
-                {
-                  error: 'asyncProvisioningDisabled',
-                  message: 'Async provisioning is temporarily disabled for this organization; please contact support',
-                },
-                503,
-              );
-            }
             // brandAliases/urls/competitors are NOT read here (unlike the sync branch below): the
             // brand row this section persists below (upsertBrand) writes them to storage, and the
             // async chain's orchestration reads them back from there — the same DB-backed source
@@ -2027,6 +2014,17 @@ function BrandsController(ctx, log, env) {
               earnedContent: brandData.earnedContent,
             };
             provisionedBrandId = idempotentBrandId ?? randomUUID();
+            // LLMO-7352 migration telemetry: this is the SYNCHRONOUS provisioning path — the bug
+            // pattern the epic was filed for, kept only until every caller migrates. It is reached
+            // whenever a caller does not send `async: true`, or while the global switch is off, so
+            // during the dormant period it sees ALL traffic. One line per hit is what makes the
+            // consumer list knowable: without it there is no way to tell who is still on this path,
+            // and therefore no evidence on which to ever delete it.
+            log?.info?.('serenity: SYNCHRONOUS provisioning path taken (LLMO-7352 migration)', {
+              endpoint: 'POST /v2/orgs/:spaceCatId/brands (with market)',
+              orgId: spaceCatId,
+              callerId: resolveCallerId(context),
+            });
             const provisioned = await provisionBrandSubworkspace(context, {
               spaceCatId,
               brandId: provisionedBrandId,
@@ -2100,17 +2098,6 @@ function BrandsController(ctx, log, env) {
           // sub-workspace provisioning off to provision-workspace-job — no chained job, since a
           // bare create has no project to create once the workspace is ready.
           //
-          // LLMO-7418 external-review Finding 15: server-side kill switch — see the
-          // hasSemrushMarket branch above for rationale.
-          if (await isAsyncProvisioningKillSwitched(context, spaceCatId, log)) {
-            return createResponse(
-              {
-                error: 'asyncProvisioningDisabled',
-                message: 'Async provisioning is temporarily disabled for this organization; please contact support',
-              },
-              503,
-            );
-          }
           // Resolved and validated HERE, before any write — same rationale as the
           // hasSemrushMarket branch: a missing org workspace config must never leave a
           // persisted, permanently-inert brand row behind.
@@ -2126,6 +2113,17 @@ function BrandsController(ctx, log, env) {
           // tab. The brand is anchored by its primary site (baseSiteId, persisted by
           // upsertBrand below) AND by its Semrush sub-workspace.
           provisionedBrandId = idempotentBrandId ?? randomUUID();
+          // LLMO-7352 migration telemetry: this is the SYNCHRONOUS provisioning path — the bug
+          // pattern the epic was filed for, kept only until every caller migrates. It is reached
+          // whenever a caller does not send `async: true`, or while the global switch is off, so
+          // during the dormant period it sees ALL traffic. One line per hit is what makes the
+          // consumer list knowable: without it there is no way to tell who is still on this path,
+          // and therefore no evidence on which to ever delete it.
+          log?.info?.('serenity: SYNCHRONOUS provisioning path taken (LLMO-7352 migration)', {
+            endpoint: 'POST /v2/orgs/:spaceCatId/brands (bare)',
+            orgId: spaceCatId,
+            callerId: resolveCallerId(context),
+          });
           const bare = await provisionBrandSubworkspaceBare(context, {
             spaceCatId,
             brandId: provisionedBrandId,

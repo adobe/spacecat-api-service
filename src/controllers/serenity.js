@@ -108,7 +108,6 @@ import {
 import { ensureSubworkspace, decommissionBrandWorkspace } from '../support/serenity/workspace-lifecycle.js';
 import {
   isSerenityActiveForBrand,
-  isAsyncProvisioningKillSwitched,
   isAsyncProvisioningEnabled,
 } from '../support/serenity/serenity-active.js';
 import { marketForGeoTargetId } from '../support/serenity/locations.js';
@@ -1165,18 +1164,6 @@ function SerenityController(context, log, env) {
         // synchronous branch is the LLMO-7352 bug pattern itself, not a valid alternative, and
         // is slated for removal once every known caller has migrated to `async: true`.
         if (validateAsync(requestBody) && isAsyncProvisioningEnabled(ctx.env || env)) {
-          // LLMO-7418 external-review Finding 15: server-side kill switch — lets ops disable
-          // the async path for this organization without a deploy if it misbehaves in
-          // production. The caller falls back to the synchronous path on its own retry.
-          if (await isAsyncProvisioningKillSwitched(ctx, ctx?.params?.spaceCatId, log)) {
-            return createResponse(
-              {
-                error: 'asyncProvisioningDisabled',
-                message: 'Async provisioning is temporarily disabled for this organization; please contact support',
-              },
-              503,
-            );
-          }
           // The worker's existing-pointer fast path (provision-workspace-job.js) polls THIS
           // brand's already-canonical workspace rather than provisioning a new one — every
           // brand reaching this branch already has one (`auth.mode === 'subworkspace'` IS that
@@ -1273,6 +1260,17 @@ function SerenityController(context, log, env) {
           ctx.dataAccess.services.postgrestClient,
           log,
         );
+        // LLMO-7352 migration telemetry: this is the SYNCHRONOUS provisioning path — the bug
+        // pattern the epic was filed for, kept only until every caller migrates. It is reached
+        // whenever a caller does not send `async: true`, or while the global switch is off, so
+        // during the dormant period it sees ALL traffic. One line per hit is what makes the
+        // consumer list knowable: without it there is no way to tell who is still on this path,
+        // and therefore no evidence on which to ever delete it.
+        log?.info?.('serenity: SYNCHRONOUS provisioning path taken (LLMO-7352 migration)', {
+          endpoint: 'POST .../serenity/markets',
+          orgId: ctx?.params?.spaceCatId,
+          callerId: resolveCallerId(ctx),
+        });
         const result = await orchestrateCreateMarketSubworkspace({
           dataAccess: ctx.dataAccess,
           env: ctx.env,
@@ -1847,17 +1845,6 @@ function SerenityController(context, log, env) {
         // `provision-workspace-job` ->
         // `serenity-activate-brand-workspace` job chain instead.
         if (validateAsync(body) && isAsyncProvisioningEnabled(ctx.env || env)) {
-          // LLMO-7418 external-review Finding 15: server-side kill switch — see createMarket's
-          // async branch for the full rationale.
-          if (await isAsyncProvisioningKillSwitched(ctx, ctx?.params?.spaceCatId, log)) {
-            return createResponse(
-              {
-                error: 'asyncProvisioningDisabled',
-                message: 'Async provisioning is temporarily disabled for this organization; please contact support',
-              },
-              503,
-            );
-          }
           // LLMO-7418 external-review Finding 9: see createMarket's async branch for the full
           // rationale — reconcile a stale in-flight attempt (reusing the sync guard's own logic)
           // before minting a new one, since beginProvisioningAttempt's own CAS has no staleness
@@ -1928,6 +1915,17 @@ function SerenityController(context, log, env) {
           ctx.dataAccess.services.postgrestClient,
           log,
         );
+        // LLMO-7352 migration telemetry: this is the SYNCHRONOUS provisioning path — the bug
+        // pattern the epic was filed for, kept only until every caller migrates. It is reached
+        // whenever a caller does not send `async: true`, or while the global switch is off, so
+        // during the dormant period it sees ALL traffic. One line per hit is what makes the
+        // consumer list knowable: without it there is no way to tell who is still on this path,
+        // and therefore no evidence on which to ever delete it.
+        log?.info?.('serenity: SYNCHRONOUS provisioning path taken (LLMO-7352 migration)', {
+          endpoint: 'POST .../serenity/activate (pending->active)',
+          orgId: ctx?.params?.spaceCatId,
+          callerId: resolveCallerId(ctx),
+        });
         const pendingWorkspaceId = await ensureSubworkspace(
           transport,
           brand,
@@ -2003,17 +2001,6 @@ function SerenityController(context, log, env) {
         // activate-brand-workspace-job.js's save-divergence handling matches this branch's own
         // 207-not-502 contract.
         if (validateAsync(body) && isAsyncProvisioningEnabled(ctx.env || env)) {
-          // LLMO-7418 external-review Finding 15: server-side kill switch — see createMarket's
-          // async branch for the full rationale.
-          if (await isAsyncProvisioningKillSwitched(ctx, ctx?.params?.spaceCatId, log)) {
-            return createResponse(
-              {
-                error: 'asyncProvisioningDisabled',
-                message: 'Async provisioning is temporarily disabled for this organization; please contact support',
-              },
-              503,
-            );
-          }
           // LLMO-7418 external-review Finding 9: see createMarket's async branch (and the
           // wasPending branch above) for the full rationale.
           await guardAgainstConcurrentProvisioning(
@@ -2081,6 +2068,17 @@ function SerenityController(context, log, env) {
           ctx.dataAccess.services.postgrestClient,
           log,
         );
+        // LLMO-7352 migration telemetry: this is the SYNCHRONOUS provisioning path — the bug
+        // pattern the epic was filed for, kept only until every caller migrates. It is reached
+        // whenever a caller does not send `async: true`, or while the global switch is off, so
+        // during the dormant period it sees ALL traffic. One line per hit is what makes the
+        // consumer list knowable: without it there is no way to tell who is still on this path,
+        // and therefore no evidence on which to ever delete it.
+        log?.info?.('serenity: SYNCHRONOUS provisioning path taken (LLMO-7352 migration)', {
+          endpoint: 'POST .../serenity/activate (bare reactivation)',
+          orgId: ctx?.params?.spaceCatId,
+          callerId: resolveCallerId(ctx),
+        });
         const bareWorkspaceId = await ensureSubworkspace(
           transport,
           brand,
@@ -2147,17 +2145,6 @@ function SerenityController(context, log, env) {
       // in-request settle-poll + project-create/publish sequence), slated for removal once every
       // known caller has migrated to `async: true`.
       if (validateAsync(body) && isAsyncProvisioningEnabled(ctx.env || env)) {
-        // LLMO-7418 external-review Finding 15: server-side kill switch — see createMarket's
-        // async branch for the full rationale.
-        if (await isAsyncProvisioningKillSwitched(ctx, ctx?.params?.spaceCatId, log)) {
-          return createResponse(
-            {
-              error: 'asyncProvisioningDisabled',
-              message: 'Async provisioning is temporarily disabled for this organization; please contact support',
-            },
-            503,
-          );
-        }
         // LLMO-7418 external-review Finding 9: see the createMarket async branch above for the
         // full rationale — reconcile a stale in-flight attempt before minting a new one, since
         // beginProvisioningAttempt's own CAS has no staleness awareness.

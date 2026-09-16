@@ -5384,12 +5384,6 @@ describe('Brands Controller', () => {
         // Default: no attempt in flight for this brand, so the guard is a no-op.
         guardAgainstConcurrentProvisioning = sinon.stub().resolves(),
         updateProvisioningJobId = sinon.stub().resolves(true),
-        // LLMO-7418 external-review Finding 15: kill switch off by default (async available);
-        // specific tests override it to resolve(true) to exercise the 503 gate.
-        isAsyncProvisioningKillSwitched = sinon.stub().resolves(false),
-        // LLMO-7352 idempotent create: the replay check reads the brand at the derived id, and
-        // its provisioning state. Default to "nothing there" so every existing test is a first
-        // submission; the replay tests override them.
         getBrandById = sinon.stub().resolves(null),
         getBrandProvisioningState = sinon.stub().resolves(null),
       } = {}) {
@@ -5403,7 +5397,6 @@ describe('Brands Controller', () => {
           },
           '../../src/support/serenity/serenity-active.js': {
             isSerenityActiveForOrg,
-            isAsyncProvisioningKillSwitched,
           },
           '../../src/support/serenity/workspace-resolver.js': { resolveWorkspaceId },
           '../../src/support/serenity/async-job-runner.js': { createAndEnqueueJob },
@@ -5921,28 +5914,6 @@ describe('Brands Controller', () => {
         expect(enqueueStub).to.not.have.been.called;
       });
 
-      it('returns 503 without enqueuing when the async kill switch is on (LLMO-7418 external-review Finding 15)', async () => {
-        const beginStub = sinon.stub().resolves(true);
-        const enqueueStub = sinon.stub().resolves({ getId: () => 'job-xyz' });
-        const controller = await buildController({
-          beginProvisioningAttempt: beginStub,
-          createAndEnqueueJob: enqueueStub,
-          isAsyncProvisioningKillSwitched: sinon.stub().resolves(true),
-        });
-
-        const response = await controller.createBrandForOrg({
-          ...context,
-          params: { spaceCatId: ORGANIZATION_ID },
-          data: { ...semrushData },
-          dataAccess: mockDataAccess,
-          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
-        });
-
-        expect(response.status).to.equal(503);
-        expect(beginStub).to.not.have.been.called;
-        expect(enqueueStub).to.not.have.been.called;
-      });
-
       it('returns 400 without persisting a row when the organization has no Semrush parent workspace configured', async () => {
         const upsertStub = sinon.stub().resolves({ id: 'forced-id', name: 'New Brand' });
         const controller = await buildController({
@@ -6312,28 +6283,6 @@ describe('Brands Controller', () => {
         });
 
         expect(response.status).to.equal(409);
-        expect(enqueueStub.called).to.equal(false);
-      });
-
-      it('Phase 4: bare create returns 503 without enqueuing when the async kill switch is on (LLMO-7418 external-review Finding 15)', async () => {
-        const beginStub = sinon.stub().resolves(true);
-        const enqueueStub = sinon.stub().resolves({ getId: () => 'job-xyz' });
-        const controller = await buildController({
-          beginProvisioningAttempt: beginStub,
-          createAndEnqueueJob: enqueueStub,
-          isAsyncProvisioningKillSwitched: sinon.stub().resolves(true),
-        });
-
-        const response = await controller.createBrandForOrg({
-          ...context,
-          params: { spaceCatId: ORGANIZATION_ID },
-          data: { name: 'New Brand', baseSiteId: 'site-123', async: true },
-          dataAccess: mockDataAccess,
-          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
-        });
-
-        expect(response.status).to.equal(503);
-        expect(beginStub.called).to.equal(false);
         expect(enqueueStub.called).to.equal(false);
       });
 

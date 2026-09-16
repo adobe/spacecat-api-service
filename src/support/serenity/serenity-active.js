@@ -56,8 +56,6 @@ export const SERENITY_UI_FEATURE_FLAG_NAME = 'serenity_ui';
  * misbehaves in production — there was previously no way to do this short of a
  * code change reverting every `async: true` call site at once.
  */
-export const ASYNC_PROVISIONING_KILL_SWITCH_FLAG_NAME = 'serenity_async_provisioning_disabled';
-
 /**
  * GLOBAL async-provisioning master switch (LLMO-7352/LLMO-7418), DEFAULT OFF.
  *
@@ -67,11 +65,17 @@ export const ASYNC_PROVISIONING_KILL_SWITCH_FLAG_NAME = 'serenity_async_provisio
  * and the only way back is reverting a merge under pressure. With it, the stack merges inert,
  * async is turned on deliberately, and it can be turned off again in seconds.
  *
- * Deliberately a single global env boolean rather than a per-organization opt-in row: there are
- * ~140 Serenity organizations, so a per-org ENABLE flag would mean creating and maintaining a row
- * for each — real operational burden for no extra safety. The per-org
- * {@link ASYNC_PROVISIONING_KILL_SWITCH_FLAG_NAME} covers the opposite, cheap case (disable the
- * one organization that misbehaves), because that one is exception-only.
+ * Deliberately a single global env boolean rather than a per-organization row: there are ~140
+ * Serenity organizations, so a per-org flag would mean creating and maintaining a row for each —
+ * real operational burden for no extra safety.
+ *
+ * A per-org kill switch existed here briefly and was removed. Its justification was speed, and it
+ * did not hold: this value is read from Vault on every request with a 60-second change poll, so
+ * flipping it reaches running containers in about a minute, against roughly ten seconds for a
+ * feature-flag row. Fifty seconds did not pay for a second lever whose semantics differed from
+ * this one — it returned 503 rather than falling through, and the only client sends `async: true`
+ * unconditionally with no handling for that response, so using it took an organization offline
+ * instead of protecting it.
  *
  * Same shape as this codebase's other global serenity toggles (`SERENITY_DEFER_PUBLISH`,
  * `SERENITY_ALLOW_WORKSPACE_DELETE`, `SERENITY_ALLOW_NON_IMS_AUTH`). Wired to Vault at
@@ -284,36 +288,5 @@ export async function isSerenityActiveForBrand(ctx, spaceCatId, brandUuid, log) 
  */
 export async function isSerenityUiActiveForOrg(ctx, spaceCatId, log) {
   const scopes = await readCachedFlagScopes(ctx, spaceCatId, SERENITY_UI_FEATURE_FLAG_NAME, log);
-  return scopes?.orgRow?.flag_value === true;
-}
-
-/**
- * LLMO-7418 external-review Finding 15: server-side kill switch for the opt-in
- * `async: true` provisioning path. Reads the org-wide
- * `LLMO/serenity_async_provisioning_disabled` feature flag (cached, same
- * machinery as every other flag in this file).
- *
- * Deliberately reuses the SAME "absent/unreadable resolves to `false`"
- * fail-safe shape as every other predicate here — it happens to be the safe
- * default in both directions: for a rollout flag, `false` means "stay off";
- * for this kill switch, `false` means "stay on" (async provisioning
- * available). A transient PostgREST read failure must never silently disable
- * async provisioning org-wide, so this is NOT inverted to fail closed.
- *
- * @param {object} ctx - Request context (uses
- *   `ctx.dataAccess.services.postgrestClient`).
- * @param {string} spaceCatId - SpaceCat organization UUID.
- * @param {object} [log] - Optional logger (used to surface a missing client /
- *   a read error without throwing on this hot path).
- * @returns {Promise<boolean>} `true` only when the flag is explicitly on
- *   (async provisioning is disabled for this organization).
- */
-export async function isAsyncProvisioningKillSwitched(ctx, spaceCatId, log) {
-  const scopes = await readCachedFlagScopes(
-    ctx,
-    spaceCatId,
-    ASYNC_PROVISIONING_KILL_SWITCH_FLAG_NAME,
-    log,
-  );
   return scopes?.orgRow?.flag_value === true;
 }
