@@ -2571,6 +2571,36 @@ PageMetricList:
   items:
     oneOf:
       - $ref: './schemas.yaml#/PageOrganicKeywords'
+KeywordCpc:
+  type: object
+  properties:
+    keyword:
+      type: string
+      description: The keyword phrase (Semrush `Ph`).
+    volume:
+      type: integer
+      description: Monthly search volume for the keyword (Semrush `Nq`).
+    cpc:
+      type: integer
+      description: Cost-per-click in integer US cents (Semrush `Cp` × 100); `0` when unknown.
+  required:
+    - keyword
+    - volume
+    - cpc
+KeywordCpcList:
+  type: object
+  properties:
+    baseURL:
+      type: string
+      format: uri
+      description: The site base URL the keywords were fetched for.
+    keywords:
+      type: array
+      items:
+        $ref: './schemas.yaml#/KeywordCpc'
+  required:
+    - baseURL
+    - keywords
 DocImportData:
   title: 'Doc Import'
   description: 'There are no data properties available for doc based imports.'

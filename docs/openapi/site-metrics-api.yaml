@@ -60,6 +60,57 @@ page-metrics-by-source:
         $ref: './responses.yaml#/500'
     security:
       - api_key: [ ]
+site-keyword-cpc:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - name: country
+      in: query
+      required: false
+      description: |
+        Semrush database / country code (case-insensitive ISO 3166-1 alpha-2, e.g. `us`, `gb`, `de`).
+        Defaults to `us` when omitted.
+      schema:
+        type: string
+        default: us
+    - name: limit
+      in: query
+      required: false
+      description: Maximum number of organic keywords to return. Defaults to 1000; clamped to 10000.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 10000
+        default: 1000
+  get:
+    tags:
+      - metrics
+      - site
+    summary: Retrieve the site's organic keywords with CPC
+    description: |
+      Returns the site's organic keywords from Semrush together with their cost-per-click (CPC),
+      the raw material for deriving per-topic CPC on the Return on Brand Visibility dashboard.
+      `cpc` is expressed in integer US cents (Semrush `Cp` × 100); it is `0` when Semrush has no
+      CPC for the keyword.
+    operationId: getSiteKeywordCpc
+    responses:
+      '200':
+        description: The site's organic keywords with CPC
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/KeywordCpcList'
+      '400':
+        $ref: './responses.yaml#/400-no-site-id'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403-site-access-forbidden'
+      '404':
+        $ref: './responses.yaml#/404-site-not-found-with-id'
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - api_key: [ ]
 site-metrics-latest:
   get:
     operationId: getSiteLatestMetrics

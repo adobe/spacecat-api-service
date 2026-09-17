@@ -1156,6 +1156,7 @@ describe('getRouteHandlers', () => {
       'GET /sites/:siteId/experiments',
       'GET /sites/:siteId/metrics/:metric/:source',
       'GET /sites/:siteId/metrics/:metric/:source/by-url/:base64PageUrl',
+      'GET /sites/:siteId/keyword-cpc',
       'GET /sites/:siteId/latest-metrics',
       'GET /sites/by-base-url/:baseURL',
       'GET /sites/by-delivery-type/:deliveryType',

@@ -552,6 +552,7 @@ const routeRequiredCapabilities = {
   'GET /sites/:siteId/geo-experiments/:geoExperimentId/results': 'site:read', // impact-measurement insights
   'GET /sites/:siteId/metrics/:metric/:source': 'site:read',
   'GET /sites/:siteId/metrics/:metric/:source/by-url/:base64PageUrl': 'site:read',
+  'GET /sites/:siteId/keyword-cpc': 'site:read',
   'GET /sites/:siteId/latest-metrics': 'site:read',
   'GET /sites/by-base-url/:baseURL': 'site:read',
   'GET /sites/by-delivery-type/:deliveryType': 'site:read',

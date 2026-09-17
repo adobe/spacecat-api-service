@@ -589,6 +589,8 @@ paths:
     $ref: './site-metrics-api.yaml#/site-metrics-by-source'
   /sites/{siteId}/metrics/{metric}/{source}/by-url/{base64PageUrl}:
     $ref: './site-metrics-api.yaml#/page-metrics-by-source'
+  /sites/{siteId}/keyword-cpc:
+    $ref: './site-metrics-api.yaml#/site-keyword-cpc'
   /sites/{siteId}/experiments:
     $ref: './experiments-api.yaml#/experiments'
   /sites/{siteId}/fixes:
