@@ -3831,6 +3831,37 @@ describe('Sites Controller', () => {
     expect(getOrganicKeywords).to.have.been.calledOnceWith('https://site1.com', { limit: 1000 });
   });
 
+  it('get site keyword cpc forwards excludeBranded when requested', async () => {
+    const siteId = sites[0].getId();
+    const getOrganicKeywords = sinon.stub().resolves({ result: { keywords: [] }, fullAuditRef: '' });
+    const createFrom = sinon.stub().returns({ getOrganicKeywords });
+
+    const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+      '@adobe/mysticat-shared-seo-client': { default: { createFrom } },
+    });
+    const controller = sitesControllerMock.default(context, loggerStub, context.env);
+
+    await controller.getSiteKeywordCpc({ params: { siteId }, data: { excludeBranded: 'true' } });
+
+    expect(getOrganicKeywords).to.have.been.calledOnceWith('https://site1.com', { limit: 1000, excludeBranded: true });
+  });
+
+  it('get site keyword cpc does not set excludeBranded unless explicitly true', async () => {
+    const siteId = sites[0].getId();
+    const getOrganicKeywords = sinon.stub().resolves({ result: { keywords: [] }, fullAuditRef: '' });
+    const createFrom = sinon.stub().returns({ getOrganicKeywords });
+
+    const sitesControllerMock = await esmock('../../src/controllers/sites.js', {
+      '@adobe/mysticat-shared-seo-client': { default: { createFrom } },
+    });
+    const controller = sitesControllerMock.default(context, loggerStub, context.env);
+
+    // any value other than the string 'true' is treated as false (option omitted)
+    await controller.getSiteKeywordCpc({ params: { siteId }, data: { excludeBranded: 'false' } });
+
+    expect(getOrganicKeywords).to.have.been.calledOnceWith('https://site1.com', { limit: 1000 });
+  });
+
   it('get site keyword cpc returns bad request when siteId is missing', async () => {
     const result = await sitesController.getSiteKeywordCpc({ params: {} });
     const error = await result.json();

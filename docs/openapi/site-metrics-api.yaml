@@ -81,6 +81,16 @@ site-keyword-cpc:
         minimum: 1
         maximum: 10000
         default: 1000
+    - name: excludeBranded
+      in: query
+      required: false
+      description: |
+        When `true`, excludes branded keywords (the brand's own name) from the result. Branded
+        terms carry very high, navigational CPC that distorts a category-level cost estimate.
+        Defaults to `false` (all keywords included).
+      schema:
+        type: boolean
+        default: false
   get:
     tags:
       - metrics
