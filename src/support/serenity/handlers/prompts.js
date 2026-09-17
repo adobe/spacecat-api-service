@@ -1761,6 +1761,12 @@ export const TARGETED_LOOKUP_LIMIT = 25;
  * fully-capped corpus walk ({@link buildExistingPromptIndex}) — still correct
  * (never the pre-fix serial-20-page walk), just corpus-cost. Read per-request so
  * a mid-rollout warm-Lambda mix is consistent.
+ *
+ * TEMPORARY: this kill-switch (and the {@link buildExistingPromptIndex} walk it
+ * falls back to) should be removed after a soak with `targetedLookup=true` across
+ * brands and zero degradation alerts — do not let the two-strategy dedup path
+ * calcify.
+ *
  * @param {{ SERENITY_TARGETED_CREATE_LOOKUP?: string } | null | undefined} env
  * @returns {boolean}
  */
@@ -1771,10 +1777,11 @@ export function isTargetedCreateLookupEnabled(env) {
 /**
  * Builds the `text -> stored prompt` index an upsert resolves against by walking
  * the whole project corpus. Pages are fetched with bounded concurrency (a batch
- * of `BULK_CREATE_CONCURRENCY` at a time, stopping once a page comes back short)
- * rather than serially, so a large corpus does not blow the edge budget on
- * round-trip stacking. This is the FALLBACK path (kill-switch OFF); the default
- * is {@link buildTargetedPromptIndex}.
+ * of `BULK_CREATE_CONCURRENCY` at a time, stopping after the batch that CONTAINS
+ * a short page — so up to `BULK_CREATE_CONCURRENCY` pages are read even for a
+ * one-page corpus) rather than serially, so a large corpus does not blow the edge
+ * budget on round-trip stacking. This is the FALLBACK path (kill-switch OFF); the
+ * default is {@link buildTargetedPromptIndex}.
  *
  * Search-semantics note (verified 2026-09-17, live against the Helpx project):
  * upstream `search` IS usable for exact matching — it is literal substring match,
@@ -1790,11 +1797,15 @@ export function isTargetedCreateLookupEnabled(env) {
  * case-sensitive where upstream's own dedupe is not would send a case variant
  * back down the create path and straight into the additive attach.
  *
+ * `writeDeadline` (epoch ms; optional) short-circuits the page walk itself: once
+ * the budget is spent, the next batch throws (so the project degrades to an index
+ * error and its inputs fail itemized) rather than reading past the edge budget.
+ *
  * @param {SerenityTransport} transport
  * @param {string} semrushWorkspaceId
  * @param {string} projectId
  * @param {any} [log]
- * @param {{ onUpstreamCall?: () => void }} [opts]
+ * @param {{ onUpstreamCall?: () => void, writeDeadline?: number }} [opts]
  * @returns {Promise<{ byText: Map<string, { semrushPromptId: string,
  *   carryOverTagIds: string[] }>, byLower: Map<string, { semrushPromptId: string,
  *   carryOverTagIds: string[] }> }>}
@@ -1804,7 +1815,7 @@ export async function buildExistingPromptIndex(
   semrushWorkspaceId,
   projectId,
   log,
-  { onUpstreamCall } = {},
+  { onUpstreamCall, writeDeadline } = {},
 ) {
   /** @type {Map<string, { semrushPromptId: string, carryOverTagIds: string[] }>} */
   const byText = new Map();
@@ -1832,6 +1843,11 @@ export async function buildExistingPromptIndex(
   let done = false;
   let start = 1;
   while (!done && start <= MAX_PROMPT_INDEX_PAGES) {
+    if (writeDeadline !== undefined && Date.now() >= writeDeadline) {
+      // Budget spent mid-walk: throw so the project degrades to an index error
+      // (its inputs fail itemized) rather than reading past the edge budget.
+      throw new ErrorWithStatusCode('write budget exhausted during existing-prompt lookup', 503);
+    }
     const pages = [];
     const batchEnd = Math.min(start + BULK_CREATE_CONCURRENCY, MAX_PROMPT_INDEX_PAGES + 1);
     for (let p = start; p < batchEnd; p += 1) {
@@ -1884,18 +1900,35 @@ export async function buildExistingPromptIndex(
  * with HTTP 200) rather than ever concluding "not found" from an incomplete read,
  * because a false "new" pushes an existing prompt down the create path and
  * silently stacks a second tag (rest-transport create folds a repeated text into
- * `existing_count` but still attaches the given tags). Two guards throw:
+ * `existing_count` but still attaches the given tags). Guards that throw:
  *  - a full page (`items.length >= TARGETED_LOOKUP_LIMIT`) without an exact hit —
- *    the row could be on page 2, so "not found" is not safe to conclude; and
+ *    the row could be on page 2, so "not found" is not safe to conclude. NOTE:
+ *    a short, common exact text with more than `TARGETED_LOOKUP_LIMIT` substring
+ *    siblings can trip this and false-degrade a LEGITIMATE upsert to a failure;
+ *    that is fail-safe (never a wrong write), and the kill-switch walk is the
+ *    recovery. Real prompts are full sentences, so this is low-probability;
+ *  - an exact-name match with no usable `id` — storing nothing here would let the
+ *    input fall through to create-as-new and tag-stack, so treat it as ambiguous;
+ *  - a `writeDeadline` crossed mid-build (a large single-project add), so the
+ *    build cannot run the edge budget out before the fan-out even starts; and
  *  - any upstream error on the `search` call (e.g. a body-size limit on a
  *    near-`MAX_PROMPT_TEXT_LENGTH` text) propagates out.
+ *
+ * RESIDUAL VENDOR-CONTRACT DEPENDENCY: correctness of the "not found -> create"
+ * conclusion assumes upstream `search` returns ALL substring matches up to the
+ * requested `limit`, UNRANKED. Verified substring/unranked 2026-09-17. If the
+ * vendor ever narrows to relevance-ranked or caps below `limit`, an exact row
+ * could be absent from a NON-full (< limit) result set — the full-page guard
+ * would not fire, and the input would silently tag-stack. That drift is not
+ * caught at runtime today (it surfaces only as a created:updated ratio shift);
+ * re-verify this contract if the vendor changes, and flip the kill-switch off.
  *
  * @param {SerenityTransport} transport
  * @param {string} semrushWorkspaceId
  * @param {string} projectId
  * @param {string[]} texts - the trimmed input texts for this project
  * @param {any} [log]
- * @param {{ onUpstreamCall?: () => void }} [opts]
+ * @param {{ onUpstreamCall?: () => void, writeDeadline?: number }} [opts]
  * @returns {Promise<{ byText: Map<string, { semrushPromptId: string,
  *   carryOverTagIds: string[] }>, byLower: Map<string, { semrushPromptId: string,
  *   carryOverTagIds: string[] }> }>}
@@ -1906,7 +1939,7 @@ export async function buildTargetedPromptIndex(
   projectId,
   texts,
   log,
-  { onUpstreamCall } = {},
+  { onUpstreamCall, writeDeadline } = {},
 ) {
   /** @type {Map<string, { semrushPromptId: string, carryOverTagIds: string[] }>} */
   const byText = new Map();
@@ -1917,6 +1950,11 @@ export async function buildTargetedPromptIndex(
   )];
   // eslint-disable-next-line no-use-before-define -- mapLimit is hoisted
   await mapLimit(distinct, BULK_CREATE_CONCURRENCY, async (text) => {
+    if (writeDeadline !== undefined && Date.now() >= writeDeadline) {
+      // Budget spent mid-build: throw so the project degrades to an index error
+      // rather than running the edge budget out inside the build phase.
+      throw new ErrorWithStatusCode('write budget exhausted during existing-prompt lookup', 503);
+    }
     onUpstreamCall?.();
     const resp = await transport.listPromptsByTags(semrushWorkspaceId, projectId, {
       tag_ids: [], search: text, page: 1, limit: TARGETED_LOOKUP_LIMIT,
@@ -1925,11 +1963,20 @@ export async function buildTargetedPromptIndex(
     const exact = items.find((it) => String(it?.name ?? '').trim() === text);
     if (!exact && items.length >= TARGETED_LOOKUP_LIMIT) {
       // Full page, no exact hit: cannot safely conclude "not found" (the row may
-      // be on a later page). Throw so the project degrades to an index error.
-      throw new ErrorWithStatusCode(
-        `targeted lookup returned a full page (${TARGETED_LOOKUP_LIMIT}) with no exact match`,
-        502,
-      );
+      // be on a later page). Log the specifics; throw a redaction-safe client
+      // message (no page-size constant / internal wording reaches failed[].message).
+      log?.warn?.('serenity upsert: targeted lookup returned a full page with no exact match', {
+        projectId, limit: TARGETED_LOOKUP_LIMIT,
+      });
+      throw new ErrorWithStatusCode('existing-prompt lookup unavailable', 502);
+    }
+    if (exact && !exact.id) {
+      // Exact name matched but the row carries no usable id: storing nothing would
+      // let this input fall through to create-as-new and tag-stack. Degrade instead.
+      log?.warn?.('serenity upsert: targeted lookup matched an existing prompt with no usable id', {
+        projectId,
+      });
+      throw new ErrorWithStatusCode('existing-prompt lookup unavailable', 502);
     }
     if (exact && exact.id) {
       const entry = {
@@ -2076,14 +2123,14 @@ export async function buildPromptIndexByProject(
           pid,
           textsByProject.get(pid) ?? [],
           log,
-          { onUpstreamCall },
+          { onUpstreamCall, writeDeadline },
         )
         : await buildExistingPromptIndex(
           transport,
           semrushWorkspaceId,
           pid,
           log,
-          { onUpstreamCall },
+          { onUpstreamCall, writeDeadline },
         );
       promptIndexByProject.set(pid, index);
     } catch (e) {
@@ -2178,9 +2225,13 @@ export async function applyUpsertTagWrites(
  * @param {any} classifyPromptType
  * @param {object | null} env - environment (Azure OpenAI creds), threaded into intent
  *   classification; ALSO used directly to fire the quota-rejection Slack alert (serenity-docs#72
- *   §5). Optional — omitted, alerting is a no-op.
+ *   §5); ALSO read by {@link isTargetedCreateLookupEnabled} to select the targeted-vs-walk
+ *   dedup lookup (SERENITY_TARGETED_CREATE_LOOKUP). Optional — omitted, alerting is a no-op
+ *   and the dedup defaults to the targeted lookup.
  * @param {number | undefined} writeDeadline - shared request-write deadline for intent
- *   classification. A caller with no deadline of its own (e.g. finalize's deferred prompt push)
+ *   classification; ALSO short-circuits the prompt-index build ({@link buildPromptIndexByProject})
+ *   and the create fan-out once the budget is spent, so remaining work fails itemized before the
+ *   ~15s edge kill. A caller with no deadline of its own (e.g. finalize's deferred prompt push)
  *   passes undefined; classifyPromptIntents defaults to Informational whenever env is also unset,
  *   before the deadline math is ever evaluated. (Typed as a required union, not an optional
  *   param, because it precedes the required callerId below — tsc rejects an optional parameter

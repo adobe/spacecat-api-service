@@ -40,6 +40,10 @@ import {
   parseUpdatePromptBody,
   MAX_PROMPT_TEXT_LENGTH,
   FACETED_PROMPT_LIST_MAX_PAGES,
+  buildTargetedPromptIndex,
+  buildExistingPromptIndex,
+  MAX_PAGE_LIMIT,
+  MAX_PROMPT_INDEX_PAGES,
 } from '../../../../src/support/serenity/handlers/prompts.js';
 import { ErrorWithStatusCode } from '../../../../src/support/utils.js';
 import { SerenityTransportError } from '../../../../src/support/serenity/rest-transport.js';
@@ -4588,5 +4592,146 @@ describe('handlers/prompts.js — create is an upsert (existing text replaces ta
     // One concurrency batch of BULK_CREATE_CONCURRENCY pages — page 2 is short, so
     // the walk stops after the first batch (8 pages), never a serial page-at-a-time.
     expect(listPromptsByTags).to.have.callCount(8);
+  });
+
+  it('targeted lookup: an exact-name match with no usable id degrades the project (never a false "new")', async () => {
+    // Exact name matches but the row carries no id — storing nothing would let the
+    // input fall through to create-as-new and tag-stack. It must degrade instead.
+    const listPromptsByTags = sinon.stub().resolves({ items: [{ name: 'best shoes' }] });
+    const { transport, dataAccess } = setup([], { listPromptsByTags });
+
+    const result = await runImport(transport, dataAccess, [importRow('best shoes', ['cat-a'])]);
+
+    expect(transport.createPromptsWithMetadata).to.not.have.been.called;
+    expect(result.failed).to.have.lengthOf(1);
+    expect(result.failed[0].status).to.equal(502);
+    // Redaction-safe client message — no page-size constant / internal wording.
+    expect(result.failed[0].message).to.equal('existing-prompt lookup unavailable');
+  });
+
+  it('targeted lookup: the full-page degrade surfaces a redaction-safe client message (no internal wording)', async () => {
+    const fullPage = Array.from({ length: 25 }, (_, i) => storedPrompt({ id: `x${i}`, name: `other ${i}` }));
+    const listPromptsByTags = sinon.stub().resolves({ items: fullPage });
+    const { transport, dataAccess } = setup([], { listPromptsByTags });
+
+    const result = await runImport(transport, dataAccess, [importRow('best shoes', ['cat-a'])]);
+
+    expect(result.failed[0].status).to.equal(502);
+    expect(result.failed[0].message).to.equal('existing-prompt lookup unavailable');
+  });
+
+  it('targeted lookup: collapses duplicate input texts to a single search (cost dedup)', async () => {
+    const listPromptsByTags = sinon.stub().resolves({ items: [] });
+    const { transport, dataAccess } = setup([], { listPromptsByTags });
+
+    await runImport(transport, dataAccess, [
+      importRow('same text', ['cat-a']),
+      importRow('same text', ['cat-b']),
+    ]);
+
+    // new Set over the project's texts -> one lookup for the two identical inputs.
+    expect(listPromptsByTags).to.have.callCount(1);
+  });
+
+  it('per-item deadline guard: budget crossed AFTER the index builds fails later items (never a half-write)', async () => {
+    // The index builds while the deadline is in the future; the deadline is then
+    // crossed before the create fan-out runs, so the per-item guard (not the
+    // build-phase guard) must fire and fail the input rather than create-as-new.
+    const clock = sinon.useFakeTimers({ now: 1_000_000, toFake: ['Date'] });
+    try {
+      const deadline = 1_000_050;
+      const listPromptsByTags = sinon.stub().callsFake(() => {
+        clock.tick(60); // advance PAST the deadline once the (clean) build has read
+        return Promise.resolve({ items: [] });
+      });
+      const { transport, dataAccess } = setup([], { listPromptsByTags });
+
+      const result = await handleCreatePrompts(
+        transport,
+        dataAccess,
+        BRAND,
+        WORKSPACE,
+        { prompts: [importRow('anything', ['cat-a'])] },
+        fakeLog(),
+        undefined, // classifyPromptType
+        undefined, // env
+        deadline, // writeDeadline: future at build, past at fan-out
+      );
+
+      expect(transport.createPromptsWithMetadata).to.not.have.been.called;
+      expect(result.failed).to.have.lengthOf(1);
+      expect(result.failed[0].status).to.equal(503);
+      // The later per-item guard, distinct from the build-phase 'during'/'before lookup' messages.
+      expect(result.failed[0].message).to.equal('write budget exhausted before processing');
+    } finally {
+      clock.restore();
+    }
+  });
+
+  it('buildTargetedPromptIndex throws 503 when the write budget is already spent (build-phase deadline guard)', async () => {
+    const listPromptsByTags = sinon.stub().resolves({ items: [] });
+    await expect(buildTargetedPromptIndex({ listPromptsByTags }, WORKSPACE, 'proj-us-en', ['a text'], fakeLog(), { writeDeadline: Date.now() - 1 })).to.be.rejectedWith(ErrorWithStatusCode, /write budget exhausted during existing-prompt lookup/);
+    expect(listPromptsByTags).to.not.have.been.called;
+  });
+
+  it('buildExistingPromptIndex (fixed walk) throws 503 when the write budget is already spent (build-phase deadline guard)', async () => {
+    const listPromptsByTags = sinon.stub().resolves({ items: [] });
+    await expect(buildExistingPromptIndex({ listPromptsByTags }, WORKSPACE, 'proj-us-en', fakeLog(), { writeDeadline: Date.now() - 1 })).to.be.rejectedWith(ErrorWithStatusCode, /write budget exhausted during existing-prompt lookup/);
+    expect(listPromptsByTags).to.not.have.been.called;
+  });
+
+  it('fixed walk (kill-switch off): recognises a prompt PAST the old 20-page cap (upsert, not tag-stack)', async () => {
+    // Old cap was 20 pages; the target lives on page 21. With the cap raised to 100
+    // the walk still reaches it, so it upserts instead of silently tag-stacking.
+    const fullPage = Array.from({ length: MAX_PAGE_LIMIT }, (_, i) => storedPrompt({ id: `p${i}`, name: `q${i}` }));
+    const target = [storedPrompt({ id: 'sem-page21', name: 'deep prompt' })];
+    const pageItems = (page) => {
+      if (page < 21) {
+        return fullPage;
+      }
+      return page === 21 ? target : [];
+    };
+    const listPromptsByTags = sinon.stub()
+      .callsFake((_ws, _pid, { page }) => Promise.resolve({ items: pageItems(page) }));
+    const { transport, dataAccess } = setup([], { listPromptsByTags });
+
+    const result = await handleCreatePrompts(
+      transport,
+      dataAccess,
+      BRAND,
+      WORKSPACE,
+      { prompts: [importRow('deep prompt', ['cat-x'])] },
+      fakeLog(),
+      undefined,
+      { SERENITY_TARGETED_CREATE_LOOKUP: 'false' },
+    );
+
+    expect(result.updated).to.have.lengthOf(1);
+    expect(result.updated[0].semrushPromptId).to.equal('sem-page21');
+    expect(transport.createPromptsWithMetadata).to.not.have.been.called;
+  });
+
+  it('fixed walk (kill-switch off): warns when the 100-page cap is hit (index incomplete)', async () => {
+    // Every page full -> the walk never sees a short page and runs to the cap.
+    const fullPage = Array.from({ length: MAX_PAGE_LIMIT }, (_, i) => storedPrompt({ id: `p${i}`, name: `q${i}` }));
+    const listPromptsByTags = sinon.stub().resolves({ items: fullPage });
+    const { transport, dataAccess } = setup([], { listPromptsByTags });
+    const log = fakeLog();
+
+    await handleCreatePrompts(
+      transport,
+      dataAccess,
+      BRAND,
+      WORKSPACE,
+      { prompts: [importRow('never found', ['cat-x'])] },
+      log,
+      undefined,
+      { SERENITY_TARGETED_CREATE_LOOKUP: 'false' },
+    );
+
+    expect(log.warn).to.have.been.calledWithMatch(
+      sinon.match(/prompt index hit the page cap/),
+    );
+    expect(listPromptsByTags).to.have.callCount(MAX_PROMPT_INDEX_PAGES);
   });
 });

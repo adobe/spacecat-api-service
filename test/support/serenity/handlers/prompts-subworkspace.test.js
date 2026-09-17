@@ -354,6 +354,75 @@ describe('prompts-subworkspace handlers', () => {
       expect(result.failed[0].status).to.equal(502);
     });
 
+    // Lockstep with the flat twin's dangerous-path coverage — the subworkspace
+    // handler wires the same deadline/full-page/walk guards, and a copy-paste
+    // divergence in this twin would otherwise silently create-as-new.
+    it('targeted lookup: a full page with no exact hit degrades the project (never a false "new")', async () => {
+      const fullPage = Array.from({ length: 25 }, (_, i) => ({ id: `x${i}`, name: `other ${i}`, tags: [] }));
+      const transport = makeTransport({
+        listPromptsByTags: sinon.stub().resolves({ items: fullPage }),
+      });
+
+      const result = await handleCreatePromptsSubworkspace(transport, WS, {
+        prompts: [{
+          text: 'p', tagIds: ['tag-a'], geoTargetId: 2840, languageCode: 'en',
+        }],
+      }, log);
+
+      expect(transport.createPromptsWithMetadata).to.not.have.been.called;
+      expect(result.failed).to.have.length(1);
+      expect(result.failed[0].status).to.equal(502);
+      expect(result.failed[0].message).to.equal('existing-prompt lookup unavailable');
+    });
+
+    it('targeted lookup: an exact-name match with no usable id degrades the project (never a false "new")', async () => {
+      const transport = makeTransport({ listPromptsByTags: sinon.stub().resolves({ items: [{ name: 'p' }] }) });
+
+      const result = await handleCreatePromptsSubworkspace(transport, WS, {
+        prompts: [{
+          text: 'p', tagIds: ['tag-a'], geoTargetId: 2840, languageCode: 'en',
+        }],
+      }, log);
+
+      expect(transport.createPromptsWithMetadata).to.not.have.been.called;
+      expect(result.failed).to.have.length(1);
+      expect(result.failed[0].status).to.equal(502);
+    });
+
+    it('marks inputs failed (503) when the write budget is already exhausted (never a half-write)', async () => {
+      const transport = makeTransport();
+      const result = await handleCreatePromptsSubworkspace(transport, WS, {
+        prompts: [{
+          text: 'p', tagIds: ['tag-a'], geoTargetId: 2840, languageCode: 'en',
+        }],
+      }, log, undefined, undefined, Date.now() - 1);
+
+      expect(transport.createPromptsWithMetadata).to.not.have.been.called;
+      expect(result.failed).to.have.length(1);
+      expect(result.failed[0].status).to.equal(503);
+    });
+
+    it('fixed walk (kill-switch off): recognises a prompt past page 1 (upsert, not tag-stack)', async () => {
+      const firstPage = Array.from({ length: 1000 }, (_, i) => ({ id: `p${i}`, name: `q${i}`, tags: [] }));
+      const pageItems = { 1: firstPage, 2: [{ id: 'sem-page2', name: 'on page two', tags: [] }] };
+      const transport = makeTransport({
+        listPromptsByTags: sinon.stub()
+          .callsFake((_ws, _pid, { page }) => Promise.resolve({ items: pageItems[page] ?? [] })),
+        updatePromptTagsByIds: sinon.stub().resolves(),
+        patchPromptsMetadataBatch: sinon.stub().resolves(),
+      });
+
+      const result = await handleCreatePromptsSubworkspace(transport, WS, {
+        prompts: [{
+          text: 'on page two', tagIds: ['tag-x'], geoTargetId: 2840, languageCode: 'en',
+        }],
+      }, log, undefined, { SERENITY_TARGETED_CREATE_LOOKUP: 'false' });
+
+      expect(result.updated).to.have.length(1);
+      expect(result.updated[0].semrushPromptId).to.equal('sem-page2');
+      expect(transport.createPromptsWithMetadata).to.not.have.been.called;
+    });
+
     // Lockstep coverage for the flat twin's "moves updates into `failed` when the
     // batched tag write throws". The twin resolves its workspace id differently
     // (`workspaceId` vs `semrushWorkspaceId`), so a copy-paste divergence in this

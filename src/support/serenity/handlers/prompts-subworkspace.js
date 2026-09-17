@@ -175,8 +175,12 @@ export async function handleListPromptsSubworkspace(transport, workspaceId, quer
  * @param {any} classifyPromptType
  * @param {object | null} env - environment (Azure OpenAI creds), threaded into intent
  *   classification; ALSO used directly to fire the quota-rejection Slack alert (serenity-docs#72
- *   §5). Optional — omitted, alerting is a no-op.
- * @param {number} writeDeadline - shared request-write deadline for intent classification.
+ *   §5); ALSO read by {@link isTargetedCreateLookupEnabled} to select the targeted-vs-walk dedup
+ *   lookup (SERENITY_TARGETED_CREATE_LOOKUP). Optional — omitted, alerting is a no-op and the
+ *   dedup defaults to the targeted lookup.
+ * @param {number} writeDeadline - shared request-write deadline for intent classification; ALSO
+ *   short-circuits the prompt-index build and the create fan-out once the budget is spent, so
+ *   remaining work fails itemized before the ~15s edge kill.
  * @param {string} callerId - resolved caller id (LLMO-6289) stamped as the created/updated author.
  * @param {object} [options]
  * @param {string | null} [options.orgId] - serenity-docs#72 §5 alert payload only.
