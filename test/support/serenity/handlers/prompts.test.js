@@ -4516,6 +4516,24 @@ describe('handlers/prompts.js — create is an upsert (existing text replaces ta
     expect(result.created).to.have.lengthOf(1);
   });
 
+  it('targeted lookup matches case-INSENSITIVELY (stored "Best Shoes" upserts for input "best shoes", never create-as-new)', async () => {
+    // Upstream dedupe/search is case-insensitive; a case-sensitive === here would
+    // send the variant down the create path and re-attach the tag (the additive bug).
+    const listPromptsByTags = sinon.stub().callsFake((_ws, _pid, { search }) => Promise.resolve({
+      items: search === 'best shoes'
+        ? [storedPrompt({ id: PROMPT_ID, name: 'Best Shoes' })]
+        : [],
+    }));
+    const { transport, dataAccess } = setup([], { listPromptsByTags });
+
+    const result = await runImport(transport, dataAccess, [importRow('best shoes', ['cat-a'])]);
+
+    expect(transport.createPromptsWithMetadata).to.not.have.been.called;
+    expect(result.created).to.be.an('array').that.is.empty;
+    expect(result.updated).to.have.lengthOf(1);
+    expect(result.updated[0].semrushPromptId).to.equal(PROMPT_ID);
+  });
+
   it('targeted lookup: a search failure degrades the WHOLE project (inputs fail itemized, never treated as new)', async () => {
     const listPromptsByTags = sinon.stub().rejects(Object.assign(new Error('upstream 502'), { status: 502 }));
     const { transport, dataAccess } = setup([], { listPromptsByTags });

@@ -1960,7 +1960,13 @@ export async function buildTargetedPromptIndex(
       tag_ids: [], search: text, page: 1, limit: TARGETED_LOOKUP_LIMIT,
     });
     const items = Array.isArray(resp?.items) ? resp.items : [];
-    const exact = items.find((it) => String(it?.name ?? '').trim() === text);
+    // Case-INSENSITIVE match, mirroring the walk path's byText/byLower dedup:
+    // upstream's own dedupe is case-insensitive, so a case-sensitive === here would
+    // send a case variant (stored "Best Shoes" vs input "best shoes") back down the
+    // create path and straight into the additive tag attach.
+    const exact = items.find(
+      (it) => String(it?.name ?? '').trim().toLowerCase() === text.trim().toLowerCase(),
+    );
     if (!exact && items.length >= TARGETED_LOOKUP_LIMIT) {
       // Full page, no exact hit: cannot safely conclude "not found" (the row may
       // be on a later page). Log the specifics; throw a redaction-safe client
@@ -1979,12 +1985,16 @@ export async function buildTargetedPromptIndex(
       throw new ErrorWithStatusCode('existing-prompt lookup unavailable', 502);
     }
     if (exact && exact.id) {
+      // Key by the matched STORED name (like buildExistingPromptIndex), not the
+      // input text: byText resolves an exact-case input, byLower resolves a case
+      // variant via findStoredPrompt's `byLower.get(text.toLowerCase())` fallback.
+      const storedName = String(exact.name ?? '').trim();
       const entry = {
         semrushPromptId: String(exact.id),
         carryOverTagIds: carryOverTagIdsOf(exact, log, projectId),
       };
-      byText.set(text, entry);
-      byLower.set(text.toLowerCase(), entry);
+      byText.set(storedName, entry);
+      byLower.set(storedName.toLowerCase(), entry);
     }
   });
   return { byText, byLower };

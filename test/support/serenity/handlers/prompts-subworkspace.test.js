@@ -337,6 +337,33 @@ describe('prompts-subworkspace handlers', () => {
       expect(result.created).to.have.length(1);
     });
 
+    it('targeted lookup matches case-insensitively (stored "Best Shoes" upserts for input "best shoes", never create-as-new)', async () => {
+      // Lockstep with the flat twin: case-insensitive match, mirroring the walk's byLower dedup.
+      const listPromptsByTags = sinon.stub().callsFake((_ws, _pid, { search }) => Promise.resolve({
+        items: search === 'best shoes'
+          ? [{ id: 'sem-existing', name: 'Best Shoes', tags: [] }]
+          : [],
+      }));
+      const transport = makeTransport({
+        listPromptsByTags,
+        updatePromptTagsByIds: sinon.stub().resolves(),
+        patchPromptsMetadataBatch: sinon.stub().resolves(),
+      });
+
+      const result = await handleCreatePromptsSubworkspace(transport, WS, {
+        prompts: [
+          {
+            text: 'best shoes', tagIds: ['tag-a'], geoTargetId: 2840, languageCode: 'en',
+          },
+        ],
+      }, log);
+
+      expect(transport.createPromptsWithMetadata).to.not.have.been.called;
+      expect(result.created).to.have.length(0);
+      expect(result.updated).to.have.length(1);
+      expect(result.updated[0].semrushPromptId).to.equal('sem-existing');
+    });
+
     it('targeted lookup: a search failure degrades the whole project (inputs fail itemized, never treated as new)', async () => {
       const transport = makeTransport({
         listPromptsByTags: sinon.stub().rejects(Object.assign(new Error('upstream 502'), { status: 502 })),
