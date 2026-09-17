@@ -729,25 +729,6 @@ describe('llmo-agentic-traffic', () => {
       });
     });
 
-    it('preserves the spaced Coding agents value when forwarding to PostgREST', async () => {
-      const client = createMockClient({
-        rpc_agentic_traffic_kpis_trend: { data: [], error: null },
-      });
-      const ctx = makeContext({
-        client,
-        data: {
-          startDate: '2026-01-01',
-          endDate: '2026-01-28',
-          agentTypes: ' coding AGENTS ',
-        },
-      });
-      const handler = createAgenticTrafficKpisTrendHandler(stubbedValidateAccess);
-      await handler(ctx);
-      expect(client.rpc).to.have.been.calledWithMatch('rpc_agentic_traffic_kpis_trend', {
-        p_agent_types: ['Coding agents'],
-      });
-    });
-
     it('collapses an all-unknown list to omitted (null behaviour)', async () => {
       const client = createMockClient({
         rpc_agentic_traffic_kpis_trend: { data: [], error: null },
@@ -1931,8 +1912,8 @@ describe('llmo-agentic-traffic', () => {
         rpc_agentic_traffic_distinct_filters: {
           data: [{
             categories: ['Electronics', 'Fashion'],
-            agent_types: ['Chatbots', 'Coding agents', 'Research'],
-            platforms: ['ChatGPT', 'GitHub Copilot', 'Meta', 'Perplexity'],
+            agent_types: ['Chatbots', 'Research'],
+            platforms: ['ChatGPT', 'Meta', 'Perplexity'],
             content_types: ['article', 'product'],
             user_agents: ['ClaudeBot', 'GPTBot', 'PerplexityBot'],
           }],
@@ -1945,10 +1926,8 @@ describe('llmo-agentic-traffic', () => {
       expect(res.status).to.equal(200);
       const body = await res.json();
       expect(body.categories).to.deep.equal(['Electronics', 'Fashion']);
-      expect(body.agentTypes).to.deep.equal(['Chatbots', 'Coding agents', 'Research']);
-      expect(body.platforms).to.deep.equal(
-        ['ChatGPT', 'GitHub Copilot', 'Meta', 'Perplexity'],
-      );
+      expect(body.agentTypes).to.deep.equal(['Chatbots', 'Research']);
+      expect(body.platforms).to.deep.equal(['ChatGPT', 'Meta', 'Perplexity']);
       expect(body.contentTypes).to.deep.equal(['article', 'product']);
       expect(body.userAgents).to.deep.equal(['ClaudeBot', 'GPTBot', 'PerplexityBot']);
     });
@@ -2385,7 +2364,7 @@ describe('llmo-agentic-traffic', () => {
           startDate: '2026-01-01',
           endDate: '2026-01-28',
           urls: urlsBody,
-          agentTypes: ['Chatbots', 'Coding agents'],
+          agentTypes: ['Chatbots', 'Research'],
         },
       });
 
@@ -2400,7 +2379,7 @@ describe('llmo-agentic-traffic', () => {
           { host: 'www.example.com', url_path: '/a' },
           { host: 'www.example.com', url_path: '/b' },
         ],
-        p_agent_types: ['Chatbots', 'Coding agents'],
+        p_agent_types: ['Chatbots', 'Research'],
       });
       expect(res.status).to.equal(200);
       const body = await res.json();
