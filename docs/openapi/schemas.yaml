@@ -12989,7 +12989,10 @@ SerenityTagSearchResponse:
       items: { $ref: '#/SerenityTagSearchItem' }
     cursor:
       type: [string, 'null']
-      description: Opaque continuation cursor, or null on the final page.
+      description: |
+        Opaque, versioned base64url continuation state, or null on the final
+        page. It is bound to the normalized query and taxonomy revision and
+        carries no tenant or project authority.
     complete:
       type: boolean
       enum: [true]

@@ -13,6 +13,8 @@
 // @ts-check
 
 export const TAG_SEARCH_CURSOR_VERSION = 1;
+export const MAX_TAG_SEARCH_CURSOR_LENGTH = 4096;
+export const MAX_TAG_SEARCH_CURSOR_DECODED_BYTES = 2048;
 export const DEFAULT_TAG_SEARCH_LIMIT = 25;
 export const MAX_TAG_SEARCH_LIMIT = 100;
 export const MAX_TAG_SEARCH_QUERY_LENGTH = 200;

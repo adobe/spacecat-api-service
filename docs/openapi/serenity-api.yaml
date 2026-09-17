@@ -1085,6 +1085,13 @@ v2-serenity-tag-search:
       upstream reads, so a tag created into an already-visited level while the
       walk is in progress is simply absent from that response and appears on the
       next call. Results are eventually consistent, never truncated.
+
+      **Cursor authority.** The opaque cursor is versioned base64url-encoded
+      pagination state, bound to the normalized query and taxonomy revision. It
+      carries no organization, brand, workspace, project, or authorization
+      authority. Every page authenticates and authorizes the caller, resolves
+      the workspace and project server-side, re-reads the complete taxonomy,
+      and rejects a changed revision with `409`.
     operationId: searchSerenityTags
     security:
       - session_token: []
@@ -1109,7 +1116,10 @@ v2-serenity-tag-search:
       - name: cursor
         in: query
         required: false
-        description: Opaque cursor from the preceding page.
+        description: |
+          Opaque, versioned base64url pagination state from the preceding page.
+          It is query- and revision-bound and carries no tenant or project
+          authority.
         schema: { type: string, minLength: 1 }
     responses:
       '200':
@@ -1138,11 +1148,10 @@ v2-serenity-tag-search:
         description: |
           `tagTreeLimitExceeded` — the complete tree could not be established
           within the safety budgets (`details.budget` names `parents`, `nodes`,
-          `pages`, or `duration`); `tagTreeReadIncomplete` — an upstream page
+          `pages`, or `duration`);           `tagTreeReadIncomplete` — an upstream page
           was malformed, inconsistent, or could not prove the level complete;
           `tagTreeDataIntegrity` — upstream returned a connected tree this
-          endpoint refuses to interpret; or `tagSearchUnavailable` — the
-          endpoint's cursor-signing secret is not provisioned, or search is
+          endpoint refuses to interpret; or `tagSearchUnavailable` — search is
           switched off for this environment.
         content:
           application/json:

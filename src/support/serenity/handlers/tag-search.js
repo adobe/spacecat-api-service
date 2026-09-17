@@ -12,7 +12,7 @@
 
 // @ts-check
 
-import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { ErrorWithStatusCode } from '../../utils.js';
 import { ERROR_CODES } from '../errors.js';
 import { DIMENSION } from '../prompt-tags.js';
@@ -20,6 +20,8 @@ import { resolveProject } from '../subworkspace-projects.js';
 import { readTagTreeSnapshot } from '../tag-tree.js';
 import {
   DEFAULT_TAG_SEARCH_LIMIT,
+  MAX_TAG_SEARCH_CURSOR_DECODED_BYTES,
+  MAX_TAG_SEARCH_CURSOR_LENGTH,
   MAX_TAG_SEARCH_LIMIT,
   MAX_TAG_SEARCH_QUERY_LENGTH,
   TAG_SEARCH_CURSOR_VERSION,
@@ -36,7 +38,7 @@ import { normalizeGeoTargetId, normalizeLanguageCode } from '../validation.js';
  * @property {string} languageCode
  * @property {string} q - normalized (NFKC, trimmed, lower-cased) search text.
  * @property {number} limit
- * @property {string | null} cursor - opaque, HMAC-signed pagination cursor.
+ * @property {string | null} cursor - opaque, versioned base64url pagination state.
  */
 /**
  * @typedef {object} TagSearchMatch
@@ -64,6 +66,8 @@ import { normalizeGeoTargetId, normalizeLanguageCode } from '../validation.js';
 
 export {
   TAG_SEARCH_CURSOR_VERSION,
+  MAX_TAG_SEARCH_CURSOR_LENGTH,
+  MAX_TAG_SEARCH_CURSOR_DECODED_BYTES,
   DEFAULT_TAG_SEARCH_LIMIT,
   MAX_TAG_SEARCH_LIMIT,
   MAX_TAG_SEARCH_QUERY_LENGTH,
@@ -76,10 +80,8 @@ function codedError(message, status, code) {
 }
 
 /**
- * The single 503 `tagSearchUnavailable` shape, shared by the controller's
- * pre-flight checks (kill switch, missing cursor secret — both raised BEFORE
- * any data access) and by {@link searchProjectTags}'s own defense-in-depth
- * re-check, so a caller cannot tell the two apart.
+ * The 503 `tagSearchUnavailable` shape used by the controller's environment
+ * kill-switch check after authorization and before project resolution.
  *
  * @param {string} [message]
  * @returns {Error}
@@ -166,41 +168,63 @@ function parseSearchQuery(query) {
   };
 }
 
-function cursorSignature(encoded, secret) {
-  return createHmac('sha256', secret).update(encoded).digest('base64url');
+const BASE64URL_PATTERN = /^[A-Za-z0-9_-]+$/;
+const CURSOR_KEYS = Object.freeze(['offset', 'q', 'revision', 'v']);
+const SHA256_BYTES = 32;
+
+function invalidCursorError() {
+  return codedError(
+    'The tag search cursor is invalid',
+    400,
+    ERROR_CODES.TAG_SEARCH_CURSOR_INVALID,
+  );
 }
 
-function encodeCursor(payload, secret) {
-  const encoded = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
-  return `${encoded}.${cursorSignature(encoded, secret)}`;
+function isValidRevision(revision) {
+  if (typeof revision !== 'string' || !BASE64URL_PATTERN.test(revision)) {
+    return false;
+  }
+  const bytes = Buffer.from(revision, 'base64url');
+  return bytes.length === SHA256_BYTES && bytes.toString('base64url') === revision;
 }
 
-function decodeCursor(cursor, secret) {
+function encodeCursor(payload) {
+  return Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
+}
+
+function decodeCursor(cursor) {
   try {
-    const [encoded, signature, extra] = cursor.split('.');
-    if (!encoded || !signature || extra !== undefined) {
+    if (typeof cursor !== 'string'
+      || cursor.length === 0
+      || cursor.length > MAX_TAG_SEARCH_CURSOR_LENGTH
+      || !BASE64URL_PATTERN.test(cursor)) {
       throw new Error('malformed');
     }
-    const expected = Buffer.from(cursorSignature(encoded, secret), 'utf8');
-    const supplied = Buffer.from(signature, 'utf8');
-    if (expected.length !== supplied.length || !timingSafeEqual(expected, supplied)) {
-      throw new Error('invalid signature');
+    const decoded = Buffer.from(cursor, 'base64url');
+    if (decoded.length === 0
+      || decoded.length > MAX_TAG_SEARCH_CURSOR_DECODED_BYTES
+      || decoded.toString('base64url') !== cursor) {
+      throw new Error('non-canonical');
     }
-    const payload = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'));
-    if (!payload || payload.v !== TAG_SEARCH_CURSOR_VERSION
-      || !Number.isInteger(payload.offset) || payload.offset < 0
+    const json = decoded.toString('utf8');
+    if (!Buffer.from(json, 'utf8').equals(decoded)) {
+      throw new Error('invalid utf-8');
+    }
+    const payload = JSON.parse(json);
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)
+      || Object.keys(payload).sort().join(',') !== CURSOR_KEYS.join(',')
+      || payload.v !== TAG_SEARCH_CURSOR_VERSION
+      || !Number.isSafeInteger(payload.offset) || payload.offset < 0
       || typeof payload.q !== 'string'
-      || typeof payload.project !== 'string'
-      || typeof payload.revision !== 'string') {
+      || !payload.q
+      || Array.from(payload.q).length > MAX_TAG_SEARCH_QUERY_LENGTH
+      || normalizeSearchText(payload.q) !== payload.q
+      || !isValidRevision(payload.revision)) {
       throw new Error('invalid payload');
     }
     return payload;
   } catch {
-    throw codedError(
-      'The tag search cursor is invalid',
-      400,
-      ERROR_CODES.TAG_SEARCH_CURSOR_INVALID,
-    );
+    throw invalidCursorError();
   }
 }
 
@@ -321,13 +345,8 @@ export function searchTagSnapshot(snapshot, query) {
  * @param {string} projectId - AIO project id.
  * @param {ParsedTagSearchQuery} query - already-validated/normalized query
  *   (see {@link parseSearchQuery}); `cursor`, if present, has NOT yet been
- *   decoded/verified — that happens here, against `cursorSecret`.
+ *   decoded/validated — that happens here before use.
  * @param {object} [log] - logger.
- * @param {string} [cursorSecret] - HMAC key signing the opaque cursor; a
- *   falsy value fails closed with 503 `TAG_SEARCH_UNAVAILABLE` before any
- *   traversal or cursor decode is attempted. The key is unversioned, so
- *   rotating it invalidates every in-flight cursor (the caller restarts at
- *   page one); use a distinct high-entropy value per environment.
  * @param {object} [budgets] - per-environment traversal budget overrides; see
  *   {@link import('../tag-search-constants.js').resolveTagTreeBudgets}.
  * @returns {Promise<TagSearchResult>}
@@ -338,16 +357,11 @@ async function searchProjectTags(
   projectId,
   query,
   log,
-  cursorSecret,
   budgets,
 ) {
-  if (!cursorSecret) {
-    throw tagSearchUnavailableError('Tag search cursor signing is unavailable');
-  }
   const parsed = query;
-  const project = `${workspaceId}:${projectId}`;
-  const cursor = parsed.cursor ? decodeCursor(parsed.cursor, cursorSecret) : null;
-  if (cursor && (cursor.q !== parsed.q || cursor.project !== project)) {
+  const cursor = parsed.cursor ? decodeCursor(parsed.cursor) : null;
+  if (cursor && cursor.q !== parsed.q) {
     throw codedError(
       'The tag search cursor does not match this request',
       400,
@@ -421,10 +435,9 @@ async function searchProjectTags(
       ? encodeCursor({
         v: TAG_SEARCH_CURSOR_VERSION,
         q: parsed.q,
-        project,
         offset: nextOffset,
         revision,
-      }, cursorSecret)
+      })
       : null,
     complete: true,
   };
@@ -453,7 +466,6 @@ function marketNotFound() {
  * @param {object} query - raw, unvalidated request query params; validated
  *   and normalized internally via {@link parseSearchQuery}.
  * @param {object} [log] - logger.
- * @param {string} [cursorSecret] - see {@link searchProjectTags}.
  * @param {object} [budgets] - see {@link searchProjectTags}.
  * @returns {Promise<TagSearchResult>}
  */
@@ -464,7 +476,6 @@ export async function handleSearchTags(
   workspaceId,
   query,
   log,
-  cursorSecret,
   budgets,
 ) {
   const parsed = parseSearchQuery(query);
@@ -482,7 +493,6 @@ export async function handleSearchTags(
     row.getSemrushProjectId(),
     parsed,
     log,
-    cursorSecret,
     budgets,
   );
 }
@@ -497,7 +507,6 @@ export async function handleSearchTags(
  * @param {object} query - raw, unvalidated request query params; validated
  *   and normalized internally via {@link parseSearchQuery}.
  * @param {object} [log] - logger.
- * @param {string} [cursorSecret] - see {@link searchProjectTags}.
  * @param {object} [budgets] - see {@link searchProjectTags}.
  * @returns {Promise<TagSearchResult>}
  */
@@ -506,7 +515,6 @@ export async function handleSearchTagsSubworkspace(
   workspaceId,
   query,
   log,
-  cursorSecret,
   budgets,
 ) {
   const parsed = parseSearchQuery(query);
@@ -526,7 +534,6 @@ export async function handleSearchTagsSubworkspace(
     String(project.id),
     parsed,
     log,
-    cursorSecret,
     budgets,
   );
 }

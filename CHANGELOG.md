@@ -1,3 +1,10 @@
+## [1.820.1](https://github.com/adobe/spacecat-api-service/compare/v1.820.0...v1.820.1) (2026-09-17)
+
+
+### Bug Fixes
+
+* **serenity:** use strict base64url search cursors ([#3302](https://github.com/adobe/spacecat-api-service/issues/3302)) ([e539cec](https://github.com/adobe/spacecat-api-service/commit/e539cecb23b17ddfc947dbd4c97ce38c182cd80f))
+
 # [1.820.0](https://github.com/adobe/spacecat-api-service/compare/v1.819.0...v1.820.0) (2026-09-17)
 
 

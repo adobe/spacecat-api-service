@@ -10,7 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-import { createHmac } from 'node:crypto';
 import { expect, use } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
@@ -18,6 +17,8 @@ import sinonChai from 'sinon-chai';
 import {
   handleSearchTags,
   handleSearchTagsSubworkspace,
+  MAX_TAG_SEARCH_CURSOR_DECODED_BYTES,
+  MAX_TAG_SEARCH_CURSOR_LENGTH,
   MAX_TAG_SEARCH_LIMIT,
   MAX_TAG_SEARCH_QUERY_LENGTH,
   searchTagSnapshot,
@@ -40,7 +41,7 @@ import {
 const WORKSPACE = 'workspace-1';
 const PROJECT = 'project-1';
 const BRAND = '11111111-2222-3333-4444-555555555555';
-const SECRET = 'unit-test-cursor-secret';
+const VALID_REVISION = 'A'.repeat(43);
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -51,24 +52,40 @@ function fakeLog() {
   };
 }
 
-function dataAccess() {
+function dataAccess(projectId = PROJECT) {
   return {
     BrandSemrushProject: {
-      findBySlice: sinon.stub().resolves({ getSemrushProjectId: () => PROJECT }),
+      findBySlice: sinon.stub().resolves({ getSemrushProjectId: () => projectId }),
     },
   };
 }
 
-function signedCursor(payload) {
-  const encoded = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
-  const signature = createHmac('sha256', SECRET).update(encoded).digest('base64url');
-  return `${encoded}.${signature}`;
+function encodedCursor(payload) {
+  return Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
+}
+
+function decodedCursor(cursor) {
+  return JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'));
 }
 
 function rewriteCursor(cursor, update) {
-  const [encoded] = cursor.split('.');
-  const payload = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'));
-  return signedCursor({ ...payload, ...update });
+  return encodedCursor({ ...decodedCursor(cursor), ...update });
+}
+
+function withoutCursorField(payload, field) {
+  const copy = { ...payload };
+  delete copy[field];
+  return encodedCursor(copy);
+}
+
+function nonCanonicalBase64url(cursor) {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+  const remainder = cursor.length % 4;
+  if (remainder !== 2 && remainder !== 3) {
+    throw new Error('cursor must end with unused base64url bits');
+  }
+  const index = alphabet.indexOf(cursor.at(-1));
+  return `${cursor.slice(0, -1)}${alphabet[index + 1]}`;
 }
 
 function tag(id, name, parentId, childrenCount, path = undefined) {
@@ -82,14 +99,18 @@ function tag(id, name, parentId, childrenCount, path = undefined) {
   };
 }
 
-function deepTransport(state = { leafName: 'Needle' }) {
+function deepTransport(
+  state = { leafName: 'Needle' },
+  expectedWorkspace = WORKSPACE,
+  expectedProject = PROJECT,
+) {
   const root = { id: 'tag-root', name: 'tag' };
   const family = { id: 'family', name: 'Campaign' };
   const branch = { id: 'branch', name: 'Spring' };
   return {
     listProjectTags: sinon.stub().callsFake((workspaceId, projectId, options) => {
-      expect(workspaceId).to.equal(WORKSPACE);
-      expect(projectId).to.equal(PROJECT);
+      expect(workspaceId).to.equal(expectedWorkspace);
+      expect(projectId).to.equal(expectedProject);
       expect(options).to.not.have.property('search');
       const levels = {
         '': [
@@ -150,7 +171,7 @@ describe('Serenity custom-tag search', () => {
         geoTargetId: 2840, languageCode: 'en', q: ' needle ', limit: 25,
       },
       fakeLog(),
-      SECRET,
+      undefined,
     );
 
     expect(result).to.deep.equal({
@@ -214,7 +235,7 @@ describe('Serenity custom-tag search', () => {
         geoTargetId: 2840, languageCode: 'en', q: 'needle', limit: 25,
       },
       fakeLog(),
-      SECRET,
+      undefined,
     );
 
     expect(result.items.map((item) => item.id)).to.deep.equal([`child-${TAG_TREE_PAGE_SIZE}`]);
@@ -268,10 +289,18 @@ describe('Serenity custom-tag search', () => {
         geoTargetId: 2840, languageCode: 'en', q: 'needle', limit: 1,
       },
       fakeLog(),
-      SECRET,
+      undefined,
     );
     expect(first.items.map((item) => item.id)).to.deep.equal(['leaf']);
     expect(first.cursor).to.be.a('string');
+    expect(first.cursor).to.match(/^[A-Za-z0-9_-]+$/);
+    expect(first.cursor).not.to.include('=');
+    expect(Buffer.from(first.cursor, 'base64url').toString('base64url')).to.equal(first.cursor);
+    const payload = decodedCursor(first.cursor);
+    expect(payload).to.have.all.keys('v', 'q', 'offset', 'revision');
+    expect(payload).to.deep.include({ v: 1, q: 'needle', offset: 1 });
+    expect(payload.revision).to.match(/^[A-Za-z0-9_-]{43}$/);
+    expect(payload).not.to.have.any.keys('project', 'workspace', 'tenant', 'brandId');
 
     const second = await handleSearchTags(
       transport,
@@ -286,7 +315,7 @@ describe('Serenity custom-tag search', () => {
         cursor: first.cursor,
       },
       fakeLog(),
-      SECRET,
+      undefined,
     );
     expect(second.items.map((item) => item.id)).to.deep.equal(['other-leaf']);
     expect(second.cursor).to.equal(null);
@@ -305,7 +334,7 @@ describe('Serenity custom-tag search', () => {
         cursor: first.cursor,
       },
       fakeLog(),
-      SECRET,
+      undefined,
     )).to.be.rejected.then((error) => {
       expect(error.status).to.equal(409);
       expect(error.code).to.equal(ERROR_CODES.TAG_SEARCH_SNAPSHOT_CHANGED);
@@ -323,7 +352,7 @@ describe('Serenity custom-tag search', () => {
         geoTargetId: 2840, languageCode: 'en', q: 'needle', limit: 1,
       },
       fakeLog(),
-      SECRET,
+      undefined,
     );
     await expect(handleSearchTags(
       transport,
@@ -338,7 +367,7 @@ describe('Serenity custom-tag search', () => {
         cursor: `${first.cursor}x`,
       },
       fakeLog(),
-      SECRET,
+      undefined,
     )).to.be.rejected.then((error) => {
       expect(error.status).to.equal(400);
       expect(error.code).to.equal(ERROR_CODES.TAG_SEARCH_CURSOR_INVALID);
@@ -378,7 +407,7 @@ describe('Serenity custom-tag search', () => {
         WORKSPACE,
         query,
         fakeLog(),
-        SECRET,
+        undefined,
       )).to.be.rejected.then((error) => {
         expect(error.status).to.equal(400);
       });
@@ -398,12 +427,11 @@ describe('Serenity custom-tag search', () => {
         geoTargetId: 2840,
         languageCode: 'en',
         q: 'needle',
-        cursor: signedCursor({
+        cursor: encodedCursor({
           v: 1,
           offset: 'invalid',
           q: 'needle',
-          project: `${WORKSPACE}:${PROJECT}`,
-          revision: 'revision',
+          revision: VALID_REVISION,
         }),
       },
     ]) {
@@ -415,30 +443,15 @@ describe('Serenity custom-tag search', () => {
         WORKSPACE,
         query,
         fakeLog(),
-        SECRET,
+        undefined,
       )).to.be.rejected.then((error) => {
         expect(error.status).to.equal(400);
       });
     }
   });
 
-  it('rejects missing cursor signing, request-mismatched cursors, and invalid offsets', async () => {
+  it('binds cursors to the normalized query and safely rejects invalid offsets', async () => {
     const transport = deepTransport();
-    await expect(handleSearchTags(
-      transport,
-      dataAccess(),
-      BRAND,
-      WORKSPACE,
-      {
-        geoTargetId: 2840, languageCode: 'en', q: 'needle', limit: 1,
-      },
-      fakeLog(),
-      undefined,
-    )).to.be.rejected.then((error) => {
-      expect(error.status).to.equal(503);
-      expect(error.code).to.equal(ERROR_CODES.TAG_SEARCH_UNAVAILABLE);
-    });
-
     const first = await handleSearchTags(
       transport,
       dataAccess(),
@@ -448,7 +461,7 @@ describe('Serenity custom-tag search', () => {
         geoTargetId: 2840, languageCode: 'en', q: 'needle', limit: 1,
       },
       fakeLog(),
-      SECRET,
+      undefined,
     );
     await expect(handleSearchTags(
       transport,
@@ -463,7 +476,7 @@ describe('Serenity custom-tag search', () => {
         cursor: first.cursor,
       },
       fakeLog(),
-      SECRET,
+      undefined,
     )).to.be.rejected.then((error) => {
       expect(error.status).to.equal(400);
       expect(error.code).to.equal(ERROR_CODES.TAG_SEARCH_CURSOR_INVALID);
@@ -481,11 +494,106 @@ describe('Serenity custom-tag search', () => {
         cursor: rewriteCursor(first.cursor, { offset: 999 }),
       },
       fakeLog(),
-      SECRET,
+      undefined,
     )).to.be.rejected.then((error) => {
       expect(error.status).to.equal(400);
       expect(error.code).to.equal(ERROR_CODES.TAG_SEARCH_CURSOR_INVALID);
     });
+  });
+
+  it('strictly validates cursor encoding, size, JSON shape, version, and fields', async () => {
+    const transport = deepTransport();
+    const first = await handleSearchTags(
+      transport,
+      dataAccess(),
+      BRAND,
+      WORKSPACE,
+      {
+        geoTargetId: 2840, languageCode: 'en', q: 'needle', limit: 1,
+      },
+      fakeLog(),
+      undefined,
+    );
+    const valid = decodedCursor(first.cursor);
+    const invalidCursors = [
+      `${first.cursor}=`,
+      `+${first.cursor.slice(1)}`,
+      nonCanonicalBase64url(first.cursor),
+      Buffer.from('not-json', 'utf8').toString('base64url'),
+      encodedCursor({ ...valid, v: 2 }),
+      withoutCursorField(valid, 'v'),
+      withoutCursorField(valid, 'q'),
+      withoutCursorField(valid, 'offset'),
+      withoutCursorField(valid, 'revision'),
+      encodedCursor({ ...valid, project: `${WORKSPACE}:${PROJECT}` }),
+      encodedCursor({ ...valid, q: ' Needle ' }),
+      encodedCursor({ ...valid, offset: -1 }),
+      encodedCursor({ ...valid, offset: 1.5 }),
+      encodedCursor({ ...valid, offset: Number.MAX_SAFE_INTEGER + 1 }),
+      encodedCursor({ ...valid, revision: 'not-a-sha256-revision' }),
+      'A'.repeat(MAX_TAG_SEARCH_CURSOR_LENGTH + 1),
+      Buffer.alloc(MAX_TAG_SEARCH_CURSOR_DECODED_BYTES + 1, 0x20).toString('base64url'),
+    ];
+
+    for (const cursor of invalidCursors) {
+      // eslint-disable-next-line no-await-in-loop
+      await expect(handleSearchTags(
+        transport,
+        dataAccess(),
+        BRAND,
+        WORKSPACE,
+        {
+          geoTargetId: 2840, languageCode: 'en', q: 'needle', limit: 1, cursor,
+        },
+        fakeLog(),
+        undefined,
+      )).to.be.rejected.then((error) => {
+        expect(error.status).to.equal(400);
+        expect(error.code).to.equal(ERROR_CODES.TAG_SEARCH_CURSOR_INVALID);
+      });
+    }
+  });
+
+  it('always derives tenant and project authority server-side on cursor pages', async () => {
+    const first = await handleSearchTags(
+      deepTransport(),
+      dataAccess(),
+      BRAND,
+      WORKSPACE,
+      {
+        geoTargetId: 2840, languageCode: 'en', q: 'needle', limit: 1,
+      },
+      fakeLog(),
+      undefined,
+    );
+    const otherWorkspace = 'workspace-2';
+    const otherProject = 'project-2';
+    const otherTransport = deepTransport(
+      { leafName: 'Needle' },
+      otherWorkspace,
+      otherProject,
+    );
+    const result = await handleSearchTags(
+      otherTransport,
+      dataAccess(otherProject),
+      'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      otherWorkspace,
+      {
+        geoTargetId: 2840,
+        languageCode: 'en',
+        q: 'needle',
+        limit: 1,
+        cursor: first.cursor,
+      },
+      fakeLog(),
+      undefined,
+    );
+
+    expect(result.items.map((item) => item.id)).to.deep.equal(['other-leaf']);
+    for (const call of otherTransport.listProjectTags.getCalls()) {
+      expect(call.args[0]).to.equal(otherWorkspace);
+      expect(call.args[1]).to.equal(otherProject);
+    }
   });
 
   it('returns marketNotFound for missing flat and subworkspace slices', async () => {
@@ -500,7 +608,7 @@ describe('Serenity custom-tag search', () => {
         geoTargetId: 2840, languageCode: 'en', q: 'needle',
       },
       fakeLog(),
-      SECRET,
+      undefined,
     )).to.be.rejected.then((error) => {
       expect(error.status).to.equal(404);
       expect(error.code).to.equal(ERROR_CODES.MARKET_NOT_FOUND);
@@ -513,7 +621,7 @@ describe('Serenity custom-tag search', () => {
         geoTargetId: 2840, languageCode: 'en', q: 'needle',
       },
       fakeLog(),
-      SECRET,
+      undefined,
     )).to.be.rejected.then((error) => {
       expect(error.status).to.equal(404);
       expect(error.code).to.equal(ERROR_CODES.MARKET_NOT_FOUND);
@@ -543,7 +651,7 @@ describe('Serenity custom-tag search', () => {
         geoTargetId: 2840, languageCode: 'en', q: 'needle',
       },
       fakeLog(),
-      SECRET,
+      undefined,
     );
 
     expect(result.items.map((item) => item.id)).to.deep.equal(['leaf', 'other-leaf']);
@@ -568,7 +676,7 @@ describe('Serenity custom-tag search', () => {
         geoTargetId: 2840, languageCode: 'en', q: 'tag', limit: 25,
       },
       fakeLog(),
-      SECRET,
+      undefined,
     )).to.be.rejected.then((error) => {
       expect(error.status).to.equal(503);
       expect(error.code).to.equal(ERROR_CODES.TAG_TREE_READ_INCOMPLETE);
@@ -813,7 +921,7 @@ describe('Serenity custom-tag search', () => {
         geoTargetId: 2840, languageCode: 'en', q: 'needle', limit: 25,
       },
       fakeLog(),
-      SECRET,
+      undefined,
     )).to.be.rejected.then((error) => {
       expect(error.status).to.equal(503);
       expect(error.code).to.equal(ERROR_CODES.TAG_TREE_DATA_INTEGRITY);
@@ -842,7 +950,7 @@ describe('Serenity custom-tag search', () => {
         geoTargetId: 2840, languageCode: 'en', q: 'tag', limit: 25,
       },
       fakeLog(),
-      SECRET,
+      undefined,
     )).to.be.rejected.then((error) => {
       expect(error.status).to.equal(503);
       expect(error.code).to.equal(ERROR_CODES.TAG_TREE_DATA_INTEGRITY);
@@ -871,7 +979,7 @@ describe('Serenity custom-tag search', () => {
         geoTargetId: 2840, languageCode: 'en', q: 'tag', limit: 25,
       },
       fakeLog(),
-      SECRET,
+      undefined,
     )).to.be.rejected.then((error) => {
       expect(error.status).to.equal(503);
       expect(error.code).to.equal(ERROR_CODES.TAG_TREE_DATA_INTEGRITY);
@@ -1091,7 +1199,7 @@ describe('Serenity custom-tag search', () => {
         WORKSPACE,
         { geoTargetId: 2840, languageCode: 'en', q: raw },
         fakeLog(),
-        SECRET,
+        undefined,
       )).to.be.rejected.then((error) => {
         expect(error.status).to.equal(400);
         expect(error.code).to.equal(ERROR_CODES.INVALID_REQUEST);
@@ -1107,7 +1215,7 @@ describe('Serenity custom-tag search', () => {
         WORKSPACE,
         { geoTargetId: 2840, languageCode: 'en', q: 'nothing-matches-this' },
         fakeLog(),
-        SECRET,
+        undefined,
       );
 
       expect(result).to.deep.equal({ items: [], cursor: null, complete: true });
@@ -1138,7 +1246,7 @@ describe('Serenity custom-tag search', () => {
         WORKSPACE,
         { geoTargetId: 2840, languageCode: 'en', q: 'needle' },
         fakeLog(),
-        SECRET,
+        undefined,
       );
 
       expect(result.items.map((item) => item.id)).to.deep.equal(['tag-needle']);
@@ -1153,7 +1261,6 @@ describe('Serenity custom-tag search', () => {
         WORKSPACE,
         { geoTargetId: 2840, languageCode: 'en', q: 'needle' },
         fakeLog(),
-        SECRET,
         { maxParents: 1 },
       )).to.be.rejected.then((error) => {
         expect(error.status).to.equal(503);
@@ -1171,7 +1278,6 @@ describe('Serenity custom-tag search', () => {
         WORKSPACE,
         { geoTargetId: 2840, languageCode: 'en', q: 'needle' },
         fakeLog(),
-        SECRET,
         { maxParents: 3 },
       );
 
@@ -1201,7 +1307,6 @@ describe('Serenity custom-tag search', () => {
         WORKSPACE,
         { geoTargetId: 2840, languageCode: 'en', q: 'needle' },
         fakeLog(),
-        SECRET,
         { maxParents: 1 },
       )).to.be.rejected.then((error) => {
         expect(error.status).to.equal(503);
