@@ -1,3 +1,17 @@
+# [1.819.0](https://github.com/adobe/spacecat-api-service/compare/v1.818.0...v1.819.0) (2026-09-17)
+
+
+### Features
+
+* **serenity:** support unbounded nested tags ([#3291](https://github.com/adobe/spacecat-api-service/issues/3291)) ([125b02c](https://github.com/adobe/spacecat-api-service/commit/125b02c2191b56a02b525a0e12c7bfec8eae2cfe)), closes [adobe/serenity-docs#26](https://github.com/adobe/serenity-docs/issues/26) [adobe/spacecat-shared#1931](https://github.com/adobe/spacecat-shared/issues/1931)
+
+# [1.818.0](https://github.com/adobe/spacecat-api-service/compare/v1.817.0...v1.818.0) (2026-09-17)
+
+
+### Features
+
+* **facs:** opportunity-type-aware user capabilities + site-cap scope guard ([#3300](https://github.com/adobe/spacecat-api-service/issues/3300)) ([d93eb04](https://github.com/adobe/spacecat-api-service/commit/d93eb04a02f515bbe135bc8f4881ca1cd9edaf46))
+
 # [1.817.0](https://github.com/adobe/spacecat-api-service/compare/v1.816.0...v1.817.0) (2026-09-16)
 
 

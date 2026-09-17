@@ -743,6 +743,73 @@ export default function stateAccessMappingsTests(getHttpClient, resetData) {
         expect(res.body.items[0].compositeKeyType1).to.equal('opportunity');
         expect(res.body.items[0].compositeKeyValue1).to.equal('security');
       });
+
+      it('POST rejects can_configure scoped to an opportunity type (400)', async () => {
+        const http = getHttpClient();
+        const res = await http.facsManager.post(
+          BASE,
+          {
+            subjectType: 'user',
+            subjectId: USER_SUBJECT,
+            resourceType: 'site',
+            resourceId: SITE_RESOURCE_ID,
+            compositeKeyType1: 'opportunity',
+            compositeKeyValue1: 'security',
+            grantedCapabilities: ['aso/can_configure'],
+          },
+          { 'x-product': 'aso' },
+        );
+        // Site-level caps enforce site-wide, so they may only live on the 'all'
+        // row — a qualifier-scoped grant carrying them is rejected.
+        expect(res.status).to.equal(400);
+        expect(res.body.message).to.contain('Site-level capabilities');
+      });
+
+      it('POST rejects can_manage_users scoped to an opportunity type (400)', async () => {
+        const http = getHttpClient();
+        const res = await http.facsManager.post(
+          BASE,
+          {
+            subjectType: 'user',
+            subjectId: USER_SUBJECT,
+            resourceType: 'site',
+            resourceId: SITE_RESOURCE_ID,
+            compositeKeyType1: 'opportunity',
+            compositeKeyValue1: 'security',
+            grantedCapabilities: ['aso/can_manage_users'],
+          },
+          { 'x-product': 'aso' },
+        );
+        expect(res.status).to.equal(400);
+        expect(res.body.message).to.contain('Site-level capabilities');
+      });
+
+      it('GET /user/capabilities returns the two-tier fields for ASO', async () => {
+        const http = getHttpClient();
+        const res = await http.facsManager.get(
+          `/user/capabilities/${SITE_RESOURCE_ID}?resourceType=site`,
+          { 'x-product': 'aso' },
+        );
+        expect(res.status).to.equal(200);
+        expect(res.body.product).to.equal('ASO');
+        // Composite product → the two-tier view is present; the caller's JWT
+        // manage cap is bucketed into siteCapabilities.
+        expect(res.body.siteCapabilities)
+          .to.be.an('array')
+          .that.includes('aso/can_manage_users');
+        expect(res.body.opportunityCapabilities).to.be.an('object');
+      });
+
+      it('GET /user/capabilities omits the two-tier fields for LLMO (non-composite)', async () => {
+        const http = getHttpClient();
+        const res = await http.facsManager.get(
+          `/user/capabilities/${BRAND_RESOURCE_ID_2}?resourceType=brand`,
+          { 'x-product': 'llmo' },
+        );
+        expect(res.status).to.equal(200);
+        expect(res.body.siteCapabilities).to.be.undefined;
+        expect(res.body.opportunityCapabilities).to.be.undefined;
+      });
     });
   });
 }

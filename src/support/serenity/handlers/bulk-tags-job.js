@@ -82,10 +82,12 @@ function buildBulkTagMutationIds(operation, selected, snapshot) {
   const ids = new Set();
   for (const item of selected) {
     ids.add(item.id);
-    if (operation === 'assign' && item.rootName === 'tag' && item.depth === 3) {
-      ids.add(item.fullPath[1].id);
+    if (operation === 'assign' && item.rootName === 'tag') {
+      for (const ancestor of item.fullPath.slice(1, -1)) {
+        ids.add(ancestor.id);
+      }
     }
-    if (operation === 'remove' && item.rootName === 'tag' && item.depth === 2) {
+    if (operation === 'remove' && item.rootName === 'tag') {
       for (const candidate of snapshot.items) {
         if (candidate.fullPath.some((part) => part.id === item.id)) {
           ids.add(candidate.id);
@@ -119,8 +121,10 @@ export function applyBulkTagOperation(currentIds, operation, selected, snapshot,
 
   for (const id of [...result]) {
     const item = snapshot.byId.get(id);
-    if (item?.rootName === 'tag' && item.depth === 3) {
-      result.add(item.fullPath[1].id);
+    if (item?.rootName === 'tag') {
+      for (const ancestor of item.fullPath.slice(1, -1)) {
+        result.add(ancestor.id);
+      }
     }
   }
   const ids = [...result];

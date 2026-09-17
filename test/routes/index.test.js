@@ -613,6 +613,7 @@ describe('getRouteHandlers', () => {
     listProjects: sinon.stub(),
     createProject: sinon.stub(),
     listProjectTags: sinon.stub(),
+    searchTags: sinon.stub(),
     listProjectModels: sinon.stub(),
     listWorkspaceProjects: sinon.stub(),
   };
@@ -1034,6 +1035,7 @@ describe('getRouteHandlers', () => {
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode',
       'DELETE /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags/search',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags',
       'PATCH /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags/:tagId',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags/:tagId/impact',

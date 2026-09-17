@@ -334,6 +334,7 @@ const routeRequiredCapabilities = {
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/generation/jobs/:jobId': 'organization:read',
   'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/generation/jobs/:jobId/reauth': 'organization:write',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags': 'organization:read',
+  'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags/search': 'organization:read',
   'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags': 'organization:write',
   'PATCH /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags/:tagId': 'organization:write',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags/:tagId/impact': 'organization:read',

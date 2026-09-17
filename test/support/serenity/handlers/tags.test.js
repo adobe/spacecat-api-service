@@ -1518,6 +1518,10 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
       levels[''] = levels[''].map(
         (t) => (t.name === INTENT_ROOT_NAME ? { ...t, name: 'intent' } : t),
       );
+      levels[TAG_IDS.intentRoot] = levels[TAG_IDS.intentRoot].map((t) => ({
+        ...t,
+        path: [{ id: TAG_IDS.intentRoot, name: 'intent' }],
+      }));
       const transport = makeTransport({ listProjectTags: makeListProjectTagsStub(levels) });
       const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
       const err = await handler.handleUpdateTag(
@@ -1863,7 +1867,7 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
       );
     });
 
-    it('502s rather than walk a tree past the read budget', async () => {
+    it('fails explicitly rather than walk a tree past the read budget', async () => {
       const transport = makeWideTreeTransport(250, 249);
       const dataAccess = makeDataAccess({ getSemrushProjectId: () => 'proj-1' });
       const err = await handler.handleUpdateTag(
@@ -1877,7 +1881,7 @@ describe('serenity tags handler (POST /serenity/tags)', () => {
       ).then(() => null, (e) => e);
 
       expect(err.status).to.equal(503);
-      expect(err.code).to.equal('tagTreeReadIncomplete');
+      expect(err.code).to.equal('tagTreeLimitExceeded');
     });
   });
 

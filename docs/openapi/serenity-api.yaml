@@ -461,7 +461,14 @@ v2-serenity-prompts-bulk-tags:
           application/json:
             schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
       '503':
-        description: The complete taxonomy required to validate mutation/filter ids could not be established.
+        description: |
+          The complete taxonomy required to validate mutation/filter ids could
+          not be established: `tagTreeLimitExceeded` when the walk exhausts a
+          safety budget (`details.budget` names `parents`, `nodes`, or
+          `duration`), `tagTreeReadIncomplete` from the legacy single-cap
+          lookup walks. Unbounded nesting replaced the parent-budget breach's
+          former `tagTreeReadIncomplete` with `tagTreeLimitExceeded`, so a
+          consumer keying on the old token for that case must be updated.
         content:
           application/json:
             schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
@@ -883,7 +890,11 @@ v2-serenity-tags:
           application/json:
             schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
       '503':
-        description: The complete requested tag level could not be established.
+        description: |
+          The complete requested tag level could not be established:
+          `tagTreeLimitExceeded` on a safety-budget breach (`details.budget` is
+          `parents`, `nodes`, or `duration`), or `tagTreeReadIncomplete` from
+          the legacy single-cap lookup walks.
         content:
           application/json:
             schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
@@ -916,6 +927,12 @@ v2-serenity-tags:
 
       The dimension roots are provisioned on demand, so a project that predates
       this taxonomy is brought forward by the first write to it.
+
+      Custom `tag` authoring remains limited to depth 2 and depth 3 unless the
+      brand resolves the `LLMO/serenity_unbounded_tag_authoring` feature flag to
+      `true`. The gate affects authoring only; existing deeper tags remain
+      readable, searchable, assignable, and preserved when the flag is off. A
+      deeper create while disabled returns `400 invalidRequest`.
     operationId: createSerenityTag
     security:
       - session_token: []
@@ -1011,6 +1028,125 @@ v2-serenity-tags:
         content:
           application/json:
             schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '503':
+        description: |
+          The taxonomy read backing this mutation could not be completed:
+          `tagTreeLimitExceeded` on a safety-budget breach (`details.budget` is
+          `parents`, `nodes`, or `duration` — the node and duration budgets are
+          new with unbounded nesting and are tunable per environment), or
+          `tagTreeReadIncomplete` from the legacy single-cap lookup walks.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '500': { $ref: './responses.yaml#/500' }
+
+# ─── Complete custom-tag search ──────────────────────────────────────
+
+v2-serenity-tag-search:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema: { type: string, format: uuid }
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID-only on the /serenity/* surface)
+      schema: { type: string, format: uuid }
+  get:
+    tags: [serenity]
+    summary: Search the complete custom-tag tree for one market
+    description: |
+      Rebuilds the complete authoritative draft `tag` subtree from Semrush and
+      searches every customer-authored level locally. Results are ordered by
+      exact label, label prefix, label substring, then full-path substring,
+      followed by normalized full path and tag id.
+
+      **Rollout.** Search is independently default-off per brand behind the
+      `LLMO/serenity_tag_search` feature flag. An environment-wide emergency
+      switch can take only this endpoint dark without disabling other Serenity
+      features.
+
+      **Cost profile — design your client around it.** There is no cache: every
+      call, including every subsequent `cursor` page, re-walks the entire tag
+      subtree upstream (bounded per request by a parent-expansion budget, a node
+      budget, a per-parent page budget, a fan-out concurrency cap, and a
+      traversal-wide deadline of a few seconds, all tunable per environment).
+      A request can therefore take
+      seconds, and pagination costs one full traversal per page. A type-ahead
+      integration MUST debounce keystrokes and SHOULD prefer a larger `limit`
+      over paging.
+
+      **What "complete" means.** A `200` is never budget-truncated: traversal
+      failures, integrity disagreements, and budget exhaustion return an error
+      instead of partial matches, and `complete: true` records exactly that. It
+      is not a point-in-time consistency guarantee — the walk spans many
+      upstream reads, so a tag created into an already-visited level while the
+      walk is in progress is simply absent from that response and appears on the
+      next call. Results are eventually consistent, never truncated.
+    operationId: searchSerenityTags
+    security:
+      - session_token: []
+    parameters:
+      - name: geoTargetId
+        in: query
+        required: true
+        schema: { type: integer, minimum: 1 }
+      - name: languageCode
+        in: query
+        required: true
+        schema: { type: string, pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$' }
+      - name: q
+        in: query
+        required: true
+        description: Unicode-normalized, case-insensitive substring query.
+        schema: { type: string, minLength: 1, maxLength: 200 }
+      - name: limit
+        in: query
+        required: false
+        schema: { type: integer, minimum: 1, maximum: 100, default: 25 }
+      - name: cursor
+        in: query
+        required: false
+        description: Opaque cursor from the preceding page.
+        schema: { type: string, minLength: 1 }
+    responses:
+      '200':
+        description: A search page that is complete (never budget-truncated).
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityTagSearchResponse' }
+      '400':
+        description: Invalid selectors, query, limit, or cursor.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '404':
+        description: Organization, brand, workspace, or market not found, or search is not enabled for this brand.
+      '409':
+        description: The taxonomy changed between cursor pages; restart at page one.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '502':
+        description: Semrush returned a non-success response.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '503':
+        description: |
+          `tagTreeLimitExceeded` — the complete tree could not be established
+          within the safety budgets (`details.budget` names `parents`, `nodes`,
+          `pages`, or `duration`); `tagTreeReadIncomplete` — an upstream page
+          was malformed, inconsistent, or could not prove the level complete;
+          `tagTreeDataIntegrity` — upstream returned a connected tree this
+          endpoint refuses to interpret; or `tagSearchUnavailable` — the
+          endpoint's cursor-signing secret is not provisioned, or search is
+          switched off for this environment.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
       '500': { $ref: './responses.yaml#/500' }
 
 # ─── Nested-tag edit (rename / re-parent) ─────────────────────────────
@@ -1065,6 +1201,12 @@ v2-serenity-tag-by-id:
       (400) — doing so would leave their whole subtree without a dimension. A
       closed dimension's value cannot be renamed or re-parented either: its
       vocabulary is fixed.
+
+      Custom `tag` rename/re-parent operations remain limited to existing
+      depth-2/depth-3 nodes and destinations producing those depths unless the
+      brand resolves the `LLMO/serenity_unbounded_tag_authoring` feature flag to
+      `true`. Disabling the flag does not hide or remove existing deeper tags;
+      an unsupported-depth mutation returns `400 invalidRequest`.
     operationId: updateSerenityTag
     security:
       - session_token: []
@@ -1139,6 +1281,16 @@ v2-serenity-tag-by-id:
           tag's current parent there is no request body that preserves it.
       '502':
         description: Upstream returned a non-2xx response.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '503':
+        description: |
+          The taxonomy read backing this mutation could not be completed:
+          `tagTreeLimitExceeded` on a safety-budget breach (`details.budget` is
+          `parents`, `nodes`, or `duration` — the node and duration budgets are
+          new with unbounded nesting and are tunable per environment), or
+          `tagTreeReadIncomplete` from the legacy single-cap lookup walks.
         content:
           application/json:
             schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
