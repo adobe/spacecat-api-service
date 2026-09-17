@@ -12568,6 +12568,8 @@ describe('Suggestions Controller', () => {
       expect(response.status).to.equal(200);
       expect(rollbackStub).to.not.have.been.called;
       expect(disableScheduleStub).to.have.been.calledOnceWithExactly(SITE_ID, 'pre-sched-1');
+      expect(mockSuggestion.saveMany).to.have.been.calledOnceWithExactly([suggestion]);
+      expect(suggestion.getData().edgeOptimizeStatus).to.be.undefined;
       const body = await response.json();
       expect(body).to.deep.equal({
         status: STATUSES.CANCELLED,
@@ -12627,6 +12629,37 @@ describe('Suggestions Controller', () => {
       expect(geoExperiment.setStatus).to.have.been.calledOnceWithExactly(STATUSES.CANCELLED);
       expect(geoExperiment.save).to.have.been.calledOnce;
       expect(context.log.error).to.have.been.calledWithMatch(/geo-experiment-cancel-failed.*DRS unavailable/);
+    });
+
+    it('still cancels (marks the experiment CANCELLED) when the suggestion-unblock batch save fails', async () => {
+      const suggestion = mockSuggestionEntity({
+        ...suggs[0],
+        data: { ...suggs[0].data, edgeOptimizeStatus: 'EXPERIMENT_IN_PROGRESS' },
+      });
+      mockSuggestion.allByOpportunityId.resolves([suggestion]);
+      mockSuggestion.saveMany.rejects(new Error('batch save unavailable'));
+      const geoExperiment = createMockGeoExperiment({
+        status: STATUSES.GENERATING_BASELINE,
+        phase: PHASES.PRE_ANALYSIS_STARTED,
+        suggestionIds: [suggestion.getId()],
+        preScheduleId: 'pre-sched-1',
+        postScheduleId: null,
+      });
+      mockSuggestionDataAccess.GeoExperiment.findById.resolves(geoExperiment);
+
+      const response = await suggestionsController.cancelGeoExperiment({
+        ...context,
+        params: { siteId: SITE_ID, geoExperimentId: GEO_EXP_ID },
+      });
+
+      expect(response.status).to.equal(200);
+      expect(mockSuggestion.saveMany).to.have.been.calledOnceWithExactly([suggestion]);
+      // The in-memory mutation still happened even though the persist failed —
+      // matches the fail-open pattern used elsewhere in this handler.
+      expect(suggestion.getData().edgeOptimizeStatus).to.be.undefined;
+      expect(geoExperiment.setStatus).to.have.been.calledOnceWithExactly(STATUSES.CANCELLED);
+      expect(geoExperiment.save).to.have.been.calledOnce;
+      expect(context.log.error).to.have.been.calledWithMatch(/geo-experiment-cancel-failed.*Failed to unblock suggestion.*batch save unavailable/);
     });
 
     it('still cancels (marks the experiment CANCELLED) and reports failed URLs when suggestion rollback fails', async () => {

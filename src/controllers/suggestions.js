@@ -3261,16 +3261,16 @@ function SuggestionsController(ctx, sqs, env) {
 
     // Always clear the blocking flag — rollbackSuggestions doesn't touch edgeOptimizeStatus.
     if (isNonEmptyArray(experimentSuggestions)) {
-      await Promise.allSettled(experimentSuggestions.map(async (suggestion) => {
-        try {
-          const { edgeOptimizeStatus: _, ...rest } = suggestion.getData();
-          suggestion.setData(rest);
-          suggestion.setUpdatedBy(updatedBy);
-          await suggestion.save();
-        } catch (error) {
-          context.log.error(`[geo-experiment-cancel-failed] site: ${siteId}, GeoExperiment ${geoExperimentId}, Failed to unblock suggestion ${suggestion.getId()}: ${error.message}`, error);
-        }
-      }));
+      experimentSuggestions.forEach((suggestion) => {
+        const { edgeOptimizeStatus: _, ...rest } = suggestion.getData();
+        suggestion.setData(rest);
+        suggestion.setUpdatedBy(updatedBy);
+      });
+      try {
+        await Suggestion.saveMany(experimentSuggestions);
+      } catch (error) {
+        context.log.error(`[geo-experiment-cancel-failed] site: ${siteId}, GeoExperiment ${geoExperimentId}, Failed to unblock suggestion(s): ${error.message}`, error);
+      }
     }
 
     const drsClient = DrsClient.createFrom(context);
@@ -3293,7 +3293,7 @@ function SuggestionsController(ctx, sqs, env) {
       await geoExperiment.save();
     } catch (error) {
       context.log.error(`[geo-experiment-cancel-failed] site: ${siteId}, GeoExperiment ${geoExperimentId}, status: ${status}, isDeployed: ${isDeployed}, rolledBackSuggestionIds: ${JSON.stringify(rolledBackSuggestionIds)}, failedRollbackSuggestionIds: ${JSON.stringify(failedRollbackSuggestionIds)}, Failed to persist CANCELLED status: ${error.message}`, error);
-      return internalServerError(`Cleanup for GeoExperiment ${geoExperimentId} completed but persisting CANCELLED status failed`);
+      return internalServerError('Failed to cancel geo experiment');
     }
 
     context.log.info(`[geo-experiment-cancel] Successfully cancelled GeoExperiment ${geoExperimentId} for site ${siteId} by ${updatedBy}`);
