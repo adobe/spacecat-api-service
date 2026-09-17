@@ -9158,8 +9158,8 @@ AgenticTrafficUrlsExportRequest:
       format: date
     platform:
       type: string
-      description: AI platform value, mapped to the DB platform value before export; `Meta` maps to `Meta`
-      example: 'Meta'
+      description: AI platform UI code, mapped to the DB platform value before export; `meta-ai` maps to `Meta`
+      example: 'meta-ai'
     categoryName:
       type: string
       example: 'Poster Maker'

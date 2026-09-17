@@ -4316,7 +4316,7 @@ llmo-agentic-traffic-kpis:
     parameters:
       - { name: startDate, in: query, schema: { type: string, format: date } }
       - { name: endDate, in: query, schema: { type: string, format: date } }
-      - { name: platform, in: query, description: "AI platform value; `Meta` maps to the `Meta` report value.", schema: { type: string } }
+      - { name: platform, in: query, description: "AI platform UI code; `meta-ai` maps to the `Meta` report value.", schema: { type: string } }
       - { name: categoryName, in: query, schema: { type: string } }
       - { name: agentType, in: query, schema: { type: string } }
       - { name: userAgent, in: query, schema: { type: string } }
@@ -4353,7 +4353,7 @@ llmo-agentic-traffic-kpis-trend:
     parameters:
       - { name: startDate, in: query, schema: { type: string, format: date } }
       - { name: endDate, in: query, schema: { type: string, format: date } }
-      - { name: platform, in: query, description: "AI platform value; `Meta` maps to the `Meta` report value.", schema: { type: string } }
+      - { name: platform, in: query, description: "AI platform UI code; `meta-ai` maps to the `Meta` report value.", schema: { type: string } }
       - { name: categoryName, in: query, schema: { type: string } }
       - { name: agentType, in: query, schema: { type: string } }
       - { name: userAgent, in: query, schema: { type: string } }
@@ -4396,7 +4396,7 @@ llmo-agentic-traffic-by-region:
     parameters:
       - { name: startDate, in: query, schema: { type: string, format: date } }
       - { name: endDate, in: query, schema: { type: string, format: date } }
-      - { name: platform, in: query, description: "AI platform value; `Meta` maps to the `Meta` report value.", schema: { type: string } }
+      - { name: platform, in: query, description: "AI platform UI code; `meta-ai` maps to the `Meta` report value.", schema: { type: string } }
       - { name: categoryName, in: query, schema: { type: string } }
       - { name: agentType, in: query, schema: { type: string } }
       - { name: userAgent, in: query, schema: { type: string } }
@@ -4431,7 +4431,7 @@ llmo-agentic-traffic-by-category:
     parameters:
       - { name: startDate, in: query, schema: { type: string, format: date } }
       - { name: endDate, in: query, schema: { type: string, format: date } }
-      - { name: platform, in: query, description: "AI platform value; `Meta` maps to the `Meta` report value.", schema: { type: string } }
+      - { name: platform, in: query, description: "AI platform UI code; `meta-ai` maps to the `Meta` report value.", schema: { type: string } }
       - { name: agentType, in: query, schema: { type: string } }
       - { name: userAgent, in: query, schema: { type: string } }
       - { name: contentType, in: query, schema: { type: string } }
@@ -4465,7 +4465,7 @@ llmo-agentic-traffic-by-page-type:
     parameters:
       - { name: startDate, in: query, schema: { type: string, format: date } }
       - { name: endDate, in: query, schema: { type: string, format: date } }
-      - { name: platform, in: query, description: "AI platform value; `Meta` maps to the `Meta` report value.", schema: { type: string } }
+      - { name: platform, in: query, description: "AI platform UI code; `meta-ai` maps to the `Meta` report value.", schema: { type: string } }
       - { name: categoryName, in: query, schema: { type: string } }
       - { name: agentType, in: query, schema: { type: string } }
       - { name: userAgent, in: query, schema: { type: string } }
@@ -4500,7 +4500,7 @@ llmo-agentic-traffic-by-status:
     parameters:
       - { name: startDate, in: query, schema: { type: string, format: date } }
       - { name: endDate, in: query, schema: { type: string, format: date } }
-      - { name: platform, in: query, description: "AI platform value; `Meta` maps to the `Meta` report value.", schema: { type: string } }
+      - { name: platform, in: query, description: "AI platform UI code; `meta-ai` maps to the `Meta` report value.", schema: { type: string } }
       - { name: categoryName, in: query, schema: { type: string } }
       - { name: agentType, in: query, schema: { type: string } }
       - { name: userAgent, in: query, schema: { type: string } }
@@ -4537,7 +4537,7 @@ llmo-agentic-traffic-by-user-agent:
     parameters:
       - { name: startDate, in: query, schema: { type: string, format: date } }
       - { name: endDate, in: query, schema: { type: string, format: date } }
-      - { name: platform, in: query, description: "AI platform value; `Meta` maps to the `Meta` report value.", schema: { type: string } }
+      - { name: platform, in: query, description: "AI platform UI code; `meta-ai` maps to the `Meta` report value.", schema: { type: string } }
       - { name: categoryName, in: query, schema: { type: string } }
       - { name: agentType, in: query, schema: { type: string } }
       - { name: contentType, in: query, schema: { type: string } }
@@ -4599,7 +4599,7 @@ llmo-agentic-traffic-by-url:
         in: query
         description: Range end (`YYYY-MM-DD`). Required if `startDate` is set; span with `startDate` must be <= 62 days.
         schema: { type: string, format: date }
-      - { name: platform, in: query, description: "AI platform value; `Meta` maps to the `Meta` report value.", schema: { type: string } }
+      - { name: platform, in: query, description: "AI platform UI code; `meta-ai` maps to the `Meta` report value.", schema: { type: string } }
       - { name: categoryName, in: query, schema: { type: string } }
       - { name: agentType, in: query, schema: { type: string } }
       - { name: userAgent, in: query, schema: { type: string } }
@@ -4699,7 +4699,7 @@ llmo-agentic-traffic-hits-by-urls:
               endDate: { type: string, format: date }
               platform:
                 type: string
-                description: AI platform value; `Meta` maps to the `Meta` report value.
+                description: AI platform UI code; `meta-ai` maps to the `Meta` report value.
               agentType: { type: string }
               agentTypes:
                 type: array
@@ -4858,7 +4858,7 @@ llmo-agentic-traffic-filter-dimensions:
     parameters:
       - { name: startDate, in: query, schema: { type: string, format: date } }
       - { name: endDate, in: query, schema: { type: string, format: date } }
-      - { name: platform, in: query, description: "AI platform value; `Meta` maps to the `Meta` report value.", schema: { type: string } }
+      - { name: platform, in: query, description: "AI platform UI code; `meta-ai` maps to the `Meta` report value.", schema: { type: string } }
       - { name: categoryName, in: query, schema: { type: string } }
       - { name: agentType, in: query, schema: { type: string } }
       - { name: userAgent, in: query, schema: { type: string } }
@@ -5444,7 +5444,7 @@ llmo-agentic-traffic-movers:
     parameters:
       - { name: startDate, in: query, schema: { type: string, format: date } }
       - { name: endDate, in: query, schema: { type: string, format: date } }
-      - { name: platform, in: query, description: "AI platform value; `Meta` maps to the `Meta` report value.", schema: { type: string } }
+      - { name: platform, in: query, description: "AI platform UI code; `meta-ai` maps to the `Meta` report value.", schema: { type: string } }
       - { name: categoryName, in: query, schema: { type: string } }
       - { name: agentType, in: query, schema: { type: string } }
       - { name: userAgent, in: query, schema: { type: string } }
