@@ -74,6 +74,7 @@ describe('ConfigDto', () => {
         },
         edgeOptimizeConfig: { enabled: true, opted: 1, stagingDomains: [{ domain: 'stage.example.com', id: 'abc' }] },
         slack: { channel: '#test', workspace: 'T123' },
+        teams: { channel: '#test', link: 'https://teams.microsoft.com/l/channel/test' },
         brandConfig: { brandId: 'brand-123' },
         fetchConfig: { overrideBaseURL: 'https://override.example.com' },
         handlers: { 'meta-tags': { excludedURLs: ['/excluded'] } },
@@ -95,6 +96,7 @@ describe('ConfigDto', () => {
         },
         edgeOptimizeConfig: { enabled: true, opted: 1, stagingDomains: [{ domain: 'stage.example.com', id: 'abc' }] },
         slack: { channel: '#test', workspace: 'T123' },
+        teams: { channel: '#test', link: 'https://teams.microsoft.com/l/channel/test' },
         brandConfig: { brandId: 'brand-123' },
         fetchConfig: { overrideBaseURL: 'https://override.example.com' },
         handlers: { 'meta-tags': { excludedURLs: ['/excluded'] } },
@@ -161,6 +163,17 @@ describe('ConfigDto', () => {
       expect(result).to.deep.equal({
         edgeOptimizeConfig: { opted: 1, stagingDomains: [{ domain: 'stage.example.com', id: 'abc' }] },
         slack: { channel: '#test' },
+      });
+    });
+
+    it('handles partial config with only teams', () => {
+      sinon.stub(Config, 'toDynamoItem').returns({
+        teams: { channel: '#test', link: 'https://teams.microsoft.com/l/channel/test' },
+      });
+
+      const result = ConfigDto.toListJSON({ some: 'config' });
+      expect(result).to.deep.equal({
+        teams: { channel: '#test', link: 'https://teams.microsoft.com/l/channel/test' },
       });
     });
   });

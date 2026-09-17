@@ -71,6 +71,9 @@ const toListJSON = (config) => {
   if (isNonEmptyObject(json.slack)) {
     result.slack = json.slack;
   }
+  if (isNonEmptyObject(json.teams)) {
+    result.teams = json.teams;
+  }
   if (isNonEmptyObject(json.brandConfig)) {
     result.brandConfig = json.brandConfig;
   }
