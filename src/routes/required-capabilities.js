@@ -753,6 +753,7 @@ const routeRequiredCapabilities = {
   'GET /sites/:siteId/llmo/brand-claims': 'site:read',
   'GET /sites/:siteId/llmo/brand-claims/weeks': 'site:read',
   'POST /sites/:siteId/llmo/brand-claims/request': 'site:write',
+  'POST /sites/:siteId/llmo/brand-claims/feedback': 'site:read',
   'GET /sites/:siteId/llmo/strategy/demo/brand-presence': 'site:read',
   'GET /sites/:siteId/llmo/strategy/demo/recommendations': 'site:read',
   'GET /llmo/agentic-traffic/global': 'report:read',
