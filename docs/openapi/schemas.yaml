@@ -9158,8 +9158,8 @@ AgenticTrafficUrlsExportRequest:
       format: date
     platform:
       type: string
-      description: AI platform UI code, mapped to the DB platform value before export
-      example: 'chatgpt'
+      description: AI platform UI code, mapped to the DB platform value before export; `meta` maps to `Meta`
+      example: 'meta'
     categoryName:
       type: string
       example: 'Poster Maker'
@@ -9248,7 +9248,7 @@ AgenticTrafficFilterDimensions:
       type: array
       items:
         type: string
-      example: ['ChatGPT', 'Perplexity']
+      example: ['ChatGPT', 'Meta', 'Perplexity']
     contentTypes:
       type: array
       items:
