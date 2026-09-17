@@ -472,6 +472,105 @@ describe('acceptBulkTags idempotency', () => {
     expect(sendMessage).to.have.been.calledOnce;
   });
 
+  it('returns the accepted job when completing the idempotency claim fails', async () => {
+    const hash = requestHash(body);
+    const lock = idempotencyEntry({ response: { requestHash: hash } });
+    lock.save.rejects(new Error('database unavailable'));
+    const job = {
+      getId: () => '11111111-1111-4111-8111-111111111111',
+      getStatus: () => 'IN_PROGRESS',
+      remove: sinon.stub().resolves(),
+    };
+    const warn = sinon.stub();
+    const response = await acceptBulkTags({
+      context: {
+        dataAccess: {
+          AsyncJob: { create: sinon.stub().resolves(job) },
+          IdempotencyKey: {
+            findActiveKey: sinon.stub().resolves(null),
+            create: sinon.stub().resolves(lock),
+          },
+        },
+        sqs: { sendMessage: sinon.stub().resolves() },
+        env: { SERENITY_JOB_RUNNER_QUEUE_URL: 'queue-url' },
+        log: { error: sinon.stub(), warn },
+      },
+      transport: workerTransport([]),
+      brandId: 'brand',
+      orgId: '11111111-1111-4111-8111-111111111111',
+      workspaceId: 'ws',
+      projectId: 'project',
+      body,
+      callerId: 'caller',
+      idempotencyKey: 'same-key',
+      log: {},
+      promiseToken: FORWARDED_PROMISE_TOKEN,
+      promisePair: SEMRUSH_PROMISE_PAIR,
+    });
+
+    expect(response).to.deep.equal({
+      status: 202,
+      body: {
+        jobId: job.getId(),
+        jobType: 'bulkTags',
+        status: 'IN_PROGRESS',
+        replayed: false,
+      },
+    });
+    expect(warn).to.have.been.calledOnceWith(sinon.match(
+      `Accepted job ${job.getId()} but failed to complete idempotency`,
+    ));
+  });
+
+  it('removes a failed claim and accepts a fresh attempt', async () => {
+    const hash = requestHash(body);
+    const failedLock = idempotencyEntry({
+      status: 'failed',
+      response: { requestHash: hash },
+    });
+    const replacementLock = idempotencyEntry({ response: { requestHash: hash } });
+    const findActiveKey = sinon.stub();
+    findActiveKey.onFirstCall().resolves(failedLock);
+    findActiveKey.onSecondCall().resolves(null);
+    const job = {
+      getId: () => '11111111-1111-4111-8111-111111111111',
+      getStatus: () => 'IN_PROGRESS',
+      remove: sinon.stub().resolves(),
+    };
+    const sendMessage = sinon.stub().resolves();
+
+    const response = await acceptBulkTags({
+      context: {
+        dataAccess: {
+          AsyncJob: { create: sinon.stub().resolves(job) },
+          IdempotencyKey: {
+            findActiveKey,
+            create: sinon.stub().resolves(replacementLock),
+          },
+        },
+        sqs: { sendMessage },
+        env: { SERENITY_JOB_RUNNER_QUEUE_URL: 'queue-url' },
+        log: { error: sinon.stub(), warn: sinon.stub() },
+      },
+      transport: workerTransport([]),
+      brandId: 'brand',
+      orgId: '11111111-1111-4111-8111-111111111111',
+      workspaceId: 'ws',
+      projectId: 'project',
+      body,
+      callerId: 'caller',
+      idempotencyKey: 'same-key',
+      log: {},
+      promiseToken: FORWARDED_PROMISE_TOKEN,
+      promisePair: SEMRUSH_PROMISE_PAIR,
+    });
+
+    expect(response.status).to.equal(202);
+    expect(failedLock.remove).to.have.been.calledOnce;
+    expect(replacementLock.save).to.have.been.calledOnce;
+    expect(sendMessage).to.have.been.calledOnce;
+  });
+
   it('concurrent matching requests converge on one persisted and enqueued job', async () => {
     const hash = requestHash(body);
     let activeLock = null;
@@ -587,6 +686,98 @@ describe('acceptBulkTags idempotency', () => {
     expect(job.remove).to.have.been.calledOnce;
     expect(lock.remove).to.have.been.calledOnce;
     expect(lock.setStatus).not.to.have.been.called;
+  });
+
+  it('marks the claim failed when enqueue and claim removal both fail', async () => {
+    const hash = requestHash(body);
+    const lock = idempotencyEntry({ response: { requestHash: hash } });
+    lock.remove.rejects(new Error('delete unavailable'));
+    const job = {
+      getId: () => '11111111-1111-4111-8111-111111111111',
+      getStatus: () => 'IN_PROGRESS',
+      remove: sinon.stub().resolves(),
+    };
+    const enqueueError = new Error('queue unavailable');
+    const warn = sinon.stub();
+
+    await expect(acceptBulkTags({
+      context: {
+        dataAccess: {
+          AsyncJob: { create: sinon.stub().resolves(job) },
+          IdempotencyKey: {
+            findActiveKey: sinon.stub().resolves(null),
+            create: sinon.stub().resolves(lock),
+          },
+        },
+        sqs: { sendMessage: sinon.stub().rejects(enqueueError) },
+        env: { SERENITY_JOB_RUNNER_QUEUE_URL: 'queue-url' },
+        log: { error: sinon.stub(), warn },
+      },
+      transport: workerTransport([]),
+      brandId: 'brand',
+      orgId: '11111111-1111-4111-8111-111111111111',
+      workspaceId: 'ws',
+      projectId: 'project',
+      body,
+      callerId: 'caller',
+      idempotencyKey: 'same-key',
+      log: {},
+      promiseToken: FORWARDED_PROMISE_TOKEN,
+      promisePair: SEMRUSH_PROMISE_PAIR,
+    })).to.be.rejectedWith('queue unavailable');
+
+    expect(lock.setStatus).to.have.been.calledOnceWith('failed');
+    expect(lock.setResponse).to.have.been.calledOnceWith({ requestHash: hash });
+    expect(lock.save).to.have.been.calledOnce;
+    expect(warn).to.have.been.calledOnceWith(sinon.match(
+      'Failed to remove idempotency record',
+    ));
+  });
+
+  it('preserves the enqueue error when claim removal and fallback persistence both fail', async () => {
+    const hash = requestHash(body);
+    const lock = idempotencyEntry({ response: { requestHash: hash } });
+    lock.remove.rejects(new Error('delete unavailable'));
+    lock.save.rejects(new Error('database unavailable'));
+    const job = {
+      getId: () => '11111111-1111-4111-8111-111111111111',
+      getStatus: () => 'IN_PROGRESS',
+      remove: sinon.stub().resolves(),
+    };
+    const enqueueError = new Error('queue unavailable');
+    const warn = sinon.stub();
+
+    await expect(acceptBulkTags({
+      context: {
+        dataAccess: {
+          AsyncJob: { create: sinon.stub().resolves(job) },
+          IdempotencyKey: {
+            findActiveKey: sinon.stub().resolves(null),
+            create: sinon.stub().resolves(lock),
+          },
+        },
+        sqs: { sendMessage: sinon.stub().rejects(enqueueError) },
+        env: { SERENITY_JOB_RUNNER_QUEUE_URL: 'queue-url' },
+        log: { error: sinon.stub(), warn },
+      },
+      transport: workerTransport([]),
+      brandId: 'brand',
+      orgId: '11111111-1111-4111-8111-111111111111',
+      workspaceId: 'ws',
+      projectId: 'project',
+      body,
+      callerId: 'caller',
+      idempotencyKey: 'same-key',
+      log: {},
+      promiseToken: FORWARDED_PROMISE_TOKEN,
+      promisePair: SEMRUSH_PROMISE_PAIR,
+    })).to.be.rejectedWith('queue unavailable');
+
+    expect(lock.save).to.have.been.calledOnce;
+    expect(warn).to.have.been.calledTwice;
+    expect(warn.secondCall).to.have.been.calledWith(sinon.match(
+      'Failed to mark idempotency record failed',
+    ));
   });
 });
 

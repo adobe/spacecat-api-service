@@ -220,6 +220,8 @@ async function replayIdempotentJob(
     return acceptedJobResponse(job, true);
   }
   if (entry.getStatus() === 'failed') {
+    // A failed claim means cleanup previously degraded after no job was accepted.
+    // Remove it so a fresh request can safely acquire and retry the operation.
     await entry.remove();
     return null;
   }
@@ -252,6 +254,8 @@ async function removeExpiredIdempotencyKey(context, key, orgId) {
   if (!postgrestClient?.from) {
     throw new Error('PostgREST is required for bulk-tag idempotency');
   }
+  // The shared model only exposes a global expired-record cleanup. Use an endpoint-scoped
+  // delete here so this request cannot remove another consumer's idempotency record.
   const { error } = await postgrestClient
     .from('idempotency_keys')
     .delete()
@@ -300,7 +304,12 @@ async function acquireIdempotencyKey(context, key, orgId, hash) {
       if (retryRace) {
         return { entry: retryRace, owned: false };
       }
-      throw retryError;
+      throw codedError(
+        'Unable to reserve this bulk tag idempotency key',
+        409,
+        ERROR_CODES.IDEMPOTENCY_CONFLICT,
+        { cause: retryError.message },
+      );
     }
   }
 }
@@ -324,12 +333,25 @@ async function reserveIdempotencyKey(context, key, orgId, hash, attemptsRemainin
   );
 }
 
-async function releaseIdempotencyKey(entry, hash, log) {
+/**
+ * @param {object} context
+ * @param {object} entry
+ * @param {string} hash
+ * @param {{ key?: string | null, orgId?: string }} [details]
+ */
+async function releaseIdempotencyKey(context, entry, hash, {
+  key,
+  orgId,
+} = {}) {
+  const claimId = entry.getId?.() ?? 'unknown';
+  const diagnostic = `claim=${claimId} key=${key ?? 'unknown'} org=${orgId ?? 'unknown'} `
+    + `endpoint="${BULK_TAGS_IDEMPOTENCY_ENDPOINT}"`;
   try {
     await entry.remove();
   } catch (removeError) {
-    log?.warn?.(
-      `[serenity-bulk-tags] Failed to remove idempotency record: ${removeError.message}`,
+    context.log?.warn?.(
+      `[serenity-bulk-tags] Failed to remove idempotency record (${diagnostic}): `
+      + `${removeError.message}`,
     );
     try {
       await entry
@@ -337,8 +359,9 @@ async function releaseIdempotencyKey(entry, hash, log) {
         .setResponse({ requestHash: hash })
         .save();
     } catch (saveError) {
-      log?.warn?.(
-        `[serenity-bulk-tags] Failed to mark idempotency record failed: ${saveError.message}`,
+      context.log?.warn?.(
+        `[serenity-bulk-tags] Failed to mark idempotency record failed (${diagnostic}): `
+        + `${saveError.message}`,
       );
     }
   }
@@ -642,7 +665,10 @@ async function acceptParsedBulkTags({
     });
   } catch (error) {
     if (idempotencyEntry) {
-      await releaseIdempotencyKey(idempotencyEntry, hash, log);
+      await releaseIdempotencyKey(context, idempotencyEntry, hash, {
+        key: storageKey,
+        orgId,
+      });
     }
     throw error;
   }
@@ -650,7 +676,15 @@ async function acceptParsedBulkTags({
     idempotencyEntry
       .setStatus('completed')
       .setResponse({ requestHash: hash, jobId: job.getId() });
-    await idempotencyEntry.save();
+    try {
+      await idempotencyEntry.save();
+    } catch (error) {
+      context.log?.warn?.(
+        `[serenity-bulk-tags] Accepted job ${job.getId()} but failed to complete idempotency `
+        + `claim=${idempotencyEntry.getId?.() ?? 'unknown'} key=${storageKey} org=${orgId} `
+        + `endpoint="${BULK_TAGS_IDEMPOTENCY_ENDPOINT}": ${error.message}`,
+      );
+    }
   }
   return acceptedJobResponse(job, false);
 }

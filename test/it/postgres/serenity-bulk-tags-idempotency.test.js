@@ -15,10 +15,10 @@ import sinon from 'sinon';
 import { createDataAccess } from '@adobe/spacecat-shared-data-access';
 import { acceptBulkTags } from '../../../src/support/serenity/handlers/bulk-tags-job.js';
 import { POSTGREST_WRITER_JWT } from '../shared/postgrest-jwt.js';
+import { ORG_1_ID } from '../shared/seed-ids.js';
 import { resetPostgres } from './seed.js';
 
 const POSTGREST_URL = `http://localhost:${process.env.IT_POSTGREST_PORT || '3300'}`;
-const ORG_ID = '11111111-1111-4111-b111-111111111111';
 const PROMISE_TOKEN = { promise_token: 'it-promise-token' };
 const PROMISE_PAIR = 'SEMRUSH';
 const BULK_JOB_TYPE = 'serenity-bulk-tags';
@@ -87,7 +87,7 @@ function accept({
     context,
     transport: createTransport(),
     brandId: 'brand-a',
-    orgId: ORG_ID,
+    orgId: ORG_1_ID,
     workspaceId: 'workspace-a',
     projectId,
     body,
@@ -140,7 +140,7 @@ describe('Serenity bulk-tag PostgreSQL idempotency', () => {
     const keys = await selectRows(
       firstDataAccess.services.postgrestClient,
       'idempotency_keys',
-      (query) => query.eq('organization_id', ORG_ID).eq('endpoint', IDEMPOTENCY_ENDPOINT),
+      (query) => query.eq('organization_id', ORG_1_ID).eq('endpoint', IDEMPOTENCY_ENDPOINT),
     );
     expect(jobs).to.have.length(1);
     expect(keys).to.have.length(1);
@@ -235,7 +235,7 @@ describe('Serenity bulk-tag PostgreSQL idempotency', () => {
     const keys = await selectRows(
       dataAccess.services.postgrestClient,
       'idempotency_keys',
-      (query) => query.eq('organization_id', ORG_ID).eq('endpoint', IDEMPOTENCY_ENDPOINT),
+      (query) => query.eq('organization_id', ORG_1_ID).eq('endpoint', IDEMPOTENCY_ENDPOINT),
     );
     expect(keys).to.have.length(1);
     const firstKey = keys.find(({ response }) => response.jobId === first.body.jobId);
@@ -255,7 +255,7 @@ describe('Serenity bulk-tag PostgreSQL idempotency', () => {
     const replacementKeys = await selectRows(
       dataAccess.services.postgrestClient,
       'idempotency_keys',
-      (query) => query.eq('organization_id', ORG_ID).eq('endpoint', IDEMPOTENCY_ENDPOINT),
+      (query) => query.eq('organization_id', ORG_1_ID).eq('endpoint', IDEMPOTENCY_ENDPOINT),
     );
     expect(replacementKeys).to.have.length(1);
     expect(replacementKeys.some(({ response }) => response.jobId === replacement.body.jobId))
@@ -279,7 +279,7 @@ describe('Serenity bulk-tag PostgreSQL idempotency', () => {
     const keys = await selectRows(
       dataAccess.services.postgrestClient,
       'idempotency_keys',
-      (query) => query.eq('organization_id', ORG_ID).eq('endpoint', IDEMPOTENCY_ENDPOINT),
+      (query) => query.eq('organization_id', ORG_1_ID).eq('endpoint', IDEMPOTENCY_ENDPOINT),
     );
     expect(jobs).to.deep.equal([]);
     expect(keys).to.deep.equal([]);
