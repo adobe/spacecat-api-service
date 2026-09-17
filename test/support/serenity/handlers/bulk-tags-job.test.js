@@ -383,6 +383,61 @@ describe('acceptBulkTags idempotency', () => {
     });
   });
 
+  it('rejects a completed claim without a persisted job id', async () => {
+    const lock = idempotencyEntry({
+      status: 'completed',
+      response: { requestHash: requestHash(body) },
+    });
+
+    await expect(acceptBulkTags({
+      context: {
+        dataAccess: {
+          AsyncJob: { findById: sinon.stub() },
+          IdempotencyKey: { findActiveKey: sinon.stub().resolves(lock) },
+        },
+      },
+      transport: workerTransport([]),
+      brandId: 'brand',
+      orgId: '11111111-1111-4111-8111-111111111111',
+      workspaceId: 'ws',
+      projectId: 'project',
+      body,
+      callerId: 'caller',
+      idempotencyKey: 'same-key',
+      log: {},
+      promiseToken: FORWARDED_PROMISE_TOKEN,
+      promisePair: SEMRUSH_PROMISE_PAIR,
+    })).to.be.rejectedWith('Completed bulk-tag idempotency record has no jobId');
+  });
+
+  it('rejects a completed claim that references a missing job', async () => {
+    const jobId = '11111111-1111-4111-8111-111111111111';
+    const lock = idempotencyEntry({
+      status: 'completed',
+      response: { requestHash: requestHash(body), jobId },
+    });
+
+    await expect(acceptBulkTags({
+      context: {
+        dataAccess: {
+          AsyncJob: { findById: sinon.stub().resolves(null) },
+          IdempotencyKey: { findActiveKey: sinon.stub().resolves(lock) },
+        },
+      },
+      transport: workerTransport([]),
+      brandId: 'brand',
+      orgId: '11111111-1111-4111-8111-111111111111',
+      workspaceId: 'ws',
+      projectId: 'project',
+      body,
+      callerId: 'caller',
+      idempotencyKey: 'same-key',
+      log: {},
+      promiseToken: FORWARDED_PROMISE_TOKEN,
+      promisePair: SEMRUSH_PROMISE_PAIR,
+    })).to.be.rejectedWith(`Bulk-tag idempotency record references missing job ${jobId}`);
+  });
+
   it('rejects a reused key whose request fingerprint differs', async () => {
     const existing = idempotencyEntry({
       status: 'processing',
@@ -470,6 +525,43 @@ describe('acceptBulkTags idempotency', () => {
     expect(lock.save).to.have.been.calledOnce;
     expect(createJob).to.have.been.calledOnce;
     expect(sendMessage).to.have.been.calledOnce;
+  });
+
+  it('returns a conflict when a concurrent claim remains processing', async () => {
+    const clock = sinon.useFakeTimers();
+    const lock = idempotencyEntry({
+      status: 'processing',
+      response: { requestHash: requestHash(body) },
+    });
+    const pending = acceptBulkTags({
+      context: {
+        dataAccess: {
+          AsyncJob: { findById: sinon.stub() },
+          IdempotencyKey: { findActiveKey: sinon.stub().resolves(lock) },
+        },
+      },
+      transport: workerTransport([]),
+      brandId: 'brand',
+      orgId: '11111111-1111-4111-8111-111111111111',
+      workspaceId: 'ws',
+      projectId: 'project',
+      body,
+      callerId: 'caller',
+      idempotencyKey: 'same-key',
+      log: {},
+      promiseToken: FORWARDED_PROMISE_TOKEN,
+      promisePair: SEMRUSH_PROMISE_PAIR,
+    });
+    const rejection = expect(pending).to.be.rejected.then((error) => {
+      expect(error).to.include({
+        status: 409,
+        code: 'idempotencyConflict',
+        message: 'A request with this Idempotency-Key is still being accepted',
+      });
+    });
+
+    await clock.runAllAsync();
+    await rejection;
   });
 
   it('returns the accepted job when completing the idempotency claim fails', async () => {
@@ -569,6 +661,102 @@ describe('acceptBulkTags idempotency', () => {
     expect(failedLock.remove).to.have.been.calledOnce;
     expect(replacementLock.save).to.have.been.calledOnce;
     expect(sendMessage).to.have.been.calledOnce;
+  });
+
+  it('returns a conflict when failed claims prevent both reservation attempts', async () => {
+    const firstLock = idempotencyEntry({
+      status: 'failed',
+      response: { requestHash: requestHash(body) },
+    });
+    const secondLock = idempotencyEntry({
+      status: 'failed',
+      response: { requestHash: requestHash(body) },
+    });
+    const thirdLock = idempotencyEntry({
+      status: 'failed',
+      response: { requestHash: requestHash(body) },
+    });
+    const claims = [firstLock, secondLock, thirdLock];
+    const findActiveKey = sinon.stub().callsFake(async () => claims.shift());
+
+    await expect(acceptBulkTags({
+      context: {
+        dataAccess: {
+          AsyncJob: { create: sinon.stub() },
+          IdempotencyKey: { findActiveKey },
+        },
+      },
+      transport: workerTransport([]),
+      brandId: 'brand',
+      orgId: '11111111-1111-4111-8111-111111111111',
+      workspaceId: 'ws',
+      projectId: 'project',
+      body,
+      callerId: 'caller',
+      idempotencyKey: 'same-key',
+      log: {},
+      promiseToken: FORWARDED_PROMISE_TOKEN,
+      promisePair: SEMRUSH_PROMISE_PAIR,
+    })).to.be.rejected.then((error) => {
+      expect(error).to.include({
+        status: 409,
+        code: 'idempotencyConflict',
+        message: 'Unable to reserve this bulk tag idempotency key',
+      });
+    });
+    expect(firstLock.remove).to.have.been.calledOnce;
+    expect(secondLock.remove).to.have.been.calledOnce;
+    expect(thirdLock.remove).to.have.been.calledOnce;
+  });
+
+  it('returns a coded conflict after two unresolved unique-constraint races', async () => {
+    const uniqueViolation = () => Object.assign(new Error('duplicate key'), { code: '23505' });
+    const createKey = sinon.stub();
+    createKey.onFirstCall().rejects(uniqueViolation());
+    createKey.onSecondCall().rejects(uniqueViolation());
+    const expiredQuery = {
+      delete: sinon.stub().returnsThis(),
+      eq: sinon.stub().returnsThis(),
+      lte: sinon.stub().resolves({ error: null }),
+    };
+
+    await expect(acceptBulkTags({
+      context: {
+        dataAccess: {
+          AsyncJob: { create: sinon.stub() },
+          IdempotencyKey: {
+            findActiveKey: sinon.stub().resolves(null),
+            create: createKey,
+          },
+          services: {
+            postgrestClient: {
+              from: sinon.stub().withArgs('idempotency_keys').returns(expiredQuery),
+            },
+          },
+        },
+      },
+      transport: workerTransport([]),
+      brandId: 'brand',
+      orgId: '11111111-1111-4111-8111-111111111111',
+      workspaceId: 'ws',
+      projectId: 'project',
+      body,
+      callerId: 'caller',
+      idempotencyKey: 'same-key',
+      log: {},
+      promiseToken: FORWARDED_PROMISE_TOKEN,
+      promisePair: SEMRUSH_PROMISE_PAIR,
+    })).to.be.rejected.then((error) => {
+      expect(error).to.include({
+        status: 409,
+        code: 'idempotencyConflict',
+        message: 'Unable to reserve this bulk tag idempotency key',
+      });
+      expect(error.details).to.deep.equal({ cause: 'duplicate key' });
+    });
+    expect(createKey).to.have.been.calledTwice;
+    expect(expiredQuery.eq).to.have.callCount(3);
+    expect(expiredQuery.lte).to.have.been.calledOnce;
   });
 
   it('concurrent matching requests converge on one persisted and enqueued job', async () => {
