@@ -1,3 +1,16 @@
+# [1.821.0](https://github.com/adobe/spacecat-api-service/compare/v1.820.1...v1.821.0) (2026-09-17)
+
+
+### Bug Fixes
+
+* surface revoke-entitlement-imsorg errors to Slack ([#3305](https://github.com/adobe/spacecat-api-service/issues/3305)) ([1f76244](https://github.com/adobe/spacecat-api-service/commit/1f762447ac31bf15be04afd7ee57a194067e6bef))
+
+
+### Features
+
+* **facs:** store site-level caps on a dedicated (scope,'site') row ([#3303](https://github.com/adobe/spacecat-api-service/issues/3303)) ([453599c](https://github.com/adobe/spacecat-api-service/commit/453599c94e16ee8270607832165ecbd0baec415a)), closes [OneAdobe/experience-success-studio-ui#2228](https://github.com/OneAdobe/experience-success-studio-ui/issues/2228)
+* support Meta agentic traffic filters ([#3306](https://github.com/adobe/spacecat-api-service/issues/3306)) ([592a818](https://github.com/adobe/spacecat-api-service/commit/592a818dfbfcd622bc629f3782f0384b415a1dc9)), closes [adobe/spacecat-audit-worker#2986](https://github.com/adobe/spacecat-audit-worker/issues/2986) [Hi#level](https://github.com/Hi/issues/level) [adobe/spacecat-audit-worker#2986](https://github.com/adobe/spacecat-audit-worker/issues/2986) [adobe/project-elmo-ui#3201](https://github.com/adobe/project-elmo-ui/issues/3201) [adobe/spacecat-audit-worker#2986](https://github.com/adobe/spacecat-audit-worker/issues/2986) [adobe/spacecat-audit-worker#2986](https://github.com/adobe/spacecat-audit-worker/issues/2986) [adobe/project-elmo-ui#3201](https://github.com/adobe/project-elmo-ui/issues/3201)
+
 ## [1.820.1](https://github.com/adobe/spacecat-api-service/compare/v1.820.0...v1.820.1) (2026-09-17)
 
 
