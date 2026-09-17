@@ -1,3 +1,15 @@
+# [1.823.0](https://github.com/adobe/spacecat-api-service/compare/v1.822.0...v1.823.0) (2026-09-17)
+
+
+### Bug Fixes
+
+* **serenity:** scope create-path dedup to input via search, add fixed-walk fallback ([#3304](https://github.com/adobe/spacecat-api-service/issues/3304)) ([a7e2ee4](https://github.com/adobe/spacecat-api-service/commit/a7e2ee47decfc15086d54668c9df13c18229c410)), closes [#3285](https://github.com/adobe/spacecat-api-service/issues/3285) [#3288](https://github.com/adobe/spacecat-api-service/issues/3288) [3283/#3287](https://github.com/adobe/spacecat-api-service/issues/3287) [Hi#level](https://github.com/Hi/issues/level) [#3279](https://github.com/adobe/spacecat-api-service/issues/3279) [#3283](https://github.com/adobe/spacecat-api-service/issues/3283) [#3287](https://github.com/adobe/spacecat-api-service/issues/3287) [#3285](https://github.com/adobe/spacecat-api-service/issues/3285) [#3288](https://github.com/adobe/spacecat-api-service/issues/3288) [adobe/project-elmo-ui#3185](https://github.com/adobe/project-elmo-ui/issues/3185)
+
+
+### Features
+
+* GET /sites/:siteId/deployed-opportunities (deployed-opportunities timeline) | LLMO-7669 ([#3299](https://github.com/adobe/spacecat-api-service/issues/3299)) ([8b26421](https://github.com/adobe/spacecat-api-service/commit/8b26421754927da43b66867124bba253865e1ce6)), closes [#2501](https://github.com/adobe/spacecat-api-service/issues/2501)
+
 # [1.822.0](https://github.com/adobe/spacecat-api-service/compare/v1.821.0...v1.822.0) (2026-09-17)
 
 

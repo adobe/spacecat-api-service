@@ -595,6 +595,8 @@ paths:
     $ref: './experiments-api.yaml#/experiments'
   /sites/{siteId}/fixes:
     $ref: './site-opportunities.yaml#/site-fixes'
+  /sites/{siteId}/deployed-opportunities:
+    $ref: './site-opportunities.yaml#/site-deployed-opportunities'
   /sites/{siteId}/opportunities/{opportunityId}/fixes:
     $ref: './site-opportunities.yaml#/site-opportunity-fixes'
   /sites/{siteId}/opportunities/{opportunityId}/fixes/by-status/{status}:

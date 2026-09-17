@@ -36,6 +36,7 @@ import { ResponseFeedDto } from '../dto/response-feed.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { ErrorWithStatusCode, resolveSemrushImsToken } from '../support/utils.js';
 import { X_PROMISE_TOKEN_HEADER, PROMISE_TOKEN_REQUIRED_ERROR_CODE } from '../utils/constants.js';
+import { isYmdDate } from '../utils/date-utils.js';
 
 const MAX_ERR_MSG_LEN = 500;
 const BEARER_PREFIX = 'Bearer ';
@@ -306,20 +307,6 @@ function rejectUnsupportedTagFilter(query) {
     error.code = 'unsupportedTagFilter';
     throw error;
   }
-}
-
-/**
- * True when `value` is a real `YYYY-MM-DD` calendar date. Rejects malformed shapes
- * and impossible dates (e.g. `2026-13-45`) by round-tripping through Date so a bad
- * value never reaches Semrush. (shared-utils `isIsoDate` requires a full datetime,
- * not the date-only form the URL Inspector sends.)
- */
-function isYmdDate(value) {
-  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    return false;
-  }
-  const d = new Date(`${value}T00:00:00Z`);
-  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value;
 }
 
 /**

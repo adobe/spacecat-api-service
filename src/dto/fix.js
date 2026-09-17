@@ -101,4 +101,35 @@ export const FixDto = {
 
     return result;
   },
+
+  /**
+   * Projects a FixEntity into a single deployment entry for the deployed-opportunities
+   * timeline (`GET /sites/:siteId/fixes` deploy overlay). `deployedAt` carries the caller-
+   * supplied deploy anchor (`deployedAt ?? executedAt`), and the opportunity title is joined
+   * by the controller since it is not on the FixEntity.
+   *
+   * @param {Readonly<FixEntity>} fix - FixEntity object.
+   * @param {string|null} opportunityTitle - resolved opportunity title (null if unresolved).
+   * @param {string} anchor - the deploy anchor timestamp (ISO string).
+   * @returns {{
+   *  opportunityId: string
+   *  opportunityTitle: string|null
+   *  type: string
+   *  status: string
+   *  fixId: string
+   *  deployedAt: string
+   *  changeDetails: object
+   * }} JSON object.
+   */
+  toDeployedOpportunityJSON(fix, opportunityTitle, anchor) {
+    return {
+      opportunityId: fix.getOpportunityId(),
+      opportunityTitle: opportunityTitle ?? null,
+      type: fix.getType(),
+      status: fix.getStatus(),
+      fixId: fix.getId(),
+      deployedAt: anchor,
+      changeDetails: withLegacyDocumentPath(fix.getChangeDetails()),
+    };
+  },
 };

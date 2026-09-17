@@ -35,3 +35,18 @@ export function isValidDateInterval(startDate, endDate) {
   return parsedStartDate < parsedEndDate
         && (parsedEndDate - parsedStartDate) <= 1000 * 60 * 60 * 24 * 365 * 2; // 2 years
 }
+
+/**
+ * True when `value` is a real `YYYY-MM-DD` calendar date. Rejects malformed shapes and
+ * impossible dates (e.g. `2026-13-45`) by round-tripping through Date. shared-utils
+ * `isIsoDate` requires a full datetime, not the date-only form Overview surfaces send.
+ * @param {*} value - the value to validate
+ * @returns {boolean} true when `value` is a valid `YYYY-MM-DD` date
+ */
+export function isYmdDate(value) {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return false;
+  }
+  const d = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value;
+}

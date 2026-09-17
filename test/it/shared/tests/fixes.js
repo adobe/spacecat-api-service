@@ -208,6 +208,93 @@ export default function fixTests(getHttpClient, resetData) {
       });
     });
 
+    describe('GET /sites/:siteId/deployed-opportunities', () => {
+      const DEPLOYED_BASE = `/sites/${SITE_1_ID}/deployed-opportunities`;
+      before(() => resetData());
+
+      it('user: groups deployed opportunities by date with titles', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(DEPLOYED_BASE);
+        expect(res.status).to.equal(200);
+        // FIX_2 + FIX_3 are DEPLOYED under OPPTY_1, both deployed on 2026-08-15;
+        // FIX_1 (PENDING) and FIX_4 (FAILED) are excluded.
+        expect(res.body).to.be.an('array').with.lengthOf(1);
+        const bucket = res.body[0];
+        expect(bucket.date).to.equal('2026-08-15');
+        expect(bucket.deployments).to.be.an('array').with.lengthOf(2);
+
+        const ids = bucket.deployments.map((d) => d.fixId).sort();
+        expect(ids).to.deep.equal([FIX_2_ID, FIX_3_ID].sort());
+        bucket.deployments.forEach((d) => {
+          expect(d.opportunityId).to.equal(OPPTY_1_ID);
+          expect(d.opportunityTitle).to.equal('Fix CWV issues');
+          expect(d.status).to.be.oneOf(['DEPLOYED', 'PUBLISHED']);
+          expect(d).to.have.property('changeDetails');
+          // Fixed seed deploy date (not a recent run-time timestamp).
+          expect(d.deployedAt).to.match(/^2026-08-15T/);
+        });
+      });
+
+      it('user: returns [] when the window excludes all deploys', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`${DEPLOYED_BASE}?from=2027-01-01`);
+        expect(res.status).to.equal(200);
+        expect(res.body).to.be.an('array').with.lengthOf(0);
+      });
+
+      it('user: caps the result with limit, keeping the most recent deploy', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`${DEPLOYED_BASE}?limit=1`);
+        expect(res.status).to.equal(200);
+        // FIX_2 (10:00) + FIX_3 (14:00) on the same day; limit=1 keeps the most recent (FIX_3).
+        expect(res.body).to.be.an('array').with.lengthOf(1);
+        expect(res.body[0].deployments).to.have.lengthOf(1);
+        expect(res.body[0].deployments[0].fixId).to.equal(FIX_3_ID);
+      });
+
+      it('returns 400 for a non-positive limit', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`${DEPLOYED_BASE}?limit=0`);
+        expect(res.status).to.equal(400);
+      });
+
+      it('user: includes deploys inside the from/to window', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`${DEPLOYED_BASE}?from=2026-08-01&to=2026-09-01`);
+        expect(res.status).to.equal(200);
+        expect(res.body).to.have.lengthOf(1);
+        expect(res.body[0].date).to.equal('2026-08-15');
+      });
+
+      it('user: includes same-day deploys on the inclusive to bound', async () => {
+        const http = getHttpClient();
+        // to = the deploy day; the end-of-day bound must include FIX_3 (14:00) and FIX_2 (10:00).
+        const res = await http.user.get(`${DEPLOYED_BASE}?from=2026-08-15&to=2026-08-15`);
+        expect(res.status).to.equal(200);
+        expect(res.body).to.have.lengthOf(1);
+        expect(res.body[0].date).to.equal('2026-08-15');
+        expect(res.body[0].deployments).to.have.lengthOf(2);
+      });
+
+      it('returns 400 for an invalid from date', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`${DEPLOYED_BASE}?from=2026-13-45`);
+        expect(res.status).to.equal(400);
+      });
+
+      it('returns 400 for an inverted window (from after to)', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`${DEPLOYED_BASE}?from=2026-09-01&to=2026-08-01`);
+        expect(res.status).to.equal(400);
+      });
+
+      it('user: returns 403 for denied site', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`/sites/${SITE_3_ID}/deployed-opportunities`);
+        expect(res.status).to.equal(403);
+      });
+    });
+
     describe('GET .../fixes?fixCreatedDate (date-filtered with suggestions)', () => {
       before(() => resetData());
 
