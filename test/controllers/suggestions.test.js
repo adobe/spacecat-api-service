@@ -8480,7 +8480,7 @@ describe('Suggestions Controller', () => {
     });
 
     describe('OAE routing-validation job on deploy', () => {
-      it('queues a routing-validation job scoped to highImpactSuggestionIds and records the jobId', async () => {
+      it('queues a routing-validation job scoped to every non-pattern suggestion deployed, ignoring highImpactSuggestionIds when non-pattern suggestions exist', async () => {
         mockConfiguration.findLatest.resolves({
           getQueues: () => ({ imports: 'https://imports-queue' }),
         });
@@ -8497,13 +8497,15 @@ describe('Suggestions Controller', () => {
 
         expect(response.status).to.equal(207);
 
+        // Both deployed suggestions are non-pattern -- the job targets all of them, not just
+        // the narrower highImpactSuggestionIds subset.
         expect(mockSqs.sendMessage).to.have.been.calledWith(
           'https://imports-queue',
           sinon.match({
             type: 'oae-validation',
             siteId: SITE_ID,
             validationType: 'routing',
-            suggestionIds: [SUGGESTION_IDS[0]],
+            suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]],
           }),
         );
         const sqsPayload = mockSqs.sendMessage.firstCall.args[1];
@@ -8511,6 +8513,27 @@ describe('Suggestions Controller', () => {
 
         const createArg = mockSuggestionDataAccess.GeoExperiment.create.firstCall.args[0];
         expect(createArg.metadata.oaeValidationJobs.routing).to.deep.equal([sqsPayload.jobId]);
+      });
+
+      it('also queues a routing-validation job for a plain deploy with no highImpactSuggestionIds at all', async () => {
+        mockConfiguration.findLatest.resolves({
+          getQueues: () => ({ imports: 'https://imports-queue' }),
+        });
+
+        const response = await suggestionsController.deploySuggestionToEdge({
+          ...context,
+          params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+          data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]] },
+          env: asyncExperimentEnv,
+        });
+
+        expect(response.status).to.equal(207);
+        expect(mockSqs.sendMessage).to.have.been.calledWith(
+          'https://imports-queue',
+          sinon.match({ suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]] }),
+        );
+        const createArg = mockSuggestionDataAccess.GeoExperiment.create.firstCall.args[0];
+        expect(createArg.metadata.oaeValidationJobs.routing).to.have.lengthOf(1);
       });
 
       it('does not block the deploy when queuing the routing-validation job fails', async () => {
@@ -8533,22 +8556,45 @@ describe('Suggestions Controller', () => {
         expect(context.log.error).to.have.been.calledWithMatch(/failed to queue OAE routing-validation job/);
       });
 
-      it('does not create a routing-validation job when highImpactSuggestionIds is absent', async () => {
+      it('falls back to highImpactSuggestionIds when every deployed suggestion is pattern-based', async () => {
         mockConfiguration.findLatest.resolves({
           getQueues: () => ({ imports: 'https://imports-queue' }),
         });
+        const domainWideSuggestion = {
+          getId: () => SUGGESTION_IDS[0],
+          getType: () => 'headings',
+          getOpportunityId: () => OPPORTUNITY_ID,
+          getStatus: () => 'NEW',
+          getRank: () => 1,
+          getData: () => ({ isDomainWide: true, allowedRegexPatterns: ['/*'] }),
+          getKpiDeltas: () => ({}),
+          getCreatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedAt: () => '2025-01-15T10:00:00Z',
+          getUpdatedBy: () => 'system',
+          setData: sandbox.stub().returnsThis(),
+          setUpdatedBy: sandbox.stub().returnsThis(),
+          save: sandbox.stub().resolves(),
+        };
+        mockSuggestion.allByOpportunityId.resolves([domainWideSuggestion, ...edgeSuggestions]);
+        sandbox.stub(TokowakaClient, 'createFrom')
+          .returns({ markPatternCoveredSuggestions: sandbox.stub().resolves() });
 
         const response = await suggestionsController.deploySuggestionToEdge({
           ...context,
+          pathInfo: { headers: { prefer: 'respond-async' } },
           params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
-          data: { suggestionIds: [SUGGESTION_IDS[0], SUGGESTION_IDS[1]] },
+          data: {
+            suggestionIds: [SUGGESTION_IDS[0]],
+            metadata: { highImpactSuggestionIds: [SUGGESTION_IDS[1]] },
+          },
           env: asyncExperimentEnv,
         });
 
         expect(response.status).to.equal(207);
-        expect(mockSqs.sendMessage).to.not.have.been.called;
-        const createArg = mockSuggestionDataAccess.GeoExperiment.create.firstCall.args[0];
-        expect(createArg.metadata.oaeValidationJobs).to.equal(undefined);
+        expect(mockSqs.sendMessage).to.have.been.calledWith(
+          'https://imports-queue',
+          sinon.match({ suggestionIds: [SUGGESTION_IDS[1]] }),
+        );
       });
     });
 
