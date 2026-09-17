@@ -57,6 +57,16 @@ const MAX_AUTHORITY_PAGES = 50;
 // crafted cursor producing a misleading empty page far past the data.
 const MAX_CURSOR_OFFSET = 1_000_000;
 
+// Site-level capabilities are stored under a dedicated, non-opportunity
+// qualifier so they occupy their OWN active row — never sharing the
+// (opportunity,'all') row with opportunity caps. This keeps the two tiers
+// independently editable (editing opportunity caps never re-sends a site cap
+// the caller can't grant) and makes a site-level grant invisible to
+// opportunity-type resolution (the resolver only matches values 'all'|<type>).
+// Reserved: no opportunity type may equal these values.
+export const SITE_SCOPE_TYPE = 'scope';
+export const SITE_SCOPE_VALUE = 'site';
+
 /**
  * Returns the catalog of capability strings declared for a given product
  * in `PRODUCTS_CAPABILITIES`. The catalog is the single source of truth
@@ -116,6 +126,19 @@ function resolveCompositeKeys(product, compositeKeyType1, compositeKeyValue1) {
     }
     return { compositeKeyType1: 'all', compositeKeyValue1: 'all' };
   }
+  // Site-level caps live on a dedicated non-opportunity qualifier
+  // (scope,'site'), so they get their own active row instead of sharing the
+  // opportunity 'all' row. Recognized alongside the opportunity slot.
+  if (compositeKeyType1 === SITE_SCOPE_TYPE) {
+    if (compositeKeyValue1 !== undefined && compositeKeyValue1 !== SITE_SCOPE_VALUE) {
+      return {
+        error: badRequest(
+          `compositeKeyType1 '${SITE_SCOPE_TYPE}' requires compositeKeyValue1 '${SITE_SCOPE_VALUE}'`,
+        ),
+      };
+    }
+    return { compositeKeyType1: SITE_SCOPE_TYPE, compositeKeyValue1: SITE_SCOPE_VALUE };
+  }
   const [slot1Type] = slots;
   if (compositeKeyType1 !== undefined && compositeKeyType1 !== slot1Type) {
     return { error: badRequest(`compositeKeyType1 for ${product} must be '${slot1Type}'`) };
@@ -123,12 +146,19 @@ function resolveCompositeKeys(product, compositeKeyType1, compositeKeyValue1) {
   if (compositeKeyValue1 !== undefined && !hasText(compositeKeyValue1)) {
     return { error: badRequest('compositeKeyValue1, when provided, must be a non-empty string') };
   }
-  return {
-    compositeKeyType1: slot1Type,
-    // Trim so trailing/leading whitespace can't produce a stored qualifier that
-    // silently matches no live Opportunity.type (enforcement is exact-match).
-    compositeKeyValue1: hasText(compositeKeyValue1) ? compositeKeyValue1.trim() : 'all',
-  };
+  // Trim so trailing/leading whitespace can't produce a stored qualifier that
+  // silently matches no live Opportunity.type (enforcement is exact-match).
+  const value = hasText(compositeKeyValue1) ? compositeKeyValue1.trim() : 'all';
+  // Reserve the site-scope sentinel so it can never masquerade as an opportunity
+  // type (which would put site-level access on an opportunity row).
+  if (value === SITE_SCOPE_VALUE) {
+    return {
+      error: badRequest(
+        `compositeKeyValue1 '${SITE_SCOPE_VALUE}' is reserved for site-level access; use compositeKeyType1 '${SITE_SCOPE_TYPE}'`,
+      ),
+    };
+  }
+  return { compositeKeyType1: slot1Type, compositeKeyValue1: value };
 }
 
 /**
@@ -163,25 +193,47 @@ export function productHasCompositeSlots(product) {
 }
 
 /**
- * Rejects site-level capabilities on a qualifier-scoped ('not-all') row. Returns
- * an error message string, or null when the (value, capabilities) pair is valid.
- * A no-op for the 'all' row and for capabilities that are not site-level.
+ * Enforces the two-tier storage invariant:
+ *  - Site-level caps (configure/manage_users) may ONLY live on the dedicated
+ *    site-wide row (scope,'site'); reject them on any opportunity row.
+ *  - The (scope,'site') row may ONLY carry site-level caps; reject opportunity
+ *    caps (view/edit/deploy) there.
+ * Returns an error message string, or null when the (key, capabilities) pair is
+ * valid. A no-op for opportunity caps on an opportunity row.
  *
  * @param {string} product
- * @param {string} compositeKeyValue1 - Resolved qualifier value ('all' or a type).
+ * @param {string} compositeKeyType1  - Resolved qualifier type ('opportunity' or 'scope').
+ * @param {string} compositeKeyValue1 - Resolved qualifier value ('all' | a type | 'site').
  * @param {string[]} capabilities
  * @returns {string|null}
  */
-function validateSiteLevelCapabilityScope(product, compositeKeyValue1, capabilities) {
-  if (compositeKeyValue1 === 'all') {
+function validateSiteLevelCapabilityScope(
+  product,
+  compositeKeyType1,
+  compositeKeyValue1,
+  capabilities,
+) {
+  // Non-composite products keep every capability on the single ('all','all')
+  // row — there is no opportunity/site tiering to enforce.
+  if (!productHasCompositeSlots(product)) {
     return null;
   }
   const siteCaps = siteLevelCapabilities(product);
+  const isSiteRow = compositeKeyType1 === SITE_SCOPE_TYPE
+    && compositeKeyValue1 === SITE_SCOPE_VALUE;
+  if (isSiteRow) {
+    // The site-wide row carries only site-level caps (no opportunity tier).
+    const offending = capabilities.filter((c) => !siteCaps.has(c));
+    if (offending.length === 0) {
+      return null;
+    }
+    return `The site-level row (${SITE_SCOPE_TYPE}/${SITE_SCOPE_VALUE}) may only carry site-level capabilities; [${offending.join(', ')}] are opportunity-scoped and must be granted on an opportunity row`;
+  }
   const offending = capabilities.filter((c) => siteCaps.has(c));
   if (offending.length === 0) {
     return null;
   }
-  return `Site-level capabilities [${offending.join(', ')}] cannot be scoped to a composite qualifier ('${compositeKeyValue1}'); grant them on the 'all' (site-wide) row instead`;
+  return `Site-level capabilities [${offending.join(', ')}] cannot be scoped to an opportunity qualifier ('${compositeKeyValue1}'); grant them on the '${SITE_SCOPE_TYPE}/${SITE_SCOPE_VALUE}' (site-wide) row instead`;
 }
 
 function encodeCursor(offset) {
@@ -398,7 +450,21 @@ function StateAccessMappingsController(context) {
     // Case-sensitive match is safe: validateGrantedCapabilities already rejects
     // any capability whose prefix is not the lowercase product code, so every
     // entry here is lowercase.
-    return capabilities.includes(canView) ? capabilities : [...capabilities, canView];
+    if (capabilities.includes(canView)) {
+      return capabilities;
+    }
+    // For a COMPOSITE product, a grant of ONLY site-level caps
+    // (configure/manage_users) lands on the dedicated site-wide row
+    // (scope,'site'); can_view is an opportunity-tier cap that doesn't belong
+    // there, so don't force it on. Non-composite products keep everything on the
+    // single ('all','all') row, so view is still injected there.
+    const siteCaps = siteLevelCapabilities(product);
+    if (productHasCompositeSlots(product)
+      && capabilities.length > 0
+      && capabilities.every((c) => siteCaps.has(c))) {
+      return capabilities;
+    }
+    return [...capabilities, canView];
   }
 
   function buildListFilters(ctx, imsOrgId, product) {
@@ -772,10 +838,12 @@ function StateAccessMappingsController(context) {
     compositeKeyValue1,
   }) {
     // Site-level capabilities enforce site-wide regardless of the qualifier, so
-    // they may only be stored on the 'all' row — reject a qualifier-scoped grant
-    // that carries them (keeps the persisted data honest about what enforces).
+    // they may only be stored on the dedicated (scope,'site') row — reject an
+    // opportunity-scoped grant that carries them, and reject opportunity caps on
+    // the site row (keeps the persisted data honest about what enforces).
     const scopeErr = validateSiteLevelCapabilityScope(
       product,
+      compositeKeyType1,
       compositeKeyValue1,
       capabilitiesToStore,
     );
@@ -1298,11 +1366,13 @@ function StateAccessMappingsController(context) {
     try {
       const { postgrestClient } = ctx.dataAccess.services;
       // Fetch the target row when we need it: for per-resource authorization
-      // (non-org-wide managers, hybrid-model §8.3) or to validate site-level
-      // capability scope against the row's stored qualifier.
-      const requestHasSiteCaps = productHasCompositeSlots(product)
-        && capabilitiesToStore.some((c) => siteLevelCapabilities(product).has(c));
-      if (!authority.orgWide || requestHasSiteCaps) {
+      // (non-org-wide managers, hybrid-model §8.3) or — for composite products —
+      // to validate the two-tier scope invariant against the row's stored
+      // qualifier (site caps only on the site row; the site row only carries
+      // site caps), which needs the row's TYPE + VALUE regardless of what the
+      // request carries.
+      const needsExisting = productHasCompositeSlots(product) || !authority.orgWide;
+      if (needsExisting) {
         const existing = await getFacsAccessMappingById(postgrestClient, { id, imsOrgId, product });
         if (!existing) {
           return notFound('Mapping not found');
@@ -1312,11 +1382,10 @@ function StateAccessMappingsController(context) {
             `Caller may only manage resources where they hold ${product.toLowerCase()}/can_manage_users`,
           );
         }
-        // Site-level caps can't be pinned to a qualifier-scoped row (they enforce
-        // site-wide regardless) — reject rather than persist a misleading grant.
-        if (requestHasSiteCaps) {
+        if (productHasCompositeSlots(product)) {
           const scopeErr = validateSiteLevelCapabilityScope(
             product,
+            existing.composite_key_type_1 ?? 'all',
             existing.composite_key_value_1 ?? 'all',
             capabilitiesToStore,
           );

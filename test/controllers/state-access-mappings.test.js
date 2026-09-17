@@ -790,17 +790,67 @@ describe('StateAccessMappingsController', () => {
       expect(createStub.called).to.be.false;
     });
 
-    it('allows a site-level capability on the all (site-wide) row (ASO)', async () => {
+    it('allows a site-level capability on the dedicated site row (scope/site) (ASO)', async () => {
       const createStub = sinon.stub().resolves({
         created: [makeRow({ product: 'ASO', resource_type: 'site' })], skipped: [],
       });
       const { Controller } = await loadController({ createFacsAccessMappings: createStub });
       const ctx = makeContext({
         product: 'ASO',
-        body: asoBody({ grantedCapabilities: ['aso/can_configure'], compositeKeyValue1: 'all' }),
+        body: asoBody({
+          grantedCapabilities: ['aso/can_configure'],
+          compositeKeyType1: 'scope',
+          compositeKeyValue1: 'site',
+        }),
       });
       const res = await Controller(ctx).createMapping(ctx);
       expect(res.status).to.equal(201);
+      // The site row carries only the site-level cap — no baseline can_view is
+      // injected there (view is an opportunity-tier capability).
+      expect(createStub.firstCall.args[1].grantedCapabilities)
+        .to.have.members(['aso/can_configure']);
+    });
+
+    it('rejects a site-level capability on an opportunity row (ASO)', async () => {
+      const { Controller } = await loadController({});
+      const ctx = makeContext({
+        product: 'ASO',
+        body: asoBody({
+          grantedCapabilities: ['aso/can_configure'],
+          compositeKeyType1: 'opportunity',
+          compositeKeyValue1: 'all',
+        }),
+      });
+      const res = await Controller(ctx).createMapping(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it('rejects an opportunity capability on the site row (ASO)', async () => {
+      const { Controller } = await loadController({});
+      const ctx = makeContext({
+        product: 'ASO',
+        body: asoBody({
+          grantedCapabilities: ['aso/can_edit'],
+          compositeKeyType1: 'scope',
+          compositeKeyValue1: 'site',
+        }),
+      });
+      const res = await Controller(ctx).createMapping(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it("rejects the reserved 'site' value on an opportunity row (ASO)", async () => {
+      const { Controller } = await loadController({});
+      const ctx = makeContext({
+        product: 'ASO',
+        body: asoBody({
+          grantedCapabilities: ['aso/can_view'],
+          compositeKeyType1: 'opportunity',
+          compositeKeyValue1: 'site',
+        }),
+      });
+      const res = await Controller(ctx).createMapping(ctx);
+      expect(res.status).to.equal(400);
     });
 
     it('surfaces the composite-key qualifier in the created DTO (ASO)', async () => {
@@ -1531,16 +1581,22 @@ describe('StateAccessMappingsController', () => {
       expect(stubs.updateFacsAccessMappingCapabilities.called).to.be.false;
     });
 
-    it('allows a site-level capability when the target row is the all row (ASO)', async () => {
+    it('allows a site-level capability when the target row is the site row (scope/site) (ASO)', async () => {
       const updated = makeRow({
         product: 'ASO',
         resource_type: 'site',
-        composite_key_value_1: 'all',
-        granted_capabilities: ['aso/can_view', 'aso/can_configure'],
+        composite_key_type_1: 'scope',
+        composite_key_value_1: 'site',
+        granted_capabilities: ['aso/can_configure'],
       });
       const { Controller } = await loadController({
         getFacsAccessMappingById: sinon.stub().resolves(
-          makeRow({ product: 'ASO', resource_type: 'site', composite_key_value_1: 'all' }),
+          makeRow({
+            product: 'ASO',
+            resource_type: 'site',
+            composite_key_type_1: 'scope',
+            composite_key_value_1: 'site',
+          }),
         ),
         updateFacsAccessMappingCapabilities: sinon.stub().resolves(updated),
       });
