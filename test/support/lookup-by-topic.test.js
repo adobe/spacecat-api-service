@@ -186,6 +186,13 @@ describe('lookup-by-topic support', () => {
       expect(log.info).to.have.been.calledWithMatch(/\[lookup-by-topic\]/);
     });
 
+    it('throws when the embedding response length does not match the inputs', async () => {
+      embeddingClient.createEmbeddings.resolves([[0.1]]); // 1 vector for 2 misses
+      await expect(run({ rawTopics: ['alpha', 'beta'] }))
+        .to.be.rejectedWith(/Embedding response length mismatch: expected 2, got 1/);
+      expect(lookupVectorStub).to.not.have.been.called;
+    });
+
     it('uses the durable cache on a hit and bumps last_access (no embed)', async () => {
       getQueryEmbeddingStub.resolves({ vector: [0.3], textHash: 'h' });
       lookupVectorStub.resolves([{ entityId: 'o1', entityType: 'cited-analysis', score: 0.8 }]);

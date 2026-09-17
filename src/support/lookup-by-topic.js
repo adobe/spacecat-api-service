@@ -21,7 +21,7 @@ import { applyFieldProjection } from '../utils/field-projection.js';
 import { parseLookupStatus } from './lookup-by-url.js';
 
 /**
- * Shared engine for `POST .../opportunities/by-topic` (Lookup Service, Milestone 2 — semantic).
+ * Shared engine for `POST .../opportunities/by-topics` (Lookup Service, Milestone 2 — semantic).
  * Parallels the by-url engine, swapping the exact-URL index for a per-topic nearest-neighbour
  * search. Body `{ topics: [...], k?, minScore?, status?, fields? }` (1-100 topics; invalid entries
  * dropped, not hard-failed). For each distinct topic it resolves a query vector (durable
@@ -48,6 +48,35 @@ export const TOPIC_SOURCE_TYPE = 'topic';
 // invalidates the query cache by key.
 export const QUERY_EMBEDDING_MODEL = 'azure/text-embedding-3-small';
 export const QUERY_EMBEDDING_DIMS = 1536;
+
+// Cap on in-flight PostgREST round-trips (cache reads, ANN searches, best-effort cache writes) so a
+// max-size request (100 distinct topics) can't fan out ~100 concurrent calls into the shared pool.
+export const LOOKUP_CONCURRENCY = 20;
+
+/**
+ * Map `items` through `fn` with at most `limit` in flight, preserving input order in the result.
+ * Dependency-free bounded-concurrency pool (no `p-limit` in this repo).
+ * @template T,R
+ * @param {T[]} items
+ * @param {number} limit
+ * @param {(item: T, index: number) => Promise<R>} fn
+ * @returns {Promise<R[]>}
+ */
+async function mapWithConcurrency(items, limit, fn) {
+  const results = new Array(items.length);
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < items.length) {
+      const i = cursor;
+      cursor += 1;
+      // eslint-disable-next-line no-await-in-loop
+      results[i] = await fn(items[i], i);
+    }
+  };
+  const workers = Array.from({ length: Math.min(limit, items.length) }, () => worker());
+  await Promise.all(workers);
+  return results;
+}
 
 /**
  * Validates the request-body `topics`. Non-array / oversized are hard errors; individual
@@ -145,35 +174,51 @@ function projectLookup(fullDtos, fieldsParam, lightweightFields) {
  */
 async function resolveTopicVectors(postgrestClient, embeddingClient, texts, log) {
   const vectorByText = new Map();
-  const misses = [];
   const cacheKey = { model: QUERY_EMBEDDING_MODEL, dims: QUERY_EMBEDDING_DIMS };
 
-  for (const text of texts) {
-    // eslint-disable-next-line no-await-in-loop
-    const cached = await getQueryEmbedding(postgrestClient, { text, ...cacheKey });
-    if (cached?.vector) {
-      vectorByText.set(text, cached.vector);
-      // eslint-disable-next-line no-await-in-loop
-      await touchQueryEmbedding(postgrestClient, { text, ...cacheKey }).catch((e) => {
-        log?.debug?.(`[lookup-by-topic] touchQueryEmbedding failed (non-fatal): ${e.message}`);
-      });
+  // 1. Cache reads in parallel (bounded), result order aligned to `texts`.
+  const cached = await mapWithConcurrency(
+    texts,
+    LOOKUP_CONCURRENCY,
+    (text) => getQueryEmbedding(postgrestClient, { text, ...cacheKey }),
+  );
+
+  const hits = [];
+  const misses = [];
+  texts.forEach((text, i) => {
+    if (cached[i]?.vector) {
+      vectorByText.set(text, cached[i].vector);
+      hits.push(text);
     } else {
       misses.push(text);
     }
-  }
+  });
 
+  // 2. Embed all misses in one batch call; guard the returned length so a short/misaligned
+  //    response is a loud error, not an `undefined` vector silently cached and sent to the RPC.
   if (misses.length > 0) {
     const vectors = await embeddingClient.createEmbeddings(misses); // native dims (no truncation)
-    for (let i = 0; i < misses.length; i += 1) {
-      const text = misses[i];
-      const vector = vectors[i];
-      vectorByText.set(text, vector);
-      // eslint-disable-next-line no-await-in-loop
-      await upsertQueryEmbedding(postgrestClient, { text, ...cacheKey, vector }).catch((e) => {
-        log?.debug?.(`[lookup-by-topic] upsertQueryEmbedding failed (non-fatal): ${e.message}`);
-      });
+    if (!Array.isArray(vectors) || vectors.length !== misses.length) {
+      const want = misses.length;
+      const got = vectors?.length;
+      throw new Error(`Embedding response length mismatch: expected ${want}, got ${got}`);
     }
+    misses.forEach((text, i) => vectorByText.set(text, vectors[i]));
   }
+
+  // 3. Best-effort cache maintenance (access bump for hits, populate for misses), bounded + settled
+  //    before returning; these are optimizations that must never fail the lookup.
+  const swallow = (label) => (e) => {
+    log?.debug?.(`[lookup-by-topic] ${label} failed (non-fatal): ${e.message}`);
+  };
+  const writes = [
+    ...hits.map((text) => () => touchQueryEmbedding(postgrestClient, { text, ...cacheKey })
+      .catch(swallow('touchQueryEmbedding'))),
+    ...misses.map((text) => () => upsertQueryEmbedding(postgrestClient, {
+      text, ...cacheKey, vector: vectorByText.get(text),
+    }).catch(swallow('upsertQueryEmbedding'))),
+  ];
+  await mapWithConcurrency(writes, LOOKUP_CONCURRENCY, (task) => task());
 
   return vectorByText;
 }
@@ -247,15 +292,20 @@ export async function lookupByTopic(postgrestClient, embeddingClient, cfg) {
     log,
   );
 
+  // ANN search per distinct topic, in parallel (bounded), result order aligned to distinctTexts.
+  const matchesList = await mapWithConcurrency(
+    distinctTexts,
+    LOOKUP_CONCURRENCY,
+    (text) => lookupOpportunitiesByVector(postgrestClient, {
+      siteId, sourceType: TOPIC_SOURCE_TYPE, vector: vectorByText.get(text), k, minScore,
+    }),
+  );
+
   const matchesByText = new Map();
   const allIds = [];
   const seenIds = new Set();
-  for (const text of distinctTexts) {
-    const vector = vectorByText.get(text);
-    // eslint-disable-next-line no-await-in-loop
-    const matches = await lookupOpportunitiesByVector(postgrestClient, {
-      siteId, sourceType: TOPIC_SOURCE_TYPE, vector, k, minScore,
-    });
+  distinctTexts.forEach((text, i) => {
+    const matches = matchesList[i];
     matchesByText.set(text, matches);
     for (const m of matches) {
       if (!seenIds.has(m.entityId)) {
@@ -263,7 +313,7 @@ export async function lookupByTopic(postgrestClient, embeddingClient, cfg) {
         allIds.push(m.entityId);
       }
     }
-  }
+  });
 
   if (allIds.length > MAX_LOOKUP_MATCHES) {
     return { error: `Too many matched opportunities (${allIds.length}); lower k or narrow the topics list` };
