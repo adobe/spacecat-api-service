@@ -296,6 +296,10 @@ function WebhooksController(context) {
         // separate from retry_count (which tracks re-enqueues after a
         // worker/infra failure, not head drift). Always 0 at initial enqueue.
         head_change_count: 0,
+        // Opts this job into DLQ recovery. Recovery consumers must remain off
+        // until historical unmarked DLQ messages are externally archived.
+        lifecycle_recovery_version: 1,
+        recovery_count: 0,
         ...(targetId ? { target_id: targetId } : {}),
         ...(observability ? { observability } : {}),
       };
