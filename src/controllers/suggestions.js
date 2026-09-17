@@ -3231,9 +3231,8 @@ function SuggestionsController(ctx, sqs, env) {
 
     context.log.info(`[geo-experiment-cancel] site: ${siteId}, GeoExperiment ${geoExperimentId}, status: ${status}, isDeployed: ${isDeployed}, suggestions: ${experimentSuggestions.length}`);
 
-    const suggestionUrl = (suggestion) => suggestion.getData()?.url;
-    let rolledBackUrls = [];
-    let failedRollbackUrls = [];
+    let rolledBackSuggestionIds = [];
+    let failedRollbackSuggestionIds = [];
 
     if (isDeployed && opportunity && isNonEmptyArray(experimentSuggestions)) {
       try {
@@ -3244,13 +3243,13 @@ function SuggestionsController(ctx, sqs, env) {
           experimentSuggestions,
           { allSuggestions, updatedBy },
         );
-        rolledBackUrls = (rollbackResult.succeededSuggestions || [])
-          .map(suggestionUrl).filter(Boolean);
-        failedRollbackUrls = (rollbackResult.failedSuggestions || [])
-          .map((item) => suggestionUrl(item.suggestion || item)).filter(Boolean);
+        rolledBackSuggestionIds = (rollbackResult.succeededSuggestions || [])
+          .map((suggestion) => suggestion.getId());
+        failedRollbackSuggestionIds = (rollbackResult.failedSuggestions || [])
+          .map((item) => (item.suggestion || item).getId());
       } catch (error) {
         context.log.error(`[geo-experiment-cancel-failed] site: ${siteId}, GeoExperiment ${geoExperimentId}, Error rolling back suggestions from edge: ${error.message}`, error);
-        failedRollbackUrls = experimentSuggestions.map(suggestionUrl).filter(Boolean);
+        failedRollbackSuggestionIds = experimentSuggestions.map((suggestion) => suggestion.getId());
       }
     }
 
@@ -3287,7 +3286,7 @@ function SuggestionsController(ctx, sqs, env) {
     try {
       await geoExperiment.save();
     } catch (error) {
-      context.log.error(`[geo-experiment-cancel-failed] site: ${siteId}, GeoExperiment ${geoExperimentId}, status: ${status}, isDeployed: ${isDeployed}, rolledBackUrls: ${JSON.stringify(rolledBackUrls)}, failedRollbackUrls: ${JSON.stringify(failedRollbackUrls)}, Failed to persist CANCELLED status: ${error.message}`, error);
+      context.log.error(`[geo-experiment-cancel-failed] site: ${siteId}, GeoExperiment ${geoExperimentId}, status: ${status}, isDeployed: ${isDeployed}, rolledBackSuggestionIds: ${JSON.stringify(rolledBackSuggestionIds)}, failedRollbackSuggestionIds: ${JSON.stringify(failedRollbackSuggestionIds)}, Failed to persist CANCELLED status: ${error.message}`, error);
       return internalServerError(`Cleanup for GeoExperiment ${geoExperimentId} completed but persisting CANCELLED status failed`);
     }
 
@@ -3295,8 +3294,8 @@ function SuggestionsController(ctx, sqs, env) {
 
     return ok({
       status: GeoExperimentModel.STATUSES.CANCELLED,
-      rolledBackUrls,
-      failedRollbackUrls,
+      rolledBackSuggestionIds,
+      failedRollbackSuggestionIds,
     });
   };
 

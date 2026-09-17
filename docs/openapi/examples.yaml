@@ -1176,6 +1176,6 @@ geo-experiment-cancel-response:
   description: Example for a successful geo experiment cancellation with a partially rolled back deployment
   value:
     status: 'CANCELLED'
-    rolledBackUrls:
-      - 'https://www.example.com/product/example-product'
-    failedRollbackUrls: []
+    rolledBackSuggestionIds:
+      - '213e4567-f543-12d3-a456-426614174000'
+    failedRollbackSuggestionIds: []

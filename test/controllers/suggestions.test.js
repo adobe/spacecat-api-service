@@ -12569,7 +12569,11 @@ describe('Suggestions Controller', () => {
       expect(rollbackStub).to.not.have.been.called;
       expect(disableScheduleStub).to.have.been.calledOnceWithExactly(SITE_ID, 'pre-sched-1');
       const body = await response.json();
-      expect(body).to.deep.equal({ status: STATUSES.CANCELLED, rolledBackUrls: [], failedRollbackUrls: [] });
+      expect(body).to.deep.equal({
+        status: STATUSES.CANCELLED,
+        rolledBackSuggestionIds: [],
+        failedRollbackSuggestionIds: [],
+      });
     });
 
     it('rolls back suggestions from edge and deletes the post-schedule when deployed', async () => {
@@ -12599,8 +12603,8 @@ describe('Suggestions Controller', () => {
       const body = await response.json();
       expect(body).to.deep.equal({
         status: STATUSES.CANCELLED,
-        rolledBackUrls: [suggestion.getData().url],
-        failedRollbackUrls: [],
+        rolledBackSuggestionIds: [suggestion.getId()],
+        failedRollbackSuggestionIds: [],
       });
     });
 
@@ -12649,8 +12653,8 @@ describe('Suggestions Controller', () => {
       const body = await response.json();
       expect(body).to.deep.equal({
         status: STATUSES.CANCELLED,
-        rolledBackUrls: [],
-        failedRollbackUrls: [suggestion.getData().url],
+        rolledBackSuggestionIds: [],
+        failedRollbackSuggestionIds: [suggestion.getId()],
       });
     });
 

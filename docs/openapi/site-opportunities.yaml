@@ -1026,16 +1026,18 @@ site-geo-experiment-cancel:
                 status:
                   type: string
                   enum: [CANCELLED]
-                rolledBackUrls:
+                rolledBackSuggestionIds:
                   type: array
                   items:
                     type: string
-                  description: URLs whose deployed changes were successfully rolled back
-                failedRollbackUrls:
+                    format: uuid
+                  description: IDs of suggestions whose deployed changes were successfully rolled back
+                failedRollbackSuggestionIds:
                   type: array
                   items:
                     type: string
-                  description: URLs that were deployed but failed to roll back
+                    format: uuid
+                  description: IDs of suggestions that were deployed but failed to roll back
             examples:
               geo-experiment-cancel-response:
                 $ref: './examples.yaml#/geo-experiment-cancel-response'
