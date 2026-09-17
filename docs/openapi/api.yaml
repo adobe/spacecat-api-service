@@ -182,6 +182,8 @@ paths:
     $ref: './serenity-api.yaml#/v2-serenity-market-by-slice'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/tags:
     $ref: './serenity-api.yaml#/v2-serenity-tags'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/tags/search:
+    $ref: './serenity-api.yaml#/v2-serenity-tag-search'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/tags/{tagId}:
     $ref: './serenity-api.yaml#/v2-serenity-tag-by-id'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/tags/{tagId}/impact:
