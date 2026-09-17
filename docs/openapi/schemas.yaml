@@ -13143,6 +13143,16 @@ SerenityLanguageListResponse:
       items: { $ref: '#/SerenityLanguage' }
 
 BrandClaimsFeedbackRequest:
+  oneOf:
+    - $ref: '#/BrandClaimsReportFeedbackRequest'
+    - $ref: '#/BrandClaimsClaimFeedbackRequest'
+  discriminator:
+    propertyName: feedbackScope
+    mapping:
+      report: '#/BrandClaimsReportFeedbackRequest'
+      claim_cluster: '#/BrandClaimsClaimFeedbackRequest'
+
+BrandClaimsReportFeedbackRequest:
   type: object
   additionalProperties: false
   required: [eventId, brandId, rating]
@@ -13159,10 +13169,57 @@ BrandClaimsFeedbackRequest:
       type: string
       enum: [up, down]
       description: Whether the Brand Claims experience was useful.
+    feedbackScope:
+      type: string
+      enum: [report]
+      default: report
+      description: Feedback applies to the overall Brand Claims report.
     comment:
       type: string
       maxLength: 4000
       description: Optional additional feedback.
+
+BrandClaimsClaimFeedbackRequest:
+  type: object
+  additionalProperties: false
+  required: [eventId, brandId, rating, feedbackScope, clusterId, claimText]
+  properties:
+    eventId:
+      type: string
+      format: uuid
+      description: Client-generated UUIDv4 idempotency key for this submission.
+    brandId:
+      type: string
+      format: uuid
+      description: Brand being reviewed. The service verifies it belongs to the site's organization.
+    rating:
+      type: string
+      enum: [up, down]
+      description: Whether the visible claim cluster was useful.
+    feedbackScope:
+      type: string
+      enum: [claim_cluster]
+      description: Feedback applies to one visible claim cluster.
+    comment:
+      type: string
+      maxLength: 4000
+      description: Optional additional feedback.
+    clusterId:
+      type: string
+      maxLength: 200
+      description: Identifier of the visible claim cluster.
+    claimText:
+      type: string
+      maxLength: 4000
+      description: Immutable snapshot of the representative claim text.
+    model:
+      type: string
+      maxLength: 100
+      description: Optional model selected when claim_cluster feedback was submitted.
+    sourceFile:
+      type: string
+      maxLength: 1024
+      description: Optional Brand Claims source-file/run snapshot associated with the cluster.
 
 BrandClaimsFeedbackResponse:
   type: object

@@ -1075,6 +1075,7 @@ describe('handleBrandClaimsFeedback', () => {
       schemaVersion: 1,
       recordType: 'product_feedback',
       surface: 'brand_claims',
+      feedbackScope: 'report',
       id: EVENT_ID,
       rating: 'down',
       note: 'The recommendations need more context.',
@@ -1091,6 +1092,33 @@ describe('handleBrandClaimsFeedback', () => {
       .digest('hex')
       .slice(0, 12)}`;
     expect(record.abv_id).to.equal(expectedAbvId);
+  });
+
+  it('stores claim-cluster feedback under the claim-specific prefix', async () => {
+    const result = await handleBrandClaimsFeedback({
+      ...context,
+      data: {
+        ...context.data,
+        feedbackScope: 'claim_cluster',
+        clusterId: 'cluster-123',
+        claimText: 'Lovesac products are modular.',
+        model: 'chatgpt',
+        sourceFile: 'brand_claims/llmo/site/week/data.json.gz',
+      },
+    }, site);
+
+    expect(result.status).to.equal(202);
+    const command = s3Send.secondCall.args[0];
+    expect(command.input.Key).to.match(
+      new RegExp(`^product_feedback/brand_claims/claim_cluster/down/paid/\\d{4}-\\d{2}-\\d{2}/\\d{17}_${EVENT_ID}\\.json$`),
+    );
+    expect(JSON.parse(command.input.Body)).to.include({
+      feedbackScope: 'claim_cluster',
+      clusterId: 'cluster-123',
+      claimText: 'Lovesac products are modular.',
+      model: 'chatgpt',
+      sourceFile: 'brand_claims/llmo/site/week/data.json.gz',
+    });
   });
 
   it('omits the explicit encryption header for a local S3 emulator', async () => {
@@ -1115,8 +1143,24 @@ describe('handleBrandClaimsFeedback', () => {
       { ...context.data, brandId: 'bad' },
       { ...context.data, rating: 'neutral' },
       { ...context.data, comment: 42 },
+      { ...context.data, feedbackScope: 'other' },
+      { ...context.data, clusterId: 'cluster-1' },
+      {
+        ...context.data,
+        feedbackScope: 'claim_cluster',
+        clusterId: '',
+        claimText: 'Claim',
+      },
+      {
+        ...context.data,
+        feedbackScope: 'claim_cluster',
+        clusterId: 'cluster-1',
+        claimText: '',
+      },
     ].map((data) => handleBrandClaimsFeedback({ ...context, data }, site)));
-    expect(results.map((result) => result.status)).to.deep.equal([400, 400, 400, 400, 400, 400]);
+    expect(results.map((result) => result.status)).to.deep.equal([
+      400, 400, 400, 400, 400, 400, 400, 400, 400, 400,
+    ]);
     expect(s3Send).not.to.have.been.called;
   });
 
@@ -1177,6 +1221,7 @@ describe('handleBrandClaimsFeedback', () => {
       schemaVersion: 1,
       recordType: 'product_feedback',
       surface: 'brand_claims',
+      feedbackScope: 'report',
       id: EVENT_ID,
       timestamp: '2026-09-15T23:59:59.000Z',
       rating: 'up',

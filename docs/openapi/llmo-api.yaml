@@ -2209,11 +2209,14 @@ llmo-brand-claims-feedback:
     summary: Submit Brand Claims product feedback
     description: |
       Stores an authenticated user's rating and optional comment for the currently
-      selected Brand Claims report in the shared ABV learning-data store.
+      selected Brand Claims report or visible claim cluster in the shared ABV
+      learning-data store. Claim-cluster submissions include an immutable snapshot
+      of the representative claim text and optional model/source-file context.
 
       Organization, site, brand, entitlement tier, and pseudonymous user context
       are derived by the service. The client-supplied `eventId` is used as an
       idempotency key, so retrying the same submission does not create a duplicate.
+      Existing clients may omit `feedbackScope`; the service treats it as `report`.
     operationId: submitBrandClaimsFeedback
     requestBody:
       required: true
@@ -2221,6 +2224,11 @@ llmo-brand-claims-feedback:
         application/json:
           schema:
             $ref: './schemas.yaml#/BrandClaimsFeedbackRequest'
+          examples:
+            report:
+              $ref: './examples.yaml#/BrandClaimsReportFeedbackRequest'
+            claim-cluster:
+              $ref: './examples.yaml#/BrandClaimsClaimFeedbackRequest'
     responses:
       '202':
         description: Feedback accepted and stored
@@ -2228,6 +2236,9 @@ llmo-brand-claims-feedback:
           application/json:
             schema:
               $ref: './schemas.yaml#/BrandClaimsFeedbackResponse'
+            examples:
+              accepted:
+                $ref: './examples.yaml#/BrandClaimsFeedbackResponse'
       '400':
         $ref: './responses.yaml#/400'
       '401':
