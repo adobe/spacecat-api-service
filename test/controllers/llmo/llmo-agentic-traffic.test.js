@@ -296,7 +296,7 @@ describe('llmo-agentic-traffic', () => {
       ['parallel', 'Parallel.ai'],
       ['manus', 'Manus'],
       ['keenable', 'Keenable.ai'],
-      ['meta', 'Meta'],
+      ['Meta', 'Meta'],
       ['all', null],
       [undefined, null],
       ['unknown-code', null],
@@ -327,7 +327,7 @@ describe('llmo-agentic-traffic', () => {
   describe('platform multi-select (Serenity)', () => {
     it('maps a comma list to p_platforms and nulls the scalar p_platform', async () => {
       const client = createMockClient({ rpc_agentic_traffic_kpis: { data: [], error: null } });
-      const ctx = makeContext({ client, data: { startDate: '2026-01-01', endDate: '2026-01-28', platform: 'chatgpt,meta' } });
+      const ctx = makeContext({ client, data: { startDate: '2026-01-01', endDate: '2026-01-28', platform: 'chatgpt,Meta' } });
       await createAgenticTrafficKpisHandler(stubbedValidateAccess)(ctx);
       expect(client.rpc).to.have.been.calledWithMatch('rpc_agentic_traffic_kpis', {
         p_platform: null,

@@ -78,7 +78,7 @@ const PLATFORM_CODE_TO_DB = {
   parallel: 'Parallel.ai',
   manus: 'Manus',
   keenable: 'Keenable.ai',
-  meta: 'Meta',
+  Meta: 'Meta',
 };
 
 // A comma in the `platform` param signals a multi-select (Serenity). Returns the
