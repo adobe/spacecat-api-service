@@ -754,6 +754,8 @@ paths:
     $ref: './llmo-api.yaml#/llmo-brand-claims-weeks'
   /sites/{siteId}/llmo/brand-claims/request:
     $ref: './llmo-api.yaml#/llmo-brand-claims-request'
+  /sites/{siteId}/llmo/brand-claims/feedback:
+    $ref: './llmo-api.yaml#/llmo-brand-claims-feedback'
   /sites/{siteId}/llmo/strategy/demo/brand-presence:
     $ref: './llmo-api.yaml#/llmo-opportunity-workspace-demo-brand-presence'
   /sites/{siteId}/llmo/strategy/demo/recommendations:
