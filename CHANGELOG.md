@@ -1,3 +1,38 @@
+## [1.820.1](https://github.com/adobe/spacecat-api-service/compare/v1.820.0...v1.820.1) (2026-09-17)
+
+
+### Bug Fixes
+
+* **serenity:** use strict base64url search cursors ([#3302](https://github.com/adobe/spacecat-api-service/issues/3302)) ([e539cec](https://github.com/adobe/spacecat-api-service/commit/e539cecb23b17ddfc947dbd4c97ce38c182cd80f))
+
+# [1.820.0](https://github.com/adobe/spacecat-api-service/compare/v1.819.0...v1.820.0) (2026-09-17)
+
+
+### Features
+
+* store Brand Claims feedback | LLMO-7665 ([#3297](https://github.com/adobe/spacecat-api-service/issues/3297)) ([8f64f33](https://github.com/adobe/spacecat-api-service/commit/8f64f339a976ff73f4c7eb4a3d9f07e1c3b5af2d))
+
+# [1.819.0](https://github.com/adobe/spacecat-api-service/compare/v1.818.0...v1.819.0) (2026-09-17)
+
+
+### Features
+
+* **serenity:** support unbounded nested tags ([#3291](https://github.com/adobe/spacecat-api-service/issues/3291)) ([125b02c](https://github.com/adobe/spacecat-api-service/commit/125b02c2191b56a02b525a0e12c7bfec8eae2cfe)), closes [adobe/serenity-docs#26](https://github.com/adobe/serenity-docs/issues/26) [adobe/spacecat-shared#1931](https://github.com/adobe/spacecat-shared/issues/1931)
+
+# [1.818.0](https://github.com/adobe/spacecat-api-service/compare/v1.817.0...v1.818.0) (2026-09-17)
+
+
+### Features
+
+* **facs:** opportunity-type-aware user capabilities + site-cap scope guard ([#3300](https://github.com/adobe/spacecat-api-service/issues/3300)) ([d93eb04](https://github.com/adobe/spacecat-api-service/commit/d93eb04a02f515bbe135bc8f4881ca1cd9edaf46))
+
+# [1.817.0](https://github.com/adobe/spacecat-api-service/compare/v1.816.0...v1.817.0) (2026-09-16)
+
+
+### Features
+
+* deploy serenity-market worker under a dedicated role ([#787](https://github.com/adobe/spacecat-api-service/issues/787)) ([#3296](https://github.com/adobe/spacecat-api-service/issues/3296)) ([4c19929](https://github.com/adobe/spacecat-api-service/commit/4c199290f69eb2c624944824ecf960f74b00e776)), closes [Hi#level](https://github.com/Hi/issues/level) [#798](https://github.com/adobe/spacecat-api-service/issues/798) [#3240](https://github.com/adobe/spacecat-api-service/issues/3240) [#798](https://github.com/adobe/spacecat-api-service/issues/798) [#798](https://github.com/adobe/spacecat-api-service/issues/798) [#798](https://github.com/adobe/spacecat-api-service/issues/798) [#798](https://github.com/adobe/spacecat-api-service/issues/798) [#798](https://github.com/adobe/spacecat-api-service/issues/798) [#798](https://github.com/adobe/spacecat-api-service/issues/798) [#793](https://github.com/adobe/spacecat-api-service/issues/793) [#3240](https://github.com/adobe/spacecat-api-service/issues/3240) [#798](https://github.com/adobe/spacecat-api-service/issues/798) [#798](https://github.com/adobe/spacecat-api-service/issues/798)
+
 # [1.816.0](https://github.com/adobe/spacecat-api-service/compare/v1.815.0...v1.816.0) (2026-09-16)
 
 

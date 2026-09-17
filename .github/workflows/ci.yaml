@@ -255,6 +255,35 @@ jobs:
       - name: Deploy worker
         # dev -> deploy-dev:worker, stage -> deploy-stage:worker,
         # prod -> deploy:worker (see package.json scripts).
+        #
+        # DEDICATED EXECUTION ROLE (#787) — PROD ONLY: only deploy:worker (prod) pins
+        # the worker Lambda's execution role to spacecat-role-serenity-market-worker,
+        # via a per-invocation `--aws-role!important` override. deploy-stage:worker and
+        # deploy-dev:worker carry NO override, so stage + dev fall back to the shared
+        # spacecat-role-lambda-generic (the pkgConf hlx.awsRole!important the main
+        # api-service Lambda and the serenity-market-probe also use). The `!important`
+        # suffix on the prod override is required: a plain `--aws-role` is silently
+        # clobbered by the pkgConf hlx.awsRole!important. ${env.AWS_ACCOUNT_ID} in that
+        # ARN resolves from the AWS_ACCOUNT_ID env below (the prod account).
+        #
+        # WHY PROD-ONLY: infra #798 wires the dedicated role's DRS cross-account-invoke
+        # + SSM readiness-read GRANTS in prod only; dev + stage keep those grants on the
+        # generic role (coherent with DRS #3240, which scopes dev's reciprocal invoke
+        # policy to the generic role). #798 does create the role and grant iam:PassRole
+        # in ALL envs, so a stage/dev worker pinned to the dedicated role would deploy
+        # cleanly but then fail FUNCTIONALLY at runtime (that role lacks the invoke/
+        # readiness grants there) — hence stage + dev stay on generic.
+        #
+        # DEPLOY DEPENDENCY (prod): the deploy identity (spacecat-role-github-actions,
+        # assumed by configure-aws above) needs iam:PassRole on
+        # spacecat-role-serenity-market-worker, and that role must exist with the
+        # worker's full permission set, or hedy's UpdateFunctionConfiguration /
+        # CreateFunction fails. Both are provisioned by #798 as scoped IaC — the
+        # PassRole grant is inline on spacecat-role-github-actions, limited to this role
+        # and iam:PassedToService=lambda.amazonaws.com. Ordering rule: #798 is applied
+        # before this deploy runs. On merge-to-main the worker auto-deploys to PROD only
+        # (the matrix is ["prod"] on push); stage + dev worker deploys are manual
+        # workflow_dispatch, and both now use the generic role.
         if: steps.paths-check.outputs.changed != 'false'
         run: npm run ${{ (matrix.environment == 'dev' && 'deploy-dev:worker') || (matrix.environment == 'stage' && 'deploy-stage:worker') || (matrix.environment == 'prod' && 'deploy:worker') }}
         env:

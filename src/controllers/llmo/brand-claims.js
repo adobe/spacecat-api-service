@@ -10,15 +10,20 @@
  * governing permissions and limitations under the License.
  */
 
+import { createHmac } from 'node:crypto';
 import {
   badRequest, notFound, accepted, internalServerError, createResponse,
 } from '@adobe/spacecat-shared-http-utils';
-import { hasText } from '@adobe/spacecat-shared-utils';
+import { hasText, isValidUUID } from '@adobe/spacecat-shared-utils';
+import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
 import { HeadObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
 import { cachedOk } from '../../support/cached-response.js';
 import { dateToIsoWeek } from '../../support/elements/week-utils.js';
 import { isValidLocale } from '../../utils/validations.js';
 import { postSlackMessage } from '../../utils/slack/base.js';
+import { getBrandById } from '../../support/brands-storage.js';
+import { redactFeedbackContent } from '../../support/feedback-redaction.js';
+import { resolveCallerImsUserId } from '../../support/utils.js';
 
 const CLAIMS_PREFIX = 'brand_claims/llmo';
 const WEEK_RE = /^\d{4}-W\d{2}$/;
@@ -28,6 +33,9 @@ const WEEK_RE = /^\d{4}-W\d{2}$/;
 // supplied `limit` (a year of weekly runs) without ever paging past one S3 list.
 const DEFAULT_WEEKS_LIMIT = 15;
 const MAX_WEEKS_LIMIT = 52;
+const PRODUCT_FEEDBACK_PREFIX = 'product_feedback/brand_claims';
+const PRODUCT_FEEDBACK_NOTE_MAX_LENGTH = 4000;
+const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 /**
  * List the ISO-week (`YYYY-Www`) run folders under a site's brand-claims prefix,
@@ -309,6 +317,187 @@ export async function handleBrandClaimsWeeks(context) {
     log.error(`S3 error listing brand claims weeks for site ${siteId}: ${s3Error.message}`);
     return internalServerError('Unable to list brand claims weeks');
   }
+}
+
+/**
+ * Persists an append-only Brand Claims product-feedback record in the shared
+ * ABV learning-data bucket. Tenant and identity context are derived server-side.
+ *
+ * @param {object} context - Request context.
+ * @param {object} site - Access-checked Site model.
+ * @returns {Promise<Response>} 202 when stored (or already stored).
+ */
+export async function handleBrandClaimsFeedback(context, site) {
+  const {
+    data = {}, dataAccess, env = {}, log, s3,
+  } = context;
+  const {
+    eventId, brandId, rating, comment,
+  } = data;
+
+  if (typeof eventId !== 'string' || !UUID_V4_RE.test(eventId)) {
+    return badRequest('eventId must be a valid UUID');
+  }
+  if (!isValidUUID(brandId)) {
+    return badRequest('brandId must be a valid UUID');
+  }
+  if (!['up', 'down'].includes(rating)) {
+    return badRequest('rating must be "up" or "down"');
+  }
+  if (comment !== undefined && typeof comment !== 'string') {
+    return badRequest('comment must be a string');
+  }
+
+  const trimmedComment = comment?.trim();
+  if (trimmedComment && trimmedComment.length > PRODUCT_FEEDBACK_NOTE_MAX_LENGTH) {
+    return createResponse({
+      message: `comment exceeds the ${PRODUCT_FEEDBACK_NOTE_MAX_LENGTH} character limit`,
+    }, 413);
+  }
+
+  const bucket = env.ABV_LEARNING_DATA_BUCKET;
+  const hashSalt = env.ABV_ID_HASH_SALT;
+  if (!hasText(bucket) || !hasText(hashSalt)
+    || !s3?.s3Client || !s3?.PutObjectCommand || !s3?.GetObjectCommand) {
+    log.error('Brand Claims feedback storage is not configured');
+    return internalServerError('Brand Claims feedback is temporarily unavailable');
+  }
+
+  const organizationId = site.getOrganizationId();
+  const postgrestClient = dataAccess?.services?.postgrestClient;
+  if (!postgrestClient?.from) {
+    log.error('Brand Claims feedback requires PostgREST brand lookup');
+    return internalServerError('Brand Claims feedback is temporarily unavailable');
+  }
+
+  const brand = await getBrandById(organizationId, brandId, postgrestClient);
+  if (!brand) {
+    return notFound(`Brand not found: ${brandId}`);
+  }
+  const siteId = site.getId();
+  const brandSiteIds = new Set([
+    brand.baseSiteId,
+    ...(Array.isArray(brand.siteIds) ? brand.siteIds : []),
+  ].filter(Boolean));
+  if (!brandSiteIds.has(siteId)) {
+    return badRequest('Brand does not belong to this site');
+  }
+
+  const organization = await dataAccess.Organization.findById(organizationId);
+  if (!organization) {
+    return notFound(`Organization not found: ${organizationId}`);
+  }
+
+  let tier = 'free';
+  try {
+    const entitlement = await dataAccess.Entitlement
+      .findByOrganizationIdAndProductCode(
+        organizationId,
+        EntitlementModel.PRODUCT_CODES.LLMO,
+      );
+    if (entitlement?.getTier?.() === EntitlementModel.TIERS.PAID) {
+      tier = 'paid';
+    }
+  } catch (error) {
+    log.error(`Failed to determine Brand Claims feedback tier for org ${organizationId}: ${error.message}`);
+    return internalServerError('Unable to submit Brand Claims feedback');
+  }
+
+  const rawUserId = resolveCallerImsUserId(context);
+  if (!rawUserId) {
+    log.error(`Brand Claims feedback caller identity is unavailable for org ${organizationId}`);
+    return internalServerError('Brand Claims feedback is temporarily unavailable');
+  }
+  const abvId = `abv_${createHmac('sha256', hashSalt).update(rawUserId).digest('hex').slice(0, 12)}`;
+  const timestamp = new Date().toISOString();
+  const { detailMarkdown: cleanComment, scrubHits } = redactFeedbackContent({
+    detailMarkdown: trimmedComment,
+  });
+  if (Object.keys(scrubHits).length > 0) {
+    log.info(`brand_claims_feedback.scrub_hit_total ${JSON.stringify(scrubHits)} event=${eventId}`);
+  }
+
+  const record = {
+    schemaVersion: 1,
+    recordType: 'product_feedback',
+    surface: 'brand_claims',
+    id: eventId,
+    timestamp,
+    rating,
+    ...(cleanComment ? { note: cleanComment } : {}),
+    abv_id: abvId,
+    organizationId,
+    customerName: organization.getName(),
+    imsOrgId: organization.getImsOrgId() ?? null,
+    siteId,
+    brandId: brand.id,
+    brand: brand.name,
+    tier,
+  };
+  const markerKey = `${PRODUCT_FEEDBACK_PREFIX}/idempotency/${eventId}.json`;
+  let recordToStore = record;
+  // Local S3 emulators used by integration tests do not configure a KMS backend
+  // for explicit SSE headers. AWS environments have no custom endpoint and must
+  // keep the bucket-policy-required AES256 header.
+  const encryption = env.AWS_ENDPOINT_URL_S3
+    ? {}
+    : { ServerSideEncryption: 'AES256' };
+
+  try {
+    await s3.s3Client.send(new s3.PutObjectCommand({
+      Bucket: bucket,
+      Key: markerKey,
+      Body: JSON.stringify(record),
+      ContentType: 'application/json',
+      ...encryption,
+      IfNoneMatch: '*',
+    }));
+  } catch (error) {
+    if (error?.name !== 'PreconditionFailed' && error?.$metadata?.httpStatusCode !== 412) {
+      log.error(`Failed to reserve Brand Claims product feedback event=${eventId}: ${error.message}`);
+      return internalServerError('Unable to submit Brand Claims feedback');
+    }
+    try {
+      const marker = await s3.s3Client.send(new s3.GetObjectCommand({
+        Bucket: bucket,
+        Key: markerKey,
+      }));
+      recordToStore = JSON.parse(await marker.Body.transformToString());
+      if (recordToStore?.id !== eventId
+        || !['up', 'down'].includes(recordToStore?.rating)
+        || !hasText(recordToStore?.timestamp)
+        || recordToStore.organizationId !== organizationId
+        || recordToStore.siteId !== siteId
+        || recordToStore.brandId !== brandId
+        || recordToStore.abv_id !== abvId) {
+        throw new Error('invalid idempotency marker');
+      }
+    } catch (markerError) {
+      log.error(`Failed to recover Brand Claims product feedback event=${eventId}: ${markerError.message}`);
+      return internalServerError('Unable to submit Brand Claims feedback');
+    }
+  }
+
+  const timestampKey = recordToStore.timestamp.replace(/[-:.TZ]/g, '');
+  const key = `${PRODUCT_FEEDBACK_PREFIX}/${recordToStore.rating}/${recordToStore.tier}/${recordToStore.timestamp.slice(0, 10)}/${timestampKey}_${eventId}.json`;
+  try {
+    await s3.s3Client.send(new s3.PutObjectCommand({
+      Bucket: bucket,
+      Key: key,
+      Body: JSON.stringify(recordToStore),
+      ContentType: 'application/json',
+      ...encryption,
+      IfNoneMatch: '*',
+    }));
+  } catch (error) {
+    if (error?.name === 'PreconditionFailed' || error?.$metadata?.httpStatusCode === 412) {
+      return accepted({ id: eventId });
+    }
+    log.error(`Failed to store Brand Claims product feedback event=${eventId}: ${error.message}`);
+    return internalServerError('Unable to submit Brand Claims feedback');
+  }
+  log.info(`Stored Brand Claims product feedback event=${eventId} org=${organizationId} site=${siteId} brand=${brandId}`);
+  return accepted({ id: eventId });
 }
 
 // Adobe corporate and test email domains (plus their subdomains) that mark a

@@ -296,6 +296,7 @@ const routeFacsCapabilities = {
       'POST /sites/:siteId/llmo/config': 'llmo/can_configure',
       'PATCH /sites/:siteId/llmo/config': 'llmo/can_configure',
       'POST /sites/:siteId/llmo/brand-claims/request': 'llmo/can_configure',
+      'POST /sites/:siteId/llmo/brand-claims/feedback': 'llmo/can_view',
       // Site-level scraper config — a site write surfaced through the
       // generic /config namespace rather than under /llmo/, but
       // configuration nonetheless.
@@ -903,6 +904,7 @@ const routeFacsCapabilities = {
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/generation/jobs/:jobId': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags': 'llmo/can_view',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags/search': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags/:tagId/impact': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/models': 'llmo/can_view',
       // Org-level Serenity catalog reads (no brandId).

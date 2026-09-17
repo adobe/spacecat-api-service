@@ -12925,15 +12925,24 @@ SerenityTagCompatibility:
         read and return `unverified` for tags not locally provable as read-only.
     reason:
       type: [string, 'null']
-      enum: [unsupportedDepth, caseVariantRoot, ambiguousPath, separatorInName, taxonomyNotLoaded, null]
+      enum: [caseVariantRoot, ambiguousPath, separatorInName, taxonomyNotLoaded, null]
 
 SerenityTagConstraints:
   type: object
-  required: [maxPromptTagIds, maxTagFilterValues, bulkIdempotencyTtlSeconds]
+  required:
+    - maxPromptTagIds
+    - maxTagFilterValues
+    - bulkIdempotencyTtlSeconds
+    - maxTagSearchQueryLength
+    - maxTagSearchLimit
+    - defaultTagSearchLimit
   properties:
     maxPromptTagIds: { type: integer, example: 50 }
     maxTagFilterValues: { type: integer, example: 50 }
     bulkIdempotencyTtlSeconds: { type: integer, example: 86400 }
+    maxTagSearchQueryLength: { type: integer, example: 200 }
+    maxTagSearchLimit: { type: integer, example: 100 }
+    defaultTagSearchLimit: { type: integer, example: 25 }
 
 SerenityTagListResponse:
   type: object
@@ -12947,6 +12956,52 @@ SerenityTagListResponse:
     total: { type: integer, minimum: 0 }
     complete: { type: boolean }
     constraints: { $ref: '#/SerenityTagConstraints' }
+
+SerenityTagSearchItem:
+  type: object
+  additionalProperties: false
+  required: [id, name, parentId, depth, path, match]
+  properties:
+    id: { type: string }
+    name: { type: string }
+    parentId: { type: string }
+    depth: { type: integer, minimum: 2 }
+    path:
+      type: array
+      minItems: 1
+      items: { type: string }
+      description: |
+        The tag's ancestry as display names, from its top-level ancestor down to
+        and INCLUDING the tag's own name as the last element. Only the `tag`
+        dimension root is excluded, so `path` always ends with `name` and its
+        length equals `depth - 1`.
+    match:
+      type: string
+      enum: [exact, prefix, substring, path]
+
+SerenityTagSearchResponse:
+  type: object
+  additionalProperties: false
+  required: [items, cursor, complete]
+  properties:
+    items:
+      type: array
+      items: { $ref: '#/SerenityTagSearchItem' }
+    cursor:
+      type: [string, 'null']
+      description: |
+        Opaque, versioned base64url continuation state, or null on the final
+        page. It is bound to the normalized query and taxonomy revision and
+        carries no tenant or project authority.
+    complete:
+      type: boolean
+      enum: [true]
+      description: |
+        Always `true` on a 200: the page is not budget-truncated (budget
+        exhaustion and traversal failures return 503 instead). It is NOT a
+        point-in-time consistency claim — concurrent writes into an
+        already-visited level appear on a later call. Kept as a
+        forward-compatible discriminator should a degraded/partial mode ship.
 
 SerenityTagImpact:
   type: object
@@ -13012,6 +13067,38 @@ SerenityLanguageListResponse:
     items:
       type: array
       items: { $ref: '#/SerenityLanguage' }
+
+BrandClaimsFeedbackRequest:
+  type: object
+  additionalProperties: false
+  required: [eventId, brandId, rating]
+  properties:
+    eventId:
+      type: string
+      format: uuid
+      description: Client-generated UUIDv4 idempotency key for this submission.
+    brandId:
+      type: string
+      format: uuid
+      description: Brand being reviewed. The service verifies it belongs to the site's organization.
+    rating:
+      type: string
+      enum: [up, down]
+      description: Whether the Brand Claims experience was useful.
+    comment:
+      type: string
+      maxLength: 4000
+      description: Optional additional feedback.
+
+BrandClaimsFeedbackResponse:
+  type: object
+  additionalProperties: false
+  required: [id]
+  properties:
+    id:
+      type: string
+      format: uuid
+      description: Accepted feedback event id.
 
 SerenityUpdateModelsRequest:
   type: object
@@ -14674,6 +14761,22 @@ UserCapabilitiesResponse:
         items:
           type: string
           enum: [jwt, 'state:user', 'state:org']
+    siteCapabilities:
+      type: array
+      description: |
+        Composite products only (e.g. ASO). Capabilities that enforce site-wide
+        regardless of the opportunity-type qualifier (`can_configure`,
+        `can_manage_users`). Absent for non-composite products.
+      items: { $ref: '#/StateGrantedCapability' }
+    opportunityCapabilities:
+      type: object
+      description: |
+        Composite products only (e.g. ASO). Opportunity capabilities keyed by
+        the composite qualifier value (`all` = every opportunity type on the
+        resource). Absent for non-composite products.
+      additionalProperties:
+        type: array
+        items: { $ref: '#/StateGrantedCapability' }
 
 FacsAuditEvent:
   type: object
