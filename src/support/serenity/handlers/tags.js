@@ -22,7 +22,7 @@ import {
 } from '../validation.js';
 import { resolveProject } from '../subworkspace-projects.js';
 import {
-  ALL_DIMENSIONS, SERVER_OWNED_DIMENSIONS,
+  ALL_DIMENSIONS, DIMENSION, SERVER_OWNED_DIMENSIONS,
   isClosedDimension, isServerOwnedDimension, closedValuesOf, isDimensionRootName,
   MAX_TAG_NAME_LEN, dimensionOfRootName,
 } from '../prompt-tags.js';
@@ -300,6 +300,23 @@ function requireCreatedId(id) {
   return id;
 }
 
+function assertTagAuthoringDepth(
+  item,
+  maximumDepth,
+  allowUnboundedTagAuthoring,
+  message,
+) {
+  if (allowUnboundedTagAuthoring
+    || !item
+    || dimensionOfRootName(item.rootName) !== DIMENSION.TAG
+    || item.depth <= maximumDepth) {
+    return;
+  }
+  const error = new ErrorWithStatusCode(message, 400);
+  error.code = ERROR_CODES.INVALID_REQUEST;
+  throw error;
+}
+
 async function readTagDto(
   transport,
   semrushWorkspaceId,
@@ -367,6 +384,7 @@ async function resolveOpenRootId(transport, semrushWorkspaceId, projectId, dimen
  * @param {string} dimension - the open dimension named by the request.
  * @param {string | undefined} parentId - the caller-supplied parent, if any.
  * @param {object} [log] - logger.
+ * @param {boolean} [allowUnboundedTagAuthoring=false]
  * @returns {Promise<string>}
  */
 async function resolveTargetParent(
@@ -376,6 +394,7 @@ async function resolveTargetParent(
   dimension,
   parentId,
   log,
+  allowUnboundedTagAuthoring = false,
 ) {
   if (parentId === undefined) {
     return resolveOpenRootId(transport, semrushWorkspaceId, projectId, dimension, log);
@@ -391,12 +410,18 @@ async function resolveTargetParent(
     if (parent?.compatibility?.state === 'readOnly') {
       throw incompatibleTaxonomyError([parent]);
     }
-    if (!parent || parent.rootName !== 'tag' || parent.depth > 2) {
+    if (!parent || parent.rootName !== 'tag') {
       throw new ErrorWithStatusCode(
-        'parentId must be the "tag" root or one of its direct children',
+        'parentId must be the "tag" root or one of its descendants',
         400,
       );
     }
+    assertTagAuthoringDepth(
+      parent,
+      2,
+      allowUnboundedTagAuthoring,
+      'parentId must be the "tag" root or one of its direct children',
+    );
     return parentId;
   }
   await assertParentWithinDimension(
@@ -430,6 +455,7 @@ function marketNotFound() {
  * @param {string} semrushWorkspaceId - the org's (parent) workspace id.
  * @param {object} body - request body ({ type, name, geoTargetId, languageCode, parentId? }).
  * @param {object} log - logger.
+ * @param {boolean} [allowUnboundedTagAuthoring=false]
  * @returns {Promise<{status: number, body: object}>}
  */
 export async function handleCreateTag(
@@ -439,6 +465,7 @@ export async function handleCreateTag(
   semrushWorkspaceId,
   body,
   log,
+  allowUnboundedTagAuthoring = false,
 ) {
   const {
     type, name, geoTargetId, languageCode, parentId, isServerOwned,
@@ -513,6 +540,7 @@ export async function handleCreateTag(
     type,
     parentId,
     log,
+    allowUnboundedTagAuthoring,
   );
   const { byName, createdNames } = await ensureChildren(
     transport,
@@ -569,6 +597,7 @@ export async function handleCreateTag(
  * @param {string} workspaceId - the brand's subworkspace id.
  * @param {object} body - request body ({ type, name, geoTargetId, languageCode, parentId? }).
  * @param {object} log - logger.
+ * @param {boolean} [allowUnboundedTagAuthoring=false]
  * @returns {Promise<{status: number, body: object}>}
  */
 export async function handleCreateTagSubworkspace(
@@ -576,6 +605,7 @@ export async function handleCreateTagSubworkspace(
   workspaceId,
   body,
   log,
+  allowUnboundedTagAuthoring = false,
 ) {
   const {
     type, name, geoTargetId, languageCode, parentId, isServerOwned,
@@ -637,6 +667,7 @@ export async function handleCreateTagSubworkspace(
     type,
     parentId,
     log,
+    allowUnboundedTagAuthoring,
   );
   const { byName, createdNames } = await ensureChildren(
     transport,
@@ -867,6 +898,7 @@ function buildUpdatePayload(parsed, target, tagId) {
  * @param {string} tagId - upstream tag id to update.
  * @param {object} body - request body ({ name, parentId?, geoTargetId, languageCode }).
  * @param {object} log - logger.
+ * @param {boolean} [allowUnboundedTagAuthoring=false]
  * @returns {Promise<{status: number, body: object}>}
  */
 export async function handleUpdateTag(
@@ -877,6 +909,7 @@ export async function handleUpdateTag(
   tagId,
   body,
   log,
+  allowUnboundedTagAuthoring = false,
 ) {
   const id = requireTagId(tagId);
   const parsed = parseUpdateTagBody(body);
@@ -906,18 +939,24 @@ export async function handleUpdateTag(
   if (incompatible.length > 0) {
     throw incompatibleTaxonomyError(incompatible);
   }
-  if (snapshotTarget?.rootName === 'tag') {
-    const nextParent = snapshotParent
-      ?? (snapshotTarget.parentId ? snapshot.byId.get(snapshotTarget.parentId) : undefined);
-    if (!nextParent || nextParent.rootName !== 'tag' || nextParent.depth > 2) {
-      throw new ErrorWithStatusCode(
-        'plain tags may only be authored at depth 2 or 3 beneath the "tag" root',
-        400,
-      );
-    }
+  assertTagAuthoringDepth(
+    snapshotTarget,
+    3,
+    allowUnboundedTagAuthoring,
+    'plain tags may only be authored at depth 2 or 3 beneath the "tag" root',
+  );
+  if (parsed.parentId !== undefined) {
+    assertTagAuthoringDepth(
+      snapshotParent,
+      2,
+      allowUnboundedTagAuthoring,
+      'plain tags may only be authored at depth 2 or 3 beneath the "tag" root',
+    );
   }
   const target = positionFromSnapshot(snapshotTarget);
-  const parent = positionFromSnapshot(snapshotParent ?? snapshotTarget);
+  const parent = positionFromSnapshot(
+    parsed.parentId === undefined ? snapshotTarget : snapshotParent ?? undefined,
+  );
   const { name, parentIdToSend } = buildUpdatePayload(parsed, target, id);
   if (parsed.parentId !== undefined) {
     // A re-parent may move a tag within its dimension, never across one — and
@@ -967,6 +1006,7 @@ export async function handleUpdateTag(
  * @param {string} tagId - upstream tag id to update.
  * @param {object} body - request body ({ name, parentId?, geoTargetId, languageCode }).
  * @param {object} log - logger.
+ * @param {boolean} [allowUnboundedTagAuthoring=false]
  * @returns {Promise<{status: number, body: object}>}
  */
 export async function handleUpdateTagSubworkspace(
@@ -975,6 +1015,7 @@ export async function handleUpdateTagSubworkspace(
   tagId,
   body,
   log,
+  allowUnboundedTagAuthoring = false,
 ) {
   const id = requireTagId(tagId);
   const parsed = parseUpdateTagBody(body);
@@ -1000,18 +1041,24 @@ export async function handleUpdateTagSubworkspace(
   if (incompatible.length > 0) {
     throw incompatibleTaxonomyError(incompatible);
   }
-  if (snapshotTarget?.rootName === 'tag') {
-    const nextParent = snapshotParent
-      ?? (snapshotTarget.parentId ? snapshot.byId.get(snapshotTarget.parentId) : undefined);
-    if (!nextParent || nextParent.rootName !== 'tag' || nextParent.depth > 2) {
-      throw new ErrorWithStatusCode(
-        'plain tags may only be authored at depth 2 or 3 beneath the "tag" root',
-        400,
-      );
-    }
+  assertTagAuthoringDepth(
+    snapshotTarget,
+    3,
+    allowUnboundedTagAuthoring,
+    'plain tags may only be authored at depth 2 or 3 beneath the "tag" root',
+  );
+  if (parsed.parentId !== undefined) {
+    assertTagAuthoringDepth(
+      snapshotParent,
+      2,
+      allowUnboundedTagAuthoring,
+      'plain tags may only be authored at depth 2 or 3 beneath the "tag" root',
+    );
   }
   const target = positionFromSnapshot(snapshotTarget);
-  const parent = positionFromSnapshot(snapshotParent ?? snapshotTarget);
+  const parent = positionFromSnapshot(
+    parsed.parentId === undefined ? snapshotTarget : snapshotParent ?? undefined,
+  );
   const { name, parentIdToSend } = buildUpdatePayload(parsed, target, id);
   if (parsed.parentId !== undefined) {
     // A re-parent may move a tag within its dimension, never across one — and

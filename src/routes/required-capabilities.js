@@ -334,6 +334,7 @@ const routeRequiredCapabilities = {
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/generation/jobs/:jobId': 'organization:read',
   'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/generation/jobs/:jobId/reauth': 'organization:write',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags': 'organization:read',
+  'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags/search': 'organization:read',
   'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags': 'organization:write',
   'PATCH /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags/:tagId': 'organization:write',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags/:tagId/impact': 'organization:read',
@@ -551,6 +552,7 @@ const routeRequiredCapabilities = {
   'GET /sites/:siteId/geo-experiments/:geoExperimentId/results': 'site:read', // impact-measurement insights
   'GET /sites/:siteId/metrics/:metric/:source': 'site:read',
   'GET /sites/:siteId/metrics/:metric/:source/by-url/:base64PageUrl': 'site:read',
+  'GET /sites/:siteId/keyword-cpc': 'site:read',
   'GET /sites/:siteId/latest-metrics': 'site:read',
   'GET /sites/by-base-url/:baseURL': 'site:read',
   'GET /sites/by-delivery-type/:deliveryType': 'site:read',
@@ -752,6 +754,7 @@ const routeRequiredCapabilities = {
   'GET /sites/:siteId/llmo/brand-claims': 'site:read',
   'GET /sites/:siteId/llmo/brand-claims/weeks': 'site:read',
   'POST /sites/:siteId/llmo/brand-claims/request': 'site:write',
+  'POST /sites/:siteId/llmo/brand-claims/feedback': 'site:read',
   'GET /sites/:siteId/llmo/strategy/demo/brand-presence': 'site:read',
   'GET /sites/:siteId/llmo/strategy/demo/recommendations': 'site:read',
   'GET /llmo/agentic-traffic/global': 'report:read',

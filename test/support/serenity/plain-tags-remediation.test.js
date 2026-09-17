@@ -25,6 +25,7 @@ import {
 } from '../../../src/support/serenity/tag-tree.js';
 import {
   buildTagImpact,
+  handleCreateTag,
   handleDeleteTag,
   handleTagImpact,
   handleUpdateTag,
@@ -41,6 +42,10 @@ import {
   invalidateTagCacheForProject,
   listProjectTagTree,
 } from '../../../src/support/serenity/handlers/markets.js';
+import {
+  MAX_TREE_PARENT_READS,
+  TAG_TREE_PAGE_SIZE,
+} from '../../../src/support/serenity/tag-search-constants.js';
 
 use(chaiAsPromised);
 use(sinonChai);
@@ -159,6 +164,11 @@ function impactFixture() {
     updateProjectTag: sinon.stub().callsFake((_ws, _project, id, body) => {
       const current = levels['tag-root'].find((item) => item.id === id);
       current.name = body.name;
+      for (const child of levels[id] ?? []) {
+        child.path = child.path.map((part) => (
+          part.id === id ? { ...part, name: body.name } : part
+        ));
+      }
       return Promise.resolve({ id, name: body.name, parent_id: body.parentId });
     }),
     deleteProjectTags: sinon.stub().resolves(),
@@ -577,8 +587,9 @@ describe('remaining plain-tags regression coverage', () => {
       );
     });
 
-    it('fails closed with tagTreeReadIncomplete when MAX_TREE_READS is exceeded', async () => {
-      const roots = Array.from({ length: 200 }, (_, index) => (
+    it('fails closed with tagTreeLimitExceeded when the parent-read budget is exceeded', async () => {
+      const rootCount = MAX_TREE_PARENT_READS + 1;
+      const roots = Array.from({ length: rootCount }, (_, index) => (
         tagNode(`root-${index}`, `Root ${index}`, null, null, 1)
       ));
       const listProjectTags = pagedTreeStub({ '': roots });
@@ -586,9 +597,18 @@ describe('remaining plain-tags regression coverage', () => {
       await expect(readTagTreeSnapshot({ listProjectTags }, WS, PROJECT, fakeLog()))
         .to.be.rejected.then((error) => {
           expect(error.status).to.equal(503);
-          expect(error.code).to.equal('tagTreeReadIncomplete');
+          expect(error.code).to.equal('tagTreeLimitExceeded');
         });
-      expect(listProjectTags).to.have.callCount(201);
+
+      // Legacy (non-strict) traversal reads serially, one parent request at a
+      // time — every request that DOES go out is a real upstream call, so the
+      // invariant is an exact count, not a loose ceiling: the paginated root
+      // level (rootCount items at TAG_TREE_PAGE_SIZE/page, rounded up) plus
+      // EXACTLY MAX_TREE_PARENT_READS parent expansions — the budget refuses
+      // the (MAX_TREE_PARENT_READS + 1)-th expansion before ever calling
+      // upstream for it, so it never adds a call.
+      const expectedRootPages = Math.ceil(rootCount / TAG_TREE_PAGE_SIZE);
+      expect(listProjectTags.callCount).to.equal(expectedRootPages + MAX_TREE_PARENT_READS);
     });
 
     it('classifies canonical nodes and ambiguous sibling paths from one complete snapshot', async () => {
@@ -636,7 +656,7 @@ describe('remaining plain-tags regression coverage', () => {
       expect(result.byId.get('separator').compatibility)
         .to.deep.equal({ state: 'readOnly', reason: 'separatorInName' });
       expect(result.byId.get('too-deep').compatibility)
-        .to.deep.equal({ state: 'readOnly', reason: 'unsupportedDepth' });
+        .to.deep.equal({ state: 'canonical', reason: null });
     });
 
     it('classifies a case-variant tag root and its descendants as read-only', async () => {
@@ -652,6 +672,218 @@ describe('remaining plain-tags regression coverage', () => {
         .to.deep.equal({ state: 'readOnly', reason: 'caseVariantRoot' });
       expect(result.byId.get('child').compatibility)
         .to.deep.equal({ state: 'readOnly', reason: 'caseVariantRoot' });
+    });
+  });
+
+  describe('unbounded plain-tag authoring', () => {
+    function deepAuthoringFixture() {
+      const root = { id: 'tag-root', name: 'tag' };
+      const family = { id: 'family', name: 'Family' };
+      const middle = { id: 'middle', name: 'Middle' };
+      const deepParent = { id: 'deep-parent', name: 'Deep Parent' };
+      const levels = {
+        '': [tagNode(root.id, root.name, null, null, 2)],
+        [root.id]: [
+          tagNode(family.id, family.name, root.id, [root], 1),
+          tagNode('moving', 'Moving', root.id, [root]),
+        ],
+        [family.id]: [tagNode(middle.id, middle.name, family.id, [root, family], 1)],
+        [middle.id]: [
+          tagNode(deepParent.id, deepParent.name, middle.id, [root, family, middle]),
+        ],
+        [deepParent.id]: [],
+      };
+      const transport = {
+        listProjectTags: pagedTreeStub(levels),
+        createProjectTags: sinon.stub().callsFake((_ws, _project, names, options) => {
+          const created = names.map((name, index) => tagNode(
+            `created-${index}`,
+            name,
+            options.parentId,
+            [root, family, middle, deepParent],
+          ));
+          levels[options.parentId].push(...created);
+          return Promise.resolve(created);
+        }),
+        updateProjectTag: sinon.stub().callsFake((_ws, _project, id, body) => Promise.resolve({
+          id,
+          name: body.name,
+          parent_id: body.parentId,
+        })),
+        publishProject: sinon.stub().resolves(),
+      };
+      return { transport, deepParent };
+    }
+
+    function authoringDataAccess() {
+      return {
+        BrandSemrushProject: {
+          findBySlice: sinon.stub().resolves({ getSemrushProjectId: () => PROJECT }),
+        },
+      };
+    }
+
+    it('creates a customer-owned tag below a depth-4 parent', async () => {
+      const { transport, deepParent } = deepAuthoringFixture();
+      const result = await handleCreateTag(
+        transport,
+        authoringDataAccess(),
+        BRAND,
+        WS,
+        {
+          type: 'tag',
+          name: 'Deep Child',
+          parentId: deepParent.id,
+          geoTargetId: 2840,
+          languageCode: 'en',
+        },
+        fakeLog(),
+        true,
+      );
+
+      expect(result.status).to.equal(201);
+      expect(result.body).to.include({
+        id: 'created-0',
+        name: 'Deep Child',
+        parentId: deepParent.id,
+      });
+      expect(transport.createProjectTags).to.have.been.calledWith(
+        WS,
+        PROJECT,
+        ['Deep Child'],
+        { parentId: deepParent.id },
+      );
+    });
+
+    it('re-parents a customer-owned tag below a depth-4 parent', async () => {
+      const { transport, deepParent } = deepAuthoringFixture();
+      const result = await handleUpdateTag(
+        transport,
+        authoringDataAccess(),
+        BRAND,
+        WS,
+        'moving',
+        {
+          name: 'Moving',
+          parentId: deepParent.id,
+          geoTargetId: 2840,
+          languageCode: 'en',
+        },
+        fakeLog(),
+        true,
+      );
+
+      expect(result.status).to.equal(200);
+      expect(result.body.parentId).to.equal(deepParent.id);
+      expect(result.body.path.map((part) => part.id))
+        .to.deep.equal(['tag-root', 'family', 'middle', 'deep-parent']);
+      expect(transport.updateProjectTag).to.have.been.calledWith(
+        WS,
+        PROJECT,
+        'moving',
+        { name: 'Moving', parentId: deepParent.id },
+      );
+    });
+
+    it('rejects re-parenting to an unknown tag without calling Semrush update', async () => {
+      const { transport } = deepAuthoringFixture();
+
+      await expect(handleUpdateTag(
+        transport,
+        authoringDataAccess(),
+        BRAND,
+        WS,
+        'moving',
+        {
+          name: 'Moving',
+          parentId: 'missing-parent',
+          geoTargetId: 2840,
+          languageCode: 'en',
+        },
+        fakeLog(),
+      )).to.be.rejected.then((error) => {
+        expect(error.status).to.equal(400);
+        expect(error.message).to.equal('parentId does not resolve to a tag on this market');
+      });
+      expect(transport.updateProjectTag).not.to.have.been.called;
+    });
+
+    it('keeps deep create disabled by default while preserving the existing tree', async () => {
+      const { transport, deepParent } = deepAuthoringFixture();
+
+      await expect(handleCreateTag(
+        transport,
+        authoringDataAccess(),
+        BRAND,
+        WS,
+        {
+          type: 'tag',
+          name: 'Blocked Deep Child',
+          parentId: deepParent.id,
+          geoTargetId: 2840,
+          languageCode: 'en',
+        },
+        fakeLog(),
+      )).to.be.rejected.then((error) => {
+        expect(error.status).to.equal(400);
+        expect(error.code).to.equal('invalidRequest');
+        expect(error.message)
+          .to.equal('parentId must be the "tag" root or one of its direct children');
+        expect(error).not.to.have.property('details');
+      });
+      expect(transport.createProjectTags).not.to.have.been.called;
+      expect(transport.updateProjectTag).not.to.have.been.called;
+    });
+
+    it('rejects create under an unknown parent as an invalid request', async () => {
+      const { transport } = deepAuthoringFixture();
+
+      await expect(handleCreateTag(
+        transport,
+        authoringDataAccess(),
+        BRAND,
+        WS,
+        {
+          type: 'tag',
+          name: 'Missing Parent Child',
+          parentId: 'missing-parent',
+          geoTargetId: 2840,
+          languageCode: 'en',
+        },
+        fakeLog(),
+        true,
+      )).to.be.rejected.then((error) => {
+        expect(error.status).to.equal(400);
+        expect(error.message)
+          .to.equal('parentId must be the "tag" root or one of its descendants');
+      });
+      expect(transport.createProjectTags).not.to.have.been.called;
+    });
+
+    it('keeps deep re-parent disabled by default without changing the existing tag', async () => {
+      const { transport, deepParent } = deepAuthoringFixture();
+
+      await expect(handleUpdateTag(
+        transport,
+        authoringDataAccess(),
+        BRAND,
+        WS,
+        'moving',
+        {
+          name: 'Moving',
+          parentId: deepParent.id,
+          geoTargetId: 2840,
+          languageCode: 'en',
+        },
+        fakeLog(),
+      )).to.be.rejected.then((error) => {
+        expect(error.status).to.equal(400);
+        expect(error.code).to.equal('invalidRequest');
+        expect(error.message)
+          .to.equal('plain tags may only be authored at depth 2 or 3 beneath the "tag" root');
+        expect(error).not.to.have.property('details');
+      });
+      expect(transport.updateProjectTag).not.to.have.been.called;
     });
   });
 

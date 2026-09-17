@@ -1,3 +1,52 @@
+# [1.822.0](https://github.com/adobe/spacecat-api-service/compare/v1.821.0...v1.822.0) (2026-09-17)
+
+
+### Features
+
+* **sites:** add keyword-cpc endpoint for per-topic CPC ([#3293](https://github.com/adobe/spacecat-api-service/issues/3293)) ([aabafab](https://github.com/adobe/spacecat-api-service/commit/aabafab06a6b3e2245efbc646e532a7e68420b83))
+* support GitHub Copilot traffic filters ([#3308](https://github.com/adobe/spacecat-api-service/issues/3308)) ([b640315](https://github.com/adobe/spacecat-api-service/commit/b6403159cc322ddc3cba7e66499ac998e724e0eb)), closes [Hi#level](https://github.com/Hi/issues/level) [adobe/spacecat-audit-worker#2991](https://github.com/adobe/spacecat-audit-worker/issues/2991) [adobe/project-elmo-ui#3201](https://github.com/adobe/project-elmo-ui/issues/3201) [adobe/spacecat-audit-worker#2991](https://github.com/adobe/spacecat-audit-worker/issues/2991) [adobe/project-elmo-ui#3201](https://github.com/adobe/project-elmo-ui/issues/3201)
+
+# [1.821.0](https://github.com/adobe/spacecat-api-service/compare/v1.820.1...v1.821.0) (2026-09-17)
+
+
+### Bug Fixes
+
+* surface revoke-entitlement-imsorg errors to Slack ([#3305](https://github.com/adobe/spacecat-api-service/issues/3305)) ([1f76244](https://github.com/adobe/spacecat-api-service/commit/1f762447ac31bf15be04afd7ee57a194067e6bef))
+
+
+### Features
+
+* **facs:** store site-level caps on a dedicated (scope,'site') row ([#3303](https://github.com/adobe/spacecat-api-service/issues/3303)) ([453599c](https://github.com/adobe/spacecat-api-service/commit/453599c94e16ee8270607832165ecbd0baec415a)), closes [OneAdobe/experience-success-studio-ui#2228](https://github.com/OneAdobe/experience-success-studio-ui/issues/2228)
+* support Meta agentic traffic filters ([#3306](https://github.com/adobe/spacecat-api-service/issues/3306)) ([592a818](https://github.com/adobe/spacecat-api-service/commit/592a818dfbfcd622bc629f3782f0384b415a1dc9)), closes [adobe/spacecat-audit-worker#2986](https://github.com/adobe/spacecat-audit-worker/issues/2986) [Hi#level](https://github.com/Hi/issues/level) [adobe/spacecat-audit-worker#2986](https://github.com/adobe/spacecat-audit-worker/issues/2986) [adobe/project-elmo-ui#3201](https://github.com/adobe/project-elmo-ui/issues/3201) [adobe/spacecat-audit-worker#2986](https://github.com/adobe/spacecat-audit-worker/issues/2986) [adobe/spacecat-audit-worker#2986](https://github.com/adobe/spacecat-audit-worker/issues/2986) [adobe/project-elmo-ui#3201](https://github.com/adobe/project-elmo-ui/issues/3201)
+
+## [1.820.1](https://github.com/adobe/spacecat-api-service/compare/v1.820.0...v1.820.1) (2026-09-17)
+
+
+### Bug Fixes
+
+* **serenity:** use strict base64url search cursors ([#3302](https://github.com/adobe/spacecat-api-service/issues/3302)) ([e539cec](https://github.com/adobe/spacecat-api-service/commit/e539cecb23b17ddfc947dbd4c97ce38c182cd80f))
+
+# [1.820.0](https://github.com/adobe/spacecat-api-service/compare/v1.819.0...v1.820.0) (2026-09-17)
+
+
+### Features
+
+* store Brand Claims feedback | LLMO-7665 ([#3297](https://github.com/adobe/spacecat-api-service/issues/3297)) ([8f64f33](https://github.com/adobe/spacecat-api-service/commit/8f64f339a976ff73f4c7eb4a3d9f07e1c3b5af2d))
+
+# [1.819.0](https://github.com/adobe/spacecat-api-service/compare/v1.818.0...v1.819.0) (2026-09-17)
+
+
+### Features
+
+* **serenity:** support unbounded nested tags ([#3291](https://github.com/adobe/spacecat-api-service/issues/3291)) ([125b02c](https://github.com/adobe/spacecat-api-service/commit/125b02c2191b56a02b525a0e12c7bfec8eae2cfe)), closes [adobe/serenity-docs#26](https://github.com/adobe/serenity-docs/issues/26) [adobe/spacecat-shared#1931](https://github.com/adobe/spacecat-shared/issues/1931)
+
+# [1.818.0](https://github.com/adobe/spacecat-api-service/compare/v1.817.0...v1.818.0) (2026-09-17)
+
+
+### Features
+
+* **facs:** opportunity-type-aware user capabilities + site-cap scope guard ([#3300](https://github.com/adobe/spacecat-api-service/issues/3300)) ([d93eb04](https://github.com/adobe/spacecat-api-service/commit/d93eb04a02f515bbe135bc8f4881ca1cd9edaf46))
+
 # [1.817.0](https://github.com/adobe/spacecat-api-service/compare/v1.816.0...v1.817.0) (2026-09-16)
 
 

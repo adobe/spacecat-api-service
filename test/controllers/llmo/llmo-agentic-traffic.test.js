@@ -292,10 +292,12 @@ describe('llmo-agentic-traffic', () => {
       ['google', 'Google'],
       ['google-ai-mode', 'Google AI Mode'],
       ['copilot', 'Copilot'],
+      ['githubcopilot', 'GitHub Copilot'],
       ['amazon', 'Amazon'],
       ['parallel', 'Parallel.ai'],
       ['manus', 'Manus'],
       ['keenable', 'Keenable.ai'],
+      ['meta-ai', 'Meta'],
       ['all', null],
       [undefined, null],
       ['unknown-code', null],
@@ -324,13 +326,13 @@ describe('llmo-agentic-traffic', () => {
   });
 
   describe('platform multi-select (Serenity)', () => {
-    it('maps a comma list to p_platforms and nulls the scalar p_platform', async () => {
+    it('keeps generic Copilot and GitHub Copilot as distinct platform filters', async () => {
       const client = createMockClient({ rpc_agentic_traffic_kpis: { data: [], error: null } });
-      const ctx = makeContext({ client, data: { startDate: '2026-01-01', endDate: '2026-01-28', platform: 'chatgpt,gemini' } });
+      const ctx = makeContext({ client, data: { startDate: '2026-01-01', endDate: '2026-01-28', platform: 'copilot,githubcopilot' } });
       await createAgenticTrafficKpisHandler(stubbedValidateAccess)(ctx);
       expect(client.rpc).to.have.been.calledWithMatch('rpc_agentic_traffic_kpis', {
         p_platform: null,
-        p_platforms: ['ChatGPT', 'Gemini'],
+        p_platforms: ['Copilot', 'GitHub Copilot'],
       });
     });
 
@@ -1911,7 +1913,7 @@ describe('llmo-agentic-traffic', () => {
           data: [{
             categories: ['Electronics', 'Fashion'],
             agent_types: ['Chatbots', 'Research'],
-            platforms: ['ChatGPT', 'Perplexity'],
+            platforms: ['ChatGPT', 'Meta', 'Perplexity'],
             content_types: ['article', 'product'],
             user_agents: ['ClaudeBot', 'GPTBot', 'PerplexityBot'],
           }],
@@ -1925,7 +1927,7 @@ describe('llmo-agentic-traffic', () => {
       const body = await res.json();
       expect(body.categories).to.deep.equal(['Electronics', 'Fashion']);
       expect(body.agentTypes).to.deep.equal(['Chatbots', 'Research']);
-      expect(body.platforms).to.deep.equal(['ChatGPT', 'Perplexity']);
+      expect(body.platforms).to.deep.equal(['ChatGPT', 'Meta', 'Perplexity']);
       expect(body.contentTypes).to.deep.equal(['article', 'product']);
       expect(body.userAgents).to.deep.equal(['ClaudeBot', 'GPTBot', 'PerplexityBot']);
     });
