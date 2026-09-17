@@ -139,10 +139,5 @@ export function buildEnv(publicKeyB64) {
     SERENITY_ALLOW_NON_IMS_AUTH: 'true',
     // Lets the net-zero cleanup delete a sub-workspace it created in the mock.
     SERENITY_ALLOW_WORKSPACE_DELETE: 'true',
-    // GET /serenity/tags/search signs its opaque pagination cursor with this
-    // secret alone (no fallback to IMS_CLIENT_SECRET/AUTOFIX_CRYPT_SECRET —
-    // see src/controllers/serenity.js#searchTags). Without it the handler
-    // fails closed with 503 tagSearchUnavailable before ever reaching the mock.
-    SERENITY_TAG_SEARCH_CURSOR_SECRET: 'it-tag-search-cursor-secret',
   };
 }

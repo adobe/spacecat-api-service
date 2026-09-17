@@ -2571,6 +2571,36 @@ PageMetricList:
   items:
     oneOf:
       - $ref: './schemas.yaml#/PageOrganicKeywords'
+KeywordCpc:
+  type: object
+  properties:
+    keyword:
+      type: string
+      description: The keyword phrase (Semrush `Ph`).
+    volume:
+      type: integer
+      description: Monthly search volume for the keyword (Semrush `Nq`).
+    cpc:
+      type: integer
+      description: Cost-per-click in integer US cents (Semrush `Cp` × 100); `0` when unknown.
+  required:
+    - keyword
+    - volume
+    - cpc
+KeywordCpcList:
+  type: object
+  properties:
+    baseURL:
+      type: string
+      format: uri
+      description: The site base URL the keywords were fetched for.
+    keywords:
+      type: array
+      items:
+        $ref: './schemas.yaml#/KeywordCpc'
+  required:
+    - baseURL
+    - keywords
 DocImportData:
   title: 'Doc Import'
   description: 'There are no data properties available for doc based imports.'
@@ -4274,6 +4304,50 @@ FixList:
   type: array
   items:
     $ref: '#/Fix'
+
+DeployedOpportunity:
+  type: object
+  description: A single opportunity deployment (a DEPLOYED/PUBLISHED fix joined to its opportunity title).
+  properties:
+    opportunityId:
+      type: string
+      format: uuid
+    opportunityTitle:
+      type: [string, 'null']
+      description: The deployed opportunity's title, or null if it could not be resolved.
+    type:
+      type: string
+      description: Fix type (e.g. CONTENT_UPDATE, REDIRECT_UPDATE).
+    status:
+      type: string
+      description: Fix status — DEPLOYED or PUBLISHED.
+    fixId:
+      type: string
+      format: uuid
+    deployedAt:
+      type: string
+      format: date-time
+      description: The deploy moment (deployedAt, falling back to executedAt).
+    changeDetails:
+      type: object
+      description: |
+        Structured description of what the fix changed (mirrors the fix's `changeDetails`).
+        May be large — can include diffs — and is returned for every deploy in the response.
+
+DeployedOpportunitiesTimeline:
+  type: array
+  description: Deployed opportunities grouped by UTC deploy date, ascending.
+  items:
+    type: object
+    properties:
+      date:
+        type: string
+        description: UTC deploy date (YYYY-MM-DD).
+        example: '2026-08-15'
+      deployments:
+        type: array
+        items:
+          $ref: '#/DeployedOpportunity'
 
 FixListResponse:
   type: object
@@ -9695,6 +9769,190 @@ SerenityUrlInspectorUrlPrompts:
         $ref: '#/SerenityUrlInspectorUrlPromptRow'
   required: [prompts]
 
+SerenityOwnedUrlRow:
+  type: object
+  description: |
+    One owned URL from the URL Inspector "Your cited URLs" table. Citations,
+    `weeklyCitations` and `regions` come from the Semrush Stats-per-URL element;
+    `agenticHits`/`agenticHitsTrend`/`referralHits`/`referralHitsTrend` are
+    hybrid-joined server-side from the Adobe Postgres traffic pipeline (NOT
+    Semrush) by `(site_id, url_path)` — the only non-Semrush data on this row.
+    They default to `0`/`[]` when `siteId` is omitted from the request, the
+    traffic RPC errors, or the URL has no matching Postgres traffic in range.
+  required: [urlId, url, citations, promptsCited, products, regions, weeklyCitations, weeklyPromptsCited, agenticHits, agenticHitsTrend, referralHits, referralHitsTrend]
+  properties:
+    urlId:
+      type: string
+      description: Always empty — Semrush has no `source_urls.id` equivalent (LLMO-6086 gap).
+      example: ''
+    url:
+      type: string
+      format: uri
+      example: 'https://www.lovesac.com/sactionals/'
+    citations:
+      type: integer
+      example: 42
+    promptsCited:
+      type: integer
+      example: 11
+    products:
+      type: array
+      items: { type: string }
+      description: Always empty — no per-URL product source on the element (Semrush gap).
+      example: []
+    regions:
+      type: array
+      items: { type: string }
+      example: ['US']
+    weeklyCitations:
+      type: array
+      description: Per-ISO-week citation counts (`week` is `YYYY-'W'WW`, e.g. `2026-W07`).
+      items:
+        type: object
+        properties:
+          week: { type: string, example: '2026-W07' }
+          value: { type: integer, example: 6 }
+        required: [week, value]
+    weeklyPromptsCited:
+      type: array
+      description: Always empty — the trend element exposes mentions + positions only (Semrush gap).
+      items: { type: object }
+      example: []
+    agenticHits:
+      type: integer
+      description: |
+        Sum of CDN-log agentic-traffic hits for this URL from Postgres, scoped
+        to the request's `agentTypes` inclusion list (omitted → every agent
+        type). `0` when `siteId` was not supplied or no Postgres traffic
+        matched.
+      example: 128
+    agenticHitsTrend:
+      type: array
+      description: Per-week agentic-hits breakdown from the same Postgres join, sorted ascending by `weekStart`.
+      items:
+        type: object
+        properties:
+          weekStart: { type: [string, 'null'], format: date, example: '2026-02-09' }
+          value: { type: integer, example: 18 }
+        required: [weekStart, value]
+    referralHits:
+      type: integer
+      description: |
+        Sum of referral pageviews for this URL from `referral_traffic_<source>`,
+        selected by the request's `referralSource` (default `optel`). `0` when
+        `siteId` was not supplied or no Postgres traffic matched.
+      example: 5
+    referralHitsTrend:
+      type: array
+      description: Per-week referral-hits breakdown from the same Postgres join, sorted ascending by `weekStart`.
+      items:
+        type: object
+        properties:
+          weekStart: { type: [string, 'null'], format: date, example: '2026-02-09' }
+          value: { type: integer, example: 1 }
+        required: [weekStart, value]
+
+SerenityOwnedUrlsResponse:
+  type: object
+  properties:
+    urls:
+      type: array
+      items:
+        $ref: '#/SerenityOwnedUrlRow'
+    totalCount:
+      type: integer
+      description: Full post-filter (owned) URL count, independent of `page`/`pageSize`.
+      example: 137
+  required: [urls, totalCount]
+
+SerenityCitedDomainRow:
+  type: object
+  description: One domain cited alongside owned URLs, from the Semrush Cited Domains element.
+  required: [domain, totalCitations, totalUrls, promptsCited, contentType, categories, regions]
+  properties:
+    domain:
+      type: string
+      example: 'reddit.com'
+    totalCitations:
+      type: integer
+      example: 84
+    totalUrls:
+      type: integer
+      example: 6
+    promptsCited:
+      type: integer
+      example: 19
+    contentType:
+      type: string
+      description: Semrush ownership classification (e.g. `Owned`, `Third Party`); drives the UI's owned-vs-third-party filter.
+      example: 'Third Party'
+    categories:
+      type: string
+      description: Always empty — no per-domain category source on the element (Semrush gap).
+      example: ''
+    regions:
+      type: string
+      description: Always empty — no per-domain region source on the element (Semrush gap).
+      example: ''
+
+SerenityCitedDomainsResponse:
+  type: object
+  properties:
+    domains:
+      type: array
+      items:
+        $ref: '#/SerenityCitedDomainRow'
+    totalCount:
+      type: integer
+      description: Full post-filter domain count, independent of `page`/`pageSize`.
+      example: 52
+  required: [domains, totalCount]
+
+SerenityDomainUrlRow:
+  type: object
+  description: One URL under a cited domain (Cited Third-Party drilldown), from the same Semrush element as owned-urls minus the traffic hybrid.
+  required: [urlId, url, contentType, citations, promptsCited, categories, regions]
+  properties:
+    urlId:
+      type: string
+      description: Always empty — Semrush has no `source_urls.id` equivalent (LLMO-6086/6160 gap).
+      example: ''
+    url:
+      type: string
+      format: uri
+      example: 'https://www.reddit.com/r/BuyItForLife/comments/example/'
+    contentType:
+      type: string
+      description: Semrush ownership classification (e.g. `Owned`, `Third Party`).
+      example: 'Third Party'
+    citations:
+      type: integer
+      example: 3
+    promptsCited:
+      type: integer
+      example: 2
+    categories:
+      type: string
+      description: Always empty — no per-URL category source on the element (Semrush gap).
+      example: ''
+    regions:
+      type: string
+      description: Comma-joined region codes (unlike `SerenityOwnedUrlRow.regions`, which is an array).
+      example: 'US,CA'
+
+SerenityDomainUrlsResponse:
+  type: object
+  properties:
+    urls:
+      type: array
+      items:
+        $ref: '#/SerenityDomainUrlRow'
+    totalCount:
+      type: integer
+      description: Full post-filter (post-hostname-filter, when supplied) URL count, independent of `page`/`pageSize`.
+      example: 8
+  required: [urls, totalCount]
+
 UrlInspectorFilterDimensions:
   type: object
   description: |
@@ -12989,7 +13247,10 @@ SerenityTagSearchResponse:
       items: { $ref: '#/SerenityTagSearchItem' }
     cursor:
       type: [string, 'null']
-      description: Opaque continuation cursor, or null on the final page.
+      description: |
+        Opaque, versioned base64url continuation state, or null on the final
+        page. It is bound to the normalized query and taxonomy revision and
+        carries no tenant or project authority.
     complete:
       type: boolean
       enum: [true]

@@ -232,6 +232,12 @@ paths:
     $ref: './serenity-api.yaml#/v2-serenity-url-inspector-prompts-count'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/url-inspector/url-prompts:
     $ref: './serenity-api.yaml#/v2-serenity-url-inspector-url-prompts'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/url-inspector/owned-urls:
+    $ref: './serenity-api.yaml#/v2-serenity-url-inspector-owned-urls'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/url-inspector/cited-domains:
+    $ref: './serenity-api.yaml#/v2-serenity-url-inspector-cited-domains'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/url-inspector/domain-urls:
+    $ref: './serenity-api.yaml#/v2-serenity-url-inspector-domain-urls'
   /organizations/{organizationId}/sites:
     $ref: './sites-api.yaml#/sites-for-organization'
   /organizations/{organizationId}/entitlements:
@@ -591,10 +597,14 @@ paths:
     $ref: './site-metrics-api.yaml#/site-metrics-by-source'
   /sites/{siteId}/metrics/{metric}/{source}/by-url/{base64PageUrl}:
     $ref: './site-metrics-api.yaml#/page-metrics-by-source'
+  /sites/{siteId}/keyword-cpc:
+    $ref: './site-metrics-api.yaml#/site-keyword-cpc'
   /sites/{siteId}/experiments:
     $ref: './experiments-api.yaml#/experiments'
   /sites/{siteId}/fixes:
     $ref: './site-opportunities.yaml#/site-fixes'
+  /sites/{siteId}/deployed-opportunities:
+    $ref: './site-opportunities.yaml#/site-deployed-opportunities'
   /sites/{siteId}/opportunities/{opportunityId}/fixes:
     $ref: './site-opportunities.yaml#/site-opportunity-fixes'
   /sites/{siteId}/opportunities/{opportunityId}/fixes/by-status/{status}:

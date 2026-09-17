@@ -15,6 +15,8 @@ import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import {
   isTagSearchDisabled,
+  MAX_TAG_SEARCH_CURSOR_DECODED_BYTES,
+  MAX_TAG_SEARCH_CURSOR_LENGTH,
   MAX_TREE_CONCURRENCY,
   MAX_TREE_DURATION_MS,
   MAX_TREE_NODES,
@@ -33,6 +35,11 @@ const DEFAULTS = {
 };
 
 describe('Serenity tag-tree budget configuration', () => {
+  it('pins cursor input and decoded-payload limits', () => {
+    expect(MAX_TAG_SEARCH_CURSOR_LENGTH).to.equal(4096);
+    expect(MAX_TAG_SEARCH_CURSOR_DECODED_BYTES).to.equal(2048);
+  });
+
   it('falls back to the compiled defaults with no env', () => {
     expect(resolveTagTreeBudgets(undefined)).to.deep.equal(DEFAULTS);
     expect(resolveTagTreeBudgets({})).to.deep.equal(DEFAULTS);

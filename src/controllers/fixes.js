@@ -39,6 +39,7 @@ import AccessControlUtil from '../support/access-control-util.js';
 import { FixDto } from '../dto/fix.js';
 import { SuggestionDto } from '../dto/suggestion.js';
 import { isValidLocale } from '../utils/validations.js';
+import { isYmdDate } from '../utils/date-utils.js';
 import { resolveDocumentPath } from '../support/document-path-resolver.js';
 import { filterOpportunitiesByFacsComposite } from '../support/facs-composite-resolvers.js';
 import { getIMSPromiseToken, exchangePromiseToken } from '../support/utils.js';
@@ -58,7 +59,8 @@ const IMS_ENRICH_BATCH_SIZE = 5;
 const DEFAULT_SITE_FIXES_LIMIT = 200;
 const MAX_SITE_FIXES_LIMIT = 1000;
 
-// Fix statuses that count as an already-live deployment for dedupe purposes.
+// Fix statuses that count as an already-live deployment (used for dedupe and by the
+// deployed-opportunities timeline).
 const ACTIVE_FIX_STATUSES = [
   FixEntityModel.STATUSES.DEPLOYED,
   FixEntityModel.STATUSES.PUBLISHED,
@@ -280,6 +282,127 @@ export class FixesController {
 
     await this.#enrichFixesWithUserNames(fixEntities);
     return ok(fixEntities.map((fix) => FixDto.toJSON(fix, locale)));
+  }
+
+  /**
+   * Returns a site's opportunities deployed per date, for the (experiment) overview
+   * "deployed opportunities" timeline overlay. A deploy is a fix in DEPLOYED/PUBLISHED
+   * status; its date is `deployedAt ?? executedAt` (the deploy moment). Optionally
+   * windowed by `from`/`to` (`YYYY-MM-DD`, inclusive UTC-day bounds). Each fix is joined to
+   * its opportunity title server-side, so the client renders markers without a second fetch.
+   *
+   * This is a purpose-shaped, experiment-scoped endpoint kept separate from
+   * `getAllForSite` (the stable generic fixes list) so it can evolve or be removed with
+   * the experiment. Response: `[{ date: 'YYYY-MM-DD', deployments: [{ opportunityId,
+   * opportunityTitle, type, status, fixId, deployedAt, changeDetails }] }]`, sorted
+   * ascending by date. Fixes with no anchor timestamp are excluded (can't be placed on a
+   * date). The aggregation is multiplicative across a site's opportunities, so it is
+   * capped by `limit` (default DEFAULT_SITE_FIXES_LIMIT, max MAX_SITE_FIXES_LIMIT),
+   * keeping the **most recent** deploys when the cap bites.
+   *
+   * @param {RequestContext} context - request context
+   * @returns {Promise<Response>} Deploy-timeline buckets response.
+   */
+  async getDeployedOpportunitiesForSite(context) {
+    const { siteId } = context.params;
+    const from = context.data?.from ?? null;
+    const to = context.data?.to ?? null;
+    const limitParam = context.data?.limit ?? null;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    const res = await this.#checkAccess(siteId);
+    if (res) {
+      return res;
+    }
+
+    if (hasText(from) && !isYmdDate(from)) {
+      return badRequest('from must be a valid date (YYYY-MM-DD)');
+    }
+    if (hasText(to) && !isYmdDate(to)) {
+      return badRequest('to must be a valid date (YYYY-MM-DD)');
+    }
+    // Inclusive UTC-day window: from = start of the day, to = end of the day.
+    const fromTime = hasText(from) ? Date.parse(`${from}T00:00:00.000Z`) : null;
+    const toTime = hasText(to) ? Date.parse(`${to}T23:59:59.999Z`) : null;
+    if (fromTime !== null && toTime !== null && fromTime > toTime) {
+      return badRequest('from must not be after to');
+    }
+
+    const parsedLimit = hasText(limitParam) ? parseInt(limitParam, 10) : DEFAULT_SITE_FIXES_LIMIT;
+    if (!Number.isInteger(parsedLimit) || parsedLimit <= 0) {
+      return badRequest('limit must be a positive integer');
+    }
+    const effectiveLimit = Math.min(parsedLimit, MAX_SITE_FIXES_LIMIT);
+
+    // FACS composite scope (see getAllForSite) + opportunity-title lookup for the join.
+    const opportunities = filterOpportunitiesByFacsComposite(
+      context,
+      await this.#Opportunity.allBySiteId(siteId),
+    );
+    const titleByOpportunityId = new Map(opportunities.map((o) => [o.getId(), o.getTitle()]));
+    const opportunityIds = opportunities.map((o) => o.getId());
+
+    const fixEntities = opportunityIds.length > 0
+      ? await this.#FixEntity.allByOpportunityIds(opportunityIds)
+      : [];
+
+    // Keep only already-live deploys with a usable anchor inside the window, ordered by
+    // deploy time DESCENDING so the cap keeps the most recent deploys (the end of the
+    // timeline the overlay most wants) rather than the oldest. The numeric anchor `t` is
+    // computed once and reused for filtering, sorting, and day-bucketing.
+    const deploys = fixEntities
+      .map((fix) => {
+        const anchor = fix.getDeployedAt() ?? fix.getExecutedAt();
+        return { fix, anchor, t: anchor ? new Date(anchor).getTime() : NaN };
+      })
+      .filter(({ fix, t }) => {
+        if (!ACTIVE_FIX_STATUSES.includes(fix.getStatus())) {
+          return false;
+        }
+        if (Number.isNaN(t)) {
+          return false;
+        }
+        if (fromTime !== null && t < fromTime) {
+          return false;
+        }
+        if (toTime !== null && t > toTime) {
+          return false;
+        }
+        return true;
+      })
+      .sort((a, b) => b.t - a.t)
+      .slice(0, effectiveLimit);
+
+    // Group by UTC deploy day.
+    const bucketsByDate = new Map();
+    deploys.forEach(({ fix, anchor, t }) => {
+      const date = new Date(t).toISOString().slice(0, 10);
+      const deployment = FixDto.toDeployedOpportunityJSON(
+        fix,
+        titleByOpportunityId.get(fix.getOpportunityId()) ?? null,
+        anchor,
+      );
+      if (bucketsByDate.has(date)) {
+        bucketsByDate.get(date).push(deployment);
+      } else {
+        bucketsByDate.set(date, [deployment]);
+      }
+    });
+
+    const buckets = [...bucketsByDate.entries()]
+      .sort(([a], [b]) => (a < b ? -1 : 1))
+      .map(([date, deployments]) => ({
+        date,
+        // Chronological within a day (the retained set is newest-first from the cap sort).
+        deployments: deployments.sort(
+          (x, y) => new Date(x.deployedAt).getTime() - new Date(y.deployedAt).getTime(),
+        ),
+      }));
+
+    return ok(buckets);
   }
 
   /**

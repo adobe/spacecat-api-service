@@ -10,7 +10,10 @@
  * governing permissions and limitations under the License.
  */
 
-import { fromJson, toJson } from '@bufbuild/protobuf';
+import {
+  fromJson,
+  toJson,
+} from '@bufbuild/protobuf';
 import {
   BrandCompetitorsRequestSchema,
   BrandCompetitorsResponseSchema,
@@ -20,11 +23,12 @@ import {
   PROTO_TO_JSON,
   responseFromGrpcError,
   resolveSearchType,
+  normalizeAiVisibilityTarget,
 } from '../../../grpc-utils.js';
 
 /* c8 ignore start */
 export async function handleCompetitors(sp, clients) {
-  const domain = sp.get('domain');
+  const domain = normalizeAiVisibilityTarget(sp.get('domain'));
   if (!domain) {
     return {
       status: 400,
