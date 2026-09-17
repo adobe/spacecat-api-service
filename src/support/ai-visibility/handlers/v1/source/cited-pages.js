@@ -10,7 +10,10 @@
  * governing permissions and limitations under the License.
  */
 
-import { fromJson, toJson } from '@bufbuild/protobuf';
+import {
+  fromJson,
+  toJson,
+} from '@bufbuild/protobuf';
 import {
   COUNTRY_ENUM,
   LLM_ENUM,
@@ -33,6 +36,7 @@ import {
   resolveSearchType,
   PROTO_FROM_JSON,
   PROTO_TO_JSON,
+  normalizeAiVisibilityTarget,
 } from '../../../grpc-utils.js';
 
 /* c8 ignore start */
@@ -45,7 +49,13 @@ export function buildCitedPagesFilterQl(sp) {
 }
 
 export async function handleCitedPages(sp, clients) {
-  const domain = sp.get('domain');
+  const domain = normalizeAiVisibilityTarget(sp.get('domain'));
+  if (!domain) {
+    return {
+      status: 400,
+      body: { error: 'invalid_request', message: 'domain is required' },
+    };
+  }
   const engine = engineToLlm(sp.get('engine')) || LLM_ENUM.ALL;
   const country = resolveCountry(sp) || COUNTRY_ENUM.WORLDWIDE;
   const sortBy = sp.get('sortBy') || SOURCES_REQUEST_ORDER_BY_ENUM.PROMPTS_COUNT;
