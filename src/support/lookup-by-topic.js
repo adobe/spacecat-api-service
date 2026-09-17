@@ -188,7 +188,8 @@ async function resolveTopicVectors(postgrestClient, embeddingClient, texts, log)
   texts.forEach((text, i) => {
     if (cached[i]?.vector) {
       vectorByText.set(text, cached[i].vector);
-      hits.push(text);
+      // carry the hit's textHash so the access bump skips re-hashing (it's already resolved).
+      hits.push({ text, textHash: cached[i].textHash });
     } else {
       misses.push(text);
     }
@@ -212,8 +213,9 @@ async function resolveTopicVectors(postgrestClient, embeddingClient, texts, log)
     log?.debug?.(`[lookup-by-topic] ${label} failed (non-fatal): ${e.message}`);
   };
   const writes = [
-    ...hits.map((text) => () => touchQueryEmbedding(postgrestClient, { text, ...cacheKey })
-      .catch(swallow('touchQueryEmbedding'))),
+    ...hits.map(({ text, textHash }) => () => touchQueryEmbedding(postgrestClient, {
+      text, textHash, ...cacheKey,
+    }).catch(swallow('touchQueryEmbedding'))),
     ...misses.map((text) => () => upsertQueryEmbedding(postgrestClient, {
       text, ...cacheKey, vector: vectorByText.get(text),
     }).catch(swallow('upsertQueryEmbedding'))),
