@@ -96,6 +96,14 @@ function tagNode(id, name, parentId, path, childrenCount = 0) {
 
 function requestHash(body) {
   return createHash('sha256').update(JSON.stringify({
+    scope: {
+      orgId: 'org-1',
+      brandId: BRAND,
+      projectId: PROJECT,
+      callerId: 'caller',
+    },
+    geoTargetId: body.geoTargetId,
+    languageCode: body.languageCode,
     operation: body.operation,
     tagIds: [...new Set(body.tagIds)].sort(),
     filter: {
@@ -277,31 +285,29 @@ describe('remaining plain-tags regression coverage', () => {
       const winner = {
         getId: () => 'winner-job',
         getStatus: () => 'IN_PROGRESS',
-        getMetadata: () => ({
-          requestHash: hash,
-          idempotencyExpiresAt: Date.now() + 60_000,
-          matchedCount: 1,
-        }),
       };
-      const create = sinon.stub().rejects(new Error('duplicate job id'));
-      const sendMessage = sinon.stub().resolves();
-      const createAndEnqueueJob = sinon.stub().callsFake(async (context, params) => {
-        const job = await context.dataAccess.AsyncJob.create({
-          id: params.jobId,
-          metadata: params.metadata,
-        });
-        await context.sqs.sendMessage('queue', { jobId: job.getId() });
-        return job;
-      });
+      const duplicate = new Error('duplicate idempotency key');
+      duplicate.code = '23505';
+      const createKey = sinon.stub().rejects(duplicate);
+      const winningKey = {
+        getStatus: () => 'completed',
+        getResponse: () => ({ requestHash: hash, jobId: winner.getId() }),
+      };
+      const createAndEnqueueJob = sinon.stub();
       const { acceptBulkTags } = await loadBulkModule(createAndEnqueueJob);
       const findById = sinon.stub();
-      findById.onFirstCall().resolves(null);
-      findById.onSecondCall().resolves(winner);
+      findById.resolves(winner);
+      const findActiveKey = sinon.stub();
+      findActiveKey.onFirstCall().resolves(null);
+      findActiveKey.onSecondCall().resolves(null);
+      findActiveKey.onThirdCall().resolves(winningKey);
 
       const result = await acceptBulkTags({
         context: {
-          dataAccess: { AsyncJob: { create, findById } },
-          sqs: { sendMessage },
+          dataAccess: {
+            AsyncJob: { findById },
+            IdempotencyKey: { create: createKey, findActiveKey },
+          },
         },
         transport: bulkTransport(),
         brandId: BRAND,
@@ -325,33 +331,35 @@ describe('remaining plain-tags regression coverage', () => {
           replayed: true,
         },
       });
-      expect(findById).to.have.been.calledTwice;
-      expect(create).to.have.been.calledOnce;
-      expect(sendMessage).not.to.have.been.called;
+      expect(findActiveKey).to.have.been.calledThrice;
+      expect(findById).to.have.been.calledOnceWith('winner-job');
+      expect(createKey).to.have.been.calledOnce;
+      expect(createAndEnqueueJob).not.to.have.been.called;
     });
 
     it('returns idempotencyConflict when the concurrent winner has another fingerprint', async () => {
-      const create = sinon.stub().rejects(new Error('duplicate job id'));
-      const sendMessage = sinon.stub().resolves();
-      const createAndEnqueueJob = sinon.stub().callsFake(async (context, params) => {
-        const job = await context.dataAccess.AsyncJob.create({
-          id: params.jobId,
-          metadata: params.metadata,
-        });
-        await context.sqs.sendMessage('queue', { jobId: job.getId() });
-        return job;
-      });
+      const duplicate = new Error('duplicate idempotency key');
+      duplicate.code = '23505';
+      const createKey = sinon.stub().rejects(duplicate);
+      const createAndEnqueueJob = sinon.stub();
       const { acceptBulkTags } = await loadBulkModule(createAndEnqueueJob);
-      const findById = sinon.stub();
-      findById.onFirstCall().resolves(null);
-      findById.onSecondCall().resolves({
-        getMetadata: () => ({ requestHash: 'another-fingerprint' }),
+      const findActiveKey = sinon.stub();
+      findActiveKey.onFirstCall().resolves(null);
+      findActiveKey.onSecondCall().resolves(null);
+      findActiveKey.onThirdCall().resolves({
+        getStatus: () => 'completed',
+        getResponse: () => ({
+          requestHash: 'another-fingerprint',
+          jobId: 'winner-job',
+        }),
       });
 
       await expect(acceptBulkTags({
         context: {
-          dataAccess: { AsyncJob: { create, findById } },
-          sqs: { sendMessage },
+          dataAccess: {
+            AsyncJob: { findById: sinon.stub() },
+            IdempotencyKey: { create: createKey, findActiveKey },
+          },
         },
         transport: bulkTransport(),
         brandId: BRAND,
@@ -368,8 +376,8 @@ describe('remaining plain-tags regression coverage', () => {
         expect(error.status).to.equal(409);
         expect(error.code).to.equal('idempotencyConflict');
       });
-      expect(create).to.have.been.calledOnce;
-      expect(sendMessage).not.to.have.been.called;
+      expect(createKey).to.have.been.calledOnce;
+      expect(createAndEnqueueJob).not.to.have.been.called;
     });
   });
 
