@@ -1010,9 +1010,10 @@ site-geo-experiment-cancel:
     description: |
       Cancels a GeoExperiment that has not yet reached a terminal status. If suggestions were
       already deployed to the edge, rolls them back; disables the experiment's DRS schedule(s);
-      removes its atomic strategy artifact; and marks the experiment `CANCELLED` (kept, not
-      deleted, for audit history). Only `GENERATING_BASELINE` and `IN_PROGRESS` experiments can
-      be cancelled — `COMPLETED` or `FAILED` experiments return 400.
+      and marks the experiment `CANCELLED` (kept, not deleted, for audit history — the
+      experiment's atomic strategy entry is likewise retained for audit visibility). Only
+      `GENERATING_BASELINE` and `IN_PROGRESS` experiments can be cancelled — `COMPLETED` or
+      `FAILED` experiments return 400.
     tags:
       - geo-experiments
     responses:

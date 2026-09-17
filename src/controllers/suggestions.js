@@ -3155,11 +3155,11 @@ function SuggestionsController(ctx, sqs, env) {
 
   /**
    * Cancels an in-progress GeoExperiment: rolls back any deployed suggestions from the edge,
-   * disables its DRS schedule(s), cleans up its atomic strategy artifact, and marks the
-   * GeoExperiment CANCELLED (not removed — kept for audit/history; GeoExperiment.allActive(),
-   * the IME cron's active-experiment query, only matches GENERATING_BASELINE/IN_PROGRESS, so a
-   * CANCELLED experiment is naturally excluded). Terminal experiments (COMPLETED or FAILED)
-   * cannot be cancelled.
+   * disables its DRS schedule(s), and marks the GeoExperiment CANCELLED (not removed — kept
+   * for audit/history; GeoExperiment.allActive(), the IME cron's active-experiment query, only
+   * matches GENERATING_BASELINE/IN_PROGRESS, so a CANCELLED experiment is naturally excluded).
+   * The experiment's atomic strategy entry is likewise retained (not deleted) for audit
+   * visibility. Terminal experiments (COMPLETED or FAILED) cannot be cancelled.
    *
    * DRS schedule disable and suggestion cleanup are best-effort: a failure to disable a schedule
    * or unblock a suggestion is logged but does not prevent the experiment from being cancelled,
