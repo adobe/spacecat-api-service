@@ -915,6 +915,76 @@ const FIXTURES = {
       closestDate: '2026-07-26T00:00:00Z',
     }],
   },
+  // Served by ElementsController (listOwnedUrls). getOwnedUrls resolves a FLAT
+  // array of owned-URL rows (the controller paginates + traffic-joins them);
+  // no `siteId` in the query means the Postgres traffic join short-circuits
+  // to its 0/[] defaults, which the raw transform already sets on every row
+  // (see owned-urls.js), so the merge is a no-op here.
+  getSerenityUrlInspectorOwnedUrls: {
+    expectedStatus: 200,
+    usesElementsController: true,
+    controllerMethod: 'listOwnedUrls',
+    serviceMethod: 'getOwnedUrls',
+    query: { startDate: '2026-06-29', endDate: '2026-07-26' },
+    handlerResult: [{
+      urlId: '',
+      url: 'https://www.lovesac.com/sactionals',
+      citations: 42,
+      promptsCited: 11,
+      products: [],
+      regions: ['US'],
+      weeklyCitations: [{ week: '2026-W27', value: 6 }],
+      weeklyPromptsCited: [],
+      agenticHits: 0,
+      agenticHitsTrend: [],
+      referralHits: 0,
+      referralHitsTrend: [],
+    }],
+  },
+  // Served by ElementsController (listCitedDomains). getCitedDomains resolves
+  // the final { domains, totalCount } envelope directly; the controller
+  // passes it through via ok().
+  getSerenityUrlInspectorCitedDomains: {
+    expectedStatus: 200,
+    usesElementsController: true,
+    controllerMethod: 'listCitedDomains',
+    serviceMethod: 'getCitedDomains',
+    query: { startDate: '2026-06-29', endDate: '2026-07-26' },
+    handlerResult: {
+      domains: [{
+        domain: 'reddit.com',
+        totalCitations: 84,
+        totalUrls: 6,
+        promptsCited: 19,
+        contentType: 'Third Party',
+        categories: '',
+        regions: '',
+      }],
+      totalCount: 52,
+    },
+  },
+  // Served by ElementsController (listDomainUrls). getDomainUrls resolves the
+  // final { urls, totalCount } envelope directly; the controller passes it
+  // through via cachedOk().
+  getSerenityUrlInspectorDomainUrls: {
+    expectedStatus: 200,
+    usesElementsController: true,
+    controllerMethod: 'listDomainUrls',
+    serviceMethod: 'getDomainUrls',
+    query: { startDate: '2026-06-29', endDate: '2026-07-26' },
+    handlerResult: {
+      urls: [{
+        urlId: '',
+        url: 'https://www.reddit.com/r/BuyItForLife/comments/example/',
+        contentType: 'Third Party',
+        citations: 3,
+        promptsCited: 2,
+        categories: '',
+        regions: 'US,CA',
+      }],
+      totalCount: 8,
+    },
+  },
 };
 
 function makeAjv() {
