@@ -7941,6 +7941,14 @@ V2Brand:
         - 'null'
       maxLength: 4000
       description: Optional guidance for classifying brand mention sentiment. Blank values clear the stored value.
+    promptPreferences:
+      type: object
+      description: >-
+        Mined prompt-generation preferences for this brand (structure/phrasing/topic/
+        branding/products/prompt_examples), derived from suggestion accept/dismiss
+        history and written wholesale by a recurring mining job. Empty object when
+        no preferences have been mined yet.
+      default: {}
     vertical:
       type:
         - string
@@ -8182,6 +8190,11 @@ V2BrandUpdateInput:
         - 'null'
       maxLength: 4000
       description: Optional guidance for classifying brand mention sentiment. Omit to preserve, blank or null to clear.
+    promptPreferences:
+      type: object
+      description: >-
+        Mined prompt-generation preferences for this brand. Written wholesale by the
+        prompt-preference mining job; omit to preserve the existing value.
     vertical:
       type: string
     region:
