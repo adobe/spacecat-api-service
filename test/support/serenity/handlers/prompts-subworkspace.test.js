@@ -303,6 +303,57 @@ describe('prompts-subworkspace handlers', () => {
       expect(items[0].references).to.not.include(TAG_IDS.sourceConfig);
     });
 
+    // Lockstep with the flat twin: the DEFAULT targeted lookup issues one `search`
+    // per distinct input text (cost scales with input, not corpus) and matches the
+    // EXACT row only, never a substring over-match.
+    it('targeted lookup issues one search per distinct text and matches exactly', async () => {
+      const listPromptsByTags = sinon.stub().callsFake((_ws, _pid, { search }) => Promise.resolve({
+        items: search === 'p'
+          ? [{ id: 'sem-substr', name: 'p variant', tags: [] }, { id: 'sem-existing', name: 'p', tags: [] }]
+          : [],
+      }));
+      const transport = makeTransport({
+        listPromptsByTags,
+        updatePromptTagsByIds: sinon.stub().resolves(),
+        patchPromptsMetadataBatch: sinon.stub().resolves(),
+      });
+
+      const result = await handleCreatePromptsSubworkspace(transport, WS, {
+        prompts: [
+          {
+            text: 'p', tagIds: ['tag-a'], geoTargetId: 2840, languageCode: 'en',
+          },
+          {
+            text: 'brand new', tagIds: ['tag-b'], geoTargetId: 2840, languageCode: 'en',
+          },
+        ],
+      }, log);
+
+      expect(listPromptsByTags).to.have.callCount(2); // one search per distinct (projectId, text)
+      expect(listPromptsByTags.firstCall.args[2]).to.include({ page: 1, limit: 25 });
+      expect(listPromptsByTags.firstCall.args[2].tag_ids).to.deep.equal([]);
+      expect(result.updated).to.have.length(1);
+      expect(result.updated[0].semrushPromptId).to.equal('sem-existing'); // exact, not substring
+      expect(result.created).to.have.length(1);
+    });
+
+    it('targeted lookup: a search failure degrades the whole project (inputs fail itemized, never treated as new)', async () => {
+      const transport = makeTransport({
+        listPromptsByTags: sinon.stub().rejects(Object.assign(new Error('upstream 502'), { status: 502 })),
+      });
+
+      const result = await handleCreatePromptsSubworkspace(transport, WS, {
+        prompts: [{
+          text: 'p', tagIds: ['tag-a'], geoTargetId: 2840, languageCode: 'en',
+        }],
+      }, log);
+
+      expect(transport.createPromptsWithMetadata).to.not.have.been.called;
+      expect(result.created).to.be.an('array').that.is.empty;
+      expect(result.failed).to.have.length(1);
+      expect(result.failed[0].status).to.equal(502);
+    });
+
     // Lockstep coverage for the flat twin's "moves updates into `failed` when the
     // batched tag write throws". The twin resolves its workspace id differently
     // (`workspaceId` vs `semrushWorkspaceId`), so a copy-paste divergence in this

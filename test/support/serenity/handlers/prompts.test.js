@@ -4484,17 +4484,109 @@ describe('handlers/prompts.js — create is an upsert (existing text replaces ta
     expect(result.failed[0].text).to.equal('best shoes');
   });
 
-  it('pages the index, so a prompt past the first page is still recognised', async () => {
-    // A project larger than one page would otherwise look empty from page 2 on, and
-    // every prompt there would fall back to the additive create path.
-    const firstPage = Array.from({ length: 1000 }, (_, i) => storedPrompt({ id: `p${i}`, name: `q${i}` }));
-    const listPromptsByTags = sinon.stub();
-    listPromptsByTags.onFirstCall().resolves({ items: firstPage });
-    listPromptsByTags.onSecondCall().resolves({ items: [storedPrompt({ id: 'sem-page2', name: 'on page two' })] });
+  // Targeted lookup (default, kill-switch ON): one `search` per distinct input
+  // text, exact-match only, cost independent of corpus size.
+  it('targeted lookup issues one search per distinct text and matches EXACTLY, not by substring', async () => {
+    const listPromptsByTags = sinon.stub().callsFake((_ws, _pid, { search }) => Promise.resolve({
+      // A substring over-match sits alongside the exact row; only the exact one upserts.
+      items: search === 'best shoes'
+        ? [
+          storedPrompt({ id: 'sem-substr', name: 'best shoes for running' }),
+          storedPrompt({ id: PROMPT_ID, name: 'best shoes' }),
+        ]
+        : [],
+    }));
     const { transport, dataAccess } = setup([], { listPromptsByTags });
 
-    const result = await runImport(transport, dataAccess, [importRow('on page two', ['cat-new'])]);
+    const result = await runImport(transport, dataAccess, [
+      importRow('best shoes', ['cat-a']), // exists -> upsert to the EXACT row
+      importRow('brand new', ['cat-b']), // absent -> create
+    ]);
+
+    // Cost scales with input, not corpus: one search per distinct (projectId, text).
+    expect(listPromptsByTags).to.have.callCount(2);
+    expect(listPromptsByTags.firstCall.args[2]).to.include({ page: 1, limit: 25 });
+    expect(listPromptsByTags.firstCall.args[2].tag_ids).to.deep.equal([]);
+    expect(result.updated).to.have.lengthOf(1);
+    expect(result.updated[0].semrushPromptId).to.equal(PROMPT_ID); // exact, not the substring row
+    expect(result.created).to.have.lengthOf(1);
+  });
+
+  it('targeted lookup: a search failure degrades the WHOLE project (inputs fail itemized, never treated as new)', async () => {
+    const listPromptsByTags = sinon.stub().rejects(Object.assign(new Error('upstream 502'), { status: 502 }));
+    const { transport, dataAccess } = setup([], { listPromptsByTags });
+
+    const result = await runImport(transport, dataAccess, [importRow('best shoes', ['cat-a'])]);
+
+    // The dangerous direction — treating an existing prompt as new — must NOT happen.
+    expect(transport.createPromptsWithMetadata).to.not.have.been.called;
+    expect(result.created).to.be.an('array').that.is.empty;
+    expect(result.failed).to.have.lengthOf(1);
+    expect(result.failed[0].status).to.equal(502);
+  });
+
+  it('targeted lookup: a full page with no exact hit degrades the project (never a false "new")', async () => {
+    // 25 non-matching rows fill the page; the row could be on page 2, so "not found"
+    // is not safe to conclude — the project degrades rather than tag-stack.
+    const fullPage = Array.from({ length: 25 }, (_, i) => storedPrompt({ id: `x${i}`, name: `other ${i}` }));
+    const listPromptsByTags = sinon.stub().resolves({ items: fullPage });
+    const { transport, dataAccess } = setup([], { listPromptsByTags });
+
+    const result = await runImport(transport, dataAccess, [importRow('best shoes', ['cat-a'])]);
+
+    expect(transport.createPromptsWithMetadata).to.not.have.been.called;
+    expect(result.failed).to.have.lengthOf(1);
+    expect(result.failed[0].status).to.equal(502);
+  });
+
+  it('marks inputs failed (503) when the write budget is already exhausted (2xx partial, no half-write)', async () => {
+    const listPromptsByTags = sinon.stub().resolves({ items: [] });
+    const { transport, dataAccess } = setup([], { listPromptsByTags });
+    const pastDeadline = Date.now() - 1;
+
+    const result = await handleCreatePrompts(
+      transport,
+      dataAccess,
+      BRAND,
+      WORKSPACE,
+      { prompts: [importRow('anything', ['cat-a'])] },
+      fakeLog(),
+      undefined, // classifyPromptType
+      undefined, // env
+      pastDeadline, // writeDeadline
+    );
+
+    expect(transport.createPromptsWithMetadata).to.not.have.been.called;
+    expect(result.failed).to.have.lengthOf(1);
+    expect(result.failed[0].status).to.equal(503);
+  });
+
+  it('fixed walk (kill-switch off) pages the index concurrently, so a prompt past page 1 is still recognised', async () => {
+    // Kill-switch OFF -> bounded-concurrency corpus walk. A project larger than one
+    // page would otherwise look empty from page 2 on and tag-stack every later row.
+    const firstPage = Array.from({ length: 1000 }, (_, i) => storedPrompt({ id: `p${i}`, name: `q${i}` }));
+    const pageItems = {
+      1: firstPage,
+      2: [storedPrompt({ id: 'sem-page2', name: 'on page two' })],
+    };
+    const listPromptsByTags = sinon.stub()
+      .callsFake((_ws, _pid, { page }) => Promise.resolve({ items: pageItems[page] ?? [] }));
+    const { transport, dataAccess } = setup([], { listPromptsByTags });
+
+    const result = await handleCreatePrompts(
+      transport,
+      dataAccess,
+      BRAND,
+      WORKSPACE,
+      { prompts: [importRow('on page two', ['cat-new'])] },
+      fakeLog(),
+      undefined, // classifyPromptType
+      { SERENITY_TARGETED_CREATE_LOOKUP: 'false' }, // env: kill-switch off -> walk
+    );
 
     expect(result.updated[0].semrushPromptId).to.equal('sem-page2');
+    // One concurrency batch of BULK_CREATE_CONCURRENCY pages — page 2 is short, so
+    // the walk stops after the first batch (8 pages), never a serial page-at-a-time.
+    expect(listPromptsByTags).to.have.callCount(8);
   });
 });

@@ -35,6 +35,7 @@ import {
   resolveSort,
   buildUpdateMetadata,
   buildPromptIndexByProject,
+  isTargetedCreateLookupEnabled,
   isIndexError,
   findStoredPrompt,
   applyUpsertTagWrites,
@@ -209,6 +210,8 @@ export async function handleCreatePromptsSubworkspace(
   }
   assertCreatePromptTagLimits(inputs);
   const deferPublish = validateDeferPublish(body);
+  // Wall-clock start for the end-of-request summary log (write-path observability).
+  const startedAt = Date.now();
 
   const projectsBySlice = await buildSliceProjectMap(transport, workspaceId, log);
   // CREATE: user-authenticated write stamps independent `origin=human` and
@@ -264,11 +267,16 @@ export async function handleCreatePromptsSubworkspace(
       raw, input: value, reason, projectId: project ? String(project.id) : null,
     };
   });
+  // Dedup index: targeted per-input lookup by default, corpus walk when the
+  // kill-switch is off (lockstep with the flat twin handleCreatePrompts).
+  const targetedLookup = isTargetedCreateLookupEnabled(env);
+  const stats = { upstreamCalls: 0 };
   const promptIndexByProject = await buildPromptIndexByProject(
     transport,
     workspaceId,
-    normalizedInputs.map((n) => n.projectId),
+    normalizedInputs.map((n) => ({ projectId: n.projectId, text: n.input?.text })),
     log,
+    { targeted: targetedLookup, writeDeadline, stats },
   );
 
   const results = await mapLimit(normalizedInputs, BULK_CREATE_CONCURRENCY, async (entry) => {
@@ -301,6 +309,19 @@ export async function handleCreatePromptsSubworkspace(
           languageCode: input.languageCode,
           status: projectIndex.indexErrorStatus,
           message: projectIndex.indexError,
+        },
+      };
+    }
+    if (writeDeadline !== undefined && Date.now() >= writeDeadline) {
+      // Budget spent — fail itemized so the request returns a 2xx partial before
+      // the edge kill (lockstep with the flat twin).
+      return {
+        failed: {
+          text: input.text,
+          geoTargetId: input.geoTargetId,
+          languageCode: input.languageCode,
+          status: 503,
+          message: 'write budget exhausted before processing',
         },
       };
     }
@@ -456,6 +477,9 @@ export async function handleCreatePromptsSubworkspace(
       updated: updated.length,
       skipped: skipped.length,
       failed: failed.length,
+      upstreamCallCount: stats.upstreamCalls,
+      elapsedMs: Date.now() - startedAt,
+      targetedLookup,
     });
     return {
       // eslint-disable-next-line no-unused-vars -- omit the bookkeeping field
@@ -490,6 +514,18 @@ export async function handleCreatePromptsSubworkspace(
     log,
     alertContext,
   );
+
+  log?.info?.('serenity create-prompts (subworkspace): completed', {
+    workspaceId,
+    created: created.length,
+    updated: updated.length,
+    skipped: skipped.length,
+    failed: failed.length,
+    published: publishErrors.length === 0,
+    upstreamCallCount: stats.upstreamCalls,
+    elapsedMs: Date.now() - startedAt,
+    targetedLookup,
+  });
 
   return {
     // eslint-disable-next-line no-unused-vars -- destructuring-omit to strip the bookkeeping field

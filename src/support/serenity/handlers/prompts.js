@@ -1739,15 +1739,48 @@ function carryOverTagIdsOf(item, log, projectId) {
   return carried;
 }
 
-/** Paging cap, so a mis-paging upstream cannot spin a Lambda. 20k prompts. */
-export const MAX_PROMPT_INDEX_PAGES = 20;
+/**
+ * Paging cap for the fallback corpus walk, so a mis-paging upstream cannot spin a
+ * Lambda. Raised from 20 (20k prompts) to 100 (100k prompts) so a large brand is
+ * fully indexed: the biggest real corpus is ~76k (issue #3279), and beyond-cap
+ * rows silently tag-stack (they resolve as "new" and re-attach a tag onto the
+ * existing live prompt), so an incomplete index is a correctness bug, not just a
+ * perf one. The walk now runs pages concurrently (see below), so 100 pages is not
+ * 100 serial round-trips.
+ */
+export const MAX_PROMPT_INDEX_PAGES = 100;
+
+/** Per-input targeted-lookup page size — one `search` call classifies one text. */
+export const TARGETED_LOOKUP_LIMIT = 25;
 
 /**
- * Builds the `text -> stored prompt` index an upsert resolves against.
+ * Create/upsert dedup-lookup kill-switch. DEFAULT ON — absent, or any value other
+ * than the literal string `'false'`, selects the targeted per-input `search`
+ * lookup ({@link buildTargetedPromptIndex}), whose cost scales with the INPUT,
+ * not the existing corpus. An explicit `'false'` falls back to the bounded,
+ * fully-capped corpus walk ({@link buildExistingPromptIndex}) — still correct
+ * (never the pre-fix serial-20-page walk), just corpus-cost. Read per-request so
+ * a mid-rollout warm-Lambda mix is consistent.
+ * @param {{ SERENITY_TARGETED_CREATE_LOOKUP?: string } | null | undefined} env
+ * @returns {boolean}
+ */
+export function isTargetedCreateLookupEnabled(env) {
+  return (env?.SERENITY_TARGETED_CREATE_LOOKUP ?? 'true') !== 'false';
+}
+
+/**
+ * Builds the `text -> stored prompt` index an upsert resolves against by walking
+ * the whole project corpus. Pages are fetched with bounded concurrency (a batch
+ * of `BULK_CREATE_CONCURRENCY` at a time, stopping once a page comes back short)
+ * rather than serially, so a large corpus does not blow the edge budget on
+ * round-trip stacking. This is the FALLBACK path (kill-switch OFF); the default
+ * is {@link buildTargetedPromptIndex}.
  *
- * Lists and matches locally rather than using the upstream `search` filter,
- * whose matching semantics are not pinned by the vendor contract — an upsert that
- * mis-identifies a prompt would rewrite the WRONG row's tags.
+ * Search-semantics note (verified 2026-09-17, live against the Helpx project):
+ * upstream `search` IS usable for exact matching — it is literal substring match,
+ * an exact full text returns the row at position 0, and metacharacters are
+ * literal (no operator injection). That verification is why the targeted path is
+ * the default; this walk stays as the fail-safe.
  *
  * LIVE-LAYER READ, like every other `listPromptsByTags` caller: a prompt staged
  * in an unpublished draft is invisible here and falls through to the create path
@@ -1761,21 +1794,23 @@ export const MAX_PROMPT_INDEX_PAGES = 20;
  * @param {string} semrushWorkspaceId
  * @param {string} projectId
  * @param {any} [log]
+ * @param {{ onUpstreamCall?: () => void }} [opts]
  * @returns {Promise<{ byText: Map<string, { semrushPromptId: string,
  *   carryOverTagIds: string[] }>, byLower: Map<string, { semrushPromptId: string,
  *   carryOverTagIds: string[] }> }>}
  */
-export async function buildExistingPromptIndex(transport, semrushWorkspaceId, projectId, log) {
+export async function buildExistingPromptIndex(
+  transport,
+  semrushWorkspaceId,
+  projectId,
+  log,
+  { onUpstreamCall } = {},
+) {
   /** @type {Map<string, { semrushPromptId: string, carryOverTagIds: string[] }>} */
   const byText = new Map();
   /** @type {Map<string, { semrushPromptId: string, carryOverTagIds: string[] }>} */
   const byLower = new Map();
-  for (let page = 1; page <= MAX_PROMPT_INDEX_PAGES; page += 1) {
-    // eslint-disable-next-line no-await-in-loop -- paging is inherently sequential
-    const resp = await transport.listPromptsByTags(semrushWorkspaceId, projectId, {
-      tag_ids: [], page, limit: MAX_PAGE_LIMIT,
-    });
-    const items = Array.isArray(resp?.items) ? resp.items : [];
+  const ingest = (items) => {
     for (const item of items) {
       // Trimmed to match `normalizePromptInput`, which trims before comparing.
       const text = String(item?.name ?? '').trim();
@@ -1793,14 +1828,117 @@ export async function buildExistingPromptIndex(transport, semrushWorkspaceId, pr
         }
       }
     }
-    if (items.length < MAX_PAGE_LIMIT) {
-      return { byText, byLower };
+  };
+  let done = false;
+  let start = 1;
+  while (!done && start <= MAX_PROMPT_INDEX_PAGES) {
+    const pages = [];
+    const batchEnd = Math.min(start + BULK_CREATE_CONCURRENCY, MAX_PROMPT_INDEX_PAGES + 1);
+    for (let p = start; p < batchEnd; p += 1) {
+      pages.push(p);
     }
+    // eslint-disable-next-line no-await-in-loop, no-use-before-define
+    const resps = await mapLimit(pages, BULK_CREATE_CONCURRENCY, async (page) => {
+      onUpstreamCall?.();
+      return transport.listPromptsByTags(semrushWorkspaceId, projectId, {
+        tag_ids: [], page, limit: MAX_PAGE_LIMIT,
+      });
+    });
+    for (const resp of resps) {
+      const items = Array.isArray(resp?.items) ? resp.items : [];
+      ingest(items);
+      // A short page means the corpus ended within this batch; over-fetched
+      // sibling pages in the same batch are harmless (bounded by concurrency).
+      if (items.length < MAX_PAGE_LIMIT) {
+        done = true;
+      }
+    }
+    start += BULK_CREATE_CONCURRENCY;
   }
-  // Past the cap the index is incomplete: later rows resolve as "new" and take the
-  // create path — the pre-existing behavior. Degraded, not broken, but worth a signal.
-  log?.warn?.('serenity upsert: prompt index hit the page cap — later prompts may be treated as new', {
-    projectId, pages: MAX_PROMPT_INDEX_PAGES,
+  if (!done) {
+    // Past the cap the index is incomplete: later rows resolve as "new" and take
+    // the create path, silently tag-stacking. With the cap at 100k this should be
+    // unreachable for any real brand — if it fires, the cap needs raising again.
+    log?.warn?.('serenity upsert: prompt index hit the page cap — later prompts may be treated as new', {
+      projectId, pages: MAX_PROMPT_INDEX_PAGES,
+    });
+  }
+  return { byText, byLower };
+}
+
+/**
+ * Builds the same `text -> stored prompt` index as {@link buildExistingPromptIndex},
+ * but by looking up ONLY the incoming texts via upstream `search` — one `search`
+ * call per distinct input text, run at `BULK_CREATE_CONCURRENCY`. Cost scales with
+ * the INPUT, not the corpus, so a 1- or 16-prompt add against a 38k-prompt project
+ * costs 1 or 16 light calls instead of a ~40-page corpus walk. This is the DEFAULT
+ * path (kill-switch ON).
+ *
+ * `search` is upstream literal substring matching (verified 2026-09-17): a full
+ * exact text returns the row at position 0. We keep ONLY a row whose trimmed
+ * `name` equals the trimmed input text, so a substring over-match cannot upsert
+ * the wrong row.
+ *
+ * Failure/ambiguity semantics — this throws (so {@link buildPromptIndexByProject}
+ * degrades the WHOLE project to an index error, itemizing its inputs as failed
+ * with HTTP 200) rather than ever concluding "not found" from an incomplete read,
+ * because a false "new" pushes an existing prompt down the create path and
+ * silently stacks a second tag (rest-transport create folds a repeated text into
+ * `existing_count` but still attaches the given tags). Two guards throw:
+ *  - a full page (`items.length >= TARGETED_LOOKUP_LIMIT`) without an exact hit —
+ *    the row could be on page 2, so "not found" is not safe to conclude; and
+ *  - any upstream error on the `search` call (e.g. a body-size limit on a
+ *    near-`MAX_PROMPT_TEXT_LENGTH` text) propagates out.
+ *
+ * @param {SerenityTransport} transport
+ * @param {string} semrushWorkspaceId
+ * @param {string} projectId
+ * @param {string[]} texts - the trimmed input texts for this project
+ * @param {any} [log]
+ * @param {{ onUpstreamCall?: () => void }} [opts]
+ * @returns {Promise<{ byText: Map<string, { semrushPromptId: string,
+ *   carryOverTagIds: string[] }>, byLower: Map<string, { semrushPromptId: string,
+ *   carryOverTagIds: string[] }> }>}
+ */
+export async function buildTargetedPromptIndex(
+  transport,
+  semrushWorkspaceId,
+  projectId,
+  texts,
+  log,
+  { onUpstreamCall } = {},
+) {
+  /** @type {Map<string, { semrushPromptId: string, carryOverTagIds: string[] }>} */
+  const byText = new Map();
+  /** @type {Map<string, { semrushPromptId: string, carryOverTagIds: string[] }>} */
+  const byLower = new Map();
+  const distinct = [...new Set(
+    (texts || []).map((t) => String(t ?? '').trim()).filter(Boolean),
+  )];
+  // eslint-disable-next-line no-use-before-define -- mapLimit is hoisted
+  await mapLimit(distinct, BULK_CREATE_CONCURRENCY, async (text) => {
+    onUpstreamCall?.();
+    const resp = await transport.listPromptsByTags(semrushWorkspaceId, projectId, {
+      tag_ids: [], search: text, page: 1, limit: TARGETED_LOOKUP_LIMIT,
+    });
+    const items = Array.isArray(resp?.items) ? resp.items : [];
+    const exact = items.find((it) => String(it?.name ?? '').trim() === text);
+    if (!exact && items.length >= TARGETED_LOOKUP_LIMIT) {
+      // Full page, no exact hit: cannot safely conclude "not found" (the row may
+      // be on a later page). Throw so the project degrades to an index error.
+      throw new ErrorWithStatusCode(
+        `targeted lookup returned a full page (${TARGETED_LOOKUP_LIMIT}) with no exact match`,
+        502,
+      );
+    }
+    if (exact && exact.id) {
+      const entry = {
+        semrushPromptId: String(exact.id),
+        carryOverTagIds: carryOverTagIdsOf(exact, log, projectId),
+      };
+      byText.set(text, entry);
+      byLower.set(text.toLowerCase(), entry);
+    }
   });
   return { byText, byLower };
 }
@@ -1855,41 +1993,104 @@ export async function mapLimit(items, limit, mapper) {
 }
 
 /**
- * Builds one {@link buildExistingPromptIndex} per affected project, CONTAINING a
- * per-project read failure instead of letting it abort the whole fan-out
- * (serenity-docs#472 §2 / LLMO-7533). An unguarded `Promise.all` over this read
- * used to propagate a transient upstream failure (e.g. a transport-level `502`)
- * out of the whole create/upsert handler — the controller then answered a bare
- * outer HTTP failure with no mixed-result body, so the caller could not tell
- * which rows (if any) actually failed and could not continue with later
- * batches. Every OTHER project's index still builds normally; only the failed
- * project's entry is replaced with a {@link PromptIndexError} marker, which the
- * caller's per-item loop must check for BEFORE calling {@link findStoredPrompt}
- * (an error marker has no `byText`/`byLower` and is not itself index-shaped).
+ * Builds one prompt index per affected project, CONTAINING a per-project read
+ * failure instead of letting it abort the whole fan-out (serenity-docs#472 §2 /
+ * LLMO-7533). An unguarded `Promise.all` over this read used to propagate a
+ * transient upstream failure (e.g. a transport-level `502`) out of the whole
+ * create/upsert handler — the controller then answered a bare outer HTTP failure
+ * with no mixed-result body, so the caller could not tell which rows (if any)
+ * actually failed and could not continue with later batches. Every OTHER
+ * project's index still builds normally; only the failed project's entry is
+ * replaced with a {@link PromptIndexError} marker, which the caller's per-item
+ * loop must check for BEFORE calling {@link findStoredPrompt} (an error marker
+ * has no `byText`/`byLower` and is not itself index-shaped).
+ *
+ * The index is built EITHER by {@link buildTargetedPromptIndex} (default, cost
+ * scales with input) or {@link buildExistingPromptIndex} (kill-switch OFF, corpus
+ * walk) — see {@link isTargetedCreateLookupEnabled}. `projectInputs` carries the
+ * per-input `{ projectId, text }` so the targeted path knows what to look up; the
+ * walk path ignores `text`. Degradation is per PROJECT, never per input: a failed
+ * lookup for one project fails only that project's inputs (itemized), it never
+ * silently drops an input to the create path as "new" (which would tag-stack).
+ *
+ * `writeDeadline` (epoch ms; optional) short-circuits: once the write budget is
+ * spent, remaining projects are marked index-error (503) so their inputs fail
+ * itemized and the request can return a 2xx partial before the ~15s edge kill,
+ * rather than running unbounded reads the edge would terminate mid-flush.
+ *
  * @param {SerenityTransport} transport
  * @param {string} semrushWorkspaceId
- * @param {Array<string | null | undefined>} projectIds
+ * @param {Array<{ projectId: string | null | undefined, text?: string }>} projectInputs
  * @param {any} [log]
+ * @param {{ targeted?: boolean, writeDeadline?: number,
+ *   stats?: { upstreamCalls?: number } }} [opts]
  * @returns {Promise<Map<string, PromptIndex | PromptIndexError>>}
  */
-export async function buildPromptIndexByProject(transport, semrushWorkspaceId, projectIds, log) {
+export async function buildPromptIndexByProject(
+  transport,
+  semrushWorkspaceId,
+  projectInputs,
+  log,
+  { targeted = true, writeDeadline, stats } = {},
+) {
   /** @type {Map<string, PromptIndex | PromptIndexError>} */
   const promptIndexByProject = new Map();
-  const uniqueProjectIds = [...new Set(projectIds.filter(Boolean))];
-  await mapLimit(uniqueProjectIds, BULK_CREATE_CONCURRENCY, async (projectId) => {
-    const pid = /** @type {string} */ (projectId);
+  /** @type {Map<string, string[]>} */
+  const textsByProject = new Map();
+  for (const pi of projectInputs) {
+    if (!pi?.projectId) {
+      // eslint-disable-next-line no-continue
+      continue;
+    }
+    let texts = textsByProject.get(pi.projectId);
+    if (!texts) {
+      texts = [];
+      textsByProject.set(pi.projectId, texts);
+    }
+    if (pi.text) {
+      texts.push(pi.text);
+    }
+  }
+  const uniqueProjectIds = [...textsByProject.keys()];
+  const onUpstreamCall = () => {
+    if (stats) {
+      // eslint-disable-next-line no-param-reassign -- caller passes a mutable counter by reference
+      stats.upstreamCalls = (stats.upstreamCalls || 0) + 1;
+    }
+  };
+  await mapLimit(uniqueProjectIds, BULK_CREATE_CONCURRENCY, async (pid) => {
+    if (writeDeadline !== undefined && Date.now() >= writeDeadline) {
+      // Budget spent before this project's lookup — fail its inputs itemized
+      // rather than read past the edge budget (or, worse, treat them as "new").
+      promptIndexByProject.set(pid, {
+        indexError: 'write budget exhausted before existing-prompt lookup',
+        indexErrorStatus: 503,
+      });
+      return;
+    }
     try {
-      promptIndexByProject.set(pid, await buildExistingPromptIndex(
-        transport,
-        semrushWorkspaceId,
-        pid,
-        log,
-      ));
+      const index = targeted
+        ? await buildTargetedPromptIndex(
+          transport,
+          semrushWorkspaceId,
+          pid,
+          textsByProject.get(pid) ?? [],
+          log,
+          { onUpstreamCall },
+        )
+        : await buildExistingPromptIndex(
+          transport,
+          semrushWorkspaceId,
+          pid,
+          log,
+          { onUpstreamCall },
+        );
+      promptIndexByProject.set(pid, index);
     } catch (e) {
       log?.error?.(
         'serenity upsert: existing-prompt index read failed for project — failing only that '
         + "project's inputs, unaffected projects continue",
-        { projectId: pid, error: e.message },
+        { projectId: pid, error: e.message, targeted },
       );
       promptIndexByProject.set(pid, {
         indexError: redactUpstreamMessage(e),
@@ -2015,6 +2216,10 @@ export async function handleCreatePrompts(
   }
   assertCreatePromptTagLimits(inputs);
   const deferPublish = validateDeferPublish(body);
+  // Wall-clock start for the end-of-request summary log (write-path observability,
+  // section 7 of the fix spec) — serenity writes are otherwise invisible in
+  // cdn_prod/backend_prod, so this line is the fix's rollback detector.
+  const startedAt = Date.now();
 
   const projects = await dataAccess.BrandSemrushProject.allByBrandId(brandId);
   const projectsBySlice = new Map();
@@ -2081,11 +2286,17 @@ export async function handleCreatePrompts(
       projectId: project ? project.getSemrushProjectId() : null,
     };
   });
+  // Dedup index: targeted per-input lookup by default (cost scales with input),
+  // the bounded corpus walk when the kill-switch is off. `stats.upstreamCalls`
+  // counts the index-build upstream calls for the end-of-request summary log.
+  const targetedLookup = isTargetedCreateLookupEnabled(env);
+  const stats = { upstreamCalls: 0 };
   const promptIndexByProject = await buildPromptIndexByProject(
     transport,
     semrushWorkspaceId,
-    normalizedInputs.map((n) => n.projectId),
+    normalizedInputs.map((n) => ({ projectId: n.projectId, text: n.input?.text })),
     log,
+    { targeted: targetedLookup, writeDeadline, stats },
   );
 
   const results = await mapLimit(normalizedInputs, BULK_CREATE_CONCURRENCY, async (entry) => {
@@ -2118,6 +2329,20 @@ export async function handleCreatePrompts(
           languageCode: input.languageCode,
           status: projectIndex.indexErrorStatus,
           message: projectIndex.indexError,
+        },
+      };
+    }
+    if (writeDeadline !== undefined && Date.now() >= writeDeadline) {
+      // Budget spent before this input was written — fail it itemized so the
+      // request returns a 2xx partial before the edge kill, never a half-written
+      // batch that dies mid-flush.
+      return {
+        failed: {
+          text: input.text,
+          geoTargetId: input.geoTargetId,
+          languageCode: input.languageCode,
+          status: 503,
+          message: 'write budget exhausted before processing',
         },
       };
     }
@@ -2295,6 +2520,12 @@ export async function handleCreatePrompts(
       updated: updated.length,
       skipped: skipped.length,
       failed: failed.length,
+      // Write-path observability (fix spec §7): index-build upstream-call count
+      // and elapsed prove the fix (targeted ≈ distinct input texts; walk ≈ pages)
+      // and are the rollback detector, since writes are otherwise unlogged.
+      upstreamCallCount: stats.upstreamCalls,
+      elapsedMs: Date.now() - startedAt,
+      targetedLookup,
     });
     return {
       // eslint-disable-next-line no-unused-vars -- omit the bookkeeping field
@@ -2342,6 +2573,23 @@ export async function handleCreatePrompts(
     // from batch position; the API must tell the truth here for that fix to work).
     published = publishErrors.length === 0;
   }
+
+  // Write-path observability (fix spec §7): the one structured line that makes a
+  // create/upsert diagnosable from logs (writes are invisible in cdn_prod and
+  // silent in backend_prod). upstreamCallCount + targetedLookup are the rollback
+  // detector; it survives because the deadline guards above return a 2xx partial
+  // before the edge kill rather than dying mid-flush.
+  log?.info?.('serenity create-prompts: completed', {
+    brandId,
+    created: created.length,
+    updated: updated.length,
+    skipped: skipped.length,
+    failed: failed.length,
+    published,
+    upstreamCallCount: stats.upstreamCalls,
+    elapsedMs: Date.now() - startedAt,
+    targetedLookup,
+  });
 
   return {
     // eslint-disable-next-line no-unused-vars -- destructuring-omit to strip the bookkeeping field
