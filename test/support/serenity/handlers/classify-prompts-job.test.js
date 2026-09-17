@@ -62,6 +62,7 @@ describe('handlers/classify-prompts-job.js (serenity-docs#33)', () => {
       createPromptsWithMetadata: sinon.stub().resolves({ items: [{ id: 'created-prompt' }] }),
       publishProject: sinon.stub().resolves(),
       updatePromptTagsByIds: sinon.stub().resolves(),
+      patchPromptsMetadataBatch: sinon.stub().resolves(),
       // Subworkspace create branch resolves projects from ONE live listing
       // (buildSliceProjectMap) instead of the BrandSemrushProject DB mapping.
       // A single project on the (2840, en) slice: settings echo the draft's real
@@ -192,6 +193,36 @@ describe('handlers/classify-prompts-job.js (serenity-docs#33)', () => {
       // mints a fresh one (the worker has no HTTP context to mint from).
       expect(enqueueArgs.promiseToken).to.deep.equal({ promise_token: 'ptok-current' });
       expect(enqueueArgs.metadata.requeueDepth).to.equal(1);
+      // No callerId on the original job (predates the field) — must default
+      // rather than crash or silently drop to an empty string.
+      expect(enqueueArgs.metadata.callerId).to.equal('unknown');
+    });
+
+    it('carries the original callerId forward onto the reclassify requeue', async () => {
+      const intentByTextMap = new Map([['ambiguous text', null]]);
+      const requeuedJob = { getId: () => 'job-followup' };
+      const createAndEnqueueJobStub = sinon.stub().resolves(requeuedJob);
+      const { classifyPromptsHandler } = await load({
+        intentByTextMap, createAndEnqueueJobStub, transport,
+      });
+
+      const project = { getGeoTargetId: () => 2840, getLanguageCode: () => 'en', getSemrushProjectId: () => 'proj-1' };
+      const context = {
+        env: {}, log: fakeLog(), dataAccess: dataAccessFor([project]),
+      };
+      const job = makeJob({
+        brandId: 'brand-1',
+        semrushWorkspaceId: WORKSPACE,
+        callerId: 'user@example.com',
+        prompts: [{
+          text: 'ambiguous text', geoTargetId: 2840, languageCode: 'en', tagIds: [TAG_IDS.categoryRunningShoes],
+        }],
+      });
+
+      await classifyPromptsHandler(context, job, 'token');
+
+      const [, enqueueArgs] = createAndEnqueueJobStub.firstCall.args;
+      expect(enqueueArgs.metadata.callerId).to.equal('user@example.com');
     });
 
     it('stops requeuing once the depth cap is reached, leaving the rest permanently pending', async () => {
@@ -333,6 +364,104 @@ describe('handlers/classify-prompts-job.js (serenity-docs#33)', () => {
       expect(createAndEnqueueJobStub).to.not.have.been.called;
     });
 
+    it('stamps authorship metadata after successfully patching a project\'s tags', async () => {
+      const intentByTextMap = new Map([['great product', 'Commercial']]);
+      const createAndEnqueueJobStub = sinon.stub();
+      const { classifyPromptsHandler } = await load({
+        intentByTextMap, createAndEnqueueJobStub, transport,
+      });
+
+      const context = {
+        env: {}, log: fakeLog(), dataAccess: dataAccessFor([]),
+      };
+      const job = makeJob({
+        mode: 'reclassify',
+        semrushWorkspaceId: WORKSPACE,
+        callerId: 'user@example.com',
+        items: [{
+          projectId: 'proj-1', promptId: 'prompt-1', text: 'great product', tagIds: [TAG_IDS.categoryRunningShoes],
+        }],
+      });
+
+      await classifyPromptsHandler(context, job, 'token');
+
+      expect(transport.patchPromptsMetadataBatch).to.have.been.calledOnce;
+      const [ws, projectId, items] = transport.patchPromptsMetadataBatch.firstCall.args;
+      expect(ws).to.equal(WORKSPACE);
+      expect(projectId).to.equal('proj-1');
+      expect(items).to.have.lengthOf(1);
+      expect(items[0].promptId).to.equal('prompt-1');
+      expect(items[0].metadata.updated_by).to.equal('user@example.com');
+    });
+
+    it('defaults the authorship stamp to unknown when the job predates callerId', async () => {
+      const intentByTextMap = new Map([['great product', 'Commercial']]);
+      const { classifyPromptsHandler } = await load({
+        intentByTextMap, createAndEnqueueJobStub: sinon.stub(), transport,
+      });
+
+      const context = { env: {}, log: fakeLog(), dataAccess: dataAccessFor([]) };
+      const job = makeJob({
+        mode: 'reclassify',
+        semrushWorkspaceId: WORKSPACE,
+        items: [{
+          projectId: 'proj-1', promptId: 'prompt-1', text: 'great product', tagIds: [TAG_IDS.categoryRunningShoes],
+        }],
+      });
+
+      await classifyPromptsHandler(context, job, 'token');
+
+      const [, , items] = transport.patchPromptsMetadataBatch.firstCall.args;
+      expect(items[0].metadata.updated_by).to.equal('unknown');
+    });
+
+    it('does not stamp metadata for a project whose tag patch failed', async () => {
+      const intentByTextMap = new Map([['great product', 'Commercial']]);
+      transport.updatePromptTagsByIds.rejects(Object.assign(new Error('upstream'), { status: 500 }));
+      const { classifyPromptsHandler } = await load({
+        intentByTextMap, createAndEnqueueJobStub: sinon.stub(), transport,
+      });
+
+      const context = { env: {}, log: fakeLog(), dataAccess: dataAccessFor([]) };
+      const job = makeJob({
+        mode: 'reclassify',
+        semrushWorkspaceId: WORKSPACE,
+        items: [{
+          projectId: 'proj-1', promptId: 'prompt-1', text: 'great product', tagIds: [TAG_IDS.categoryRunningShoes],
+        }],
+      });
+
+      const result = await classifyPromptsHandler(context, job, 'token');
+
+      expect(result.failed).to.have.lengthOf(1);
+      expect(transport.patchPromptsMetadataBatch).not.to.have.been.called;
+    });
+
+    it('reports patched even when the best-effort authorship stamp fails', async () => {
+      const intentByTextMap = new Map([['great product', 'Commercial']]);
+      transport.patchPromptsMetadataBatch.rejects(new Error('upstream metadata write failed'));
+      const log = fakeLog();
+      const { classifyPromptsHandler } = await load({
+        intentByTextMap, createAndEnqueueJobStub: sinon.stub(), transport,
+      });
+
+      const context = { env: {}, log, dataAccess: dataAccessFor([]) };
+      const job = makeJob({
+        mode: 'reclassify',
+        semrushWorkspaceId: WORKSPACE,
+        items: [{
+          projectId: 'proj-1', promptId: 'prompt-1', text: 'great product', tagIds: [TAG_IDS.categoryRunningShoes],
+        }],
+      });
+
+      const result = await classifyPromptsHandler(context, job, 'token');
+
+      expect(result.patched).to.have.lengthOf(1);
+      expect(result.failed).to.have.lengthOf(0);
+      expect(log.warn).to.have.been.calledOnce;
+      expect(log.warn.firstCall.args[0]).to.include('authorship stamp failed');
+    });
+
     it('requeues whatever is still pending after a reclassify attempt, without patching it', async () => {
       const intentByTextMap = new Map([['still ambiguous', null]]);
       const requeuedJob = { getId: () => 'job-followup-2' };
@@ -360,6 +489,9 @@ describe('handlers/classify-prompts-job.js (serenity-docs#33)', () => {
       const [, enqueueArgs] = createAndEnqueueJobStub.firstCall.args;
       expect(enqueueArgs.metadata.mode).to.equal('reclassify');
       expect(enqueueArgs.metadata.items[0].promptId).to.equal('prompt-1');
+      // Self-requeue must keep carrying callerId forward across hops, not just
+      // on the first create -> reclassify handoff.
+      expect(enqueueArgs.metadata.callerId).to.equal('unknown');
     });
   });
 });
