@@ -455,9 +455,12 @@ describe('EntitlementModals', () => {
       revokeEntitlementImsOrgModal,
       createOrgMetadata(),
       createProductState(),
-      (ack) => {
+      (ack, client) => {
         expect(ack).to.have.been.calledOnce;
         expect(mockUpdateMessageToProcessing).to.have.been.calledOnce;
+        expect(client.chat.postMessage).to.have.been.calledWith(sinon.match({
+          text: sinon.match(':white_check_mark: Successfully revoked'),
+        }));
       },
     ));
 
@@ -489,7 +492,12 @@ describe('EntitlementModals', () => {
         module.revokeEntitlementImsOrgModal,
         createOrgMetadata(),
         createProductState(),
-        () => { expect(lambdaContext.log.error).to.have.been.called; },
+        (ack, client) => {
+          expect(lambdaContext.log.error).to.have.been.called;
+          expect(client.chat.postMessage).to.have.been.calledWith(sinon.match({
+            text: sinon.match(':x: Failed to revoke'),
+          }));
+        },
       );
     });
 

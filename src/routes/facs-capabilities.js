@@ -770,6 +770,7 @@ const routeFacsCapabilities = {
       'GET /sites/:siteId/metadata': 'llmo/can_view',
       'GET /sites/:siteId/metrics/:metric/:source': 'llmo/can_view',
       'GET /sites/:siteId/metrics/:metric/:source/by-url/:base64PageUrl': 'llmo/can_view',
+      'GET /sites/:siteId/keyword-cpc': 'llmo/can_view',
       'GET /sites/:siteId/opportunities': 'llmo/can_view',
       // POST-for-read lookups (body carries the query); reads, not writes.
       'POST /sites/:siteId/opportunities/by-urls': 'llmo/can_view',
@@ -1078,6 +1079,7 @@ const routeFacsCapabilities = {
       'GET /sites/:siteId/metadata': 'aso/can_view',
       'GET /sites/:siteId/metrics/:metric/:source': 'aso/can_view',
       'GET /sites/:siteId/metrics/:metric/:source/by-url/:base64PageUrl': 'aso/can_view',
+      'GET /sites/:siteId/keyword-cpc': 'aso/can_view',
       'GET /sites/:siteId/page-citability/counts': 'aso/can_view',
       'GET /sites/:siteId/scraped-content/:type': 'aso/can_view',
       'GET /sites/:siteId/site-enrollments': 'aso/can_view',
