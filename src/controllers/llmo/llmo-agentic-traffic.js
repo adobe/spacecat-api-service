@@ -74,6 +74,7 @@ const PLATFORM_CODE_TO_DB = {
   google: 'Google',
   'google-ai-mode': 'Google AI Mode',
   copilot: 'Copilot',
+  githubcopilot: 'GitHub Copilot',
   amazon: 'Amazon',
   parallel: 'Parallel.ai',
   manus: 'Manus',

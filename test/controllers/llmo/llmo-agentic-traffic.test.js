@@ -292,6 +292,7 @@ describe('llmo-agentic-traffic', () => {
       ['google', 'Google'],
       ['google-ai-mode', 'Google AI Mode'],
       ['copilot', 'Copilot'],
+      ['githubcopilot', 'GitHub Copilot'],
       ['amazon', 'Amazon'],
       ['parallel', 'Parallel.ai'],
       ['manus', 'Manus'],
@@ -325,13 +326,13 @@ describe('llmo-agentic-traffic', () => {
   });
 
   describe('platform multi-select (Serenity)', () => {
-    it('maps a comma list to p_platforms and nulls the scalar p_platform', async () => {
+    it('keeps generic Copilot and GitHub Copilot as distinct platform filters', async () => {
       const client = createMockClient({ rpc_agentic_traffic_kpis: { data: [], error: null } });
-      const ctx = makeContext({ client, data: { startDate: '2026-01-01', endDate: '2026-01-28', platform: 'chatgpt,meta-ai' } });
+      const ctx = makeContext({ client, data: { startDate: '2026-01-01', endDate: '2026-01-28', platform: 'copilot,githubcopilot' } });
       await createAgenticTrafficKpisHandler(stubbedValidateAccess)(ctx);
       expect(client.rpc).to.have.been.calledWithMatch('rpc_agentic_traffic_kpis', {
         p_platform: null,
-        p_platforms: ['ChatGPT', 'Meta'],
+        p_platforms: ['Copilot', 'GitHub Copilot'],
       });
     });
 

@@ -14,6 +14,16 @@ api-service exposes the Serenity endpoint surface documented in OpenAPI and fron
 |---|---|---|---|
 | `SEMRUSH_PROJECTS_BASE_URL` | yes (no source default) | Vault `dx_mysticat/<env>/api-service`; locally `.env` | Upstream host for the Semrush AIO REST API. Must be `https://…`. Trailing slashes are stripped. Per-environment value so the production target can differ from the hackathon host without a code change. |
 | `PROMPT_INTENT_CLASSIFICATION_DEPLOYMENT_NAME` | no (falls back to `AZURE_OPEN_AI_API_DEPLOYMENT_NAME`) | Vault `dx_mysticat/<env>/api-service`; locally `.env` | Classifier-scoped Azure OpenAI deployment (model) name for server-side prompt-intent classification (serenity-docs#32). Takes precedence over the shared `AZURE_OPEN_AI_API_DEPLOYMENT_NAME` other Azure consumers use (e.g. `org-detector`), so intent classification can target a different model without affecting them. Unset ⇒ shared deployment; behavior unchanged until explicitly configured. |
+| `SERENITY_TARGETED_CREATE_LOOKUP` | no (**default ON**) | Vault `dx_mysticat/<env>/api-service`; locally `.env` | Kill-switch for the create/upsert-path existing-prompt dedup strategy. See the subsection below. |
+
+### Create-path dedup kill-switch (`SERENITY_TARGETED_CREATE_LOOKUP`)
+
+Prompt create/upsert (`POST /v2/orgs/:id/brands/:id/serenity/prompts`, flat and sub-workspace) must decide, per input, whether a prompt already exists so it upserts (reactivates / replaces tags) instead of re-creating — a re-create folds into the upstream `existing_count` but still attaches the given tags, silently stacking a tag on the live prompt.
+
+- **ON (default; unset, empty, or any value other than the literal `'false'`):** the dedup index is built with a **per-input `search` lookup** — one `by_tags` call per distinct input text. Cost scales with the *input*, not the brand's corpus, so large-corpus brands (e.g. Adobe Helpx, ~38k prompts) no longer time out at the Fastly edge.
+- **`'false'`:** falls back to a **bounded-concurrency, capped corpus walk** (`MAX_PROMPT_INDEX_PAGES` pages at `BULK_CREATE_CONCURRENCY`). This is a corrected walk — never the pre-fix serial-unbounded walk — so a flag flip is a safe revert, not a return to the incident.
+
+The flag is read **per request** from `context.env`, so it is a per-brand canary / instant-rollback lever: enable/verify on one brand before widening (see the per-brand rollout guidance for the activation flag below). **Observability:** the create-completed log line carries `targetedLookup` (which path ran) and `upstreamCallCount` (per-request `by_tags` calls) — watch both when canarying or rolling back. This is a temporary kill-switch; it (and the fallback walk) are slated for removal after a soak with `targetedLookup=true` across brands and zero degradation alerts.
 
 ### Vault writes (dev / stage / prod)
 

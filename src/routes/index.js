@@ -399,6 +399,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/experiments': experimentsController.getExperiments,
     'GET /sites/:siteId/metrics/:metric/:source': sitesController.getSiteMetricsBySource,
     'GET /sites/:siteId/metrics/:metric/:source/by-url/:base64PageUrl': sitesController.getPageMetricsBySource,
+    'GET /sites/:siteId/keyword-cpc': sitesController.getSiteKeywordCpc,
     'GET /sites/:siteId/latest-metrics': sitesController.getLatestSiteMetrics,
     'GET /sites/by-base-url/:baseURL': sitesController.getByBaseURL,
     'GET /sites/by-delivery-type/:deliveryType': sitesController.getAllByDeliveryType,
@@ -576,6 +577,7 @@ export default function getRouteHandlers(
 
     // Fixes
     'GET /sites/:siteId/fixes': (c) => fixesController.getAllForSite(c),
+    'GET /sites/:siteId/deployed-opportunities': (c) => fixesController.getDeployedOpportunitiesForSite(c),
     'GET /sites/:siteId/opportunities/:opportunityId/fixes': (c) => fixesController.getAllForOpportunity(c),
     'GET /sites/:siteId/opportunities/:opportunityId/fixes/by-status/:status': (c) => fixesController.getByStatus(c),
     'GET /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': (c) => fixesController.getByID(c),

@@ -22,6 +22,7 @@ import { createElementsTransport } from '../support/elements/elements-transport.
 import { ElementsTransportError } from '../support/elements/errors.js';
 import { createElementsService } from '../support/elements/elements-service.js';
 import { fetchOwnedUrlsTraffic, mergeOwnedUrlsTraffic } from '../support/elements/owned-urls-traffic.js';
+import { parseAgentTypes } from './llmo/llmo-agent-types.js';
 import { mapWithConcurrency } from '../support/elements/concurrency.js';
 import { addDaysToDate } from '../support/elements/week-utils.js';
 import { normalizeSentimentMetric, SENTIMENT_METRICS } from '../support/elements/definitions/index.js';
@@ -36,6 +37,7 @@ import { ResponseFeedDto } from '../dto/response-feed.js';
 import AccessControlUtil from '../support/access-control-util.js';
 import { ErrorWithStatusCode, resolveSemrushImsToken } from '../support/utils.js';
 import { X_PROMISE_TOKEN_HEADER, PROMISE_TOKEN_REQUIRED_ERROR_CODE } from '../utils/constants.js';
+import { isYmdDate } from '../utils/date-utils.js';
 
 const MAX_ERR_MSG_LEN = 500;
 const BEARER_PREFIX = 'Bearer ';
@@ -306,20 +308,6 @@ function rejectUnsupportedTagFilter(query) {
     error.code = 'unsupportedTagFilter';
     throw error;
   }
-}
-
-/**
- * True when `value` is a real `YYYY-MM-DD` calendar date. Rejects malformed shapes
- * and impossible dates (e.g. `2026-13-45`) by round-tripping through Date so a bad
- * value never reaches Semrush. (shared-utils `isIsoDate` requires a full datetime,
- * not the date-only form the URL Inspector sends.)
- */
-function isYmdDate(value) {
-  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    return false;
-  }
-  const d = new Date(`${value}T00:00:00Z`);
-  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value;
 }
 
 /**
@@ -1778,11 +1766,17 @@ export default function ElementsController(context, log, env) {
       // (keeps p_urls small). Best-effort — degrades to 0/[] on any failure. No
       // region filter is passed to the RPC (the old `region` UI code has no
       // equivalent now that projects are selected by Semrush project id).
+      // agentTypes mirrors the PG url-inspector owned-urls handler (LLMO-4526):
+      // without it this hybrid join counted every agent_type, so the "Citation
+      // Attempts" column on Serenity-mode brands silently included agent types
+      // (e.g. Training bots) the PG dashboard's equivalent column excludes.
+      const agentTypes = parseAgentTypes(query.agentTypes ?? query.agent_types);
       const trafficMap = await fetchOwnedUrlsTraffic(ctx?.dataAccess?.Site?.postgrestService, {
         siteId: resolvedSiteId,
         startDate,
         endDate,
         urls: pageUrls.map((u) => u.url),
+        agentTypes,
         referralSource: query.referralSource || query.referral_source,
         log,
       });

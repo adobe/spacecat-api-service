@@ -553,6 +553,7 @@ const routeRequiredCapabilities = {
   'GET /sites/:siteId/geo-experiments/:geoExperimentId/results': 'site:read', // impact-measurement insights
   'GET /sites/:siteId/metrics/:metric/:source': 'site:read',
   'GET /sites/:siteId/metrics/:metric/:source/by-url/:base64PageUrl': 'site:read',
+  'GET /sites/:siteId/keyword-cpc': 'site:read',
   'GET /sites/:siteId/latest-metrics': 'site:read',
   'GET /sites/by-base-url/:baseURL': 'site:read',
   'GET /sites/by-delivery-type/:deliveryType': 'site:read',
@@ -703,6 +704,7 @@ const routeRequiredCapabilities = {
 
   // Fixes
   'GET /sites/:siteId/fixes': 'fixEntity:read',
+  'GET /sites/:siteId/deployed-opportunities': 'fixEntity:read',
   'GET /sites/:siteId/opportunities/:opportunityId/fixes': 'fixEntity:read',
   'GET /sites/:siteId/opportunities/:opportunityId/fixes/by-status/:status': 'fixEntity:read',
   'GET /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': 'fixEntity:read',

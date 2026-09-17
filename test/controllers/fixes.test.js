@@ -1116,6 +1116,305 @@ describe('Fixes Controller', () => {
     });
   });
 
+  describe('Deployed opportunities for a site', () => {
+    const opportunityId2 = 'b4e3f2fa-6f5c-4e6b-8c7d-0c7b5a2f1a2f';
+    const oppStub = (id, title) => ({ getId: () => id, getTitle: () => title });
+
+    beforeEach(() => {
+      sandbox.stub(fixEntityCollection, 'allByOpportunityIds');
+      sandbox.stub(dataAccess.Opportunity, 'allBySiteId');
+      requestContext = { params: { siteId } };
+    });
+
+    it('responds 400 for an invalid site ID', async () => {
+      requestContext.params.siteId = 'not-a-uuid';
+      const response = await fixesController.getDeployedOpportunitiesForSite(requestContext);
+      expect(response).includes({ status: 400 });
+    });
+
+    it('responds 403 if the request does not have access', async () => {
+      accessControlUtil.hasAccess.resolves(false);
+      const response = await fixesController.getDeployedOpportunitiesForSite(requestContext);
+      expect(response).includes({ status: 403 });
+    });
+
+    it('responds 400 for an invalid from date', async () => {
+      dataAccess.Opportunity.allBySiteId.resolves([oppStub(opportunityId, 'A')]);
+      requestContext.data = { from: '2026-13-45' };
+      const response = await fixesController.getDeployedOpportunitiesForSite(requestContext);
+      expect(response).includes({ status: 400 });
+      expect(await response.json()).deep.equals({ message: 'from must be a valid date (YYYY-MM-DD)' });
+    });
+
+    it('responds 400 for a non-YMD from value', async () => {
+      dataAccess.Opportunity.allBySiteId.resolves([oppStub(opportunityId, 'A')]);
+      requestContext.data = { from: '2026-08-01T00:00:00.000Z' };
+      const response = await fixesController.getDeployedOpportunitiesForSite(requestContext);
+      expect(response).includes({ status: 400 });
+      expect(await response.json()).deep.equals({ message: 'from must be a valid date (YYYY-MM-DD)' });
+    });
+
+    it('responds 400 for an invalid to date', async () => {
+      dataAccess.Opportunity.allBySiteId.resolves([oppStub(opportunityId, 'A')]);
+      requestContext.data = { to: 'not-a-date' };
+      const response = await fixesController.getDeployedOpportunitiesForSite(requestContext);
+      expect(response).includes({ status: 400 });
+      expect(await response.json()).deep.equals({ message: 'to must be a valid date (YYYY-MM-DD)' });
+    });
+
+    it('responds 400 for an inverted window (from after to)', async () => {
+      dataAccess.Opportunity.allBySiteId.resolves([oppStub(opportunityId, 'A')]);
+      requestContext.data = { from: '2026-09-01', to: '2026-08-01' };
+      const response = await fixesController.getDeployedOpportunitiesForSite(requestContext);
+      expect(response).includes({ status: 400 });
+      expect(await response.json()).deep.equals({ message: 'from must not be after to' });
+      expect(fixEntityCollection.allByOpportunityIds).to.not.have.been.called;
+    });
+
+    it('returns [] without querying fixes when the site has no opportunities', async () => {
+      dataAccess.Opportunity.allBySiteId.resolves([]);
+      const response = await fixesController.getDeployedOpportunitiesForSite(requestContext);
+      expect(response).includes({ status: 200 });
+      expect(await response.json()).deep.equals([]);
+      expect(fixEntityCollection.allByOpportunityIds).to.not.have.been.called;
+    });
+
+    it('groups deployed/published fixes by date with opportunity titles', async () => {
+      const a = await fixEntityCollection.create({
+        type: Suggestion.TYPES.CONTENT_UPDATE,
+        opportunityId,
+        status: FixEntity.STATUSES.DEPLOYED,
+        changeDetails: { file: '/a' },
+        deployedAt: '2026-08-15T10:00:00.000Z',
+      });
+      const b = await fixEntityCollection.create({
+        type: Suggestion.TYPES.REDIRECT_UPDATE,
+        opportunityId: opportunityId2,
+        status: FixEntity.STATUSES.PUBLISHED,
+        changeDetails: { file: '/b' },
+        deployedAt: '2026-08-15T14:00:00.000Z',
+      });
+      const c = await fixEntityCollection.create({
+        type: Suggestion.TYPES.CONTENT_UPDATE,
+        opportunityId,
+        status: FixEntity.STATUSES.DEPLOYED,
+        changeDetails: { file: '/c' },
+        deployedAt: '2026-08-20T09:00:00.000Z',
+      });
+      dataAccess.Opportunity.allBySiteId.resolves([
+        oppStub(opportunityId, 'Hero readability'),
+        oppStub(opportunityId2, 'Footer links'),
+      ]);
+      fixEntityCollection.allByOpportunityIds.resolves([a, b, c]);
+
+      const response = await fixesController.getDeployedOpportunitiesForSite(requestContext);
+      expect(response).includes({ status: 200 });
+      const body = await response.json();
+      expect(body).to.be.an('array').with.lengthOf(2);
+      expect(body[0].date).to.equal('2026-08-15');
+      expect(body[0].deployments).to.have.lengthOf(2);
+      expect(body[1].date).to.equal('2026-08-20');
+      expect(body[1].deployments).to.have.lengthOf(1);
+
+      const first = body[0].deployments[0];
+      expect(first).to.include({
+        opportunityId,
+        opportunityTitle: 'Hero readability',
+        type: Suggestion.TYPES.CONTENT_UPDATE,
+        status: FixEntity.STATUSES.DEPLOYED,
+        fixId: a.getId(),
+        deployedAt: '2026-08-15T10:00:00.000Z',
+      });
+      expect(first.changeDetails).to.deep.equal({ file: '/a' });
+    });
+
+    it('excludes fixes that are not DEPLOYED or PUBLISHED', async () => {
+      const pending = await fixEntityCollection.create({
+        type: Suggestion.TYPES.CONTENT_UPDATE,
+        opportunityId,
+        status: FixEntity.STATUSES.PENDING,
+        deployedAt: '2026-08-15T10:00:00.000Z',
+      });
+      const failed = await fixEntityCollection.create({
+        type: Suggestion.TYPES.CONTENT_UPDATE,
+        opportunityId,
+        status: FixEntity.STATUSES.FAILED,
+        deployedAt: '2026-08-15T10:00:00.000Z',
+      });
+      dataAccess.Opportunity.allBySiteId.resolves([oppStub(opportunityId, 'A')]);
+      fixEntityCollection.allByOpportunityIds.resolves([pending, failed]);
+
+      const response = await fixesController.getDeployedOpportunitiesForSite(requestContext);
+      expect(response).includes({ status: 200 });
+      expect(await response.json()).deep.equals([]);
+    });
+
+    it('filters deploys by a from/to window (both bounds)', async () => {
+      const before = await fixEntityCollection.create({
+        type: Suggestion.TYPES.CONTENT_UPDATE,
+        opportunityId,
+        status: FixEntity.STATUSES.DEPLOYED,
+        deployedAt: '2026-07-01T10:00:00.000Z',
+      });
+      const inside = await fixEntityCollection.create({
+        type: Suggestion.TYPES.CONTENT_UPDATE,
+        opportunityId,
+        status: FixEntity.STATUSES.DEPLOYED,
+        deployedAt: '2026-08-15T10:00:00.000Z',
+      });
+      const after = await fixEntityCollection.create({
+        type: Suggestion.TYPES.CONTENT_UPDATE,
+        opportunityId,
+        status: FixEntity.STATUSES.DEPLOYED,
+        deployedAt: '2026-10-01T10:00:00.000Z',
+      });
+      dataAccess.Opportunity.allBySiteId.resolves([oppStub(opportunityId, 'A')]);
+      fixEntityCollection.allByOpportunityIds.resolves([before, inside, after]);
+
+      requestContext.data = { from: '2026-08-01', to: '2026-09-01' };
+      const response = await fixesController.getDeployedOpportunitiesForSite(requestContext);
+      const body = await response.json();
+      expect(body).to.have.lengthOf(1);
+      expect(body[0].date).to.equal('2026-08-15');
+      expect(body[0].deployments[0].fixId).to.equal(inside.getId());
+    });
+
+    it('includes a deploy later in the day on the inclusive to bound', async () => {
+      const endOfDay = await fixEntityCollection.create({
+        type: Suggestion.TYPES.CONTENT_UPDATE,
+        opportunityId,
+        status: FixEntity.STATUSES.DEPLOYED,
+        deployedAt: '2026-08-15T14:00:00.000Z',
+      });
+      dataAccess.Opportunity.allBySiteId.resolves([oppStub(opportunityId, 'A')]);
+      fixEntityCollection.allByOpportunityIds.resolves([endOfDay]);
+
+      // `to` is the same calendar day; the end-of-day bound (23:59:59.999Z) must include a
+      // 14:00 deploy — a regression to a start-of-day bound would drop it.
+      requestContext.data = { from: '2026-08-15', to: '2026-08-15' };
+      const response = await fixesController.getDeployedOpportunitiesForSite(requestContext);
+      const body = await response.json();
+      expect(body).to.have.lengthOf(1);
+      expect(body[0].date).to.equal('2026-08-15');
+      expect(body[0].deployments[0].fixId).to.equal(endOfDay.getId());
+    });
+
+    it('falls back to executedAt and excludes fixes with no anchor', async () => {
+      const execOnly = await fixEntityCollection.create({
+        type: Suggestion.TYPES.CONTENT_UPDATE,
+        opportunityId,
+        status: FixEntity.STATUSES.DEPLOYED,
+        executedAt: '2026-08-15T10:00:00.000Z',
+      });
+      sandbox.stub(execOnly, 'getDeployedAt').returns(null);
+      const undated = await fixEntityCollection.create({
+        type: Suggestion.TYPES.CONTENT_UPDATE,
+        opportunityId,
+        status: FixEntity.STATUSES.DEPLOYED,
+      });
+      sandbox.stub(undated, 'getDeployedAt').returns(null);
+      sandbox.stub(undated, 'getExecutedAt').returns(null);
+      dataAccess.Opportunity.allBySiteId.resolves([oppStub(opportunityId, 'A')]);
+      fixEntityCollection.allByOpportunityIds.resolves([execOnly, undated]);
+
+      const response = await fixesController.getDeployedOpportunitiesForSite(requestContext);
+      const body = await response.json();
+      expect(body).to.have.lengthOf(1);
+      expect(body[0].date).to.equal('2026-08-15');
+      expect(body[0].deployments[0].fixId).to.equal(execOnly.getId());
+      expect(body[0].deployments[0].deployedAt).to.equal('2026-08-15T10:00:00.000Z');
+    });
+
+    it('excludes a fix whose anchor timestamp is unparseable (NaN guard)', async () => {
+      const malformed = await fixEntityCollection.create({
+        type: Suggestion.TYPES.CONTENT_UPDATE,
+        opportunityId,
+        status: FixEntity.STATUSES.DEPLOYED,
+      });
+      sandbox.stub(malformed, 'getDeployedAt').returns('not-a-date');
+      sandbox.stub(malformed, 'getExecutedAt').returns(null);
+      dataAccess.Opportunity.allBySiteId.resolves([oppStub(opportunityId, 'A')]);
+      fixEntityCollection.allByOpportunityIds.resolves([malformed]);
+
+      const response = await fixesController.getDeployedOpportunitiesForSite(requestContext);
+      expect(response).includes({ status: 200 });
+      expect(await response.json()).deep.equals([]);
+    });
+
+    it('resolves opportunityTitle to null when the title is unavailable', async () => {
+      const fix = await fixEntityCollection.create({
+        type: Suggestion.TYPES.CONTENT_UPDATE,
+        opportunityId,
+        status: FixEntity.STATUSES.DEPLOYED,
+        deployedAt: '2026-08-15T10:00:00.000Z',
+      });
+      dataAccess.Opportunity.allBySiteId.resolves([oppStub(opportunityId, null)]);
+      fixEntityCollection.allByOpportunityIds.resolves([fix]);
+
+      const response = await fixesController.getDeployedOpportunitiesForSite(requestContext);
+      const body = await response.json();
+      expect(body[0].deployments[0].opportunityTitle).to.equal(null);
+    });
+
+    it('responds 400 for a non-positive limit', async () => {
+      dataAccess.Opportunity.allBySiteId.resolves([oppStub(opportunityId, 'A')]);
+      requestContext.data = { limit: '0' };
+      const response = await fixesController.getDeployedOpportunitiesForSite(requestContext);
+      expect(response).includes({ status: 400 });
+      expect(await response.json()).deep.equals({ message: 'limit must be a positive integer' });
+    });
+
+    it('caps to the most recent deploys when limit truncates', async () => {
+      const older = await fixEntityCollection.create({
+        type: Suggestion.TYPES.CONTENT_UPDATE,
+        opportunityId,
+        status: FixEntity.STATUSES.DEPLOYED,
+        deployedAt: '2026-08-10T10:00:00.000Z',
+      });
+      const newer = await fixEntityCollection.create({
+        type: Suggestion.TYPES.CONTENT_UPDATE,
+        opportunityId,
+        status: FixEntity.STATUSES.DEPLOYED,
+        deployedAt: '2026-08-20T10:00:00.000Z',
+      });
+      dataAccess.Opportunity.allBySiteId.resolves([oppStub(opportunityId, 'A')]);
+      fixEntityCollection.allByOpportunityIds.resolves([older, newer]);
+
+      requestContext.data = { limit: '1' };
+      const response = await fixesController.getDeployedOpportunitiesForSite(requestContext);
+      const body = await response.json();
+      expect(body).to.have.lengthOf(1);
+      expect(body[0].date).to.equal('2026-08-20');
+      expect(body[0].deployments[0].fixId).to.equal(newer.getId());
+    });
+
+    it("narrows deploys to the caller's permitted composite types (D4)", async () => {
+      const securityFix = await fixEntityCollection.create({
+        type: Suggestion.TYPES.CONTENT_UPDATE,
+        opportunityId,
+        status: FixEntity.STATUSES.DEPLOYED,
+        deployedAt: '2026-08-15T10:00:00.000Z',
+      });
+      dataAccess.Opportunity.allBySiteId.resolves([
+        { getId: () => opportunityId, getType: () => 'security', getTitle: () => 'Security oppty' },
+        { getId: () => opportunityId2, getType: () => 'meta-tags', getTitle: () => 'Meta oppty' },
+      ]);
+      fixEntityCollection.allByOpportunityIds.withArgs([opportunityId]).resolves([securityFix]);
+      requestContext.attributes = { facsComposite: { values: ['security'] } };
+
+      const response = await fixesController.getDeployedOpportunitiesForSite(requestContext);
+      expect(response).includes({ status: 200 });
+      const body = await response.json();
+      expect(body).to.have.lengthOf(1);
+      expect(body[0].deployments).to.have.lengthOf(1);
+      expect(body[0].deployments[0].fixId).to.equal(securityFix.getId());
+      expect(body[0].deployments[0].opportunityTitle).to.equal('Security oppty');
+      // The non-permitted (meta-tags) opportunity id is never queried for fixes.
+      expect(fixEntityCollection.allByOpportunityIds)
+        .to.have.been.calledOnceWithExactly([opportunityId]);
+    });
+  });
+
   describe('getting fixes by status', () => {
     beforeEach(() => {
       requestContext.params.status = 'PENDING';
