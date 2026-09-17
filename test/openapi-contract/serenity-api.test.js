@@ -400,6 +400,30 @@ const FIXTURES = {
     handlerResult: { items: [{ id: 't1', name: 'Topic A' }] },
     query: { geoTargetId: '2840', languageCode: 'en' },
   },
+  searchSerenityTags: {
+    expectedStatus: 200,
+    controllerMethod: 'searchTags',
+    handlerName: 'handleSearchTags',
+    handlerResult: {
+      items: [{
+        id: 't1',
+        name: 'Campaign',
+        parentId: 'tag-root',
+        depth: 2,
+        path: ['Campaign'],
+        match: 'exact',
+      }],
+      cursor: null,
+      complete: true,
+    },
+    query: {
+      geoTargetId: '2840', languageCode: 'en', q: 'campaign', limit: '25',
+    },
+    // Tag search fails closed (503 tagSearchUnavailable) before dispatching when
+    // its dedicated cursor-signing secret is absent, so the contract fixture has
+    // to provision one to reach the 200 shape.
+    env: { SERENITY_TAG_SEARCH_CURSOR_SECRET: 'contract-test-cursor-secret' },
+  },
   createSerenityTag: {
     expectedStatus: 201,
     controllerMethod: 'createTag',
@@ -1000,6 +1024,7 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
             // the documented success shapes are exercised, not the inactive 404.
             '../../src/support/serenity/serenity-active.js': {
               isSerenityActiveForBrand: () => Promise.resolve(true),
+              isTagSearchActiveForBrand: () => Promise.resolve(true),
             },
             '../../src/support/access-control-util.js': {
               default: {
@@ -1084,6 +1109,7 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
         handleCreateMarket: sinon.stub(),
         handleDeleteMarket: sinon.stub(),
         handleListTags: sinon.stub(),
+        handleSearchTags: sinon.stub(),
         handleCreateTag: sinon.stub(),
         handleUpdateTag: sinon.stub(),
         handleDeleteTag: sinon.stub(),
@@ -1177,6 +1203,10 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
             handleTagImpact: handlerStubs.handleTagImpact,
             handleTagImpactSubworkspace: sinon.stub(),
           },
+          '../../src/support/serenity/handlers/tag-search.js': {
+            handleSearchTags: handlerStubs.handleSearchTags,
+            handleSearchTagsSubworkspace: sinon.stub(),
+          },
           '../../src/support/serenity/handlers/bulk-tags-job.js': {
             BULK_TAGS_JOB_TYPE: 'serenity-bulk-tags',
             BULK_TAGS_PUBLIC_JOB_TYPE: 'bulkTags',
@@ -1212,6 +1242,7 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
           // shapes are exercised rather than the inactive-brand 404.
           '../../src/support/serenity/serenity-active.js': {
             isSerenityActiveForBrand: () => Promise.resolve(true),
+            isTagSearchActiveForBrand: () => Promise.resolve(true),
           },
           // activate reads brand-level aliases/URLs/competitors once per batch, and
           // persists the active-flip + primary site (brands.site_id) via updateBrand;
@@ -1254,6 +1285,10 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
       // Ops that read an AsyncJob directly (no handler) get their job pinned here.
       if (fx.asyncJob) {
         ctx.dataAccess.AsyncJob = { findById: sinon.stub().resolves(fx.asyncJob) };
+      }
+      // Fixtures for endpoints that require a runtime secret/flag provision it here.
+      if (fx.env) {
+        ctx.env = { ...ctx.env, ...fx.env };
       }
       // Reauth drives the token-bearing 202 path: the STRICT identity check reads the
       // caller's stable user_id claim (must equal the job's metadata.imsUserId), and

@@ -1,3 +1,17 @@
+# [1.818.0](https://github.com/adobe/spacecat-api-service/compare/v1.817.0...v1.818.0) (2026-09-17)
+
+
+### Features
+
+* **facs:** opportunity-type-aware user capabilities + site-cap scope guard ([#3300](https://github.com/adobe/spacecat-api-service/issues/3300)) ([d93eb04](https://github.com/adobe/spacecat-api-service/commit/d93eb04a02f515bbe135bc8f4881ca1cd9edaf46))
+
+# [1.817.0](https://github.com/adobe/spacecat-api-service/compare/v1.816.0...v1.817.0) (2026-09-16)
+
+
+### Features
+
+* deploy serenity-market worker under a dedicated role ([#787](https://github.com/adobe/spacecat-api-service/issues/787)) ([#3296](https://github.com/adobe/spacecat-api-service/issues/3296)) ([4c19929](https://github.com/adobe/spacecat-api-service/commit/4c199290f69eb2c624944824ecf960f74b00e776)), closes [Hi#level](https://github.com/Hi/issues/level) [#798](https://github.com/adobe/spacecat-api-service/issues/798) [#3240](https://github.com/adobe/spacecat-api-service/issues/3240) [#798](https://github.com/adobe/spacecat-api-service/issues/798) [#798](https://github.com/adobe/spacecat-api-service/issues/798) [#798](https://github.com/adobe/spacecat-api-service/issues/798) [#798](https://github.com/adobe/spacecat-api-service/issues/798) [#798](https://github.com/adobe/spacecat-api-service/issues/798) [#798](https://github.com/adobe/spacecat-api-service/issues/798) [#793](https://github.com/adobe/spacecat-api-service/issues/793) [#3240](https://github.com/adobe/spacecat-api-service/issues/3240) [#798](https://github.com/adobe/spacecat-api-service/issues/798) [#798](https://github.com/adobe/spacecat-api-service/issues/798)
+
 # [1.816.0](https://github.com/adobe/spacecat-api-service/compare/v1.815.0...v1.816.0) (2026-09-16)
 
 
