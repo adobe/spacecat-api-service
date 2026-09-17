@@ -30,7 +30,12 @@
  * Re-emitted to the DB as-is (the PG predicate does case-insensitive
  * matching but matches against canonical casing for legibility).
  */
-export const VALID_AGENT_TYPES_CANONICAL = ['Chatbots', 'Research', 'Training bots'];
+export const VALID_AGENT_TYPES_CANONICAL = [
+  'Chatbots',
+  'Research',
+  'Training bots',
+  'Coding agents',
+];
 
 /**
  * Lowercase → canonical map used by `parseAgentTypes` for case-insensitive
@@ -42,7 +47,7 @@ export const VALID_AGENT_TYPES_LOOKUP = new Map(
 
 /**
  * Parse the additive `agentTypes` inclusion list into an array of canonical
- * agent_type values (`Chatbots`, `Research`, `Training bots`) or null.
+ * agent_type values (`Chatbots`, `Research`, `Training bots`, `Coding agents`) or null.
  *
  * Accepts either a comma-separated string (`"Chatbots,Research"`) or an array
  * passed as-is by the caller. Whitespace is trimmed, casing is normalised

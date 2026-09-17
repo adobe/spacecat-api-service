@@ -754,10 +754,10 @@ describe('URL Inspector Handlers', () => {
       expect(rpcCall.args[1]).to.not.have.property('p_referral_source');
     });
 
-    it('forwards comma-separated agentTypes as p_agent_types array', async () => {
+    it('forwards comma-separated agentTypes containing spaces as p_agent_types array', async () => {
       const { context, rpcStub } = createContext(
         {},
-        { agentTypes: 'Chatbots,Research' },
+        { agentTypes: 'Chatbots,Coding agents' },
         { rpcResults: { rpc_url_inspector_owned_urls: { data: [], error: null } } },
       );
 
@@ -766,7 +766,7 @@ describe('URL Inspector Handlers', () => {
 
       expect(response.status).to.equal(200);
       const rpcCall = rpcStub.firstCall;
-      expect(rpcCall.args[1].p_agent_types).to.deep.equal(['Chatbots', 'Research']);
+      expect(rpcCall.args[1].p_agent_types).to.deep.equal(['Chatbots', 'Coding agents']);
     });
 
     it('also accepts agentTypes as an array (no extra serialisation)', async () => {

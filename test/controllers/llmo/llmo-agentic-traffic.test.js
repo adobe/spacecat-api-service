@@ -292,6 +292,7 @@ describe('llmo-agentic-traffic', () => {
       ['google', 'Google'],
       ['google-ai-mode', 'Google AI Mode'],
       ['copilot', 'Copilot'],
+      ['githubcopilot', 'GitHub Copilot'],
       ['amazon', 'Amazon'],
       ['parallel', 'Parallel.ai'],
       ['manus', 'Manus'],
@@ -325,13 +326,13 @@ describe('llmo-agentic-traffic', () => {
   });
 
   describe('platform multi-select (Serenity)', () => {
-    it('maps a comma list to p_platforms and nulls the scalar p_platform', async () => {
+    it('keeps generic Copilot and GitHub Copilot as distinct platform filters', async () => {
       const client = createMockClient({ rpc_agentic_traffic_kpis: { data: [], error: null } });
-      const ctx = makeContext({ client, data: { startDate: '2026-01-01', endDate: '2026-01-28', platform: 'chatgpt,meta-ai' } });
+      const ctx = makeContext({ client, data: { startDate: '2026-01-01', endDate: '2026-01-28', platform: 'copilot,githubcopilot' } });
       await createAgenticTrafficKpisHandler(stubbedValidateAccess)(ctx);
       expect(client.rpc).to.have.been.calledWithMatch('rpc_agentic_traffic_kpis', {
         p_platform: null,
-        p_platforms: ['ChatGPT', 'Meta'],
+        p_platforms: ['Copilot', 'GitHub Copilot'],
       });
     });
 
@@ -725,6 +726,25 @@ describe('llmo-agentic-traffic', () => {
       await handler(ctx);
       expect(client.rpc).to.have.been.calledWithMatch('rpc_agentic_traffic_kpis_trend', {
         p_agent_types: ['Chatbots', 'Training bots'],
+      });
+    });
+
+    it('preserves the spaced Coding agents value when forwarding to PostgREST', async () => {
+      const client = createMockClient({
+        rpc_agentic_traffic_kpis_trend: { data: [], error: null },
+      });
+      const ctx = makeContext({
+        client,
+        data: {
+          startDate: '2026-01-01',
+          endDate: '2026-01-28',
+          agentTypes: ' coding AGENTS ',
+        },
+      });
+      const handler = createAgenticTrafficKpisTrendHandler(stubbedValidateAccess);
+      await handler(ctx);
+      expect(client.rpc).to.have.been.calledWithMatch('rpc_agentic_traffic_kpis_trend', {
+        p_agent_types: ['Coding agents'],
       });
     });
 
@@ -1911,8 +1931,8 @@ describe('llmo-agentic-traffic', () => {
         rpc_agentic_traffic_distinct_filters: {
           data: [{
             categories: ['Electronics', 'Fashion'],
-            agent_types: ['Chatbots', 'Research'],
-            platforms: ['ChatGPT', 'Meta', 'Perplexity'],
+            agent_types: ['Chatbots', 'Coding agents', 'Research'],
+            platforms: ['ChatGPT', 'GitHub Copilot', 'Meta', 'Perplexity'],
             content_types: ['article', 'product'],
             user_agents: ['ClaudeBot', 'GPTBot', 'PerplexityBot'],
           }],
@@ -1925,8 +1945,10 @@ describe('llmo-agentic-traffic', () => {
       expect(res.status).to.equal(200);
       const body = await res.json();
       expect(body.categories).to.deep.equal(['Electronics', 'Fashion']);
-      expect(body.agentTypes).to.deep.equal(['Chatbots', 'Research']);
-      expect(body.platforms).to.deep.equal(['ChatGPT', 'Meta', 'Perplexity']);
+      expect(body.agentTypes).to.deep.equal(['Chatbots', 'Coding agents', 'Research']);
+      expect(body.platforms).to.deep.equal(
+        ['ChatGPT', 'GitHub Copilot', 'Meta', 'Perplexity'],
+      );
       expect(body.contentTypes).to.deep.equal(['article', 'product']);
       expect(body.userAgents).to.deep.equal(['ClaudeBot', 'GPTBot', 'PerplexityBot']);
     });
@@ -2363,7 +2385,7 @@ describe('llmo-agentic-traffic', () => {
           startDate: '2026-01-01',
           endDate: '2026-01-28',
           urls: urlsBody,
-          agentTypes: ['Chatbots', 'Research'],
+          agentTypes: ['Chatbots', 'Coding agents'],
         },
       });
 
@@ -2378,7 +2400,7 @@ describe('llmo-agentic-traffic', () => {
           { host: 'www.example.com', url_path: '/a' },
           { host: 'www.example.com', url_path: '/b' },
         ],
-        p_agent_types: ['Chatbots', 'Research'],
+        p_agent_types: ['Chatbots', 'Coding agents'],
       });
       expect(res.status).to.equal(200);
       const body = await res.json();
