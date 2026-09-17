@@ -446,8 +446,15 @@ export function revokeEntitlementImsOrgModal(lambdaContext) {
       // Create tier client for each selected product and revoke entitlement
       /* eslint-disable no-await-in-loop */
       for (const product of selectedProducts) {
-        const tierClient = TierClient.createForOrg(lambdaContext, organization, product);
-        await tierClient.revokeEntitlement();
+        try {
+          const tierClient = TierClient.createForOrg(lambdaContext, organization, product);
+          await tierClient.revokeEntitlement();
+
+          await say(`:white_check_mark: Successfully revoked ${product} entitlement for organization ${orgName}`);
+        } catch (error) {
+          log.error(`Error revoking ${product} entitlement for organization ${organizationId}:`, error);
+          await say(`:x: Failed to revoke ${product} entitlement: ${error.message}`);
+        }
       }
       /* eslint-enable no-await-in-loop */
 
