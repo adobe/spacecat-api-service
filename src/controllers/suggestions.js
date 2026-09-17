@@ -2530,15 +2530,19 @@ function SuggestionsController(ctx, sqs, env) {
           ];
         }
 
-        // Best-effort: queue a routing-validation job for the high-impact measurement
-        // suggestions and record its jobId on the experiment so a future consumer can poll it.
-        // Only runs when highImpactSuggestionIds is actually present -- a plain (non-pattern)
-        // deploy has no discrete measurement target set to validate, so no job is created.
-        // A failure here must not block the deploy itself -- validation is an auxiliary check,
-        // not a gate.
-        // NOTE: this scoping is expected to change as the ROUTING_VALIDATION polling side
-        // (llmo-experimentation-engine) is finalized -- revisit together.
-        if (hasHighImpactIds) {
+        // Best-effort: queue a routing-validation job for every non-pattern (concrete,
+        // fetchable-URL) suggestion actually deploying, and record its jobId on the experiment
+        // so a future consumer (llmo-experimentation-engine's ROUTING_VALIDATION phase) can poll
+        // it. Falls back to highImpactSuggestionIds only when every deployed suggestion is
+        // pattern-based -- a pure domain-wide/path deploy has no discrete per-URL target
+        // otherwise. Same fallback rule llmo-experimentation-engine applies when it creates the
+        // job itself, so whichever side gets there first picks the same target set. A failure
+        // here must not block the deploy itself -- validation is an auxiliary check, not a gate.
+        const nonPatternSuggestionIds = validSuggestions.map((s) => s.getId());
+        const jobTargetSuggestionIds = nonPatternSuggestionIds.length > 0
+          ? nonPatternSuggestionIds
+          : (metadataBase.highImpactSuggestionIds ?? []);
+        if (jobTargetSuggestionIds.length > 0) {
           try {
             const oaeValidationController = OaeValidationController(
               { dataAccess, sqs },
@@ -2549,7 +2553,7 @@ function SuggestionsController(ctx, sqs, env) {
               siteId,
               opportunityId,
               type: ROUTING_VALIDATOR_TYPE,
-              suggestionIds: metadataBase.highImpactSuggestionIds,
+              suggestionIds: jobTargetSuggestionIds,
             });
             // Array (not a single id) so a future retry job (created by
             // llmo-experimentation-engine's ROUTING_VALIDATION phase) can be appended, keeping a
