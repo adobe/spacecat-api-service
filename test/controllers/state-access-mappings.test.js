@@ -853,6 +853,42 @@ describe('StateAccessMappingsController', () => {
       expect(res.status).to.equal(400);
     });
 
+    it("rejects a scope-type key whose value is not 'site' (ASO)", async () => {
+      const { Controller } = await loadController({});
+      const ctx = makeContext({
+        product: 'ASO',
+        body: asoBody({
+          grantedCapabilities: ['aso/can_manage_users'],
+          compositeKeyType1: 'scope',
+          compositeKeyValue1: 'security',
+        }),
+      });
+      const res = await Controller(ctx).createMapping(ctx);
+      expect(res.status).to.equal(400);
+      const body = await res.json();
+      expect(body.message).to.contain("'site'");
+    });
+
+    it('injects the baseline can_view for a composite opportunity grant (ASO)', async () => {
+      const createStub = sinon.stub().resolves({
+        created: [makeRow({ product: 'ASO', resource_type: 'site' })], skipped: [],
+      });
+      const { Controller } = await loadController({ createFacsAccessMappings: createStub });
+      const ctx = makeContext({
+        product: 'ASO',
+        body: asoBody({
+          grantedCapabilities: ['aso/can_edit'],
+          compositeKeyType1: 'opportunity',
+          compositeKeyValue1: 'all',
+        }),
+      });
+      const res = await Controller(ctx).createMapping(ctx);
+      expect(res.status).to.equal(201);
+      // Opportunity-tier grant still gets the baseline can_view (unlike the site row).
+      expect(createStub.firstCall.args[1].grantedCapabilities)
+        .to.have.members(['aso/can_edit', 'aso/can_view']);
+    });
+
     it('surfaces the composite-key qualifier in the created DTO (ASO)', async () => {
       const row = makeRow({
         product: 'ASO',
@@ -1546,7 +1582,10 @@ describe('StateAccessMappingsController', () => {
       const { Controller, stubs } = await loadController({
         getFacsAccessMappingById: sinon.stub().resolves(
           makeRow({
-            product: 'ASO', resource_type: 'site', composite_key_value_1: 'security',
+            product: 'ASO',
+            resource_type: 'site',
+            composite_key_type_1: 'opportunity',
+            composite_key_value_1: 'security',
           }),
         ),
       });
@@ -1566,7 +1605,10 @@ describe('StateAccessMappingsController', () => {
       const { Controller, stubs } = await loadController({
         getFacsAccessMappingById: sinon.stub().resolves(
           makeRow({
-            product: 'ASO', resource_type: 'site', composite_key_value_1: 'security',
+            product: 'ASO',
+            resource_type: 'site',
+            composite_key_type_1: 'opportunity',
+            composite_key_value_1: 'security',
           }),
         ),
       });
@@ -1578,6 +1620,29 @@ describe('StateAccessMappingsController', () => {
       const res = await Controller(ctx).patchMapping(ctx);
       expect(res.status).to.equal(400);
       expect((await res.json()).message).to.contain('Site-level capabilities');
+      expect(stubs.updateFacsAccessMappingCapabilities.called).to.be.false;
+    });
+
+    it('rejects adding an opportunity capability to the site row (ASO)', async () => {
+      // The mirror invariant on the PATCH path: the (scope,'site') row may only
+      // carry site-level caps.
+      const { Controller, stubs } = await loadController({
+        getFacsAccessMappingById: sinon.stub().resolves(
+          makeRow({
+            product: 'ASO',
+            resource_type: 'site',
+            composite_key_type_1: 'scope',
+            composite_key_value_1: 'site',
+          }),
+        ),
+      });
+      const ctx = makeContext({
+        product: 'ASO',
+        pathParams: { id: VALID_UUID_MAPPING },
+        body: { grantedCapabilities: ['aso/can_edit'] },
+      });
+      const res = await Controller(ctx).patchMapping(ctx);
+      expect(res.status).to.equal(400);
       expect(stubs.updateFacsAccessMappingCapabilities.called).to.be.false;
     });
 
@@ -2015,6 +2080,29 @@ describe('StateAccessMappingsController', () => {
             'llmo/can_configure',
           ],
         },
+      });
+      const res = await Controller(ctx).patchMapping(ctx);
+      expect(res.status).to.equal(200);
+      expect(stubs.updateFacsAccessMappingCapabilities.calledOnce).to.be.true;
+    });
+
+    it('patchMapping lets a FACS-layer manager NEWLY add can_manage_users (200)', async () => {
+      // delta=true (existing row lacks the cap) but the caller HAS FACS-layer
+      // manage authority, so the add is permitted — the positive counterpart to
+      // the state-layer-manager 403.
+      const { Controller, stubs } = await loadController({
+        getFacsAccessMappingById: sinon.stub().resolves(
+          makeRow({ granted_capabilities: ['llmo/can_view'] }),
+        ),
+        updateFacsAccessMappingCapabilities: sinon.stub().resolves(
+          makeRow({ granted_capabilities: ['llmo/can_view', 'llmo/can_manage_users'] }),
+        ),
+      });
+      const ctx = makeContext({
+        facsPermissions: ['llmo/can_manage_users'],
+        isAdmin: false,
+        pathParams: { id: VALID_UUID_MAPPING },
+        body: { grantedCapabilities: ['llmo/can_view', 'llmo/can_manage_users'] },
       });
       const res = await Controller(ctx).patchMapping(ctx);
       expect(res.status).to.equal(200);

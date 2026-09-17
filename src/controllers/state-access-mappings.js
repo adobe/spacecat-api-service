@@ -130,7 +130,12 @@ function resolveCompositeKeys(product, compositeKeyType1, compositeKeyValue1) {
   // (scope,'site'), so they get their own active row instead of sharing the
   // opportunity 'all' row. Recognized alongside the opportunity slot.
   if (compositeKeyType1 === SITE_SCOPE_TYPE) {
-    if (compositeKeyValue1 !== undefined && compositeKeyValue1 !== SITE_SCOPE_VALUE) {
+    // Trim to match the opportunity path's normalization, so a padded DTO
+    // round-trip (`' site '`) doesn't 400 where an opportunity value wouldn't.
+    const siteValue = hasText(compositeKeyValue1)
+      ? compositeKeyValue1.trim()
+      : SITE_SCOPE_VALUE;
+    if (siteValue !== SITE_SCOPE_VALUE) {
       return {
         error: badRequest(
           `compositeKeyType1 '${SITE_SCOPE_TYPE}' requires compositeKeyValue1 '${SITE_SCOPE_VALUE}'`,
@@ -166,9 +171,10 @@ function resolveCompositeKeys(product, compositeKeyType1, compositeKeyValue1) {
  * composite resolver's "non-opportunity route" branch grants them iff ANY active
  * binding on the resource carries the capability, REGARDLESS of the row's
  * composite qualifier (see support/facs-composite-resolvers.js). Scoping them to
- * a specific qualifier value is therefore meaningless AND misleading — they must
- * live on the 'all' (unscoped) row. Currently `can_configure` (site
- * config/settings) and `can_manage_users` (state-layer management).
+ * an opportunity type is therefore meaningless AND misleading — they live on the
+ * dedicated site-wide `(scope,'site')` row (see SITE_SCOPE_TYPE/_VALUE), never on
+ * an opportunity row. Currently `can_configure` (site config/settings) and
+ * `can_manage_users` (state-layer management).
  *
  * @param {string} product - Uppercase product code.
  * @returns {Set<string>}
