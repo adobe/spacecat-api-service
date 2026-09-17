@@ -225,7 +225,7 @@ export async function asoOpportunityComposite(context, {
 
   if (isOpportunityDerivedCollectionRoute(routePattern)) {
     // Opportunity-derived COLLECTION (opportunity list / by-status / top-paid,
-    // site fixes, edge-deployed-urls): the wrapper can't type-scope a whole
+    // site fixes, edge-deployed-urls, deployed-opportunities): the wrapper can't type-scope a whole
     // collection, so stash the caller's permitted opportunity types for the
     // controller to result-filter by (D4). WILDCARD ('all') → unrestricted.
     context.attributes = context.attributes ?? {};

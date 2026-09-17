@@ -36,7 +36,7 @@ import {
 } from '@adobe/spacecat-shared-utils';
 import { FixEntity as FixEntityModel } from '@adobe/spacecat-shared-data-access';
 import AccessControlUtil from '../support/access-control-util.js';
-import { FixDto, withLegacyDocumentPath } from '../dto/fix.js';
+import { FixDto } from '../dto/fix.js';
 import { SuggestionDto } from '../dto/suggestion.js';
 import { isValidLocale } from '../utils/validations.js';
 import { resolveDocumentPath } from '../support/document-path-resolver.js';
@@ -64,6 +64,17 @@ const ACTIVE_FIX_STATUSES = [
   FixEntityModel.STATUSES.DEPLOYED,
   FixEntityModel.STATUSES.PUBLISHED,
 ];
+
+// True when `value` is a real `YYYY-MM-DD` calendar date (rejects impossible dates like
+// 2026-13-45). Mirrors elements.js — the same Overview surface uses YMD, not full ISO
+// datetimes, and this endpoint's own output granularity is a UTC day.
+function isYmdDate(value) {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return false;
+  }
+  const d = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value;
+}
 
 /**
  * @typedef {Object} DataAccess
@@ -287,8 +298,8 @@ export class FixesController {
    * Returns a site's opportunities deployed per date, for the (experiment) overview
    * "deployed opportunities" timeline overlay. A deploy is a fix in DEPLOYED/PUBLISHED
    * status; its date is `deployedAt ?? executedAt` (the deploy moment). Optionally
-   * windowed by `from`/`to` (ISO-8601 date-times, inclusive). Each fix is joined to its
-   * opportunity title server-side, so the client renders markers without a second fetch.
+   * windowed by `from`/`to` (`YYYY-MM-DD`, inclusive UTC-day bounds). Each fix is joined to
+   * its opportunity title server-side, so the client renders markers without a second fetch.
    *
    * This is a purpose-shaped, experiment-scoped endpoint kept separate from
    * `getAllForSite` (the stable generic fixes list) so it can evolve or be removed with
@@ -317,14 +328,18 @@ export class FixesController {
       return res;
     }
 
-    if (hasText(from) && !isIsoDate(from)) {
-      return badRequest('from must be an ISO-8601 date-time');
+    if (hasText(from) && !isYmdDate(from)) {
+      return badRequest('from must be a valid date (YYYY-MM-DD)');
     }
-    if (hasText(to) && !isIsoDate(to)) {
-      return badRequest('to must be an ISO-8601 date-time');
+    if (hasText(to) && !isYmdDate(to)) {
+      return badRequest('to must be a valid date (YYYY-MM-DD)');
     }
-    const fromTime = hasText(from) ? new Date(from).getTime() : null;
-    const toTime = hasText(to) ? new Date(to).getTime() : null;
+    // Inclusive UTC-day window: from = start of the day, to = end of the day.
+    const fromTime = hasText(from) ? Date.parse(`${from}T00:00:00.000Z`) : null;
+    const toTime = hasText(to) ? Date.parse(`${to}T23:59:59.999Z`) : null;
+    if (fromTime !== null && toTime !== null && fromTime > toTime) {
+      return badRequest('from must not be after to');
+    }
 
     const parsedLimit = hasText(limitParam) ? parseInt(limitParam, 10) : DEFAULT_SITE_FIXES_LIMIT;
     if (!Number.isInteger(parsedLimit) || parsedLimit <= 0) {
@@ -346,17 +361,17 @@ export class FixesController {
 
     // Keep only already-live deploys with a usable anchor inside the window, ordered by
     // deploy time DESCENDING so the cap keeps the most recent deploys (the end of the
-    // timeline the overlay most wants) rather than the oldest.
+    // timeline the overlay most wants) rather than the oldest. The numeric anchor `t` is
+    // computed once and reused for filtering, sorting, and day-bucketing.
     const deploys = fixEntities
-      .map((fix) => ({ fix, anchor: fix.getDeployedAt() ?? fix.getExecutedAt() }))
-      .filter(({ fix, anchor }) => {
+      .map((fix) => {
+        const anchor = fix.getDeployedAt() ?? fix.getExecutedAt();
+        return { fix, anchor, t: anchor ? new Date(anchor).getTime() : NaN };
+      })
+      .filter(({ fix, t }) => {
         if (!ACTIVE_FIX_STATUSES.includes(fix.getStatus())) {
           return false;
         }
-        if (!anchor) {
-          return false;
-        }
-        const t = new Date(anchor).getTime();
         if (Number.isNaN(t)) {
           return false;
         }
@@ -368,22 +383,18 @@ export class FixesController {
         }
         return true;
       })
-      .sort((a, b) => new Date(b.anchor).getTime() - new Date(a.anchor).getTime())
+      .sort((a, b) => b.t - a.t)
       .slice(0, effectiveLimit);
 
     // Group by UTC deploy day.
     const bucketsByDate = new Map();
-    deploys.forEach(({ fix, anchor }) => {
-      const date = new Date(anchor).toISOString().slice(0, 10);
-      const deployment = {
-        opportunityId: fix.getOpportunityId(),
-        opportunityTitle: titleByOpportunityId.get(fix.getOpportunityId()) ?? null,
-        type: fix.getType(),
-        status: fix.getStatus(),
-        fixId: fix.getId(),
-        deployedAt: anchor,
-        changeDetails: withLegacyDocumentPath(fix.getChangeDetails()),
-      };
+    deploys.forEach(({ fix, anchor, t }) => {
+      const date = new Date(t).toISOString().slice(0, 10);
+      const deployment = FixDto.toDeployedOpportunityJSON(
+        fix,
+        titleByOpportunityId.get(fix.getOpportunityId()) ?? null,
+        anchor,
+      );
       if (bucketsByDate.has(date)) {
         bucketsByDate.get(date).push(deployment);
       } else {

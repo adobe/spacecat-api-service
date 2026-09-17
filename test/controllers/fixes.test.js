@@ -1138,20 +1138,37 @@ describe('Fixes Controller', () => {
       expect(response).includes({ status: 403 });
     });
 
-    it('responds 400 for a non-ISO from value', async () => {
+    it('responds 400 for an invalid from date', async () => {
       dataAccess.Opportunity.allBySiteId.resolves([oppStub(opportunityId, 'A')]);
-      requestContext.data = { from: '2026-08-01' };
+      requestContext.data = { from: '2026-13-45' };
       const response = await fixesController.getDeployedOpportunitiesForSite(requestContext);
       expect(response).includes({ status: 400 });
-      expect(await response.json()).deep.equals({ message: 'from must be an ISO-8601 date-time' });
+      expect(await response.json()).deep.equals({ message: 'from must be a valid date (YYYY-MM-DD)' });
     });
 
-    it('responds 400 for a non-ISO to value', async () => {
+    it('responds 400 for a non-YMD from value', async () => {
       dataAccess.Opportunity.allBySiteId.resolves([oppStub(opportunityId, 'A')]);
-      requestContext.data = { to: '2026-09-01' };
+      requestContext.data = { from: '2026-08-01T00:00:00.000Z' };
       const response = await fixesController.getDeployedOpportunitiesForSite(requestContext);
       expect(response).includes({ status: 400 });
-      expect(await response.json()).deep.equals({ message: 'to must be an ISO-8601 date-time' });
+      expect(await response.json()).deep.equals({ message: 'from must be a valid date (YYYY-MM-DD)' });
+    });
+
+    it('responds 400 for an invalid to date', async () => {
+      dataAccess.Opportunity.allBySiteId.resolves([oppStub(opportunityId, 'A')]);
+      requestContext.data = { to: 'not-a-date' };
+      const response = await fixesController.getDeployedOpportunitiesForSite(requestContext);
+      expect(response).includes({ status: 400 });
+      expect(await response.json()).deep.equals({ message: 'to must be a valid date (YYYY-MM-DD)' });
+    });
+
+    it('responds 400 for an inverted window (from after to)', async () => {
+      dataAccess.Opportunity.allBySiteId.resolves([oppStub(opportunityId, 'A')]);
+      requestContext.data = { from: '2026-09-01', to: '2026-08-01' };
+      const response = await fixesController.getDeployedOpportunitiesForSite(requestContext);
+      expect(response).includes({ status: 400 });
+      expect(await response.json()).deep.equals({ message: 'from must not be after to' });
+      expect(fixEntityCollection.allByOpportunityIds).to.not.have.been.called;
     });
 
     it('returns [] without querying fixes when the site has no opportunities', async () => {
@@ -1254,7 +1271,7 @@ describe('Fixes Controller', () => {
       dataAccess.Opportunity.allBySiteId.resolves([oppStub(opportunityId, 'A')]);
       fixEntityCollection.allByOpportunityIds.resolves([before, inside, after]);
 
-      requestContext.data = { from: '2026-08-01T00:00:00.000Z', to: '2026-09-01T00:00:00.000Z' };
+      requestContext.data = { from: '2026-08-01', to: '2026-09-01' };
       const response = await fixesController.getDeployedOpportunitiesForSite(requestContext);
       const body = await response.json();
       expect(body).to.have.lengthOf(1);
@@ -1286,6 +1303,22 @@ describe('Fixes Controller', () => {
       expect(body[0].date).to.equal('2026-08-15');
       expect(body[0].deployments[0].fixId).to.equal(execOnly.getId());
       expect(body[0].deployments[0].deployedAt).to.equal('2026-08-15T10:00:00.000Z');
+    });
+
+    it('excludes a fix whose anchor timestamp is unparseable (NaN guard)', async () => {
+      const malformed = await fixEntityCollection.create({
+        type: Suggestion.TYPES.CONTENT_UPDATE,
+        opportunityId,
+        status: FixEntity.STATUSES.DEPLOYED,
+      });
+      sandbox.stub(malformed, 'getDeployedAt').returns('not-a-date');
+      sandbox.stub(malformed, 'getExecutedAt').returns(null);
+      dataAccess.Opportunity.allBySiteId.resolves([oppStub(opportunityId, 'A')]);
+      fixEntityCollection.allByOpportunityIds.resolves([malformed]);
+
+      const response = await fixesController.getDeployedOpportunitiesForSite(requestContext);
+      expect(response).includes({ status: 200 });
+      expect(await response.json()).deep.equals([]);
     });
 
     it('resolves opportunityTitle to null when the title is unavailable', async () => {

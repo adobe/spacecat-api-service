@@ -237,7 +237,7 @@ export default function fixTests(getHttpClient, resetData) {
 
       it('user: returns [] when the window excludes all deploys', async () => {
         const http = getHttpClient();
-        const res = await http.user.get(`${DEPLOYED_BASE}?from=2027-01-01T00:00:00.000Z`);
+        const res = await http.user.get(`${DEPLOYED_BASE}?from=2027-01-01`);
         expect(res.status).to.equal(200);
         expect(res.body).to.be.an('array').with.lengthOf(0);
       });
@@ -260,15 +260,21 @@ export default function fixTests(getHttpClient, resetData) {
 
       it('user: includes deploys inside the from/to window', async () => {
         const http = getHttpClient();
-        const res = await http.user.get(`${DEPLOYED_BASE}?from=2026-08-01T00:00:00.000Z&to=2026-09-01T00:00:00.000Z`);
+        const res = await http.user.get(`${DEPLOYED_BASE}?from=2026-08-01&to=2026-09-01`);
         expect(res.status).to.equal(200);
         expect(res.body).to.have.lengthOf(1);
         expect(res.body[0].date).to.equal('2026-08-15');
       });
 
-      it('returns 400 for a non-ISO from value', async () => {
+      it('returns 400 for an invalid from date', async () => {
         const http = getHttpClient();
-        const res = await http.user.get(`${DEPLOYED_BASE}?from=2026-08-01`);
+        const res = await http.user.get(`${DEPLOYED_BASE}?from=2026-13-45`);
+        expect(res.status).to.equal(400);
+      });
+
+      it('returns 400 for an inverted window (from after to)', async () => {
+        const http = getHttpClient();
+        const res = await http.user.get(`${DEPLOYED_BASE}?from=2026-09-01&to=2026-08-01`);
         expect(res.status).to.equal(400);
       });
 
