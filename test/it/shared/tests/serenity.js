@@ -606,6 +606,13 @@ export default function serenityTests(
       expect(first.body.complete).to.equal(true);
       expect(first.body.items).to.have.length(2);
       expect(first.body.cursor).to.be.a('string');
+      expect(first.body.cursor).to.match(/^[A-Za-z0-9_-]+$/);
+      const cursorState = JSON.parse(
+        Buffer.from(first.body.cursor, 'base64url').toString('utf8'),
+      );
+      expect(cursorState).to.have.all.keys('v', 'q', 'offset', 'revision');
+      expect(cursorState).to.deep.include({ v: 1, q: 'paging', offset: 2 });
+      expect(cursorState).not.to.have.any.keys('project', 'workspace', 'tenant', 'brandId');
 
       const second = await getHttpClient().admin.get(
         `${base}/tags/search?geoTargetId=${US_GEO}&languageCode=en&q=paging&limit=2`
@@ -625,7 +632,7 @@ export default function serenityTests(
       }
     });
 
-    it('GET /serenity/tags/search 400s a cursor that was not issued by this service', async () => {
+    it('GET /serenity/tags/search 400s a malformed cursor', async () => {
       await createUsMarket();
       const res = await getHttpClient().admin.get(
         `${base}/tags/search?geoTargetId=${US_GEO}&languageCode=en&q=paging&cursor=not.acursor`,
