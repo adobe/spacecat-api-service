@@ -754,21 +754,31 @@ function StateAccessMappingsController(context) {
 
   /**
    * Guards the *grant* of `can_manage_users`: only a FACS-layer manager (or
-   * admin) may include `<product>/can_manage_users` in `grantedCapabilities`
-   * (hybrid-model §8.3 — a state-layer manager assigns every other capability
-   * but cannot mint new managers). Returns a `forbidden` Response when the grant
-   * is disallowed, else null.
+   * admin) may NEWLY grant `<product>/can_manage_users` (hybrid-model §8.3 — a
+   * state-layer manager assigns every other capability but cannot mint new
+   * managers).
+   *
+   * Evaluates the TRANSITION, not the resulting state: the guard fires only when
+   * `can_manage_users` is being *added* — present in the request but not already
+   * on the row. This matters for a full-replace PATCH, where the client re-sends
+   * an existing `can_manage_users` to preserve it (a full-replace would otherwise
+   * drop it); re-sending an unchanged manager cap is not a new grant and must not
+   * 403 a state-layer manager editing the row's OTHER capabilities. On create,
+   * `existingCapabilities` defaults to `[]`, so any present manager cap counts as
+   * added — unchanged create-time behavior.
    *
    * @param {object} ctx
    * @param {string} product
-   * @param {string[]} grantedCapabilities
+   * @param {string[]} grantedCapabilities - The capabilities to be stored.
+   * @param {string[]} [existingCapabilities] - Caps already on the target row.
    * @returns {Response|null}
    */
-  function requireFacsManageToGrant(ctx, product, grantedCapabilities) {
+  function requireFacsManageToGrant(ctx, product, grantedCapabilities, existingCapabilities = []) {
     const manageCap = `${product.toLowerCase()}/can_manage_users`;
-    if (Array.isArray(grantedCapabilities)
+    const addingManage = Array.isArray(grantedCapabilities)
       && grantedCapabilities.includes(manageCap)
-      && !callerHasFacsManageUsers(ctx, product)) {
+      && !existingCapabilities.includes(manageCap);
+    if (addingManage && !callerHasFacsManageUsers(ctx, product)) {
       return forbidden(`Granting ${manageCap} requires FACS-layer ${manageCap}`);
     }
     return null;
@@ -1353,29 +1363,45 @@ function StateAccessMappingsController(context) {
     if (capErr) {
       return badRequest(capErr);
     }
-    const grantGuard = requireFacsManageToGrant(ctx, product, grantedCapabilities);
-    if (grantGuard) {
-      return grantGuard;
-    }
     // De-dupe, then guarantee the baseline `<product>/can_view` (see create).
     const capabilitiesToStore = ensureBaselineCanView(
       [...new Set(grantedCapabilities)],
       product,
     );
+    const requestHasManageCap = capabilitiesToStore.includes(
+      `${product.toLowerCase()}/can_manage_users`,
+    );
 
     try {
       const { postgrestClient } = ctx.dataAccess.services;
-      // Fetch the target row when we need it: for per-resource authorization
-      // (non-org-wide managers, hybrid-model §8.3) or — for composite products —
-      // to validate the two-tier scope invariant against the row's stored
-      // qualifier (site caps only on the site row; the site row only carries
-      // site caps), which needs the row's TYPE + VALUE regardless of what the
-      // request carries.
-      const needsExisting = productHasCompositeSlots(product) || !authority.orgWide;
+      // Fetch the target row only when a check needs its CURRENT state:
+      //  - per-resource authorization (non-org-wide managers, hybrid-model §8.3),
+      //  - the two-tier scope invariant (composite products), or
+      //  - the FACS-manage grant guard when the request carries
+      //    can_manage_users (gated on the DELTA — see below).
+      const needsExisting = productHasCompositeSlots(product)
+        || !authority.orgWide
+        || requestHasManageCap;
       if (needsExisting) {
         const existing = await getFacsAccessMappingById(postgrestClient, { id, imsOrgId, product });
         if (!existing) {
           return notFound('Mapping not found');
+        }
+        // Grant guard on the DELTA: only a NEWLY added can_manage_users (present
+        // in the request but not already on the row) needs FACS-manage authority.
+        // A full-replace PATCH re-sends an existing one to preserve it — that is
+        // not a new grant, so a state-layer manager editing the row's OTHER caps
+        // is not blocked.
+        if (requestHasManageCap) {
+          const grantGuard = requireFacsManageToGrant(
+            ctx,
+            product,
+            capabilitiesToStore,
+            existing.granted_capabilities ?? [],
+          );
+          if (grantGuard) {
+            return grantGuard;
+          }
         }
         if (!authority.orgWide && !canActOnResource(authority, existing.resource_id)) {
           return forbidden(

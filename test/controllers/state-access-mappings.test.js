@@ -1960,22 +1960,65 @@ describe('StateAccessMappingsController', () => {
       expect(res.status).to.equal(201);
     });
 
-    it('patchMapping 403s when a state-layer manager adds can_manage_users', async () => {
+    it('patchMapping 403s when a state-layer manager ADDS can_manage_users', async () => {
       const managerRow = makeRow({
         subject_type: 'user', subject_id: CALLER_USER, granted_capabilities: ['llmo/can_manage_users'],
       });
       const { Controller, stubs } = await loadController({
         listFacsAccessMappings: sinon.stub().resolves([managerRow]),
+        // Target row does NOT hold can_manage_users → the request adds it.
+        getFacsAccessMappingById: sinon.stub().resolves(
+          makeRow({ granted_capabilities: ['llmo/can_view'] }),
+        ),
       });
       const ctx = makeContext({
         facsPermissions: [],
         isAdmin: false,
         pathParams: { id: VALID_UUID_MAPPING },
-        body: { grantedCapabilities: ['llmo/can_manage_users'] },
+        body: { grantedCapabilities: ['llmo/can_view', 'llmo/can_manage_users'] },
       });
       const res = await Controller(ctx).patchMapping(ctx);
       expect(res.status).to.equal(403);
       expect(stubs.updateFacsAccessMappingCapabilities.called).to.be.false;
+    });
+
+    it('patchMapping lets a state-layer manager PRESERVE an unchanged can_manage_users', async () => {
+      // The delta guard evaluates the transition, not the resulting state: the
+      // target row already holds can_manage_users, so re-sending it (to preserve
+      // it on a full-replace PATCH) while editing another cap is not a new grant.
+      const managerRow = makeRow({
+        subject_type: 'user', subject_id: CALLER_USER, granted_capabilities: ['llmo/can_manage_users'],
+      });
+      const { Controller, stubs } = await loadController({
+        listFacsAccessMappings: sinon.stub().resolves([managerRow]),
+        getFacsAccessMappingById: sinon.stub().resolves(
+          makeRow({ granted_capabilities: ['llmo/can_view', 'llmo/can_manage_users'] }),
+        ),
+        updateFacsAccessMappingCapabilities: sinon.stub().resolves(
+          makeRow({
+            granted_capabilities: [
+              'llmo/can_view',
+              'llmo/can_manage_users',
+              'llmo/can_configure',
+            ],
+          }),
+        ),
+      });
+      const ctx = makeContext({
+        facsPermissions: [],
+        isAdmin: false,
+        pathParams: { id: VALID_UUID_MAPPING },
+        body: {
+          grantedCapabilities: [
+            'llmo/can_view',
+            'llmo/can_manage_users',
+            'llmo/can_configure',
+          ],
+        },
+      });
+      const res = await Controller(ctx).patchMapping(ctx);
+      expect(res.status).to.equal(200);
+      expect(stubs.updateFacsAccessMappingCapabilities.calledOnce).to.be.true;
     });
 
     it('a FACS-layer manager may grant can_manage_users', async () => {
