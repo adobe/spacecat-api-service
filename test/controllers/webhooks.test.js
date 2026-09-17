@@ -111,6 +111,8 @@ describe('WebhooksController', () => {
     expect(payload.requested_head_sha).to.equal('a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2');
     // head_change_count is independent of retry_count and starts at 0.
     expect(payload.head_change_count).to.equal(0);
+    expect(payload.lifecycle_recovery_version).to.equal(1);
+    expect(payload.recovery_count).to.equal(0);
     // Every authenticated webhook now carries the resolved destination id.
     expect(payload.target_id).to.equal('github-public');
   });

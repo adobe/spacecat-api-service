@@ -464,6 +464,12 @@ Current configuration (post Phase 4 cleanup; see the Update note at the top of t
 |----------|---------|--------|
 | `GITHUB_DESTINATIONS` | Consolidated webhook-destination registry: a JSON object keyed by `target_id`, each entry `{ match, webhook_secret, reviewer_login }` (snake_case; `webhook_secret` inline; `reviewer_login` required per entry). The handler classifies each signed webhook to a destination, HMAC-verifies against that entry's `webhook_secret`, and attaches its `target_id` + `reviewer_login` to the auth profile. UNSET/malformed = fail closed (401). Secret-bearing - never logged. See the ADR `consolidated-destinations-registry.md`. | Vault (`dx_mysticat/{env}/api-service` key `GITHUB_DESTINATIONS`) -> Secrets Manager |
 | `MYSTICAT_GITHUB_JOBS_QUEUE_URL` | SQS queue URL for job enqueue | Infrastructure module output (`module.mysticat_github_service.work_queue_url`) |
+
+Accepted review jobs include `lifecycle_recovery_version: 1` and
+`recovery_count: 0`. Infrastructure uses the version marker to select
+recoverable jobs. Because Lambda SQS consumers delete filtered/no-op records,
+both existing DLQs must be externally archived and emptied before recovery
+consumers are enabled; disable those consumers before rolling back this marker.
 | `MYSTICAT_OBSERVABILITY_SLACK_TOKEN` | Dedicated chat:write-only bot token for the Slack observability feed (best-effort; absent disables Slack posting) | Vault (`dx_mysticat/{env}/...`) -> helix-deploy package secret; on the rotation list |
 | `MYSTICAT_OBSERVABILITY_SLACK_CHANNEL` | Channel id the web tier posts to and propagates to the worker; OMIT to disable observability entirely | api-service env (per env) |
 
