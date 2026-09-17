@@ -1,3 +1,10 @@
+# [1.820.0](https://github.com/adobe/spacecat-api-service/compare/v1.819.0...v1.820.0) (2026-09-17)
+
+
+### Features
+
+* store Brand Claims feedback | LLMO-7665 ([#3297](https://github.com/adobe/spacecat-api-service/issues/3297)) ([8f64f33](https://github.com/adobe/spacecat-api-service/commit/8f64f339a976ff73f4c7eb4a3d9f07e1c3b5af2d))
+
 # [1.819.0](https://github.com/adobe/spacecat-api-service/compare/v1.818.0...v1.819.0) (2026-09-17)
 
 
