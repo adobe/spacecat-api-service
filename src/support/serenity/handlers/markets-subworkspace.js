@@ -41,9 +41,12 @@ import { ensureSubworkspace } from '../workspace-lifecycle.js';
 import {
   DIMENSION, STANDARD_PROMPT_TAG_VALUES, INTENT_VALUE, GENERATED_PROMPT_SOURCE_VALUE,
 } from '../prompt-tags.js';
-import { provisionDimensionTree, ensureServerOwnedValue } from '../tag-tree.js';
+import {
+  provisionDimensionTree, ensureServerOwnedValue, indexLevelByName, ensureChildren,
+} from '../tag-tree.js';
 import { classifyBrandedTag, needlesFromNames } from '../branded-classifier.js';
 import { classifyPromptIntents, AI_GEN_CLASSIFY_MAX, computeWriteDeadline } from '../intent-classification.js';
+import { classifyTopicCategories } from '../category-classification.js';
 import {
   collectBrandUrlEntries,
   attachBrandUrlsToProject,
@@ -310,16 +313,24 @@ function validateCreateBody(body) {
  * default). Returns the topic/prompt counts.
  * A generation that yields nothing is a clean no-op (no upstream write).
  *
- * The generated topic name is NOT attached. Under the dimension-root model a
- * topic is a sub-category — a depth-3 descendant of a customer category — and
- * the AI-SEO service returns topics with no category to hang them under, so
- * there is no correct parent to create them below. Generated prompts therefore
- * arrive uncategorized and are categorized later (adobe/serenity-docs#44).
+ * The generated topic name is classified against the brand's EXISTING top-level
+ * `category` children (adobe/serenity-docs#44, see
+ * `onboarding-prompt-categorization-implementation-plan.md`): the AI-SEO service
+ * returns topics with no category of its own to hang them under, so each kept
+ * topic is classified server-side (`classifyTopicCategories`) against whatever
+ * categories the brand already has. A confident match creates/resolves the
+ * topic itself as a sub-category (depth-3) under the matched category
+ * (depth-2) and every prompt generated from that topic is tagged with it. A
+ * brand with no existing categories, or a low-confidence / no-match topic, is
+ * left uncategorized — unchanged from before this feature — the classifier
+ * never invents a placeholder category the customer never authored.
  *
  * Writes are id-based: `createPromptsWithMetadata` takes ONE shared `tag_ids` array per
  * call, so the texts are partitioned by their resolved tag-id set — the (type,
- * intent) pair, since topics are gone and everything else is constant. Identical
- * text collapses to one entry per group.
+ * intent, sub-category) triple, since everything else is constant. Identical
+ * text collapses to one entry per group. Topic grouping is kept alive long
+ * enough to resolve each topic's (at most one) matched sub-category id before
+ * that partition happens.
  *
  * @param {SerenityTransport} transport
  * @param {string} workspaceId - sub-workspace the project lives in.
@@ -331,9 +342,12 @@ function validateCreateBody(body) {
  * @param {string[]} [options.brandNames=[]] - brand name + aliases for branded
  *   classification via the shared {@link classifyBrandedTag} (whole-word match,
  *   diacritic-folded, case-insensitive).
- * @param {{ values: Map<string, Map<string, string>> }} options.provisioned - the
- *   already-provisioned dimension tree. The caller provisions it unconditionally,
- *   so re-resolving it here would read the whole taxonomy a second time per request.
+ * @param {{ roots: Map<string, string|undefined>, values: Map<string, Map<string, string>> }}
+ *   options.provisioned - the already-provisioned dimension tree. The caller
+ *   provisions it unconditionally, so re-resolving it here would read the whole
+ *   taxonomy a second time per request.
+ *   `roots` supplies the `category` root id used to read/extend the brand's
+ *   existing top-level categories (adobe/serenity-docs#44).
  * @param {object} [options.env] - environment (Azure OpenAI creds), for intent
  *   classification (serenity-docs#32).
  * @param {number} [options.writeDeadline] - shared request-write deadline.
@@ -363,21 +377,47 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
   // so a prompt is classified identically no matter how it is written.
   const needles = needlesFromNames(Array.isArray(brandNames) ? brandNames : []);
 
-  // Dedupe by text FIRST: an identical prompt under two topics is one prompt, and
-  // its classification depends only on its text, so the winner is unambiguous.
-  const texts = new Set();
+  // Preserve the topic → prompts grouping (adobe/serenity-docs#44): each kept
+  // topic is classified against the brand's existing categories below, and
+  // every prompt generated from that topic needs to know its topic's matched
+  // sub-category id BEFORE the global text-dedupe partition further down loses
+  // that association. Deduped per-topic first — an identical prompt repeated
+  // within one topic's own list is one prompt.
+  const topicPrompts = new Map();
   for (const t of selected) {
-    for (const p of (Array.isArray(t.prompts) ? t.prompts : [])) {
-      if (hasText(p)) {
-        texts.add(p);
+    if (hasText(t?.topic)) {
+      const set = topicPrompts.get(t.topic) ?? new Set();
+      for (const p of (Array.isArray(t.prompts) ? t.prompts : [])) {
+        if (hasText(p)) {
+          set.add(p);
+        }
+      }
+      if (set.size > 0) {
+        topicPrompts.set(t.topic, set);
       }
     }
   }
-  if (texts.size === 0) {
+  if (topicPrompts.size === 0) {
     log?.info?.('generateAndAttachPrompts: no prompts generated', {
       workspaceId, projectId, domain, country,
     });
     return { topicCount: 0, promptCount: 0 };
+  }
+
+  // Dedupe by text GLOBALLY: an identical prompt under two topics is one
+  // prompt, and its classification depends only on its text, so the winner is
+  // unambiguous. `topicOfText` remembers, for each distinct text, the first
+  // topic that produced it — the one whose matched sub-category (if any) the
+  // prompt is tagged with.
+  const texts = new Set();
+  const topicOfText = new Map();
+  for (const [topic, promptSet] of topicPrompts) {
+    for (const p of promptSet) {
+      texts.add(p);
+      if (!topicOfText.has(p)) {
+        topicOfText.set(p, topic);
+      }
+    }
   }
 
   // Resolve every tag id we are about to attach. `createPromptsWithMetadata` is ATOMIC on
@@ -385,7 +425,65 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
   // `provisionDimensionTree` resolved every closed value or threw a 502, so the
   // standard values and the whole `type`/`intent` vocabularies are present here by
   // construction.
-  const { values } = provisioned;
+  const { roots, values } = provisioned;
+
+  // Topic → existing-category classification (adobe/serenity-docs#44). Fails
+  // OPEN at every step: any failure here (reading existing categories,
+  // classifying, or creating the resolved sub-category tag) leaves the
+  // affected topic(s) uncategorized rather than aborting the onboarding write
+  // — a category is a nice-to-have enrichment, never a requirement to create
+  // the prompt itself.
+  const categoryTagIdByTopic = new Map();
+  const categoryRootId = roots.get(DIMENSION.CATEGORY);
+  if (categoryRootId && hasText(categoryRootId)) {
+    try {
+      const existingCategories = await indexLevelByName(
+        transport,
+        workspaceId,
+        projectId,
+        /** @type {string} */ (categoryRootId),
+        log,
+      );
+      const categoryNames = [...existingCategories.keys()];
+      if (categoryNames.length > 0) {
+        const matchedByTopic = await classifyTopicCategories(
+          [...topicPrompts.keys()],
+          categoryNames,
+          {
+            env, log, deadline: writeDeadline, writePath: 'ai-gen', workspaceId,
+          },
+        );
+        for (const [topic, matchedCategoryName] of matchedByTopic) {
+          if (matchedCategoryName) {
+            const parentId = /** @type {string} */ (existingCategories.get(matchedCategoryName));
+            try {
+              // eslint-disable-next-line no-await-in-loop
+              const { byName } = await ensureChildren(
+                transport,
+                workspaceId,
+                projectId,
+                parentId,
+                [topic],
+                log,
+              );
+              const subCategoryId = byName.get(topic);
+              if (subCategoryId && hasText(subCategoryId)) {
+                categoryTagIdByTopic.set(topic, subCategoryId);
+              }
+            } catch (e) {
+              log?.warn?.('generateAndAttachPrompts: failed to create/resolve topic sub-category tag; leaving topic uncategorized', {
+                workspaceId, projectId, topic, matchedCategoryName, error: e?.message,
+              });
+            }
+          }
+        }
+      }
+    } catch (e) {
+      log?.warn?.('generateAndAttachPrompts: failed to read existing categories; leaving all topics uncategorized', {
+        workspaceId, projectId, error: e?.message,
+      });
+    }
+  }
   // The standard closed-dimension ids EXCEPT `intent`: intent is classified per
   // prompt below (serenity-docs#32) and replaces the seeded `Informational`
   // default, so it must not be double-attached from the standard set.
@@ -435,17 +533,20 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
   );
 
   // `createPromptsByIds` takes ONE shared `tag_ids` array per call, so partition
-  // the texts by their resolved (type, intent) id pair — the only two dimensions
-  // that vary per prompt.
+  // the texts by their resolved (type, intent, sub-category) triple — the only
+  // dimensions that vary per prompt. `categoryTagId` is '' for a prompt whose
+  // topic did not resolve a sub-category (no existing categories, no match, or
+  // a failure along the way) — the pre-existing, uncategorized behavior.
   /** @type {Map<string, { items: string[], tagIds: string[] }>} */
   const byTagSet = new Map();
   for (const text of allTexts) {
     const typeValue = classifyBrandedTag(text, needles);
     const intentValue = intentByText.get(text) ?? INTENT_VALUE.INFORMATIONAL;
-    // `\0` cannot occur in either vocabulary value, so the composite key is
+    const categoryTagId = categoryTagIdByTopic.get(topicOfText.get(text)) ?? '';
+    // `\0` cannot occur in any of these values, so the composite key is
     // collision-free. Keep it escaped — a literal byte makes whole-file scanners
     // treat this file as binary and silently skip it.
-    const key = `${typeValue}\0${intentValue}`;
+    const key = `${typeValue}\0${intentValue}\0${categoryTagId}`;
     const bucket = byTagSet.get(key);
     if (bucket) {
       bucket.items.push(text);
@@ -458,8 +559,13 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
       byTagSet.set(key, {
         items: [text],
         // `sourceId` (source/semrush) is constant for every generated prompt, so
-        // it rides in every bucket alongside the per-(type, intent) ids.
-        tagIds: [...standardIdsNonIntent, intentId, sourceId, typeId],
+        // it rides in every bucket alongside the per-(type, intent, category) ids.
+        // `categoryTagId` is only appended when the topic resolved one — an
+        // unresolvable/empty id must never be handed to `createPromptsWithMetadata`
+        // (atomic on an unresolvable id).
+        tagIds: categoryTagId
+          ? [...standardIdsNonIntent, intentId, sourceId, typeId, categoryTagId]
+          : [...standardIdsNonIntent, intentId, sourceId, typeId],
       });
     }
   }
@@ -469,7 +575,7 @@ async function generateAndAttachPrompts(transport, workspaceId, projectId, {
   // metadata object per batch (same instant for every text in the group).
   const metadata = buildCreateMetadata(callerId);
   for (const { items, tagIds } of byTagSet.values()) {
-    // `tagIds` is precomputed per (type, intent) bucket above (standard + intent + source + type).
+    // `tagIds` is precomputed per (type, intent, category) bucket above.
     // eslint-disable-next-line no-await-in-loop
     await transport.createPromptsWithMetadata(
       workspaceId,
