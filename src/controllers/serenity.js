@@ -1561,11 +1561,6 @@ function SerenityController(context, log, env) {
       )) {
         return notFound('Tag search is not active for this brand');
       }
-      const cursorSecret = ctx.env?.SERENITY_TAG_SEARCH_CURSOR_SECRET
-        || env?.SERENITY_TAG_SEARCH_CURSOR_SECRET;
-      if (!cursorSecret) {
-        throw tagSearchUnavailableError('Tag search cursor signing is unavailable');
-      }
       const budgets = resolveTagTreeBudgets(runtimeEnv, log);
       const transport = buildTransport(ctx, imsToken);
       const result = auth.mode === 'subworkspace'
@@ -1574,7 +1569,6 @@ function SerenityController(context, log, env) {
           /** @type {string} */ (auth.workspaceId),
           extractQuery(ctx),
           log,
-          cursorSecret,
           budgets,
         )
         : await handleSearchTags(
@@ -1584,7 +1578,6 @@ function SerenityController(context, log, env) {
           /** @type {string} */ (auth.workspaceId),
           extractQuery(ctx),
           log,
-          cursorSecret,
           budgets,
         );
       return createResponse(result, 200);

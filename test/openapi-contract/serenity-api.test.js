@@ -419,10 +419,6 @@ const FIXTURES = {
     query: {
       geoTargetId: '2840', languageCode: 'en', q: 'campaign', limit: '25',
     },
-    // Tag search fails closed (503 tagSearchUnavailable) before dispatching when
-    // its dedicated cursor-signing secret is absent, so the contract fixture has
-    // to provision one to reach the 200 shape.
-    env: { SERENITY_TAG_SEARCH_CURSOR_SECRET: 'contract-test-cursor-secret' },
   },
   createSerenityTag: {
     expectedStatus: 201,
