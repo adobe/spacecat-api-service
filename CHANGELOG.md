@@ -1,3 +1,10 @@
+## [1.824.1](https://github.com/adobe/spacecat-api-service/compare/v1.824.0...v1.824.1) (2026-09-17)
+
+
+### Bug Fixes
+
+* **serenity:** scope owned-urls agentic traffic join to URL Inspector's agent-type allowlist ([#3286](https://github.com/adobe/spacecat-api-service/issues/3286)) ([3b7288f](https://github.com/adobe/spacecat-api-service/commit/3b7288f1f110aaa59148c676eea7c2e0d796393b)), closes [adobe/project-elmo-ui#3186](https://github.com/adobe/project-elmo-ui/issues/3186)
+
 # [1.824.0](https://github.com/adobe/spacecat-api-service/compare/v1.823.0...v1.824.0) (2026-09-17)
 
 
