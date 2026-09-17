@@ -9158,8 +9158,8 @@ AgenticTrafficUrlsExportRequest:
       format: date
     platform:
       type: string
-      description: AI platform UI code, mapped to the DB platform value before export; `meta-ai` maps to `Meta`
-      example: 'meta-ai'
+      description: AI platform UI code, mapped to the DB platform value before export
+      example: 'chatgpt'
     categoryName:
       type: string
       example: 'Poster Maker'
@@ -9248,7 +9248,7 @@ AgenticTrafficFilterDimensions:
       type: array
       items:
         type: string
-      example: ['ChatGPT', 'Meta', 'Perplexity']
+      example: ['ChatGPT', 'Perplexity']
     contentTypes:
       type: array
       items:
@@ -12989,7 +12989,10 @@ SerenityTagSearchResponse:
       items: { $ref: '#/SerenityTagSearchItem' }
     cursor:
       type: [string, 'null']
-      description: Opaque continuation cursor, or null on the final page.
+      description: |
+        Opaque, versioned base64url continuation state, or null on the final
+        page. It is bound to the normalized query and taxonomy revision and
+        carries no tenant or project authority.
     complete:
       type: boolean
       enum: [true]
