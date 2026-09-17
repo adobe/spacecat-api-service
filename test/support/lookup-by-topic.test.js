@@ -209,15 +209,20 @@ describe('lookup-by-topic support', () => {
       expect(lookupVectorStub.firstCall.args[1]).to.include({ k: 3, minScore: 0.5 });
     });
 
-    it('dedupes duplicate topics to one embed + one ANN but returns one result per input', async () => {
+    it('dedupes case/whitespace-variant topics to one embed + one ANN but returns one result per input', async () => {
       embeddingClient.createEmbeddings.resolves([[0.1]]);
       lookupVectorStub.resolves([{ entityId: 'o1', entityType: 'cited-analysis', score: 0.9 }]);
-      const res = await run({ rawTopics: ['same', 'same'], fetchEntities: fetchFrom([opp('o1')]) });
+      // "Invoicing" / "invoicing" / "  invoicing " share one normalized key -> one embed + one ANN,
+      // embedding the first-seen cleaned text; every input topic still gets its own result.
+      const res = await run({ rawTopics: ['Invoicing', 'invoicing', '  invoicing '], fetchEntities: fetchFrom([opp('o1')]) });
 
-      expect(embeddingClient.createEmbeddings).to.have.been.calledOnceWith(['same']);
+      expect(embeddingClient.createEmbeddings).to.have.been.calledOnceWith(['Invoicing']);
       expect(lookupVectorStub).to.have.been.calledOnce;
-      expect(res.response.results).to.have.length(2);
-      expect(res.response.results[0]).to.deep.equal(res.response.results[1]);
+      expect(res.response.results).to.have.length(3);
+      expect(res.response.results.map((r) => r.topic)).to.deep.equal(['Invoicing', 'invoicing', '  invoicing ']);
+      expect(res.response.results[0]).to.deep.equal({ topic: 'Invoicing', matches: [{ opportunityId: 'o1', score: 0.9 }] });
+      expect(res.response.results[1].matches).to.deep.equal(res.response.results[0].matches);
+      expect(res.response.results[2].matches).to.deep.equal(res.response.results[0].matches);
     });
 
     it('unions ids across topics and hydrates once', async () => {

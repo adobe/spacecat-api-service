@@ -16,6 +16,7 @@ import {
   getQueryEmbedding,
   upsertQueryEmbedding,
   touchQueryEmbedding,
+  cleanTopicText,
 } from '@adobe/spacecat-shared-data-access';
 import { applyFieldProjection } from '../utils/field-projection.js';
 import { parseLookupStatus } from './lookup-by-url.js';
@@ -81,8 +82,10 @@ async function mapWithConcurrency(items, limit, fn) {
 /**
  * Validates the request-body `topics`. Non-array / oversized are hard errors; individual
  * non-string/empty/oversized entries are dropped (drop-don't-fail); an all-dropped/empty list is
- * allowed. Topic text is a query value (parameterized into the RPC and the embedding API body), so
- * no character-class gate is needed — only a length bound.
+ * allowed. Per-item hygiene uses `cleanTopicText` (shared with the audit-worker writer, so the read
+ * side rejects the same junk the write side does); the original string is kept for the response
+ * echo. Topic text is a query value (parameterized into the RPC and the embedding API body), so no
+ * character-class gate is needed — only a length bound.
  * @param {*} rawTopics
  * @returns {{ topics: string[] } | { error: string }}
  */
@@ -93,9 +96,9 @@ export function parseLookupTopics(rawTopics) {
   if (rawTopics.length > MAX_LOOKUP_TOPICS) {
     return { error: `topics must contain at most ${MAX_LOOKUP_TOPICS} entries` };
   }
-  const topics = rawTopics.filter((t) => typeof t === 'string'
-    && t.trim().length > 0
-    && t.length <= MAX_TOPIC_LENGTH);
+  const topics = rawTopics.filter(
+    (t) => cleanTopicText(t, { maxLength: MAX_TOPIC_LENGTH }) !== null,
+  );
   return { topics };
 }
 
@@ -285,8 +288,21 @@ export async function lookupByTopic(postgrestClient, embeddingClient, cfg) {
     return { response: { results: [], [mapKey]: {} } };
   }
 
-  // Resolve a vector per distinct topic, then run the ANN search once per distinct topic.
-  const distinctTexts = [...new Set(topics)];
+  // Collapse case/whitespace variants ("Invoicing" vs "invoicing") to ONE embed + ONE ANN search
+  // by de-duplicating on the shared normalized key (the same value the writer hashes on), while
+  // still echoing every original input topic in the response. Embed the first-seen cleaned text
+  // per key; cleanTopicText never returns null here — parseLookupTopics already dropped the rest.
+  const keyToText = new Map();
+  const keyByTopic = topics.map((t) => {
+    const { key, text } = cleanTopicText(t, { maxLength: MAX_TOPIC_LENGTH });
+    if (!keyToText.has(key)) {
+      keyToText.set(key, text);
+    }
+    return key;
+  });
+  const distinctKeys = [...keyToText.keys()];
+  const distinctTexts = distinctKeys.map((key) => keyToText.get(key));
+
   const vectorByText = await resolveTopicVectors(
     postgrestClient,
     embeddingClient,
@@ -294,7 +310,7 @@ export async function lookupByTopic(postgrestClient, embeddingClient, cfg) {
     log,
   );
 
-  // ANN search per distinct topic, in parallel (bounded), result order aligned to distinctTexts.
+  // ANN search once per distinct key, in parallel (bounded); order aligned to distinctKeys.
   const matchesList = await mapWithConcurrency(
     distinctTexts,
     LOOKUP_CONCURRENCY,
@@ -303,12 +319,12 @@ export async function lookupByTopic(postgrestClient, embeddingClient, cfg) {
     }),
   );
 
-  const matchesByText = new Map();
+  const matchesByKey = new Map();
   const allIds = [];
   const seenIds = new Set();
-  distinctTexts.forEach((text, i) => {
+  distinctKeys.forEach((key, i) => {
     const matches = matchesList[i];
-    matchesByText.set(text, matches);
+    matchesByKey.set(key, matches);
     for (const m of matches) {
       if (!seenIds.has(m.entityId)) {
         seenIds.add(m.entityId);
@@ -359,9 +375,9 @@ export async function lookupByTopic(postgrestClient, embeddingClient, cfg) {
   });
 
   // results in input order (one per input topic), ranked matches restricted to survivors.
-  // Every input topic is in `distinctTexts`, so `matchesByText` always has its entry.
-  const results = topics.map((topic) => {
-    const matches = matchesByText.get(topic)
+  // Every input topic maps to a key in `distinctKeys`, so `matchesByKey` always has its entry.
+  const results = topics.map((topic, i) => {
+    const matches = matchesByKey.get(keyByTopic[i])
       .filter((m) => survivingById.has(m.entityId))
       .map((m) => ({ opportunityId: m.entityId, score: m.score }));
     return { topic, matches };
