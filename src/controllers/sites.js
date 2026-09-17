@@ -40,6 +40,7 @@ import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/confi
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access/src/models/entitlement/index.js';
 
 import RUMAPIClient from '@adobe/spacecat-shared-rum-api-client';
+import SeoClient from '@adobe/mysticat-shared-seo-client';
 import TierClient from '@adobe/spacecat-shared-tier-client';
 import { SiteDto } from '../dto/site.js';
 import { SiteIdentityDto } from '../dto/site-identity.js';
@@ -74,6 +75,12 @@ import { ASO_PRODUCT_CODE, STATUSES as PLG_STATUSES } from './plg/plg-onboarding
 import { guardProvisioningLlmoFields } from '../support/llmo-config-guards.js';
 
 const VALIDATION_ERROR_NAME = 'ValidationError';
+
+// Default / ceiling for the number of organic keywords the keyword-CPC endpoint pulls from Semrush.
+// The consumer (RoBV per-topic CPC clustering) wants a broad sample, but the ceiling bounds the
+// upstream cost and response size.
+const DEFAULT_KEYWORD_CPC_LIMIT = 1000;
+const MAX_KEYWORD_CPC_LIMIT = 10000;
 
 /**
  * Builds the standard resolve-site success payload. Fetches the org's ASO entitlement at
@@ -1636,6 +1643,71 @@ function SitesController(ctx, log, env) {
     return ok(metricsData);
   };
 
+  /**
+   * `GET /sites/:siteId/keyword-cpc?country=&limit=`
+   *
+   * The site's organic keywords with Semrush CPC — the raw material the RoBV dashboard
+   * clusters into per-topic CPC. Returns `{ baseURL, keywords: [{ keyword, volume, cpc }] }`
+   * where `cpc` is INTEGER US CENTS (Semrush `Cp` × 100; `0` when Semrush has no CPC).
+   */
+  const getSiteKeywordCpc = async (context) => {
+    const siteId = context.params?.siteId;
+    const country = context.data?.country;
+    const limitParam = context.data?.limit;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    let limit = DEFAULT_KEYWORD_CPC_LIMIT;
+    if (hasText(limitParam)) {
+      limit = parseInt(limitParam, 10);
+      if (Number.isNaN(limit) || limit < 1) {
+        return badRequest('limit must be a positive integer');
+      }
+      limit = Math.min(limit, MAX_KEYWORD_CPC_LIMIT);
+    }
+
+    // country is optional; when present it must be an ISO 3166-1 alpha-2 code (Semrush database).
+    if (hasText(country) && !/^[a-z]{2}$/i.test(country)) {
+      return badRequest('country must be an ISO 3166-1 alpha-2 code');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('Only users belonging to the organization can view its metrics');
+    }
+
+    const baseURL = site.getBaseURL();
+
+    try {
+      const seoClient = SeoClient.createFrom(context);
+      const options = { limit };
+      // Semrush databases are lowercase ISO-2 codes; the client defaults to `us` when omitted.
+      if (hasText(country)) {
+        options.country = country.toLowerCase();
+      }
+      const { result } = await seoClient.getOrganicKeywords(baseURL, options);
+      const keywords = (result?.keywords ?? []).map((kw) => ({
+        keyword: kw.keyword,
+        // Coerce to the documented integer contract (volume, cpc-in-cents) rather than
+        // trusting the client to honour it.
+        volume: Math.round(Number(kw.volume)) || 0,
+        cpc: Math.round(Number(kw.cpc)) || 0,
+      }));
+      return ok({ baseURL, keywords });
+    } catch (error) {
+      // Keep the upstream detail in the log only — SeoClient/Semrush errors can carry API keys,
+      // internal URLs, or rate-limit details — and return a generic message to the caller.
+      log.error(`Error fetching keyword CPC for site ${siteId}: ${error.message}`);
+      return internalServerError('Failed to fetch keyword CPC data');
+    }
+  };
+
   const getLatestSiteMetrics = async (context) => {
     const siteId = context.params?.siteId;
 
@@ -2568,6 +2640,7 @@ function SitesController(ctx, log, env) {
     // site metrics
     getSiteMetricsBySource,
     getPageMetricsBySource,
+    getSiteKeywordCpc,
     getLatestSiteMetrics,
     getGraph,
   };

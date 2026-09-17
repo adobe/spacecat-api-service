@@ -234,10 +234,24 @@ export function usersBaseUrl(env) {
 /**
  * Wraps global fetch with the transport's 15s ceiling and the
  * `Accept: application/json` header sent on every call — neither of which the
- * typed client imposes itself. An abort maps to the same 504
- * SerenityTransportError the hand-rolled user-manager path raises. openapi-fetch
- * invokes this with a `Request` object as `input`; the timeout signal is applied
- * via the `init` argument (which fetch honours even for a Request input).
+ * typed client imposes itself. openapi-fetch invokes this with a `Request`
+ * object as `input`; the timeout signal is applied via the `init` argument
+ * (which fetch honours even for a Request input).
+ *
+ * A caller-supplied signal (e.g. a traversal-wide deadline racing a
+ * `listProjectTagTree` page — see `loadTagTreeSnapshot`) is COMBINED with this
+ * wrapper's own timeout signal via `AbortSignal.any`, never replaced: either
+ * one aborting the fetch is honoured. openapi-fetch bakes a per-call `signal`
+ * INTO the constructed `Request` object rather than forwarding it via `init`
+ * (`Request.prototype.signal` always reflects it, defaulting to a never-
+ * aborting signal when none was supplied) — so the caller signal is read from
+ * `input.signal` for a `Request` input, falling back to `init.signal` for the
+ * hand-rolled (URL-string `input`) user-manager call sites. Only an abort
+ * where THIS wrapper's own timeout is the one that actually fired maps to the
+ * 504 SerenityTransportError the hand-rolled user-manager path also raises; a
+ * caller-signal-triggered abort propagates as the caller's own
+ * error/rejection reason instead, so the caller's own deadline handling
+ * applies rather than being misreported as a Semrush timeout.
  *
  * @param {number} timeoutMs
  * @returns {typeof globalThis.fetch} a drop-in fetch, as both typed clients expect.
@@ -246,13 +260,17 @@ function createTimeoutFetch(timeoutMs) {
   return async function timeoutFetch(input, init) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const callerSignal = input instanceof Request ? input.signal : init?.signal;
+    const signal = callerSignal
+      ? AbortSignal.any([callerSignal, controller.signal])
+      : controller.signal;
     if (input instanceof Request && !input.headers.has('Accept')) {
       input.headers.set('Accept', 'application/json');
     }
     try {
-      return await fetch(input, { ...(init ?? {}), signal: controller.signal });
+      return await fetch(input, { ...(init ?? {}), signal });
     } catch (e) {
-      if (e?.name === 'AbortError') {
+      if (e?.name === 'AbortError' && controller.signal.aborted) {
         // Attach what identifies the aborted call (SITES-49993): openapi-fetch
         // passes a Request as `input` (method + url); the hand-rolled paths
         // pass a URL string with the method on `init`.
@@ -828,12 +846,17 @@ export function createSerenityTransport({ env, imsToken }) {
      * @param {number} [opts.page]
      * @param {number} [opts.limit]
      * @param {boolean} [opts.draft] - read the draft view (see unpublished tags).
+     * @param {AbortSignal} [opts.signal] - forwarded to the underlying
+     *   openapi-fetch call so a caller-owned deadline (e.g. the tag-tree
+     *   traversal's `AbortSignal.timeout`) can abort an already-in-flight
+     *   request, not just gate the next one. Combined (never replacing) with
+     *   the client's own per-attempt `createTimeoutFetch` ceiling.
      */
     async listProjectTags(
       semrushWorkspaceId,
       projectId,
       {
-        parentId = '', search = '', page = 1, limit = 100, draft,
+        parentId = '', search = '', page = 1, limit = 100, draft, signal,
       } = {},
     ) {
       return projects.listProjectTags(
@@ -844,6 +867,7 @@ export function createSerenityTransport({ env, imsToken }) {
               parent_id: parentId, search, page, limit, ...(draft ? { draft: true } : {}),
             },
           },
+          ...(signal ? { signal } : {}),
         },
       );
     },

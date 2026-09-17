@@ -40,8 +40,6 @@ export function classifyTagCompatibility(items) {
       reason = 'caseVariantRoot';
     } else if (path.some((part) => String(part.name).includes(':') || String(part.name).includes('__'))) {
       reason = 'separatorInName';
-    } else if (rootName === DIMENSION.TAG && path.length > 3) {
-      reason = 'unsupportedDepth';
     } else if ((counts.get(key) ?? 0) > 1) {
       reason = 'ambiguousPath';
     }

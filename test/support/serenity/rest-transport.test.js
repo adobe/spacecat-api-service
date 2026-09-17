@@ -1277,6 +1277,95 @@ describe('Semrush REST transport', () => {
       expect(call.url).to.contain('parent_id=parent-1');
       expect(call.url).to.contain('draft=true');
     });
+
+    it('forwards a caller-supplied signal into the actual fetch call (combined, not '
+      + 'replaced)', async () => {
+      // The combined signal createTimeoutFetch builds and hands to `fetch` (its
+      // own AbortSignal.any(...) result, or a bare passthrough) is what proves
+      // items 2/3's wiring reached the real call — regardless of the caller's
+      // own controller ever firing.
+      const callerSignal = new AbortController().signal;
+      let capturedSignal;
+      fetchStub.callsFake((_input, init) => {
+        capturedSignal = init.signal;
+        return Promise.resolve(fetchOk({ items: [], page: 1, total: 0 }));
+      });
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      await transport.listProjectTags(WORKSPACE_ID, PROJECT_ID, { signal: callerSignal });
+
+      expect(capturedSignal).to.exist;
+      expect(capturedSignal).to.be.an.instanceOf(AbortSignal);
+      // Never the caller's own bare signal outright — createTimeoutFetch always
+      // combines it with its own timeout ceiling via AbortSignal.any, so the
+      // object reaching fetch is a distinct, composite signal.
+      expect(capturedSignal).to.not.equal(callerSignal);
+    });
+
+    it("does not map a caller-triggered abort to the transport's own 504 timeout "
+      + '(only its OWN ceiling firing maps to 504)', async () => {
+      // createTimeoutFetch's own internal `controller` never fires here (no
+      // fake-timer advance) — so this simulates an abort NOT caused by its own
+      // 15s ceiling (e.g. a caller's upstream deadline combined in via
+      // AbortSignal.any) while still exercising the REAL catch/mapping logic.
+      fetchStub.callsFake(() => {
+        const e = new Error('The operation was aborted');
+        e.name = 'AbortError';
+        return Promise.reject(e);
+      });
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+
+      const err = await transport.listProjectTags(
+        WORKSPACE_ID,
+        PROJECT_ID,
+        { signal: new AbortController().signal },
+      ).catch((e) => e);
+
+      // Facade error wrapping is unconditional (LLMO-6386): every thrown error
+      // becomes a status-undefined ProjectEngineApiError carrying the original
+      // as `.cause` — this is what distinguishes it from the OWN-timeout path
+      // below, which instead carries a SerenityTransportError(504) `.cause`.
+      expect(err).to.be.instanceOf(ProjectEngineApiError);
+      expect(err.status).to.equal(undefined);
+      expect(err.cause).to.not.be.instanceOf(SerenityTransportError);
+      expect(err.cause.name).to.equal('AbortError');
+    });
+
+    it("maps an abort to the transport's own 504 timeout only when its OWN "
+      + 'ceiling actually fires', async () => {
+      // Mirrors the existing PE "aborts with a 504…" test's own-timeout pattern
+      // (fake-timer-driven internal `setTimeout`), but through listProjectTags —
+      // proving createTimeoutFetch's own-vs-caller distinction the RIGHT way
+      // round: this IS the transport's own ceiling, so it DOES map to 504.
+      fetchStub.callsFake((_input, init) => new Promise((_resolve, reject) => {
+        init.signal.addEventListener('abort', () => {
+          const e = new Error('aborted');
+          e.name = 'AbortError';
+          reject(e);
+        });
+      }));
+      const transport = createSerenityTransport({ env: TEST_ENV, imsToken: IMS });
+      const clock = sinon.useFakeTimers({
+        now: 1_700_000_000_000,
+        toFake: ['setTimeout', 'clearTimeout'],
+      });
+      try {
+        const promise = transport.listProjectTags(WORKSPACE_ID, PROJECT_ID);
+        // listProjectTags is a GET (idempotent), so a per-attempt timeout is
+        // retried under the library's retry budget (3 attempts total, plus
+        // jittered backoff up to MAX_RETRY_DELAY_MS=20s between them) before
+        // the last attempt's error is finally rethrown — unlike the POST case
+        // above, which never retries and settles after a single 15s wait.
+        await clock.tickAsync(100_000);
+        const err = await promise.catch((e) => e);
+        expect(err).to.be.instanceOf(ProjectEngineApiError);
+        expect(err.status).to.equal(undefined);
+        expect(err.cause).to.be.instanceOf(SerenityTransportError);
+        expect(err.cause.status).to.equal(504);
+      } finally {
+        clock.restore();
+      }
+    });
   });
 
   describe('updateProjectTag', () => {
