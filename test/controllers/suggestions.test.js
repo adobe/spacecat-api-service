@@ -12659,7 +12659,7 @@ describe('Suggestions Controller', () => {
       expect(suggestion.getData().edgeOptimizeStatus).to.be.undefined;
       expect(geoExperiment.setStatus).to.have.been.calledOnceWithExactly(STATUSES.CANCELLED);
       expect(geoExperiment.save).to.have.been.calledOnce;
-      expect(context.log.error).to.have.been.calledWithMatch(/geo-experiment-cancel-failed.*Failed to unblock suggestion.*batch save unavailable/);
+      expect(context.log.error).to.have.been.calledWithMatch(/geo-experiment-cancel-failed.*Failed to clear EXPERIMENT_IN_PROGRESS from suggestion\(s\).*batch save unavailable/);
     });
 
     it('still cancels (marks the experiment CANCELLED) and reports failed URLs when suggestion rollback fails', async () => {

@@ -3239,6 +3239,26 @@ function SuggestionsController(ctx, sqs, env) {
 
     let rolledBackSuggestionIds = [];
     let failedRollbackSuggestionIds = [];
+    let unblockedSuggestionIds = [];
+    let failedUnblockSuggestionIds = [];
+
+    // Clear the blocking flag BEFORE attempting rollback (rollbackSuggestions doesn't touch
+    // edgeOptimizeStatus itself). If the process dies between the two steps, we'd rather leave
+    // a suggestion unblocked-but-not-yet-rolled-back than blocked-but-already-rolled-back
+    if (isNonEmptyArray(experimentSuggestions)) {
+      experimentSuggestions.forEach((suggestion) => {
+        const { edgeOptimizeStatus: _, ...rest } = suggestion.getData();
+        suggestion.setData(rest);
+        suggestion.setUpdatedBy(updatedBy);
+      });
+      try {
+        await Suggestion.saveMany(experimentSuggestions);
+        unblockedSuggestionIds = experimentSuggestions.map((suggestion) => suggestion.getId());
+      } catch (error) {
+        context.log.error(`[geo-experiment-cancel-failed] site: ${siteId}, GeoExperiment ${geoExperimentId}, Failed to clear EXPERIMENT_IN_PROGRESS from suggestion(s) ${JSON.stringify(experimentSuggestions.map((suggestion) => suggestion.getId()))}: ${error.message}`, error);
+        failedUnblockSuggestionIds = experimentSuggestions.map((suggestion) => suggestion.getId());
+      }
+    }
 
     if (isDeployed && opportunity && isNonEmptyArray(experimentSuggestions)) {
       try {
@@ -3256,20 +3276,6 @@ function SuggestionsController(ctx, sqs, env) {
       } catch (error) {
         context.log.error(`[geo-experiment-cancel-failed] site: ${siteId}, GeoExperiment ${geoExperimentId}, Error rolling back suggestions from edge: ${error.message}`, error);
         failedRollbackSuggestionIds = experimentSuggestions.map((suggestion) => suggestion.getId());
-      }
-    }
-
-    // Always clear the blocking flag — rollbackSuggestions doesn't touch edgeOptimizeStatus.
-    if (isNonEmptyArray(experimentSuggestions)) {
-      experimentSuggestions.forEach((suggestion) => {
-        const { edgeOptimizeStatus: _, ...rest } = suggestion.getData();
-        suggestion.setData(rest);
-        suggestion.setUpdatedBy(updatedBy);
-      });
-      try {
-        await Suggestion.saveMany(experimentSuggestions);
-      } catch (error) {
-        context.log.error(`[geo-experiment-cancel-failed] site: ${siteId}, GeoExperiment ${geoExperimentId}, Failed to unblock suggestion(s): ${error.message}`, error);
       }
     }
 
@@ -3292,11 +3298,11 @@ function SuggestionsController(ctx, sqs, env) {
     try {
       await geoExperiment.save();
     } catch (error) {
-      context.log.error(`[geo-experiment-cancel-failed] site: ${siteId}, GeoExperiment ${geoExperimentId}, status: ${status}, isDeployed: ${isDeployed}, rolledBackSuggestionIds: ${JSON.stringify(rolledBackSuggestionIds)}, failedRollbackSuggestionIds: ${JSON.stringify(failedRollbackSuggestionIds)}, Failed to persist CANCELLED status: ${error.message}`, error);
+      context.log.error(`[geo-experiment-cancel-failed] site: ${siteId}, GeoExperiment ${geoExperimentId}, status: ${status}, isDeployed: ${isDeployed}, rolledBackSuggestionIds: ${JSON.stringify(rolledBackSuggestionIds)}, failedRollbackSuggestionIds: ${JSON.stringify(failedRollbackSuggestionIds)}, unblockedSuggestionIds: ${JSON.stringify(unblockedSuggestionIds)}, failedUnblockSuggestionIds: ${JSON.stringify(failedUnblockSuggestionIds)}, Failed to persist CANCELLED status: ${error.message}`, error);
       return internalServerError('Failed to cancel geo experiment');
     }
 
-    context.log.info(`[geo-experiment-cancel] Successfully cancelled GeoExperiment ${geoExperimentId} for site ${siteId} by ${updatedBy}`);
+    context.log.info(`[geo-experiment-cancel] Successfully cancelled GeoExperiment ${geoExperimentId} for site ${siteId} by ${updatedBy}, unblockedSuggestionIds: ${JSON.stringify(unblockedSuggestionIds)}, failedUnblockSuggestionIds: ${JSON.stringify(failedUnblockSuggestionIds)}`);
 
     return ok({
       status: GeoExperimentModel.STATUSES.CANCELLED,
