@@ -17,7 +17,9 @@ import {
   internalServerError,
 } from '@adobe/spacecat-shared-http-utils';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
-import { isNonEmptyObject } from '@adobe/spacecat-shared-utils';
+import {
+  AUTHORING_TYPES, DELIVERY_TYPES, isNonEmptyObject,
+} from '@adobe/spacecat-shared-utils';
 
 import { getHeader } from '../support/http-headers.js';
 import { emitMetric, resolveEnvironment } from '../support/metrics-emf.js';
@@ -123,6 +125,77 @@ function ifNoneMatchMatches(headerValue, currentEtag) {
 }
 
 /**
+ * Resolves a Site by (programId, environmentId) directly against the
+ * `deliveryConfig` JSONB column, bypassing the precomputed
+ * externalOwnerId/externalSiteId columns entirely. Only a fallback for the
+ * primary indexed lookup (`Site.findByExternalOwnerIdAndExternalSiteId`) —
+ * scans an unindexed JSONB column, so it must stay the second check, not
+ * the first. Returns a proper `Site` model instance (via `Site.findById`),
+ * not the raw PostgREST row, so callers can keep using model accessors.
+ *
+ * Matches CS-family sites two ways (covers both bases): `authoringType` is
+ * `cs`/`cs/crosswalk` (the intended signal — see spacecat-shared
+ * computeExternalIds), OR `deliveryType` is `aem_cs` (fallback for a site
+ * whose `authoringType` was never set — the actual gap this function exists
+ * to cover; see Nutanix, program 136464/env 1403605).
+ *
+ * @param {object} dataAccess - `ctx.dataAccess` (carries `Site` + `services.postgrestClient`).
+ * @param {string} programId - Cloud Manager program id (no `p` prefix).
+ * @param {string} environmentId - Cloud Manager environment id (no `e` prefix).
+ * @param {object} log - Request logger, used to surface a genuine query failure
+ *   (PostgREST down/misconfigured/malformed query) at error level — distinct from
+ *   the expected "no matching site" case, which the caller already logs at info.
+ * @returns {Promise<object|null>} The resolved Site, or null if none matches.
+ */
+async function findCSSiteByProgramAndEnvironmentIds(dataAccess, programId, environmentId, log) {
+  const postgrestClient = dataAccess?.services?.postgrestClient;
+  if (!postgrestClient?.from) {
+    log.error('[aso-overlay] deliveryConfig fallback unavailable: postgrestClient missing/misconfigured', {
+      programId,
+      environmentId,
+    });
+    return null;
+  }
+
+  const { data, error } = await postgrestClient
+    .from('sites')
+    .select('id')
+    .or(`authoring_type.eq.${AUTHORING_TYPES.CS},`
+      + `authoring_type.eq.${AUTHORING_TYPES.CS_CW},`
+      + `delivery_type.eq.${DELIVERY_TYPES.AEM_CS}`)
+    .eq('delivery_config->>programId', programId)
+    .eq('delivery_config->>environmentId', environmentId)
+    // maybeSingle (not limit(1)) so >1 matching row throws PGRST116 instead of
+    // silently, non-deterministically picking one — same failure semantics as
+    // the primary Site.findByExternalOwnerIdAndExternalSiteId lookup.
+    .maybeSingle();
+
+  if (error) {
+    if (error.code === 'PGRST116') {
+      log.error('[aso-overlay] deliveryConfig fallback matched multiple sites', { programId, environmentId, error });
+    } else {
+      log.error('[aso-overlay] deliveryConfig fallback query failed', { programId, environmentId, error });
+    }
+    return null;
+  }
+  if (!data) {
+    return null;
+  }
+
+  try {
+    return await dataAccess.Site.findById(data.id);
+  } catch (findByIdError) {
+    log.error('[aso-overlay] deliveryConfig fallback Site.findById failed', {
+      programId,
+      environmentId,
+      siteId: data.id,
+      error: findByIdError,
+    });
+    return null;
+  }
+}
+
+/**
  * Redirects Controller — serves the ASO dispatcher-layer redirect overlay
  * (`config/cm-pXXX-eYYY/redirects.txt`) from the per-env overlay S3 bucket.
  *
@@ -213,10 +286,26 @@ function RedirectsController(ctx) {
     // Resolve (program, env) -> Site via the indexed external-id accessor. The
     // p<programId>/e<environmentId> encoding matches Site.computeExternalIds for
     // AEM CS sites (see spacecat-shared site.model.js / SiteCollection.findByPreviewURL).
-    const site = await Site.findByExternalOwnerIdAndExternalSiteId(
+    let site = await Site.findByExternalOwnerIdAndExternalSiteId(
       `p${programId}`,
       `e${environmentId}`,
     );
+    if (!site) {
+      // Fallback: externalOwnerId/externalSiteId are precomputed from
+      // authoringType + deliveryConfig (see spacecat-shared site.model.js
+      // computeExternalIds). A CS-family site whose authoringType was never
+      // set (data gap, not an auth/entitlement issue) never gets those
+      // computed, so the indexed lookup above misses it even though the site
+      // is real and correctly configured. Query deliveryConfig directly as a
+      // second chance before declaring "no site resolves".
+      site = await findCSSiteByProgramAndEnvironmentIds(dataAccess, programId, environmentId, log);
+      if (site) {
+        // Tracks how many sites still rely on this workaround, so backfill
+        // progress (getting authoringType set on every CS-family site) is
+        // measurable rather than invisible once the fallback masks the gap.
+        log.info('[aso-overlay] resolved site via deliveryConfig fallback', { service, siteId: site.getId() });
+      }
+    }
     if (!site) {
       log.info('[aso-overlay] no site resolves for service', { service });
       emitFinal(OUTCOME.AUTHZ_NO_SITE);
