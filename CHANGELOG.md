@@ -1,3 +1,11 @@
+# [1.822.0](https://github.com/adobe/spacecat-api-service/compare/v1.821.0...v1.822.0) (2026-09-17)
+
+
+### Features
+
+* **sites:** add keyword-cpc endpoint for per-topic CPC ([#3293](https://github.com/adobe/spacecat-api-service/issues/3293)) ([aabafab](https://github.com/adobe/spacecat-api-service/commit/aabafab06a6b3e2245efbc646e532a7e68420b83))
+* support GitHub Copilot traffic filters ([#3308](https://github.com/adobe/spacecat-api-service/issues/3308)) ([b640315](https://github.com/adobe/spacecat-api-service/commit/b6403159cc322ddc3cba7e66499ac998e724e0eb)), closes [Hi#level](https://github.com/Hi/issues/level) [adobe/spacecat-audit-worker#2991](https://github.com/adobe/spacecat-audit-worker/issues/2991) [adobe/project-elmo-ui#3201](https://github.com/adobe/project-elmo-ui/issues/3201) [adobe/spacecat-audit-worker#2991](https://github.com/adobe/spacecat-audit-worker/issues/2991) [adobe/project-elmo-ui#3201](https://github.com/adobe/project-elmo-ui/issues/3201)
+
 # [1.821.0](https://github.com/adobe/spacecat-api-service/compare/v1.820.1...v1.821.0) (2026-09-17)
 
 
