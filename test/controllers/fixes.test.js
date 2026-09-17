@@ -1279,6 +1279,26 @@ describe('Fixes Controller', () => {
       expect(body[0].deployments[0].fixId).to.equal(inside.getId());
     });
 
+    it('includes a deploy later in the day on the inclusive to bound', async () => {
+      const endOfDay = await fixEntityCollection.create({
+        type: Suggestion.TYPES.CONTENT_UPDATE,
+        opportunityId,
+        status: FixEntity.STATUSES.DEPLOYED,
+        deployedAt: '2026-08-15T14:00:00.000Z',
+      });
+      dataAccess.Opportunity.allBySiteId.resolves([oppStub(opportunityId, 'A')]);
+      fixEntityCollection.allByOpportunityIds.resolves([endOfDay]);
+
+      // `to` is the same calendar day; the end-of-day bound (23:59:59.999Z) must include a
+      // 14:00 deploy — a regression to a start-of-day bound would drop it.
+      requestContext.data = { from: '2026-08-15', to: '2026-08-15' };
+      const response = await fixesController.getDeployedOpportunitiesForSite(requestContext);
+      const body = await response.json();
+      expect(body).to.have.lengthOf(1);
+      expect(body[0].date).to.equal('2026-08-15');
+      expect(body[0].deployments[0].fixId).to.equal(endOfDay.getId());
+    });
+
     it('falls back to executedAt and excludes fixes with no anchor', async () => {
       const execOnly = await fixEntityCollection.create({
         type: Suggestion.TYPES.CONTENT_UPDATE,

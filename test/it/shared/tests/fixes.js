@@ -266,6 +266,16 @@ export default function fixTests(getHttpClient, resetData) {
         expect(res.body[0].date).to.equal('2026-08-15');
       });
 
+      it('user: includes same-day deploys on the inclusive to bound', async () => {
+        const http = getHttpClient();
+        // to = the deploy day; the end-of-day bound must include FIX_3 (14:00) and FIX_2 (10:00).
+        const res = await http.user.get(`${DEPLOYED_BASE}?from=2026-08-15&to=2026-08-15`);
+        expect(res.status).to.equal(200);
+        expect(res.body).to.have.lengthOf(1);
+        expect(res.body[0].date).to.equal('2026-08-15');
+        expect(res.body[0].deployments).to.have.lengthOf(2);
+      });
+
       it('returns 400 for an invalid from date', async () => {
         const http = getHttpClient();
         const res = await http.user.get(`${DEPLOYED_BASE}?from=2026-13-45`);

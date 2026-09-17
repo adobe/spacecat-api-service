@@ -4300,7 +4300,9 @@ DeployedOpportunity:
       description: The deploy moment (deployedAt, falling back to executedAt).
     changeDetails:
       type: object
-      description: Structured description of what the fix changed.
+      description: |
+        Structured description of what the fix changed (mirrors the fix's `changeDetails`).
+        May be large — can include diffs — and is returned for every deploy in the response.
 
 DeployedOpportunitiesTimeline:
   type: array
