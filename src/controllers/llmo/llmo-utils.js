@@ -13,6 +13,31 @@
 // LLMO constants
 export const LLMO_SHEETDATA_SOURCE_URL = 'https://main--project-elmo-ui-data--adobe.aem.live';
 
+/**
+ * Canonical site hostname for CDN-onboarding audit lines: a bare, lowercase host with no scheme,
+ * port or trailing dot. Matches the akamai-client `normalizeDomain` semantics.
+ *
+ * Every cdn-onboard controller MUST log `host=` through this, so that one Splunk query matches all
+ * three providers. In particular, do not use `calculateForwardedHost()` for an audit `host`: it
+ * describes the ORIGIN forwarding host and deliberately rewrites a bare apex
+ * (`example.com` -> `www.example.com`), which silently excludes those events from a
+ * `host=example.com` search. Log that value under a distinct key when it is genuinely needed.
+ *
+ * Best-effort: returns undefined for a malformed base URL so the audit line simply drops the
+ * field — a log line must never be able to fail the request it describes.
+ *
+ * @param {object} site - Site entity
+ * @returns {string|undefined} bare lowercase hostname, or undefined when it cannot be derived
+ */
+export const auditHostname = (site) => {
+  try {
+    const { hostname } = new URL(site?.getBaseURL?.());
+    return hostname.toLowerCase().replace(/\.$/, '') || undefined;
+  } catch {
+    return undefined;
+  }
+};
+
 // Supported CDN types. Aligned with auth-service (cdn-logs-infrastructure/common.js).
 export const CDN_TYPES = {
   BYOCDN_FASTLY: 'byocdn-fastly',

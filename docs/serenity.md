@@ -4,15 +4,16 @@ This document is the runtime reference for the `/v2/orgs/:spaceCatId/brands/:bra
 
 ## Architecture in one paragraph
 
-api-service exposes nine endpoints that front the Adobe-hosted Semrush AIO API at `https://adobe-hackathon.semrush.com`. Authentication is IMS-bearer-only: the client sends an `Authorization: Bearer <ims_user_token>`, api-service forwards that header verbatim to Semrush, and the Adobe gateway exchanges the IMS token for Semrush's internal credential server-side. There are no Semrush cookies, API keys, or service accounts in api-service — every outbound request carries the caller's IMS user token. The brand-to-project mapping lives in the `brand_to_semrush_projects` table in mysticat-data-service; the Semrush workspace per org is read from `organizations.semrush_workspace_id` (already in place since PR #2403).
+api-service exposes the Serenity endpoint surface documented in OpenAPI and fronts the Adobe-hosted Semrush AIO API at `https://www.semrush.com`. Authentication is IMS-bearer-only: the client sends an `Authorization: Bearer <ims_user_token>`, api-service forwards that header verbatim to Semrush, and the Adobe gateway exchanges the IMS token for Semrush's internal credential server-side. There are no Semrush cookies, API keys, or service accounts in api-service — every outbound request carries the caller's IMS user token. The brand-to-project mapping lives in the `brand_to_semrush_projects` table in mysticat-data-service; the Semrush workspace per org is read from `organizations.semrush_workspace_id` (already in place since PR #2403).
 
 ## Environment configuration
 
-The proxy is configured via a single env var that is **required at runtime** — Lambda fails at first request if it is unset.
+`SEMRUSH_PROJECTS_BASE_URL` is **required at runtime** — Lambda fails at first request if it is unset. The server-side intent classifier (serenity-docs#32) adds one optional override.
 
 | Variable | Required | Source | Purpose |
 |---|---|---|---|
 | `SEMRUSH_PROJECTS_BASE_URL` | yes (no source default) | Vault `dx_mysticat/<env>/api-service`; locally `.env` | Upstream host for the Semrush AIO REST API. Must be `https://…`. Trailing slashes are stripped. Per-environment value so the production target can differ from the hackathon host without a code change. |
+| `PROMPT_INTENT_CLASSIFICATION_DEPLOYMENT_NAME` | no (falls back to `AZURE_OPEN_AI_API_DEPLOYMENT_NAME`) | Vault `dx_mysticat/<env>/api-service`; locally `.env` | Classifier-scoped Azure OpenAI deployment (model) name for server-side prompt-intent classification (serenity-docs#32). Takes precedence over the shared `AZURE_OPEN_AI_API_DEPLOYMENT_NAME` other Azure consumers use (e.g. `org-detector`), so intent classification can target a different model without affecting them. Unset ⇒ shared deployment; behavior unchanged until explicitly configured. |
 
 ### Vault writes (dev / stage / prod)
 
@@ -22,11 +23,11 @@ vault login -method=oidc   # opens browser
 
 # value used for all three today; production target host may differ later
 vault kv patch dx_mysticat/dev/api-service \
-  SEMRUSH_PROJECTS_BASE_URL=https://adobe-hackathon.semrush.com
+  SEMRUSH_PROJECTS_BASE_URL=https://www.semrush.com
 vault kv patch dx_mysticat/stage/api-service \
-  SEMRUSH_PROJECTS_BASE_URL=https://adobe-hackathon.semrush.com
+  SEMRUSH_PROJECTS_BASE_URL=https://www.semrush.com
 vault kv patch dx_mysticat/prod/api-service \
-  SEMRUSH_PROJECTS_BASE_URL=https://adobe-hackathon.semrush.com
+  SEMRUSH_PROJECTS_BASE_URL=https://www.semrush.com
 
 # verify (must export VAULT_ADDR — the CLI default is 127.0.0.1:8200)
 export VAULT_ADDR=https://vault-amer.adobe.net
@@ -70,27 +71,241 @@ curl -X PATCH "${API_BASE}/organizations/${ORG_ID}" \
 
 The new workspace flows into the resolver cache on the next call.
 
+## Serenity activation flag (per-brand rollout switch)
+
+Binding a `semrush_workspace_id` no longer activates serenity by itself. The
+whole `/serenity/*` surface is additionally gated on a **feature flag resolved per
+brand**, so the rollout can be decoupled from provisioning: an org (and its
+brands) can have their `semrush_workspace_id` backfilled ahead of time while the
+customer UI keeps reading the normal backend data, until the flag is flipped on.
+
+**Flag identity and resolution.** A `feature_flags` row keyed `(organization_id,
+product='LLMO', flag_name='serenity')` with **no `brand_id`** is the
+organization's value; a row naming a brand **overrides** it for that brand alone:
+
+```
+resolve(org, brand) := brand's own row, else the organization's row, else OFF
+```
+
+The brand row is an override, not a second condition ANDed with the
+organization's, so a brand is active under an organization that is not — which is
+what every migration wave before the last one looks like, and why the
+organization's row is the last step of a rollout rather than the first. A brand
+row of `false` conversely holds one brand back from an organization that is on.
+An organization with one org-level row and no brand rows resolves identically for
+every brand it owns, so a customer that migrated in one step behaves exactly as
+before.
+
+- **Central predicate:** `isSerenityActiveForBrand(ctx, spaceCatId, brandUuid,
+  log)` in `src/support/serenity/serenity-active.js` — the single source of truth,
+  reused by every gate below. Default **OFF**: a missing row, a `false` row, an
+  unavailable PostgREST client, or a transient read error all resolve to inactive.
+- **`isSerenityActiveForOrg(ctx, spaceCatId, log)`** answers for the organization's
+  own row only, ignoring overrides. It has exactly one caller — brand creation,
+  which has no brand to resolve against. Anything acting on an existing brand must
+  use the per-brand predicate, or it applies one answer to every brand in the org.
+- **Caching.** One cache entry per `(org, flag)` holds *both* scopes — the org row
+  and every brand override — so a single query answers for the organization and
+  for any of its brands, and the two views cannot disagree within a request. The
+  positive TTL is the short `BRAND_CACHE_TTL_MS` (10s), not the workspace
+  resolver's 5 minutes: a brand's value flips mid-rollout and the cache is
+  process-local, so a flip on one container leaves siblings serving the old answer
+  until their own entry expires.
+- **Effective gate = resolved flag AND workspace.** The controller's `authorize`
+  rejects the serenity surface with `404 Serenity is not active for this brand`;
+  the existing workspace resolution supplies the "AND a Semrush workspace
+  resolves" half. So serenity is served only when **both** the brand resolves on
+  **and** a workspace resolves for it.
+
+This also closes a rollout hole: flipping an org on with unbound brands used to
+resolve each of them to `mode: 'flat'` against the org parent, so the UI rendered
+a brand with **zero markets** instead of falling back to its legacy data. An
+unreleased brand now 404s the serenity surface, which the UI already handles as
+"no serenity here".
+
+Flip the **organization's** row with the admin feature-flags endpoint:
+
+```bash
+# Activate serenity for an org (every brand with no override of its own)
+curl -X PUT "${API_BASE}/organizations/${ORG_ID}/feature-flags/llmo/serenity" \
+  -H "x-api-key: ${SPACECAT_ADMIN_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{"value": true}'
+
+# Deactivate (org falls back to the normal backend data)
+curl -X DELETE "${API_BASE}/organizations/${ORG_ID}/feature-flags/llmo/serenity" \
+  -H "x-api-key: ${SPACECAT_ADMIN_KEY}"
+```
+
+That endpoint writes and reads the **organization's** row only; it neither creates
+nor reports brand overrides, so its response keeps describing the org's own state.
+Brand override rows are written by the wave-execution migration CLI in
+`mysticat-data-service`, which is what releases a brand as part of a wave.
+
+The org-level catalogue routes (`GET /serenity/models`, `GET /serenity/languages`,
+without `:brandId`) are intentionally **not** gated — the add-brand wizard needs
+them before a workspace (or the flag) exists.
+
+### The flag also gates the serenity-adjusted brand endpoints
+
+The same helpers gate the Semrush **side-effects** on the v2 brand endpoints
+(`src/controllers/brands.js`), so an inactive brand operates as plain backend CRUD:
+
+- `POST /v2/orgs/:org/brands` — **Semrush mode is decided by the ORGANIZATION's
+  serenity row, not the request body** (LLMO-6405), and stays org-level because a
+  create has no brand to resolve against. In a serenity-active org every brand
+  create is a Semrush create: it provisions the brand's sub-workspace — a **bare**
+  sub-workspace when no market is supplied (markets are added later from the
+  Markets tab), or the initial project when a `semrushMarket` is supplied. While
+  the org's row is **off**, a create that carries a `semrushMarket` or
+  `generatePrompts: true` is rejected with `403 Serenity is not active for this
+  organization`; a plain (flat) create — including a bare `generatePrompts: false`
+  — is unaffected. A brand created in an active org needs no override row of its
+  own: with none, it inherits the org's value, which is the intent.
+- `PATCH /v2/orgs/:org/brands/:brandId` — resolved **per brand**. An edit that
+  would **re-sync to Semrush** (URL / social / earned-content / competitor / alias
+  change on a brand that has a `semrush_sub_workspace_id`) is rejected `403
+  Serenity is not active for this brand` while that brand is inactive, before the
+  row is written. This is what lets one org hold a released brand and an
+  unreleased one at once: the unreleased brand keeps its editable classic UI while
+  its released sibling is locked. The same edit on a brand that was never migrated
+  (no sub-workspace) is a normal backend update.
+- The post-commit Semrush re-sync keys on `semrushSubWorkspaceId`. It needs no
+  serenity check of its own — the gate above already rejects an inactive bound
+  brand on exactly the same set of touched fields, so a provisioned-but-unreleased
+  brand can never reach it.
+- Every brand payload — the list, the by-id and by-site reads, and the create,
+  update and status-transition responses — exposes the resolved state so no
+  consumer re-implements the rule: `serenityActive` (boolean) and
+  `serenityActivatedAt` (the resolved row's `updated_at`, null while inactive),
+  alongside the unchanged `semrushSubWorkspaceId` / `pendingSemrushProvisioning`
+  mirrors. Read `serenityActive` per brand — a mid-migration org returns both
+  answers in one list. The handler returning the payload derives the fields from
+  one flag read per response, so the brand readers stay free of that query and the
+  internal callers which never surface these fields do not pay for it; on a write
+  handler the read is issued before the write, so a flag-read fault cannot turn an
+  edit that already committed into a 500.
+- `DELETE` and status-transition have no Semrush side-effect, so they are
+  ungated.
+
+### The brand-presence surface and the access probe
+
+`src/controllers/elements.js` gates both of its authorizers on the same per-brand
+predicate. `authorizeBrandSubWorkspace` already required sub-workspace mode;
+`authorizeOrg` was the gap — it falls back to the org **parent** workspace when a
+brand has no binding, so the brand-presence reads and the workspace-access probe
+(`GET …/serenity/brand-presence/access`) would have answered for the organization
+instead of for an unmigrated brand.
+
+## Migration-window flag (`LLMO/serenity_ui`)
+
+A second org-wide flag, `feature_flags` row keyed `(organization_id,
+product='LLMO', flag_name='serenity_ui')`, marks an org as **past** the Semrush
+migration. The name is snake_case because it has to be: `feature_flags` carries
+`CHECK (flag_name ~ '^[a-z][a-z0-9_]*$')`, so a hyphenated variant cannot be
+stored and any client matching on a hyphenated name never matches. The frontend
+reads it from `GET /organizations/:id/feature-flags/llmo` to pin the org to the
+Serenity UI and hide the classic/Serenity switcher; the backend reads it via
+`isSerenityUiActiveForOrg(ctx, spaceCatId, log)` in
+`src/support/serenity/serenity-active.js` (same cache and TTLs as the activation
+flag, default **OFF**).
+
+Backend meaning: **whether a Semrush failure on a brand edit is reported or
+absorbed.**
+
+During the migration an org's LLMO users may have no Semrush user record at all.
+Semrush binds the forwarded IMS token to a Semrush user before executing, so for
+those users it answers 4xx on every call, permanently — no retry the caller can
+make will clear it, and JIT provisioning from IMS claims was declined. Reporting
+that on a brand edit would tell the customer their edit failed when the row did
+persist. So `PATCH /v2/orgs/:org/brands/:brandId` absorbs it: the pre-write
+self-referential-competitor guard degrades to a brand-URL-only reserved set, and
+the post-commit re-sync returns `200 { semrushSyncPending: true }`.
+
+An org on the Serenity UI is past that window — its users are provisioned in
+Semrush — so a failure there is a real fault, not migration noise. With the flag
+on, both call sites propagate instead: the guard failure rejects the write before
+the row is touched, and a re-sync failure maps through `createErrorResponse` to
+401/403 (upstream authorization) or 502 (everything else). The row stays
+committed either way; the flag decides whether the divergence is reported.
+
+The combined contract, given the activation flag is on (it gates the route
+entirely — see above):
+
+| `LLMO/serenity` | `LLMO/serenity_ui` | Semrush failure on a brand edit |
+| --- | --- | --- |
+| on | off | absorbed — `200` with `semrushSyncPending: true` |
+| on | on | reported — `401` / `403` / `502` |
+
+Both classes are logged either way, at `warn` with `permanent: true` for 401/403
+and at `error` otherwise, under `serenity: brand-edit Semrush re-sync failed
+after row commit`. api-service prod logs are effectively absent from Splunk, so
+enumerate drifted brands from CloudWatch Logs Insights on the api-service prod
+Lambda log group.
+
+Flip it with the same admin endpoint as the activation flag:
+
+```bash
+# Stop absorbing Semrush failures for an org (org is fully migrated)
+curl -X PUT "${API_BASE}/organizations/${ORG_ID}/feature-flags/llmo/serenity_ui" \
+  -H "x-api-key: ${SPACECAT_ADMIN_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{"value": true}'
+
+# Back to absorbing (org still has unprovisioned Semrush users)
+curl -X DELETE "${API_BASE}/organizations/${ORG_ID}/feature-flags/llmo/serenity_ui" \
+  -H "x-api-key: ${SPACECAT_ADMIN_KEY}"
+```
+
 ## Endpoint surface
 
-All endpoints require `Authorization: Bearer <ims_user_token>` and `organization:read` (GET) or `organization:write` (mutating) capability. The `:brandId` path param is UUID-only on this surface — name-based brand lookup is rejected with 400. The slice key for everything is `(brandId, geoTargetId, languageCode)`; the upstream workspace id and per-project upstream identifier are resolved server-side and never leak into request/response shapes.
+All `/serenity/*` endpoints require `Authorization: Bearer <ims_user_token>` and `organization:read` (GET) or `organization:write` (mutating) capability. (The S2S brand-markets read documented at the end of this section is the exception: it is reachable without an IMS user token, though it still requires `organization:read`.) The `:brandId` path param is UUID-only on this surface — name-based brand lookup is rejected with 400. The slice key for everything is `(brandId, geoTargetId, languageCode)`; the upstream workspace id and per-project upstream identifier are resolved server-side and never leak into request/response shapes.
 
 | Method | Path | Purpose | OperationId |
 |---|---|---|---|
-| GET | `/serenity/prompts?geoTargetId=&languageCode=&page=&limit=&search=&tagIds=` | List prompts for one slice. geoTargetId and languageCode required. tagIds is repeatable (OR semantics, max 50). | `listSerenityPrompts` |
-| POST | `/serenity/prompts` | Bulk create prompts grouped by (geoTargetId, languageCode) | `createSerenityPrompts` |
-| PATCH | `/serenity/prompts/:semrushPromptId` | Update a prompt; body carries slice + new fields | `updateSerenityPrompt` |
+| GET | `/serenity/prompts?geoTargetId=&languageCode=&page=&limit=&search=&tagIds=` | List prompts for one slice. geoTargetId and languageCode required. `tagFilterMode=faceted-v1` enables authoritative native id-based faceting; plain rows mark otherwise-compatible tags `unverified` because they do not load the complete taxonomy. | `listSerenityPrompts` |
+| POST | `/serenity/prompts` | Bulk create prompts grouped by (geoTargetId, languageCode); each input carries 1–50 caller-supplied `tagIds` (upstream ids, id-based write path). More than 50 returns 409 `tagLimitExceeded` before server-managed tags are injected; ids are never truncated. A `tags` (name-based) key is rejected with 400. | `createSerenityPrompts` |
+| PATCH | `/serenity/prompts/:semrushPromptId` | Update a prompt; body carries slice + text + a non-empty `tagIds`. A `tags` (name-based) key is rejected with 400. | `updateSerenityPrompt` |
 | POST | `/serenity/prompts/bulk-delete` | Delete prompts; body is `{ prompts: [{semrushPromptId, geoTargetId, languageCode}] }` | `bulkDeleteSerenityPrompts` |
+| POST | `/serenity/prompts/finalize` | Publish any pending draft state for up to 50 caller-supplied (geoTargetId, languageCode) slices, resolved through the same org/brand/workspace authorization as prompt creation. Idempotent per slice: `live` is a no-op, `draft`/`live_with_unpublished_updates` publish (then bounded-confirm), `publishing` is polled without a second publish, `initial_publish_failed` is terminal. Recovery surface for CSV imports whose deferred-publish batches were left stranded unpublished. | `finalizeSerenityPrompts` |
+| POST | `/serenity/prompts/bulk-tags` | Validate mutation ids, freeze the normalized faceted filter, and enqueue an assign/remove set operation without scanning prompts synchronously. The worker force-refreshes taxonomy and resolves the worker-time cohort under the 20,000-prompt ceiling; per-item over-limit sets fail loudly. Optional `Idempotency-Key` replays the same canonical request for 24 hours. Publish runs only after an update or an explicitly marked prior failed-publish recovery. | `bulkTagSerenityPrompts` |
+| GET | `/serenity/prompts/jobs/:jobId` | Poll classify/bulk jobs. `COMPLETED` is terminal processing; for bulk tags, `result.outcome=PARTIAL_FAILURE` explicitly reports item or publish failure and `failureCursor`/`failureLimit` page failures. | `getSerenityPromptsJobStatus` |
 | GET | `/serenity/markets` | List markets configured for the brand (incl. live `status`) | `listSerenityMarkets` |
-| POST | `/serenity/markets` | Onboard a new (brand, geoTargetId, languageCode) slice | `createSerenityMarket` |
+| POST | `/serenity/markets` | Onboard a new (brand, geoTargetId, languageCode) slice (accepts `siteId` in place of `brandDomain`) | `createSerenityMarket` |
 | DELETE | `/serenity/markets/:geoTargetId/:languageCode` | Remove a slice (idempotent; upstream-first, DB-second) | `deleteSerenityMarket` |
-| GET | `/serenity/tags?geoTargetId=&languageCode=` | Unique tag names for one slice | `listSerenityTags` |
-| GET | `/serenity/models?geoTargetId=&languageCode=` | AI models for one slice | `listSerenityModels` |
+| GET | `/serenity/tags?geoTargetId=&languageCode=` | Unique tag names for one slice. Add `parentId` (present, even empty) to switch to the nested-tree read instead: `parentId=''` returns root categories with `childrenCount`, `parentId=<tagId>` returns that root's children with a `path` breadcrumb. | `listSerenityTags` |
+| POST | `/serenity/tags` | Create/resolve a tag on one slice; body is `{ type, name, geoTargetId, languageCode, parentId? }`. `name` is always BARE — a `:` is rejected, as is a reserved dimension-root name. `category` and `tag` are customer-owned open dimensions. `source` is server-owned open. `intent`, `origin`, and `type` are server-owned closed dimensions with fixed enums. Server-owned values reject `parentId` and use idempotent resolve-before-create. | `createSerenityTag` |
+| PATCH | `/serenity/tags/:tagId` | Rename and/or re-parent a tag by its upstream id. `name` is a bare value. `parentId`: an id RE-PARENTS within the tag's own dimension, omitted preserves the current parent, and an explicit `null` is rejected — the root level is reserved for the six dimension roots. The new parent may be neither the tag itself nor one of its descendants (400): upstream stores a parent pointer rather than a tree and would accept the edge, leaving the tag's subtree reachable from no root, and so unreachable and unrepairable through this API. The proxy always re-sends a parent upstream, because a PATCH that omits one promotes the tag to a root. A dimension root (400), a closed dimension's value (400), and an unknown id (404 `tagNotFound`) are all refused. | `updateSerenityTag` |
+| GET | `/serenity/tags/:tagId/impact?geoTargetId=&languageCode=` | Return the complete subtree, distinct affected-prompt count, and quoted revision used by guarded delete. Roots, server-owned tags, and read-only taxonomy branches are refused. | `getSerenityTagImpact` |
+| GET | `/serenity/tags/search?geoTargetId=&languageCode=&q=&limit=&cursor=` | Search the plain `tag` dimension (never `category`/other dimensions) for names/paths containing `q` (NFKC-normalized, case-insensitive), ranked exact > prefix > substring > path. **Rollout:** independently default-off per brand behind `LLMO/serenity_tag_search`; the environment-wide `SERENITY_TAG_SEARCH_DISABLED=true` switch is emergency backout. **Cost profile:** every call — including each subsequent cursor page — re-walks the complete tag tree from Semrush with no caching (up to `SERENITY_TAG_TREE_MAX_PARENTS` parent reads and `SERENITY_TAG_TREE_MAX_PAGES_PER_PARENT` pages per parent at concurrency `SERENITY_TAG_TREE_CONCURRENCY`, bounded by `SERENITY_TAG_TREE_MAX_DURATION_MS`), so a type-ahead client MUST debounce. A `200` is never budget-truncated — budget exhaustion and traversal failures fail closed with `503` (`tagTreeLimitExceeded` for configured ceilings, `tagTreeReadIncomplete` when an upstream level cannot be proven complete, and `tagTreeDataIntegrity` for contradictory tree relationships) instead of returning partial matches — but it is a level-by-level read, not a point-in-time transaction: a tag created into an already-visited level mid-walk is simply absent until the next call, and `complete: true` asserts only "not truncated". Returns an opaque, versioned base64url JSON `cursor` for the next page (`null` once exhausted), bound to the normalized query and taxonomy revision. The cursor carries no organization, brand, workspace, project, or authorization authority: every page reauthenticates, resolves the project server-side, and re-reads the taxonomy; a revision change returns `409 tagSearchSnapshotChanged`. The emergency environment switch returns `503 tagSearchUnavailable` after normal org/brand authorization and before Semrush project resolution or traversal. | `searchSerenityTags` |
+| GET | `/serenity/models?geoTargetId=&languageCode=` | AI models for one slice (catalog mode when no params) | `listSerenityModels` |
+| PUT | `/serenity/models` | Replace the AI-model set for one slice (publishes after change) | `updateSerenityModels` |
+| POST | `/serenity/activate` | Activate into sub-workspace mode. A **pending** brand activates sub-workspace-only (ensure sub-workspace + flip active, no markets); an already-**active** brand's body-supplied markets are provisioned (reactivation) | `activateSerenityBrand` |
+| POST | `/serenity/deactivate` | Deactivate: decommission the sub-workspace + disconnect the brand back to flat mode | `deactivateSerenityBrand` |
 
-All paths are prefixed with `/v2/orgs/:spaceCatId/brands/:brandId`.
+Elements analytics uses root-first `tagPath` values rather than native tag ids.
+Those routes require `tagFilterMode=elements-faceted-v1`; the distinct token
+prevents clients from treating the incompatible native and Elements filter
+engines as the same contract.
+
+The above are prefixed with `/v2/orgs/:spaceCatId/brands/:brandId`.
+
+Two **org-level** catalogue routes are brand-independent (prefixed with `/v2/orgs/:spaceCatId`, no `:brandId`) and are used to populate UI selectors before any brand/market exists:
+
+| Method | Path | Purpose | OperationId |
+|---|---|---|---|
+| GET | `/serenity/models` | Global AI-model catalog (`GET /v1/ai_models`) | `listSerenityOrgModels` |
+| GET | `/serenity/languages` | Supported Semrush language catalog (`GET /v1/languages`) | `listSerenityOrgLanguages` |
+
+### S2S brand markets read (`GET /v2/orgs/:spaceCatId/brands/:brandId/markets`)
+
+A separate, S2S-authenticated route reads a brand's markets straight from the `brand_to_semrush_projects` table (`BrandSemrushProject.allByBrandId`), bypassing the IMS-gated `/serenity/*` surface above entirely. It exists for consumers that need a brand's configured markets without an IMS user token — DRS is the first caller. The response is `{ markets: [{ region, languageCode, geoTargetId }] }`; a row whose `geoTargetId` isn't a whole country, or whose `languageCode` is blank, is skipped rather than mislabeled.
+
+This differs from `GET /serenity/markets` in three ways: it carries no live/draft `status` (that only exists in the upstream Semrush listing, which this route never calls), no `siteId` (the market-mirror Site link is a `/serenity/*` concern), and it only ever reports whole countries (the flat table has no sub-national representation, whereas the IMS-gated route resolves markets live from Semrush and can surface sub-national slices). Soft-deleted (`deletedAt`) rows are excluded.
 
 ## The onboarding flow
 
-`POST /serenity/markets` writes a row to `brand_to_semrush_projects` **only after both upstream calls succeed**. The order is strict and the `findBySlice` 409 gate runs before any upstream call so safe retries are free:
+`POST /serenity/markets` writes a row to `brand_to_semrush_projects` **only after every blocking step below succeeds — create, the primary_url PATCH, the main-brand benchmark invariant, and publish**. The order is strict and the `findBySlice` 409 gate runs before any upstream call so safe retries are free:
 
 ```
 1. validate body                                  -> 400 on missing/invalid fields
@@ -99,15 +314,45 @@ All paths are prefixed with `/v2/orgs/:spaceCatId/brands/:brandId`.
 4. resolveLanguageId(languageCode) via cached     -> 400 if language not in catalog
    `/v1/languages`
 5. POST /v1/workspaces/{ws}/projects              -> 502 envelope on upstream error
-6. POST .../publish                               -> 502 envelope, no row written
-7. BrandSemrushProject.create({...})              -> 201 with the new market
+6. PATCH .../projects/{pid} {type, primary_url}   -> 502 envelope, no row written
+7. ensureOwnBrandBenchmark + assertMainBrandBenchmark (DRAFT view)
+                                                   -> 502 `mainBrandBenchmarkInvariant`,
+                                                      no row written, orphan project
+                                                      deleted best-effort
+8. POST .../publish                               -> 502 envelope, no row written
+9. BrandSemrushProject.create({...})              -> 201 with the new market
 ```
 
-If step 5 or 6 fails, no row is written and the caller may safely retry with the same body. The 409 gate catches the case where a previous attempt succeeded both upstream calls but failed the DB write — extremely unlikely in practice; covered by the integration tests in `test/it/`.
+Step 6 is not optional and cannot be folded into step 5. A project carries two URL-ish
+fields: `domain`, which must be a bare FQDN (a path is a hard 400, and the upstream folds
+whatever is sent to the registrable domain), and `settings.ai.primary_url`, which is the
+URL the project actually **tracks** and accepts a subdomain, a subpath, or both. Create
+**ignores** `primary_url` — sent in the create body it comes back as the apex, whatever
+spelling went in — so it can only be set by a PATCH, and that PATCH must land before the
+publish or the value stays in draft. `primary_url` is sent flat (`{type: 'ai',
+primary_url}`, the shape `model.ProjectUpdateRequest` declares) and read back nested at
+`settings.ai.primary_url`. Without it, a brand whose site is `nba.com/kings` is recorded
+against the whole of `nba.com`.
+
+Step 7 is a blocking invariant (LLMO-7421), not enrichment: the project must carry exactly
+one `main_brand: true` benchmark before it is allowed to publish, or Brand Presence has no
+customer baseline to score against. `ensureOwnBrandBenchmark` creates the benchmark flagged
+when none exists, and deletes-then-recreates-flagged an existing unflagged own-domain match
+(the flag can only be set at create, never by a PUT); `assertMainBrandBenchmark` then reads
+the DRAFT view and requires the count to be exactly one, throwing `MainBrandBenchmarkInvariantError`
+(502, code `mainBrandBenchmarkInvariant` — see Error envelopes below) otherwise. Checked only
+pre-publish, never post-publish: Semrush publishes asynchronously (a 202 with the project
+transitioning to `live` in the background, no completion webhook), so a published-view read
+taken immediately after step 8 would race that transition and could fail spuriously even on
+success.
+
+If step 5, 6, 7 or 8 fails, no row is written and the caller may safely retry with the same body. The 409 gate catches the case where a previous attempt succeeded all upstream calls but failed the DB write — extremely unlikely in practice; covered by the integration tests in `test/it/`.
+
+**`siteId` is authoritative over `brandDomain` (LLMO-6405 Phase 2).** A market created from an already-onboarded URL can send `siteId` (the SpaceCat Site UUID) instead of, or alongside, a raw `brandDomain`. When `siteId` is supplied, its resolved Site identity is **always** used for the project's Semrush URL values — even if the request also carries a `brandDomain` that differs from it; a mismatch is the normal, intended shape (most brands have markets on Sites other than their apex domain) and is never compared or rejected. `brandDomain` is consulted **only** when no `siteId` was supplied. The server derives **both** Semrush URL values from the resolved Site's `base_url` in one read (`resolveSiteIdentity`): the project `domain` (bare host, the same normalization as every other brand→domain derivation) and the project's tracked `primary_url` (host + path, scheme-less to match the stored upstream form). They come from one read so the two can never describe different URLs; a supplied-but-unresolvable `siteId` is a hard 400, regardless of whether a `brandDomain` was also supplied — it never silently falls back. `primary_url` is always derived server-side and never read from the request body. At least one of `siteId`/`brandDomain` is required. In sub-workspace mode a supplied `siteId` also makes the post-201 mirror link **that** Site directly (skipping the domain→Site find-or-create — see below); the linked `siteId` then surfaces on the market DTO (`GET /serenity/markets[/:slice]`, both modes). The flat handler self-derives (it holds `dataAccess.Site`); the sub-workspace handler relies on the controller (its `dataAccess` is narrowed). Both call sites share one precedence implementation (`resolveMarketIdentity`). When `siteId` is absent, behavior is unchanged: the raw `brandDomain` is used.
 
 ## Delete-market semantics
 
-`DELETE /serenity/markets/:geoTargetId/:languageCode` removes a slice from the brand. Upstream support was verified 2026-05-28 against `adobe-hackathon.semrush.com`:
+`DELETE /serenity/markets/:geoTargetId/:languageCode` removes a slice from the brand. Upstream support was verified 2026-05-28 against `www.semrush.com`:
 
 ```
 OPTIONS /v1/workspaces/{ws}/projects/{pid} → 405, allow: DELETE, GET, PATCH
@@ -127,6 +372,78 @@ Ordering (mirrors the create flow in reverse):
 
 The DELETE is **not soft**. The UI must confirm with the user before invoking — the linked upstream project (and all its prompts) is permanently destroyed.
 
+**Orphaned-site cleanup (LLMO-6405 R12).** Each delete handler captures the removed market's linked `siteId` (from the mapping row, before the row is removed/tombstoned) and returns it. The controller then reference-counts the brand's remaining LIVE mapping rows: when **zero** remaining markets point at that `siteId` **and** it is not the brand's primary site (`brands.site_id`), the `brand_sites` `type='serenity'` link for it is deleted (`unlinkMarketSiteIfOrphaned`) so a site that no longer backs any market is not left orphaned. The **Site entity itself is never deleted**; only the link is removed. Best-effort: any failure (including an unresolvable primary-site lookup, which fail-safes to *skip* the unlink) is logged under `SERENITY_MARKET_UNLINK_FAILED` and never fails the 204. The brand's primary site is never unlinked here.
+
+## SpaceCat Site mirroring (`brand_sites`)
+
+For backwards compatibility and integrations, every Semrush market (project) is mirrored as a SpaceCat **Site** on our side. The domain model is the key thing to hold onto:
+
+- A **brand is a shell** with **no domain of its own** — like its Semrush sub-workspace. **Each market has its own primary URL/domain**, and that URL maps to a single Site. `sites.base_url` is globally unique over the **whole URL including its path**, so one host can back several Sites: in prod 440 of 12,926 sites carry a subpath, and `nba.com` coexists with `nba.com/kings`, `/knicks`, `/lakers` and `/timberwolves` as five distinct rows. A brand whose markets span distinct URLs therefore owns several market Sites. Site lookup is by the full identity (host + path) for exactly this reason — resolving by host alone silently returns the root site for every subpath sibling.
+- The Site is linked to the owning brand via a **`brand_sites` row tagged `type='serenity'`** (`src/support/serenity/site-linkage.js` → `ensureMarketSite`; the marker names the owning feature, not the provider). The marker is load-bearing:
+  - **`syncBrandSites` preserves it.** That function rebuilds `brand_sites` from `brand.urls` on every brand edit (delete-all-then-reinsert). A market's domain is generally **not** in `brand.urls`, so an unmarked row would be silently deleted on the next edit. The marker excludes these rows from the delete and keeps their type from being downgraded on re-upsert.
+  - **`mapDbBrandToV2` excludes it.** A market's domain is not a brand URL, so `type='serenity'` rows never surface in the brand V2 response (`urls[]` / `siteIds`). Integrations resolve them via the `sites` / `brand_sites` tables directly.
+- **Lifecycle:** the market Site (+ link) is ensured wherever a **market** is provisioned — a **brand create that supplies a market** (that market's domain), an **already-active brand's activation** (the activated markets' domain), and **market creation in sub-workspace mode** (that market's domain — `ensureMarketSite` runs only on the `subworkspace` branch of `POST /serenity/markets`). A **bare** brand create (no market — the LLMO-6405 default) and a **pending** brand's sub-workspace-only activation mirror **no** market Site; the brand's own primary site is recorded as `brands.site_id` from the selected `baseSiteId` at create (a Semrush brand is anchored by BOTH its sub-workspace and its primary Site). A **flat-mode** brand is **not** mirrored on market creation. When a market create supplies a **`siteId`** (LLMO-6405 Phase 2), `ensureMarketSite` links **that** Site directly (skipping the domain→Site find-or-create) and the linked `siteId` is written onto the market's mapping row (`linkSiteToLiveRows`). The Site is **never auto-deleted** — but market **deletion now removes the `brand_sites` link** when the deleted market was the last live one on that (non-primary) site (R12; see Delete-market semantics), leaving the Site itself in place. A market-mirror site's **`baseURL` is immutable at the API**: a `PATCH /sites` that changes it is rejected (the domain is the Semrush project anchor; `isSemrushMarketMirrorSite` gates the guard).
+- **Best-effort, except on active-brand activation:** on the brand-create and market-create paths the Semrush project is the primary outcome and has already succeeded when mirroring runs, so a Site/link failure is logged and swallowed (never fails a live market). On an **already-active brand's activation** (reactivation) the site mirror is part of the all-or-nothing success gate — if the markets are live but the mirror fails, the brand is not marked fully-succeeded and returns **207** (it stays `active`, never downgraded; see Activate below). `Site.create` uses `deliveryType: 'other'` (not an AEM target).
+
+## Activate / deactivate (sub-workspace dual-mode)
+
+A brand runs in one of two modes, decided entirely by `brands.semrush_sub_workspace_id`:
+- **flat** (pointer NULL): markets resolve through the shared org parent workspace via the `BrandSemrushProject` mapping.
+- **subworkspace** (pointer set): the brand has its own Semrush sub-workspace; markets resolve live from it via `listProjects`.
+
+`POST /serenity/activate` moves a brand into sub-workspace mode. There are two
+paths, keyed on the brand's current status (LLMO-6405):
+
+**Pending brand → sub-workspace-only.** Activating a *pending* (draft) brand ONLY
+ensures its Semrush sub-workspace (the active-brand anchor), clears any legacy
+provisioning stash, and flips the brand `active` — **HTTP 200 with an empty
+`markets[]`**, no project, no Site mirror. Markets are Semrush projects the user
+adds afterwards from the Markets tab (the wizard's approve sends an empty body).
+Any `markets` / `brandDomain` / stash on a pending brand is **ignored for
+provisioning** — the brand is anchored by its primary site (`brands.site_id`, set at
+create). If the sub-workspace is ensured upstream but the `active` flip fails to
+persist, the brand stays `pending` and returns **502 `serenityActivationIncomplete`**
+(idempotent to retry — the sub-workspace 409s on the next attempt).
+
+**Already-active brand → body-driven market provisioning (reactivation / onboarding
+API).** For a brand that is already `active`, the body's markets are provisioned:
+
+```
+1. ensure the sub-workspace ONCE for the whole batch (create + settle, or re-grant)
+2. for each market (from the body; empty + a resolved brandDomain -> one US/en
+   fallback project): create-or-resume a draft project, attach models + generated
+   topic prompts, resolve/repair the own-brand benchmark and require exactly one
+   `main_brand: true` benchmark (LLMO-7421, blocking — see The onboarding flow,
+   step 7) + brand URLs + competitor benchmarks, then publish
+3. mirror every live market as a Site + brand_sites row (type='serenity')
+4. the brand is NEVER downgraded — a partial failure returns 207 Multi-Status
+   while the brand stays active.
+```
+
+All markets in one activate batch share the single resolved `brandDomain`, so they
+collapse to one Site mirror. (Distinct-domain markets under one brand are not
+produced by this path today; if that changes, the site-link step must require a
+linked Site per distinct market domain.)
+
+- Body: `{ brandDomain?, brandNames?, brandDisplayName?, markets?: [{ market, languageCode, name? }] }`. **All body fields are optional.** A pending brand's approve sends an empty body (→ sub-workspace-only). For an active brand, `markets` is **capped at 50** (400 above that); an empty `markets` with a resolved `brandDomain` provisions one `US`/`en` fallback project; a body that resolves no markets and no `brandDomain` is a no-op re-ensure.
+- **No stash-driven provisioning (LLMO-6405, SITES-49448).** A pending brand activates sub-workspace-only regardless of `brands.pending_semrush_provisioning`; activation no longer reads OR clears the stash — the column is a deprecated, unwritten remnant, slated for removal once existing legacy drafts drain (serenity-docs post-GA cleanup).
+- Response: **200** — a pending brand's sub-workspace-only activation (flips to `active`), or a fully-succeeded active reactivation. **502 `serenityActivationIncomplete`** — a pending brand whose sub-workspace ensured upstream but whose `active` flip did not persist (stays `pending`, idempotent retry). **502 `subworkspaceCreationFailed`** — a readiness check observed a terminal sub-workspace status; deactivate the brand before retrying activation. **504 `subworkspaceCreationTimeout`** — the sub-workspace remained transient through the bounded readiness poll. **207 Multi-Status** — an *already-active* brand re-supplying markets where ≥1 fails; never downgraded, stays `active`.
+- Idempotent: a market already live upstream returns 409 `sliceExists` and still counts as live, so a full re-activate of an already-live active brand is a 200.
+
+`POST /serenity/deactivate` moves a brand back to flat mode:
+
+```
+1. decommission the sub-workspace: delete EVERY project
+2. clear `brands.semrush_sub_workspace_id` (disconnect -> flat mode)
+3. set brands.status = 'pending'
+```
+
+**Caveats operators must know:**
+- **Deactivate is destructive, not a pause.** It deletes every project in the sub-workspace (all markets, prompts, benchmarks, competitors). There is **no stored market memory**: a later activate must re-supply the markets and rebuilds everything from scratch. Reactivation does NOT restore the prior data.
+- **The sub-workspace shell is never deleted.** Production never deletes a sub-workspace (Rainer, PR #2812 review — Semrush CS is the only party that ever deprovisions a workspace shell). Deactivate empties every project and leaves the shell in place. There is no allocation to reclaim: a brand's sub-workspace is created without a `resources` payload and nothing transfers units onto it (see **Sub-workspace resource allocation** below). `SERENITY_ALLOW_WORKSPACE_DELETE` (unset — off — in every deployed env) gates only the raw `deleteWorkspace` transport primitive, used solely for test/smoke-cleanup — no production lifecycle path calls it or branches on it.
+- **`status = 'pending'` is overloaded.** A deactivated brand and a never-finished onboarding both read `pending`; downstream consumers cannot distinguish "off by choice" from "incomplete" on status alone.
+- **IMS-user only.** activate/deactivate (and all `/serenity/*`) require an IMS user token; a non-IMS S2S consumer is refused (401). There is no backend/automation path to activate a Semrush brand today.
+
 ## Prompt id semantics
 
 `SerenityPrompt.semrushPromptId` is the upstream prompt UUID. The name carries the `semrush` prefix because the value genuinely IS Semrush's identifier — pretending otherwise (calling it `id`) would be misleading. The id changes whenever the prompt is re-created upstream (which happens on every PATCH — see `handleUpdatePrompt`); clients should refetch after a PATCH and use the new id.
@@ -139,23 +456,77 @@ The DELETE is **not soft**. The UI must confirm with the user before invoking �
 | 404 | `{ message: "Organization has no semrush_workspace_id" }` or `{ error: "marketNotFound" | "promptNotFound" }` | Missing workspace, no `BrandSemrushProject` row for the slice, or upstream prompt id not in the slice |
 | 409 | `{ error: "sliceExists", message }` | `findBySlice` returned a row before the upstream call |
 | 502 | `{ error: "serenityUpstreamError", message }` | Upstream returned a non-2xx; provider-specific detail is logged server-side, not echoed to the client |
+| 502 | `{ error: "subworkspaceCreationFailed", message }` | A readiness check observed the exact terminal status `creation failed` or `invalid subscription`; deactivate the brand before retrying activation |
+| 502 | `{ error: "mainBrandBenchmarkInvariant", message }` | LLMO-7421: market create/publish blocked because the project's DRAFT benchmark state does not carry exactly one `main_brand: true` benchmark (see The onboarding flow, step 7). Retryable — a retry re-attempts the ensure/repair. |
+| 504 | `{ error: "subworkspaceCreationTimeout", message }` | A sub-workspace remained in a transient state through the bounded readiness poll |
 | 500 | `{ message }` | Unexpected error; logged with stack via `log.error` |
 
-`SerenityTransportError` from `src/support/serenity/rest-transport.js` carries the upstream `status` and `body` for server-side logging; the 502 envelope deliberately does not echo provider details.
+Upstream failures surface as one of two typed errors, both carrying the upstream `status` and `body` for server-side logging and both classified by `isSemrushTransportError` (`src/support/serenity/errors.js`): **`ProjectEngineApiError`** (from the shared `@adobe/spacecat-shared-project-engine-client` facade) for Project Engine calls, and **`SerenityTransportError`** (`src/support/serenity/rest-transport.js`) for the User Manager and brand-topics calls. On a Project Engine no-HTTP-response failure (timeout / network / missing-token 401) the original throw is carried as `.cause` and unwrapped at the error→HTTP seam so auth stays 401 and timeouts stay 502. The 502 envelope deliberately does not echo provider details.
 
-## Observability (Coralogix)
+## Observability (Splunk)
 
-Outbound calls to Semrush, plus the controller's 502/500 paths, log to Coralogix under `applicationname=spacecat-services--api-service`. To verify a deploy after changes, query:
+Outbound calls to Semrush, plus the controller's 502/500 paths, ship to Splunk (index `dx_aem_engineering`, sourcetype `dx_aem_sites_spacecat_backend_<env>`, `service=api-service`). Coralogix has been retired platform-wide; use Splunk (or CloudWatch as a fallback). To verify a deploy after changes, run this SPL:
 
-```bash
-coralogix-query --from 30m \
-  "source logs | filter \$l.applicationname == 'spacecat-services--api-service' && \$d.message ~ 'semrush' | limit 50"
+```spl
+index=dx_aem_engineering sourcetype=dx_aem_sites_spacecat_backend_<env> service=api-service "semrush" | head 50
 ```
 
+`SERENITY_MARKET_PRIMARY_URL_DIVERGENCE` fires only in **sub-workspace** mode, and it is expected to be rare rather than impossible. The two provisioning paths treat a failed `primary_url` PATCH differently on purpose. The **flat** handler treats it exactly like a failed publish: the project is deleted best-effort, the error is rethrown, and no mapping row is written — so the market simply does not exist and a retry is safe. The **sub-workspace** handler cannot do that; it adopts leftover drafts, provisions a taxonomy between create and publish, and publishes quota-tolerantly, so it has no orphan-cleanup seam, and failing a whole market create because the tracked url could not be refined is worse than a market live on its apex — the state every market is in today. It therefore logs this token and continues.
+
+What that means operationally: a market carrying this token is **live and usable**, but tracking its apex rather than its subpath. Nothing further is needed here — the `mysticat-data-service` reconcile repairs `primary_url` in place (PATCH + publish, non-destructive) on its next run, because it compares against live state. A token that keeps recurring for the same market across reconciles is the signal worth chasing.
+
+Greppable failure tokens worth alerting on: `SERENITY_MARKET_LINK_REJECTED` (the `brand_sites.type='serenity'` migration is not deployed in the env — every market create/activate then produces a Semrush project + Site with no link), `SERENITY_ACTIVATE_LINK_INCOMPLETE` (markets live upstream but the brand stayed pending because the site mirror failed), and `SERENITY_ACTIVATE_SAVE_DIVERGENCE` / `SERENITY_DEACTIVATE_SAVE_DIVERGENCE` (upstream succeeded but the status/pointer persist failed).
+
 Expected fields in the structured log payload:
-- outbound host: `adobe-hackathon.semrush.com`
+- outbound host: `www.semrush.com`
 - outbound auth: `Authorization: Bearer ...` (the token itself is redacted by the platform)
 - the IMS sub of the caller in the `actor` field
+
+## Sub-workspace resource allocation
+
+The decision and its evidence are recorded in
+[ADR-008](./decisions/008-no-subworkspace-resource-carve.md).
+
+A brand's sub-workspace carries **no AI resource allocation of its own**. It is created with no
+`resources` body, and no lifecycle path transfers units onto or off it.
+
+Semrush provisions our parent workspaces with `limits_enabled: false` on the `ai` product, which
+disables product metering outright. Live-verified 2026-07-28 against the LLMO-Dev-2 parent: a child
+created with no `resources` body settled to `created`, reported `projects 0/0  prompts 0/0`, and
+then accepted `createProject`, prompt drafts and `publishProject`. It finished at
+`projects.used: 1` against `total: 0` — upstream let it exceed a zero total outright — and both
+published prompts read back in the LIVE (published) prompt view, so the publish landed rather than
+silently no-op'ing.
+
+Sizing a child up front is therefore not merely unnecessary but actively harmful. Allocation moves
+via `POST .../resources/transfer`, and that endpoint — unlike the product metering — *does* validate
+the requested totals against the subscription's units, terminally `422`-ing
+`insufficient available units in subscription`. A carve can never grant a child a capability it
+lacks; it can only fail a request that would otherwise have succeeded. In production it did exactly
+that: a brand's first market-add demanded the child's project total be raised to 3 against a parent
+pool that could not cover it, and the whole request died as a generic 502 before it ever reached
+project creation.
+
+The parent-pool premise was re-checked, not assumed: a manual metered-405 canary drove the real
+transport against a throwaway sub-workspace and published into zero headroom, per environment
+(dev/stage/prod, SITES-49206, 2026-08-17) — publish succeeded at zero headroom in all three,
+confirming the premise. That interim, manual, one-time check is now retired; the **durable**
+re-check is the retained disguised-405 classifier (`isMeteredQuota` / `toQuotaExceededError`,
+`errors.js`) observing every real production publish continuously, backed by
+`quota-alerts.js`/`allocation-metrics.js` alerting — see [ADR-010](decisions/010-durable-limits-recheck-retires-canary.md)
+for why this resolves the "durable re-check" question ADR-009 left open, and
+[ADR-009](decisions/009-remove-dormant-jit-allocator.md) for the original removal.
+
+> **Removed (SITES-49206):** the just-in-time (JIT) top-up allocator
+> (`SERENITY_DYNAMIC_ALLOCATION`, `resource-manager.js`, `dynamic-allocation-active.js`,
+> `resource-lock.js`) and its operational surface — the "when to turn it on" flip, the
+> zombie-workspace runbook, and the rightsizing sweep — have been deleted. Semrush no longer enforces
+> AI limits for proxy-routed LLMO workspaces, so there is no allocation to top up, exhaust, or
+> reclaim. `allocation-metrics.js` is **trimmed, not deleted** — `recordRejection` and
+> `recordMeteredQuotaClassifier` stay, since the disguised-405 quota classification still uses them.
+> The no-carve behaviour above is unconditional. See
+> [ADR-009](decisions/009-remove-dormant-jit-allocator.md) (the removal), and ADR-007 / ADR-008
+> (superseded).
 
 ## Dev environment smoke tests
 
@@ -175,15 +546,21 @@ Happy-path walkthrough:
 curl -s -H "Authorization: Bearer ${IMS}" \
   "${API_BASE}/v2/orgs/${ORG_ID}/brands/${BRAND_ID}/serenity/markets" | jq .
 
-# 2) Onboard a (US, en) slice. `name` is optional; default is `<brand>-<6 hex>`.
+# 2) Onboard a (US, en) slice. `name` is optional; default is `<REGION>-<language>` (e.g. `US-en`).
 curl -s -H "Authorization: Bearer ${IMS}" -H 'Content-Type: application/json' \
   -X POST "${API_BASE}/v2/orgs/${ORG_ID}/brands/${BRAND_ID}/serenity/markets" \
   -d '{ "market": "US", "languageCode": "en", "brandDomain": "adobe.com", "brandNames": ["Adobe"] }' | jq .
 
-# 3) Bulk-create prompts in that slice
+# 3) Bulk-create prompts in that slice. Prompts carry tags by UPSTREAM ID
+#    (`tagIds`); a name-based `tags` key is rejected with 400. Resolve an id from
+#    a POST /serenity/tags first (a category hangs off the `category` root).
+TAG_ID=$(curl -s -H "Authorization: Bearer ${IMS}" -H 'Content-Type: application/json' \
+  -X POST "${API_BASE}/v2/orgs/${ORG_ID}/brands/${BRAND_ID}/serenity/tags" \
+  -d '{ "type": "category", "name": "Product", "geoTargetId": 2840, "languageCode": "en" }' | jq -r .id)
+
 curl -s -H "Authorization: Bearer ${IMS}" -H 'Content-Type: application/json' \
   -X POST "${API_BASE}/v2/orgs/${ORG_ID}/brands/${BRAND_ID}/serenity/prompts" \
-  -d '{ "prompts": [ { "text": "What is Adobe Photoshop?", "geoTargetId": 2840, "languageCode": "en", "tags": ["product"] } ] }' | jq .
+  -d "{ \"prompts\": [ { \"text\": \"What is Adobe Photoshop?\", \"geoTargetId\": 2840, \"languageCode\": \"en\", \"tagIds\": [\"${TAG_ID}\"] } ] }" | jq .
 
 # 4) List prompts (filters are REQUIRED — 400 without them)
 curl -s -H "Authorization: Bearer ${IMS}" \
@@ -204,14 +581,13 @@ curl -s -X DELETE -H "Authorization: Bearer ${IMS}" \
 
 Negative-path checks worth covering: non-UUID `:brandId` → 400 `invalidRequest`; missing `geoTargetId` or `languageCode` on a list → 400; org without `semrush_workspace_id` → 404; duplicate market POST → 409 `sliceExists`.
 
-After the walkthrough, verify Coralogix has the outbound traces:
+After the walkthrough, verify Splunk has the outbound traces:
 
-```bash
-coralogix-query --from 15m \
-  "source logs | filter \$l.applicationname == 'spacecat-services--api-service' && \$d.message ~ 'adobe-hackathon.semrush.com' | limit 30"
+```spl
+index=dx_aem_engineering sourcetype=dx_aem_sites_spacecat_backend_<env> service=api-service "www.semrush.com" | head 30
 ```
 
-Expected: outbound host `adobe-hackathon.semrush.com`, IMS sub of the caller in `actor`, no `SerenityTransportError` entries beyond the deliberate 404/409 cases above.
+Expected: outbound host `www.semrush.com`, IMS sub of the caller in `actor`, no `SerenityTransportError` entries beyond the deliberate 404/409 cases above.
 
 ## Troubleshooting
 
@@ -222,5 +598,5 @@ Expected: outbound host `adobe-hackathon.semrush.com`, IMS sub of the caller in 
 | Every endpoint 500s with `Cannot read property 'allByBrandId' of undefined` | api-service was deployed before `@adobe/spacecat-shared-data-access` published the `BrandSemrushProject` entity | `npm ls @adobe/spacecat-shared-data-access` on the lambda container; needs `>= 3.67.0` |
 | All endpoints 404 with `Organization has no semrush_workspace_id` | The org never had `semrushWorkspaceId` set; or the LRU cache is stale from before it was set | Wait 5 min for the cache TTL, or restart the lambda container; verify via `GET /organizations/:id` |
 | `createSerenityMarket` returns 400 `unknownLanguage` | The language tag isn't in Semrush's `/v1/languages` catalog response | The cache is module-scoped and lives for 1 h; if a new language landed in Semrush, restart the lambda or wait for the TTL |
-| `listSerenityPrompts` returns `total: 0` immediately after create | Semrush publishes asynchronously; the prompt isn't queryable yet | Retry after ~5 s; if still empty, check the upstream Coralogix logs for a publish failure |
-| Coralogix shows `Auth-Data-Jwt` or `Cookie` in the outbound headers | Stale Lambda container running pre-PR #2456 code | Re-deploy; the Phase 4 transport explicitly drops both branches |
+| `listSerenityPrompts` returns `total: 0` immediately after create | Semrush publishes asynchronously; the prompt isn't queryable yet | Retry after ~5 s; if still empty, check the upstream Splunk logs for a publish failure |
+| Splunk shows `Auth-Data-Jwt` or `Cookie` in the outbound headers | Stale Lambda container running pre-PR 2456 code | Re-deploy; the Phase 4 transport explicitly drops both branches |

@@ -27,6 +27,7 @@ import TierClient from '@adobe/spacecat-shared-tier-client';
 
 import { SiteEnrollmentDto } from '../dto/site-enrollment.js';
 import AccessControlUtil from '../support/access-control-util.js';
+import { CAP_ENTITLEMENT_CREATE } from '../routes/capability-constants.js';
 
 const ASO_PRODUCT_CODE = EntitlementModel.PRODUCT_CODES.ASO;
 const SUMMIT_PLG_HANDLER = 'summit-plg';
@@ -52,6 +53,25 @@ function SiteEnrollmentsController(ctx) {
   } = dataAccess;
 
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
+
+  /**
+   * Whether the caller may create site enrollments: a full admin (bypass, no DB hit), or
+   * an S2S consumer holding `entitlement:create` (enforced upstream by `s2sAuthWrapper`,
+   * re-checked here at Layer 2 via a fresh DB fetch). The S2S decision is audit-logged once
+   * — this provisions billable state. SITES-50526.
+   * @param {object} log - Request logger.
+   * @returns {Promise<boolean>}
+   */
+  const hasEntitlementCreateAccess = async (log) => {
+    if (accessControlUtil.hasAdminAccess()) {
+      return true;
+    }
+    const {
+      allowed, reason, clientId, consumerId,
+    } = await accessControlUtil.hasS2SCapability(CAP_ENTITLEMENT_CREATE);
+    log.info(`[s2s] entitlement:create ${allowed ? 'granted' : 'denied'} clientId=${clientId || 'n/a'} consumerId=${consumerId || 'n/a'} reason=${reason}`);
+    return allowed;
+  };
 
   /**
    * Gets site enrollments by site ID.
@@ -92,13 +112,14 @@ function SiteEnrollmentsController(ctx) {
    *   - The summit-plg handler is enabled for the site
    *   - The site's org has an existing ASO entitlement
    *   - The site is not already enrolled in that entitlement
-   * Admin only.
+   * Admin-or-S2S: full admins pass, as do S2S consumers holding `entitlement:create`
+   * (see {@link hasEntitlementCreateAccess}).
    * @param {object} context - Context of the request.
    * @returns {Promise<Response>} Created enrollment, or skipped response.
    */
   const createPlgEnrollment = async (context) => {
-    if (!accessControlUtil.hasAdminAccess()) {
-      return forbidden('Only admins can create site enrollments');
+    if (!await hasEntitlementCreateAccess(context.log)) {
+      return forbidden('Insufficient permissions to create site enrollments');
     }
 
     const { siteId } = context.params;

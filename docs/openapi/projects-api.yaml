@@ -27,7 +27,7 @@ projects:
         $ref: './responses.yaml#/500'
     security:
       - admin_key: [ ]
-      - ims_key: [ ]
+      - session_token: [ ]
       - scoped_api_key: [ ]
   get:
     tags:
@@ -49,5 +49,5 @@ projects:
         $ref: './responses.yaml#/500'
     security:
       - admin_key: [ ]
-      - ims_key: [ ]
+      - session_token: [ ]
       - scoped_api_key: [ ]

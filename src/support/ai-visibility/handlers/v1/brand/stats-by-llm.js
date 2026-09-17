@@ -20,6 +20,7 @@ import {
 } from '@quazar/ai-seo-ts/v2/brand/messages_pb.js';
 import {
   resolveCountry,
+  resolveSearchType,
   responseFromGrpcError,
   PROTO_FROM_JSON,
   PROTO_TO_JSON,
@@ -30,6 +31,7 @@ export async function handleStatsByLLM(sp, clients) {
   const country = resolveCountry(sp) || COUNTRY_ENUM.US;
   const dateFrom = sp.get('dateFrom');
   const dateTo = sp.get('dateTo');
+  const searchType = resolveSearchType(domain);
 
   let statsRequest;
   try {
@@ -40,6 +42,7 @@ export async function handleStatsByLLM(sp, clients) {
         target: { domain, name: domain },
         date_from: dateFrom,
         date_to: dateTo,
+        search_type: searchType,
       },
       PROTO_FROM_JSON,
     );

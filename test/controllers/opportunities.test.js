@@ -17,6 +17,7 @@ import sinon from 'sinon';
 
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 import { ValidationError } from '@adobe/spacecat-shared-data-access';
+import { canonicalizeUrl } from '@adobe/spacecat-shared-utils';
 import esmock from 'esmock';
 import OpportunitiesController from '../../src/controllers/opportunities.js';
 
@@ -177,6 +178,7 @@ describe('Opportunities Controller', () => {
   const opportunitiesFunctions = [
     'getAllForSite',
     'getByStatus',
+    'getByUrl',
     'getByID',
     'createOpportunity',
     'patchOpportunity',
@@ -185,6 +187,8 @@ describe('Opportunities Controller', () => {
 
   let mockOpportunityDataAccess;
   let mockOpportunity;
+  let mockOpportunitySuggestion;
+  let mockOpportunitySuggestionGrant;
   let opportunitiesController;
   let mockSite;
   let mockContext;
@@ -228,9 +232,20 @@ describe('Opportunities Controller', () => {
       }),
     };
 
+    mockOpportunitySuggestion = {
+      allByOpportunityId: sandbox.stub().resolves([]),
+    };
+
+    mockOpportunitySuggestionGrant = {
+      findBySuggestionIds: sandbox.stub().resolves([]),
+      revokeSuggestionGrant: sandbox.stub().resolves({ success: true }),
+    };
+
     mockOpportunityDataAccess = {
       Opportunity: mockOpportunity,
       Site: mockSite,
+      Suggestion: mockOpportunitySuggestion,
+      SuggestionGrant: mockOpportunitySuggestionGrant,
     };
 
     mockContext = {
@@ -286,6 +301,87 @@ describe('Opportunities Controller', () => {
     const opportunities = await response.json();
     expect(opportunities).to.be.an('array').with.lengthOf(1);
     expect(opportunities[0]).to.have.property('id', OPPORTUNITY_ID);
+  });
+
+  it('narrows opportunities to the caller\'s permitted types when the resolver deferred (D4)', async () => {
+    const response = await opportunitiesController.getAllForSite({
+      params: { siteId: SITE_ID },
+      attributes: { facsComposite: { values: ['__no-match__'] } },
+    });
+    expect(response.status).to.equal(200);
+    const opportunities = await response.json();
+    expect(opportunities).to.be.an('array').with.lengthOf(0);
+  });
+
+  it('returns all opportunities for a site-wide (all) composite grant (D4)', async () => {
+    const response = await opportunitiesController.getAllForSite({
+      params: { siteId: SITE_ID },
+      attributes: { facsComposite: { values: 'all' } },
+    });
+    expect(response.status).to.equal(200);
+    const opportunities = await response.json();
+    expect(opportunities).to.be.an('array').with.lengthOf(1);
+  });
+
+  it('narrows by-status opportunities to the caller\'s permitted types (D4)', async () => {
+    const response = await opportunitiesController.getByStatus({
+      params: { siteId: SITE_ID, status: 'NEW' },
+      attributes: { facsComposite: { values: ['__no-match__'] } },
+    });
+    expect(response.status).to.equal(200);
+    const opportunities = await response.json();
+    expect(opportunities).to.be.an('array').with.lengthOf(0);
+  });
+
+  it('projects opportunities to the requested fields when ?fields= is passed', async () => {
+    const response = await opportunitiesController.getAllForSite({
+      params: { siteId: SITE_ID },
+      data: { fields: 'title,type' },
+    });
+    expect(response.status).to.equal(200);
+    const opportunities = await response.json();
+    expect(opportunities).to.be.an('array').with.lengthOf(1);
+    // id is always retained; only requested fields plus id are present
+    expect(Object.keys(opportunities[0]).sort()).to.deep.equal(['id', 'title', 'type']);
+    expect(opportunities[0]).to.not.have.property('guidance');
+    expect(opportunities[0]).to.not.have.property('data');
+  });
+
+  it('returns the full shape when ?fields= is omitted', async () => {
+    const response = await opportunitiesController.getAllForSite({ params: { siteId: SITE_ID } });
+    const opportunities = await response.json();
+    expect(opportunities[0]).to.have.property('guidance');
+    expect(opportunities[0]).to.have.property('data');
+  });
+
+  it('returns 400 when ?fields= matches no known field', async () => {
+    const response = await opportunitiesController.getAllForSite({
+      params: { siteId: SITE_ID },
+      data: { fields: 'nope,missing' },
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Invalid fields: nope, missing');
+  });
+
+  it('projects opportunities by status to the requested fields', async () => {
+    const response = await opportunitiesController.getByStatus({
+      params: { siteId: SITE_ID, status: 'NEW' },
+      data: { fields: 'title' },
+    });
+    expect(response.status).to.equal(200);
+    const opportunities = await response.json();
+    expect(Object.keys(opportunities[0]).sort()).to.deep.equal(['id', 'title']);
+  });
+
+  it('returns 400 when ?fields= matches no known field on getByStatus', async () => {
+    const response = await opportunitiesController.getByStatus({
+      params: { siteId: SITE_ID, status: 'NEW' },
+      data: { fields: 'nope' },
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Invalid fields: nope');
   });
 
   it('gets all opportunities for a site returns bad request if no site ID is passed', async () => {
@@ -348,6 +444,36 @@ describe('Opportunities Controller', () => {
     expect(response.status).to.equal(400);
     const error = await response.json();
     expect(error).to.have.property('message', 'Opportunity ID required');
+  });
+
+  it('returns 400 for malformed locale on getAllForSite', async () => {
+    const response = await opportunitiesController.getAllForSite({
+      params: { siteId: SITE_ID },
+      data: { locale: 'INVALID' },
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Invalid locale format');
+  });
+
+  it('returns 400 for malformed locale on getByStatus', async () => {
+    const response = await opportunitiesController.getByStatus({
+      params: { siteId: SITE_ID, status: 'NEW' },
+      data: { locale: 'fr-FR' },
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Invalid locale format');
+  });
+
+  it('returns 400 for malformed locale on getByID', async () => {
+    const response = await opportunitiesController.getByID({
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      data: { locale: '123' },
+    });
+    expect(response.status).to.equal(400);
+    const error = await response.json();
+    expect(error).to.have.property('message', 'Invalid locale format');
   });
 
   it('gets opportunity by ID returns not found if opportunity is not found', async () => {
@@ -598,6 +724,188 @@ describe('Opportunities Controller', () => {
     expect(updatedOppty).to.have.property('updatedBy', 'system');
   });
 
+  describe('patchOpportunity revoke existing grants (SITES-49175)', () => {
+    const plgSite = {
+      getId: () => SITE_ID,
+      getOrganizationId: () => 'org-123',
+    };
+    const plgHeaders = { pathInfo: { headers: { 'x-client-type': 'sites-optimizer-ui' } } };
+
+    beforeEach(() => {
+      // mockOpptyEntity is a module-level fixture shared across all tests in this file;
+      // an earlier test permanently overwrites .save to throw (it isn't sandbox-tracked,
+      // so sandbox.restore() in the outer afterEach can't undo it). Mocha runs every
+      // top-level `it` in this describe before any nested describe, so by the time this
+      // block runs, that mutation has already happened — restore the passthrough here.
+      mockOpptyEntity.save = () => mockOpptyEntity;
+    });
+
+    const buildController = (overrides = {}) => {
+      const mockSiteWithOrg = { findById: sandbox.stub().resolves(plgSite) };
+      const mockEntitlement = {
+        findByOrganizationIdAndProductCode: sandbox.stub().resolves({ getTier: () => 'PLG' }),
+      };
+      const mockSuggestion = {
+        allByOpportunityIdAndStatus: sandbox.stub().resolves([]),
+      };
+      const mockSuggestionGrant = {
+        splitSuggestionsByGrantStatus: sandbox.stub().resolves({
+          grantedIds: [], notGrantedIds: [], grantIds: [],
+        }),
+        revokeSuggestionGrant: sandbox.stub().resolves({ success: true }),
+      };
+      const ctxWithGrants = {
+        ...mockContext,
+        dataAccess: {
+          ...mockOpportunityDataAccess,
+          Site: mockSiteWithOrg,
+          Suggestion: mockSuggestion,
+          SuggestionGrant: mockSuggestionGrant,
+          Entitlement: mockEntitlement,
+          ...overrides,
+        },
+      };
+      return {
+        controller: OpportunitiesController(ctxWithGrants),
+        mockSuggestion,
+        mockSuggestionGrant,
+      };
+    };
+
+    it('invokes revokeExistingGrants when the opportunity resolves on a PLG-enabled site', async () => {
+      const s1 = { getId: () => 'sugg-1' };
+      const { controller, mockSuggestion, mockSuggestionGrant } = buildController();
+      mockSuggestion.allByOpportunityIdAndStatus.resolves([s1]);
+      mockSuggestionGrant.splitSuggestionsByGrantStatus.resolves({
+        grantedIds: ['sugg-1'], notGrantedIds: [], grantIds: ['grant-1'],
+      });
+
+      const response = await controller.patchOpportunity({
+        ...defaultAuthAttributes,
+        ...plgHeaders,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { status: 'RESOLVED' },
+      });
+
+      expect(response.status).to.equal(200);
+      expect(mockSuggestion.allByOpportunityIdAndStatus).to.have.been.calledOnceWith(
+        OPPORTUNITY_ID,
+        'NEW',
+      );
+      expect(mockSuggestionGrant.revokeSuggestionGrant).to.have.been.calledOnceWith('grant-1');
+    });
+
+    it('does not invoke revokeExistingGrants when status changes to something other than RESOLVED', async () => {
+      const { controller, mockSuggestion } = buildController();
+
+      const response = await controller.patchOpportunity({
+        ...defaultAuthAttributes,
+        ...plgHeaders,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { status: 'APPROVED' },
+      });
+
+      expect(response.status).to.equal(200);
+      expect(mockSuggestion.allByOpportunityIdAndStatus).to.not.have.been.called;
+    });
+
+    it('does not invoke revokeExistingGrants when the opportunity is already RESOLVED', async () => {
+      const previousStatus = opptys[0].status;
+      opptys[0].status = 'RESOLVED';
+      try {
+        const { controller, mockSuggestion } = buildController();
+
+        const response = await controller.patchOpportunity({
+          ...defaultAuthAttributes,
+          ...plgHeaders,
+          params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+          data: { status: 'RESOLVED', title: 'still resolved' },
+        });
+
+        expect(response.status).to.equal(200);
+        expect(mockSuggestion.allByOpportunityIdAndStatus).to.not.have.been.called;
+      } finally {
+        opptys[0].status = previousStatus;
+      }
+    });
+
+    it('does not invoke revokeExistingGrants when the site is not PLG-enabled', async () => {
+      const { controller, mockSuggestion } = buildController({
+        Entitlement: {
+          findByOrganizationIdAndProductCode: sandbox.stub().resolves({ getTier: () => 'FREE' }),
+        },
+      });
+
+      const response = await controller.patchOpportunity({
+        ...defaultAuthAttributes,
+        ...plgHeaders,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { status: 'RESOLVED' },
+      });
+
+      expect(response.status).to.equal(200);
+      expect(mockSuggestion.allByOpportunityIdAndStatus).to.not.have.been.called;
+    });
+
+    it('invokes revokeExistingGrants for backend-initiated resolves without the UI client-type header', async () => {
+      const s1 = { getId: () => 'sugg-1' };
+      const { controller, mockSuggestion, mockSuggestionGrant } = buildController();
+      mockSuggestion.allByOpportunityIdAndStatus.resolves([s1]);
+      mockSuggestionGrant.splitSuggestionsByGrantStatus.resolves({
+        grantedIds: ['sugg-1'], notGrantedIds: [], grantIds: ['grant-1'],
+      });
+
+      const response = await controller.patchOpportunity({
+        ...defaultAuthAttributes,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { status: 'RESOLVED' },
+      });
+
+      expect(response.status).to.equal(200);
+      expect(mockSuggestionGrant.revokeSuggestionGrant).to.have.been.calledOnceWith('grant-1');
+    });
+
+    it('catches and logs a revokeExistingGrants failure without failing the PATCH response', async () => {
+      const { controller, mockSuggestion } = buildController();
+      mockSuggestion.allByOpportunityIdAndStatus.rejects(new Error('db failure'));
+
+      const response = await controller.patchOpportunity({
+        ...defaultAuthAttributes,
+        ...plgHeaders,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { status: 'RESOLVED' },
+      });
+
+      expect(response.status).to.equal(200);
+      expect(mockContext.log.warn).to.have.been.calledOnceWith(
+        `Revoke existing grants handler failed for opportunity ${OPPORTUNITY_ID} on site ${SITE_ID}`,
+        'db failure',
+      );
+    });
+
+    it('returns 200 when the entitlement lookup itself fails, not a 500', async () => {
+      const { controller, mockSuggestion } = buildController({
+        Entitlement: {
+          findByOrganizationIdAndProductCode: sandbox.stub().rejects(new Error('entitlement lookup failed')),
+        },
+      });
+
+      const response = await controller.patchOpportunity({
+        ...defaultAuthAttributes,
+        ...plgHeaders,
+        params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+        data: { status: 'RESOLVED' },
+      });
+
+      expect(response.status).to.equal(200);
+      expect(mockSuggestion.allByOpportunityIdAndStatus).to.not.have.been.called;
+      expect(mockContext.log.error).to.have.been.calledOnceWith(
+        'Error checking audit summit-plg for site:',
+        sinon.match.instanceOf(Error),
+      );
+    });
+  });
+
   it('returns bad request when creating an opportunity if site not provided', async () => {
     // eslint-disable-next-line max-len
     const response = await opportunitiesController.createOpportunity({ params: {}, data: opptys[0] });
@@ -747,6 +1055,53 @@ describe('Opportunities Controller', () => {
     expect(response.status).to.equal(404);
     const error = await response.json();
     expect(error).to.have.property('message', 'Opportunity not found');
+  });
+
+  it('revokes grants for the opportunity\'s suggestions before removing it', async () => {
+    const s1 = { getId: () => 'sugg-1' };
+    mockOpportunitySuggestion.allByOpportunityId.resolves([s1]);
+    mockOpportunitySuggestionGrant.findBySuggestionIds.resolves([
+      { suggestion_id: 'sugg-1', grant_id: 'grant-1' },
+    ]);
+    const removeSpy = sandbox.spy(mockOpptyEntity, 'remove');
+    const response = await opportunitiesController.removeOpportunity({
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      data: {},
+    });
+    expect(response.status).to.equal(204);
+    expect(mockOpportunitySuggestion.allByOpportunityId).to.have.been.calledOnceWith(
+      OPPORTUNITY_ID,
+    );
+    expect(mockOpportunitySuggestionGrant.revokeSuggestionGrant)
+      .to.have.been.calledOnceWith('grant-1');
+    expect(mockOpportunitySuggestionGrant.revokeSuggestionGrant)
+      .to.have.been.calledBefore(removeSpy);
+  });
+
+  it('removes an opportunity with no suggestions without attempting a revoke', async () => {
+    const response = await opportunitiesController.removeOpportunity({
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      data: {},
+    });
+    expect(response.status).to.equal(204);
+    expect(mockOpportunitySuggestionGrant.revokeSuggestionGrant).to.not.have.been.called;
+  });
+
+  it('still removes the opportunity and logs a warning when revoking its grants fails', async () => {
+    const s1 = { getId: () => 'sugg-1' };
+    mockOpportunitySuggestion.allByOpportunityId.resolves([s1]);
+    mockOpportunitySuggestionGrant.findBySuggestionIds.resolves([
+      { suggestion_id: 'sugg-1', grant_id: 'grant-1' },
+    ]);
+    mockOpportunitySuggestionGrant.revokeSuggestionGrant.rejects(new Error('rpc failure'));
+    const removeSpy = sandbox.spy(mockOpptyEntity, 'remove');
+    const response = await opportunitiesController.removeOpportunity({
+      params: { siteId: SITE_ID, opportunityId: OPPORTUNITY_ID },
+      data: {},
+    });
+    expect(response.status).to.equal(204);
+    expect(removeSpy).to.have.been.calledOnce;
+    expect(mockContext.log.warn).to.have.been.calledOnce;
   });
 
   it('returns 500 when removing an opportunity if there is a data access layer error', async () => {
@@ -1366,6 +1721,185 @@ describe('Opportunities Controller', () => {
 
       expect(plgStub.calledOnce).to.be.true;
       expect(plgStub.firstCall.args[2]).to.equal(requestContext);
+    });
+  });
+
+  describe('getByUrl', () => {
+    const inputUrl = 'https://example.com/a';
+    let batchStub;
+    let daWithPg;
+    let controllerWithPg;
+
+    beforeEach(() => {
+      batchStub = sandbox.stub().resolves({ data: [mockOpptyEntity] });
+      const pgResult = {
+        data: [{ entity_id: OPPORTUNITY_ID, entity_type: 'cited-analysis', url: canonicalizeUrl(inputUrl) }],
+        error: null,
+      };
+      // Chainable + thenable stub tolerant of the real query-builder chain
+      // (.select().eq().in().order()...), so the test isn't coupled to its exact shape.
+      const pgBuilder = new Proxy({}, {
+        get: (_t, p) => (p === 'then' ? (res) => res(pgResult) : () => pgBuilder),
+      });
+      const pgClient = { from: () => pgBuilder };
+      daWithPg = {
+        Opportunity: { ...mockOpportunity, batchGetByKeys: batchStub },
+        Site: mockSite,
+        services: { postgrestClient: pgClient },
+      };
+      controllerWithPg = OpportunitiesController({
+        dataAccess: daWithPg, pathInfo: { headers: {} }, ...defaultAuthAttributes,
+      });
+    });
+
+    it('returns 400 for an invalid site id', async () => {
+      const res = await controllerWithPg.getByUrl({ params: { siteId: 'nope' }, data: { urls: [inputUrl] } });
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 400 for a malformed locale', async () => {
+      const res = await controllerWithPg.getByUrl({
+        params: { siteId: SITE_ID }, data: { urls: [inputUrl], locale: 'not-a-locale!!' },
+      });
+      expect(res.status).to.equal(400);
+    });
+
+    it('honors a valid locale when projecting the matched opportunities', async () => {
+      const res = await controllerWithPg.getByUrl({
+        params: { siteId: SITE_ID }, data: { urls: [inputUrl], locale: 'en_us' },
+      });
+      expect(res.status).to.equal(200);
+    });
+
+    it('returns 404 when the site does not exist', async () => {
+      mockSite.findById.resolves(null);
+      const res = await controllerWithPg.getByUrl({
+        params: { siteId: SITE_ID }, data: { urls: [inputUrl] },
+      });
+      expect(res.status).to.equal(404);
+    });
+
+    it('returns 403 when the user lacks access to the site', async () => {
+      const mockSiteWithOrg = {
+        id: SITE_ID, getOrganization: async () => ({ getImsOrgId: () => 'test-org-id' }),
+      };
+      mockSiteWithOrg.constructor = { ENTITY_NAME: 'Site' };
+      mockSite.findById.resolves(mockSiteWithOrg);
+      const restrictedAuthInfo = new AuthInfo()
+        .withType('jwt')
+        .withScopes([{ name: 'user' }])
+        .withProfile({ is_admin: false })
+        .withAuthenticated(true);
+      restrictedAuthInfo.claims = { organizations: [] };
+      const ctrl = OpportunitiesController({
+        dataAccess: daWithPg,
+        pathInfo: { headers: {} },
+        attributes: { authInfo: restrictedAuthInfo },
+      });
+      const res = await ctrl.getByUrl({ params: { siteId: SITE_ID }, data: { urls: [inputUrl] } });
+      expect(res.status).to.equal(403);
+    });
+
+    it('returns 503 when the postgrest client is unavailable', async () => {
+      const ctrl = OpportunitiesController({
+        dataAccess: mockOpportunityDataAccess, pathInfo: { headers: {} }, ...defaultAuthAttributes,
+      });
+      const res = await ctrl.getByUrl({ params: { siteId: SITE_ID }, data: { urls: [inputUrl] } });
+      expect(res.status).to.equal(503);
+    });
+
+    it('returns 503 when the postgrest client is present but not a real PostgREST client (no .from)', async () => {
+      const ctrl = OpportunitiesController({
+        dataAccess: {
+          ...mockOpportunityDataAccess, services: { postgrestClient: {} },
+        },
+        pathInfo: { headers: {} },
+        ...defaultAuthAttributes,
+      });
+      const res = await ctrl.getByUrl({ params: { siteId: SITE_ID }, data: { urls: [inputUrl] } });
+      expect(res.status).to.equal(503);
+    });
+
+    it('returns 400 for an invalid urls body', async () => {
+      const res = await controllerWithPg.getByUrl({ params: { siteId: SITE_ID }, data: { urls: 'nope' } });
+      expect(res.status).to.equal(400);
+      const body = await res.json();
+      expect(body.message).to.match(/must be an array/);
+    });
+
+    it('returns 400 when the request has no body at all', async () => {
+      const res = await controllerWithPg.getByUrl({ params: { siteId: SITE_ID } });
+      expect(res.status).to.equal(400);
+    });
+
+    it('treats an unrecognized batchGetByKeys result as no hydrated opportunities', async () => {
+      batchStub.resolves({ data: null });
+      const res = await controllerWithPg.getByUrl({
+        params: { siteId: SITE_ID }, data: { urls: [inputUrl] },
+      });
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.opportunities).to.deep.equal({});
+    });
+
+    it('drops and warns on a hydrated opportunity whose siteId does not match the requested site (stale/cross-site index row)', async () => {
+      const logStub = { warn: sandbox.stub(), info: sandbox.stub(), error: sandbox.stub() };
+      const siteIdStub = sandbox.stub(mockOpptyEntity, 'getSiteId').returns('a-different-site-id');
+      const ctrl = OpportunitiesController({
+        dataAccess: daWithPg, pathInfo: { headers: {} }, log: logStub, ...defaultAuthAttributes,
+      });
+      const res = await ctrl.getByUrl({ params: { siteId: SITE_ID }, data: { urls: [inputUrl] } });
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      // dropped for tenancy, not merely narrowed by type - absent from both the map and results
+      expect(body.opportunities).to.deep.equal({});
+      expect(body.results).to.deep.equal([{ url: inputUrl, opportunityIds: [] }]);
+      expect(logStub.warn).to.have.been.calledOnce;
+      expect(logStub.warn.firstCall.args[0]).to.match(/siteId did not match/);
+      siteIdStub.restore();
+    });
+
+    it('returns matched opportunities for the supplied urls', async () => {
+      const res = await controllerWithPg.getByUrl({
+        params: { siteId: SITE_ID },
+        data: { urls: [inputUrl, 'https://example.com/miss'] },
+      });
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.results).to.deep.equal([
+        { url: inputUrl, opportunityIds: [OPPORTUNITY_ID] },
+        { url: 'https://example.com/miss', opportunityIds: [] },
+      ]);
+      expect(body.opportunities[OPPORTUNITY_ID]).to.include({ id: OPPORTUNITY_ID });
+      expect(body.opportunities[OPPORTUNITY_ID]).to.not.have.property('data');
+      expect(batchStub).to.have.been.calledOnce;
+    });
+
+    it('returns an opportunity whose type is in the caller\'s permitted set (D4 composite)', async () => {
+      // mockOpptyEntity.getType() === 'SEO'; a grant scoped to that type must retain it.
+      const res = await controllerWithPg.getByUrl({
+        params: { siteId: SITE_ID },
+        data: { urls: [inputUrl] },
+        attributes: { facsComposite: { values: ['SEO'] } },
+      });
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.opportunities[OPPORTUNITY_ID]).to.include({ id: OPPORTUNITY_ID });
+      expect(body.results).to.deep.equal([{ url: inputUrl, opportunityIds: [OPPORTUNITY_ID] }]);
+    });
+
+    it('narrows out an opportunity whose type is NOT in the caller\'s permitted set (D4 composite)', async () => {
+      // caller is scoped to 'broken-backlinks'; the 'SEO' opportunity must be hidden,
+      // but the requested URL is still echoed (with no ids) since opportunities keep no-match URLs.
+      const res = await controllerWithPg.getByUrl({
+        params: { siteId: SITE_ID },
+        data: { urls: [inputUrl] },
+        attributes: { facsComposite: { values: ['broken-backlinks'] } },
+      });
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.opportunities).to.deep.equal({});
+      expect(body.results).to.deep.equal([{ url: inputUrl, opportunityIds: [] }]);
     });
   });
 });

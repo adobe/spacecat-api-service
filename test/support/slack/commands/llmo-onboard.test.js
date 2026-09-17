@@ -77,7 +77,7 @@ describe('LlmoOnboardCommand', () => {
       await command.handleExecution([], slackContext);
 
       expect(slackContext.say).to.have.been.calledWith(
-        'Usage: _onboard-llmo <site url> [--skip-helix-query | --temp-onboarding]_',
+        'Usage: _onboard-llmo <site url>_',
       );
     });
 
@@ -85,7 +85,7 @@ describe('LlmoOnboardCommand', () => {
       await command.handleExecution(['invalid-url'], slackContext);
 
       expect(slackContext.say).to.have.been.calledWith(
-        'Usage: _onboard-llmo <site url> [--skip-helix-query | --temp-onboarding]_',
+        'Usage: _onboard-llmo <site url>_',
       );
     });
 
@@ -119,7 +119,7 @@ describe('LlmoOnboardCommand', () => {
       expect(button.style).to.equal('primary');
     });
 
-    it('should encode skip helix-query flag on Start Onboarding button', async () => {
+    it('should ignore trailing tokens after the URL (LLMO-7141: --skip-helix-query no longer a supported flag)', async () => {
       mockDataAccess.Site.findByBaseURL.resolves(null);
 
       await command.handleExecution(
@@ -129,9 +129,9 @@ describe('LlmoOnboardCommand', () => {
 
       const message = slackContext.say.getCall(0).args[0];
       const button = message.blocks.find((block) => block.type === 'actions').elements[0];
+      // No special flag handling remains — the button value only ever carries brandURL.
       expect(JSON.parse(button.value)).to.deep.equal({
         brandURL: 'https://example.com',
-        tempOnboarding: true,
       });
     });
 

@@ -28,7 +28,17 @@ export const STATUS_INTERNAL_SERVER_ERROR = 500;
 
 export const X_PROMISE_TOKEN_HEADER = 'x-promise-token';
 
+/**
+ * Optional header selecting which IMS promise-token pair mints/exchanges the
+ * request's token. Absent => the default pair. `semrush` => the dedicated
+ * Semrush-scoped pair. Any other value is rejected (see resolvePromisePair).
+ */
+export const X_PROMISE_AUDIENCE_HEADER = 'x-promise-audience';
+
 export const MISSING_X_PROMISE_TOKEN_MESSAGE = `Invalid request: missing required header: ${X_PROMISE_TOKEN_HEADER}`;
+
+/** Error code for a non-IMS caller hitting an IMS-bearer gate with no x-promise-token. */
+export const PROMISE_TOKEN_REQUIRED_ERROR_CODE = 'promiseTokenRequired';
 
 /** Authoring types that use IMS promise-token auth (CS, CS_CW, AMS). */
 export const PROMISE_BASED_AUTHORING_TYPES = [

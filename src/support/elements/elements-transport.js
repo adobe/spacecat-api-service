@@ -1,0 +1,427 @@
+/*
+ * Copyright 2026 Adobe. All rights reserved.
+ * This file is licensed to you under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License. You may obtain a copy
+ * of the License at http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed under
+ * the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTATIONS
+ * OF ANY KIND, either express or implied. See the License for the specific language
+ * governing permissions and limitations under the License.
+ */
+
+import { hasText } from '@adobe/spacecat-shared-utils';
+import { ErrorWithStatusCode } from '../utils.js';
+import { endpointOf } from '../url-utils.js';
+import { ElementsTransportError } from './errors.js';
+
+const ELEMENTS_API_PATH = '/enterprise/pages/api/v3/workspaces';
+// S2S consumers hit a different Semrush gateway: same workspace/element path segments,
+// but a v4-raw external-api host, no trailing `/data`, Apikey auth instead of an IMS
+// bearer token, and the payload wrapped in `{ render_data: <payload> }`. The response
+// shape is unchanged.
+const S2S_ELEMENTS_API_PATH = '/apis/v4-raw/external-api/v1/workspaces';
+// Verified against a real Semrush-provisioned brand: individual Stats-per-URL
+// calls were timing out at 15s roughly half the time; 30s was needed for them
+// to reliably complete (and even then, some calls come in close to that
+// ceiling). Endpoints with a wide fan-out (e.g. getUrlInspectorStats) bound
+// their OWN total wall time separately (see STATS_FANOUT_CONCURRENCY /
+// maxTrendWeeks in elements-service.js) rather than relying on this transport
+// timeout to keep the whole request under the gateway's hard integration
+// timeout ceiling.
+const DEFAULT_TIMEOUT_MS = 30_000;
+
+// Retry defaults match the shared Project Engine client (same Semrush gateway contract).
+const DEFAULT_MAX_RETRIES = 2;
+const DEFAULT_RETRY_BASE_DELAY_MS = 200;
+
+/**
+ * Upper bound on a single inter-attempt wait. Caps a hostile or fat-fingered `Retry-After`
+ * (and runaway exponential growth) so a retry can never hang the request past a sane ceiling.
+ */
+const MAX_RETRY_DELAY_MS = 20_000;
+
+/**
+ * Validates and returns the canonical origin of the given env var. Enforces HTTPS.
+ * Returns `protocol//host` with no trailing path so URL segments injected later
+ * cannot be escaped by a misconfigured base URL.
+ */
+function baseUrlFromEnvVar(env, envVarName) {
+  const raw = typeof env?.[envVarName] === 'string'
+    ? env[envVarName].trim()
+    : env?.[envVarName];
+  if (!hasText(raw)) {
+    throw new ErrorWithStatusCode(
+      `${envVarName} is not set. Configure it via Vault `
+      + '(dx_mysticat/<env>/api-service) or .env for local dev.',
+      503,
+    );
+  }
+  const candidate = raw.replace(/\/$/, '');
+  let parsed;
+  try {
+    parsed = new URL(candidate);
+  } catch {
+    throw new ErrorWithStatusCode(
+      `${envVarName} is not a valid URL: ${candidate}`,
+      503,
+    );
+  }
+  if (parsed.protocol !== 'https:') {
+    throw new ErrorWithStatusCode(
+      `${envVarName} must use https (got ${parsed.protocol})`,
+      503,
+    );
+  }
+  return `${parsed.protocol}//${parsed.host}`;
+}
+
+function baseUrl(env) {
+  return baseUrlFromEnvVar(env, 'SEMRUSH_PROJECTS_BASE_URL');
+}
+
+function s2sBaseUrl(env) {
+  return baseUrlFromEnvVar(env, 'SEO_API_BASE_URL');
+}
+
+function buildHeaders(imsToken) {
+  if (!hasText(imsToken)) {
+    throw new ElementsTransportError(401, 'Missing IMS bearer token for Elements transport');
+  }
+  return {
+    Authorization: `Bearer ${imsToken}`,
+    Accept: 'application/json',
+    'Content-Type': 'application/json',
+  };
+}
+
+function buildS2SHeaders(apiKey) {
+  if (!hasText(apiKey)) {
+    // A missing SEMRUSH_ADMIN_ELEMENT_API_KEY is a server-side config gap, not a caller
+    // auth failure - 503 (matching baseUrlFromEnvVar's missing-env-var case) so mapError()
+    // doesn't misreport it as "the S2S consumer's credentials are bad" (its 401/403 branch
+    // is reserved for actual upstream authorization failures).
+    throw new ErrorWithStatusCode(
+      'SEMRUSH_ADMIN_ELEMENT_API_KEY is not set. Configure it via Vault '
+      + '(dx_mysticat/<env>/api-service) or .env for local dev.',
+      503,
+    );
+  }
+  return {
+    Authorization: `Apikey ${apiKey}`,
+    Accept: 'application/json',
+    'Content-Type': 'application/json',
+  };
+}
+
+async function readBoundedText(response, maxResponseBytes, requestInfo) {
+  const limit = Number.isSafeInteger(maxResponseBytes) && maxResponseBytes > 0
+    ? maxResponseBytes
+    : undefined;
+  const contentLength = Number(response.headers?.get('content-length'));
+  if (limit && Number.isFinite(contentLength) && contentLength > limit) {
+    try {
+      await response.body?.cancel?.();
+    } catch {
+      // Preserve the deterministic typed size error even if Undici cannot cancel the stream.
+    }
+    throw new ElementsTransportError(
+      502,
+      `Elements API response exceeds configured ${limit}-byte limit`,
+      undefined,
+      requestInfo(),
+    );
+  }
+
+  if (limit && response.body?.getReader) {
+    const reader = response.body.getReader();
+    const chunks = [];
+    let total = 0;
+    while (true) {
+      // eslint-disable-next-line no-await-in-loop
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      total += value.byteLength;
+      if (total > limit) {
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          await reader.cancel();
+        } catch {
+          // Preserve the deterministic typed size error if stream cancellation fails.
+        }
+        throw new ElementsTransportError(
+          502,
+          `Elements API response exceeds configured ${limit}-byte limit`,
+          undefined,
+          requestInfo(),
+        );
+      }
+      chunks.push(value);
+    }
+    const bytes = new Uint8Array(total);
+    let offset = 0;
+    chunks.forEach((chunk) => {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    });
+    return new TextDecoder().decode(bytes);
+  }
+
+  const text = await response.text();
+  if (limit && new TextEncoder().encode(text).byteLength > limit) {
+    throw new ElementsTransportError(
+      502,
+      `Elements API response exceeds configured ${limit}-byte limit`,
+      undefined,
+      requestInfo(),
+    );
+  }
+  return text;
+}
+
+async function parseBody(response, maxResponseBytes, requestInfo) {
+  const text = await readBoundedText(response, maxResponseBytes, requestInfo);
+  if (!text) {
+    return null;
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
+function enc(segment) {
+  return encodeURIComponent(String(segment ?? ''));
+}
+
+const sleep = (ms) => new Promise((resolve) => {
+  setTimeout(resolve, ms);
+});
+
+/**
+ * Parses a `Retry-After` header into milliseconds. Supports both RFC 9110 forms: delta-seconds
+ * (e.g. `"5"`) and an HTTP-date. Returns null when the header is absent or unparseable, so the
+ * caller falls back to backoff. Mirrors the shared Project Engine client's `parseRetryAfterMs`.
+ * @param {Response} response
+ * @returns {number | null}
+ */
+function parseRetryAfterMs(response) {
+  const raw = response.headers?.get('retry-after');
+  if (!raw) {
+    return null;
+  }
+  const seconds = Number(raw);
+  if (Number.isFinite(seconds)) {
+    // A negative delta-seconds is non-conforming (RFC 9110); treat it as absent so the caller
+    // falls back to jittered backoff rather than reading it as "retry immediately".
+    return seconds >= 0 ? Math.round(seconds * 1000) : null;
+  }
+  const epochMs = Date.parse(raw);
+  if (Number.isNaN(epochMs)) {
+    return null;
+  }
+  return Math.max(0, epochMs - Date.now());
+}
+
+/**
+ * The wait before the next attempt: the larger of (a) exponential backoff with equal jitter —
+ * `baseDelayMs * 2 ** completedAttempt` scaled by a random factor in `[0.5, 1)` to de-correlate
+ * concurrent clients and avoid a thundering herd on a shared 429 — and (b) the server's
+ * `Retry-After`, when present (so we never retry sooner than the server asked). Clamped to
+ * {@link MAX_RETRY_DELAY_MS}. Mirrors the shared Project Engine client's `nextRetryDelayMs`.
+ * @param {number} completedAttempt zero-based index of the attempt that just failed
+ * @param {number} baseDelayMs
+ * @param {Response} response the retryable response (for `Retry-After`)
+ * @returns {number}
+ */
+function nextRetryDelayMs(completedAttempt, baseDelayMs, response) {
+  const backoff = baseDelayMs * 2 ** completedAttempt;
+  const jittered = backoff * (0.5 + Math.random() * 0.5);
+  const retryAfter = parseRetryAfterMs(response);
+  const delay = retryAfter == null ? jittered : Math.max(jittered, retryAfter);
+  return Math.min(delay, MAX_RETRY_DELAY_MS);
+}
+
+/**
+ * POSTs to the Elements API with bounded retry on HTTP 429.
+ *
+ * Retry is limited to 429 ON PURPOSE: `fetchElement` is a non-idempotent POST, so 5xx, network
+ * errors, and AbortError/timeout are NEVER replayed — a write that may already have been processed
+ * must not be re-sent (double-write risk). 429 is the one safe case because the Semrush gateway
+ * rejects rate-limited requests at the edge, before the write handler runs, so the create never
+ * happened and replaying it cannot duplicate a resource — the same assumption and rationale as the
+ * shared Project Engine client's `isRetryableStatus`.
+ *
+ * Each attempt gets a FRESH `AbortController` + timeout timer (per-attempt, not a whole-loop
+ * budget). The body is a JSON string, so it is safe to re-send unchanged across attempts.
+ *
+ * @param {string} url
+ * @param {object} headers request headers (built by the caller - Bearer IMS token for
+ *   regular callers, Apikey for S2S consumers)
+ * @param {object} body request payload (serialised once, re-sent per attempt)
+ * @param {object} [opts]
+ * @param {number} [opts.timeoutMs] per-attempt timeout
+ * @param {number} [opts.maxRetries] number of retries after the first attempt; <=0 ⇒ single attempt
+ * @param {number} [opts.retryBaseDelayMs] base delay for the jittered exponential backoff
+ * @param {string} [opts.workspaceId] id of the workspace being called, carried onto the thrown
+ *   error's request descriptor for the structured upstream-error log line (SITES-49993)
+ * @param {string} [opts.elementId] id of the element being called, ditto
+ * @param {number} [opts.maxResponseBytes] maximum decompressed upstream response bytes
+ * @param {boolean} [opts.redactWorkspaceInErrors] omit workspace identifiers from errors
+ * @returns {Promise<*>} parsed response body on success
+ */
+async function request(url, headers, body, {
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+  maxRetries = DEFAULT_MAX_RETRIES,
+  retryBaseDelayMs = DEFAULT_RETRY_BASE_DELAY_MS,
+  workspaceId = undefined,
+  elementId = undefined,
+  maxResponseBytes = undefined,
+  redactWorkspaceInErrors = false,
+} = {}) {
+  const jsonBody = JSON.stringify(body);
+  // Floor at 0: a negative/zero maxRetries degrades to a single attempt (no retry).
+  const retries = Math.max(0, maxRetries);
+  const errorUrl = redactWorkspaceInErrors
+    ? url.replace(/\/workspaces\/[^/]+/, '/workspaces/[redacted]')
+    : url;
+  // Structured request descriptor for the upstream-error log line (SITES-49993).
+  // Built only when a throw actually happens — never on the happy path.
+  const requestInfo = () => ({
+    method: 'POST',
+    endpoint: endpointOf(errorUrl),
+    workspaceId: redactWorkspaceInErrors ? undefined : workspaceId,
+    elementId,
+  });
+
+  for (let attempt = 0; ; attempt += 1) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    let response;
+    let parsed;
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      response = await fetch(url, {
+        method: 'POST',
+        headers,
+        signal: controller.signal,
+        body: jsonBody,
+      });
+      // Keep the same abort budget active while consuming/decompressing the body. Fetch resolves
+      // when response headers arrive, so clearing the timer before this read would leave a stalled
+      // or slow body unbounded even though callers supplied timeoutMs.
+      // eslint-disable-next-line no-await-in-loop
+      parsed = await parseBody(response, maxResponseBytes, requestInfo);
+    } catch (e) {
+      if (e?.name === 'AbortError') {
+        throw new ElementsTransportError(504, `Elements API POST ${errorUrl} timed out after ${timeoutMs}ms`, undefined, requestInfo());
+      }
+      throw e;
+    } finally {
+      clearTimeout(timer);
+    }
+
+    if (response.ok) {
+      return parsed;
+    }
+
+    // Retry only on 429, and only while retries remain (see function doc for the POST rationale).
+    if (response.status === 429 && attempt < retries) {
+      const delayMs = nextRetryDelayMs(attempt, retryBaseDelayMs, response);
+      // eslint-disable-next-line no-await-in-loop
+      await sleep(delayMs);
+    } else {
+      throw new ElementsTransportError(
+        response.status,
+        `Elements API POST ${errorUrl} failed: ${response.status}`,
+        parsed,
+        requestInfo(),
+      );
+    }
+  }
+}
+
+/**
+ * Creates the Semrush Elements API HTTP transport.
+ *
+ * Regular callers POST to the enterprise Elements API authenticated with the caller's IMS
+ * bearer token. S2S consumers (`isS2SConsumer: true`) instead POST to the v4-raw external
+ * API (`SEO_API_BASE_URL`), authenticated with `SEMRUSH_ADMIN_ELEMENT_API_KEY` via an
+ * `Apikey` header, hitting a URL with no trailing `/data`, with the payload wrapped in
+ * `{ render_data: payload }`. Same workspace/element path segments, same response shape,
+ * same retry/timeout behaviour either way.
+ *
+ * @param {object} args
+ * @param {object} args.env - Environment (reads SEMRUSH_PROJECTS_BASE_URL / SEO_API_BASE_URL
+ *   and SEMRUSH_ADMIN_ELEMENT_API_KEY).
+ * @param {string} [args.imsToken] - IMS user bearer token (without 'Bearer ' prefix).
+ *   Required unless `isS2SConsumer` is true.
+ * @param {boolean} [args.isS2SConsumer] - Use the S2S/Apikey call shape instead of the IMS
+ *   bearer shape (default false).
+ * @param {number} [args.maxRetries] - Retries after the first attempt on a 429 (default 2;
+ *   <=0 ⇒ single attempt). Defaults match the shared Project Engine client.
+ * @param {number} [args.retryBaseDelayMs] - Base delay for the jittered backoff (default 200).
+ *
+ * Worst-case wall time per `fetchElement` is bounded but can be significant. The retry loop
+ * only ever retries a 429 (see `request`'s doc for why non-idempotent POSTs can't safely retry
+ * on timeout/5xx) — a plain timeout throws immediately on the FIRST attempt, so that path costs
+ * exactly one `timeoutMs` (30s by default), not the multi-attempt figure below. The multi-attempt
+ * ceiling only applies to a run of repeated 429s: with the defaults (`maxRetries` 2, per-attempt
+ * `timeoutMs` 30s, backoff capped at `MAX_RETRY_DELAY_MS` 20s) that theoretical ceiling is ~130s
+ * (3 × 30s attempts + up to 2 × 20s waits). Callers on a tight execution budget (e.g. a Lambda
+ * timeout, or an API-Gateway-fronted route with a hard ~29-30s integration timeout that no
+ * Lambda-side setting can raise) should lower `maxRetries` / `timeoutMs` accordingly, and bound
+ * their OWN fan-out width so a single request doesn't need more than one round of concurrent
+ * calls to complete (see `getUrlInspectorStats` in elements-service.js for an example).
+ */
+export function createElementsTransport({
+  env,
+  imsToken,
+  isS2SConsumer = false,
+  maxRetries = DEFAULT_MAX_RETRIES,
+  retryBaseDelayMs = DEFAULT_RETRY_BASE_DELAY_MS,
+}) {
+  const root = isS2SConsumer ? s2sBaseUrl(env) : baseUrl(env);
+
+  return {
+    /**
+     * Regular: POST {ELEMENTS_API_PATH}/{workspaceId}/products/ai/elements/{elementId}/data
+     * S2S: POST {S2S_ELEMENTS_API_PATH}/{workspaceId}/products/ai/elements/{elementId}
+     *
+     * @param {string} workspaceId
+     * @param {string} elementId
+     * @param {object} payload
+     * @param {object} [callOpts] - Per-call override of this transport's own
+     *   `timeoutMs`/`maxRetries` defaults — for callers that chain multiple
+     *   sequential `fetchElement` calls and need each one tightened so the
+     *   chain's worst case stays under a hard downstream timeout ceiling (e.g.
+     *   an API Gateway integration timeout) regardless of the transport's
+     *   general-purpose defaults. Omit for the normal single-call case.
+     * @param {number} [callOpts.timeoutMs]
+     * @param {number} [callOpts.maxRetries]
+     * @param {number} [callOpts.maxResponseBytes]
+     * @param {boolean} [callOpts.redactWorkspaceInErrors]
+     */
+    async fetchElement(workspaceId, elementId, payload, callOpts = {}) {
+      const url = isS2SConsumer
+        ? `${root}${S2S_ELEMENTS_API_PATH}/${enc(workspaceId)}/products/ai/elements/${enc(elementId)}`
+        : `${root}${ELEMENTS_API_PATH}/${enc(workspaceId)}/products/ai/elements/${enc(elementId)}/data`;
+      const headers = isS2SConsumer
+        ? buildS2SHeaders(env?.SEMRUSH_ADMIN_ELEMENT_API_KEY)
+        : buildHeaders(imsToken);
+      const body = isS2SConsumer ? { render_data: payload } : payload;
+      return request(url, headers, body, {
+        maxRetries: callOpts.maxRetries ?? maxRetries,
+        retryBaseDelayMs,
+        timeoutMs: callOpts.timeoutMs,
+        workspaceId,
+        elementId,
+        maxResponseBytes: callOpts.maxResponseBytes,
+        redactWorkspaceInErrors: callOpts.redactWorkspaceInErrors,
+      });
+    },
+  };
+}

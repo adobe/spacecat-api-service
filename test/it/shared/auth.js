@@ -18,6 +18,11 @@ import {
   CONSUMER_1_IMS_ORG_ID,
   CONSUMER_2_CLIENT_ID,
   CONSUMER_2_IMS_ORG_ID,
+  BRAND_MANAGER_SUBJECT,
+  ENTERPRISE_USER_ID,
+  ENTERPRISE_USER_EMAIL,
+  ENTERPRISE_USER_FIRST_NAME,
+  ENTERPRISE_USER_LAST_NAME,
 } from './seed-ids.js';
 
 const ISSUER = 'https://spacecat.experiencecloud.live';
@@ -73,6 +78,100 @@ export async function createUserToken() {
   return signToken({
     sub: 'test-user@example.com',
     email: 'test-user@example.com',
+    is_admin: false,
+    is_llmo_administrator: false,
+    tenants: [{
+      id: IMS_ORG_IDENT,
+      subServices: [],
+      entitlement: {},
+    }],
+  });
+}
+
+/**
+ * LLMO administrator — same ORG_1 tenancy as the `user` persona (so org/site access resolves
+ * identically) but with `is_llmo_administrator: true`. Required to reach the LLMO Cloudflare
+ * onboarding endpoints, which gate every handler behind `AccessControlUtil.isLLMOAdministrator()`
+ * (a raw JWT-claim check with no admin bypass — even the `admin` persona is denied without it).
+ */
+export async function createLlmoAdminToken() {
+  return signToken({
+    sub: 'test-llmo-admin@example.com',
+    email: 'test-llmo-admin@example.com',
+    is_admin: false,
+    is_llmo_administrator: true,
+    tenants: [{
+      id: IMS_ORG_IDENT,
+      subServices: [],
+      entitlement: {},
+    }],
+  });
+}
+
+/**
+ * Resource-scoped state-layer manager (hybrid-model §8.3). Member of ORG_1 with
+ * an EMPTY JWT facs_permissions set — its `can_manage_users` authority comes
+ * solely from a seeded state-layer binding on MANAGED_BRAND_ID. `sub` must match
+ * the seeded binding's `subject_id` (BRAND_MANAGER_SUBJECT).
+ */
+export async function createBrandManagerToken() {
+  return signToken({
+    sub: BRAND_MANAGER_SUBJECT,
+    email: BRAND_MANAGER_SUBJECT,
+    is_admin: false,
+    is_llmo_administrator: false,
+    facs_permissions: [],
+    tenants: [{
+      id: IMS_ORG_IDENT,
+      subServices: [],
+      entitlement: {},
+    }],
+  });
+}
+
+/**
+ * Org-wide FACS manager (hybrid-model §8.3). Member of ORG_1, NOT an internal
+ * admin, carrying `<product>/can_manage_users` in the JWT `facs_permissions`
+ * for both LLMO and ASO — so `callerHasFacsManageUsers` resolves org-wide
+ * authority on any resource. This is the persona that authors/edits/revokes
+ * state-layer bindings in the write tests: an internal admin may CREATE only
+ * for resources in its own org (`requireAdminResourceInOrg`), which the IT
+ * harness can't satisfy without seeding real resources, so a non-admin manager
+ * drives the write flow.
+ */
+export async function createFacsManagerToken() {
+  return signToken({
+    sub: 'test-facs-manager@example.com',
+    email: 'test-facs-manager@example.com',
+    is_admin: false,
+    is_llmo_administrator: false,
+    facs_permissions: ['llmo/can_manage_users', 'aso/can_manage_users'],
+    tenants: [{
+      id: IMS_ORG_IDENT,
+      subServices: [],
+      entitlement: {},
+    }],
+  });
+}
+
+/**
+ * Enterprise (non-trial) ORG_1 member. Claim shape is copied from what
+ * spacecat-auth-service actually mints for an enterprise login: no `user_id` at
+ * all, the IMS user id duplicated across `sub` and `email`, the real address in
+ * `preferred_username` / `trial_email`, and both the snake_case and OIDC name
+ * claims populated. The other personas here use an address as `sub`, which cannot
+ * exercise the id-vs-address distinction this persona exists to prove.
+ */
+export async function createEnterpriseUserToken() {
+  return signToken({
+    sub: ENTERPRISE_USER_ID,
+    email: ENTERPRISE_USER_ID,
+    preferred_username: ENTERPRISE_USER_EMAIL,
+    trial_email: ENTERPRISE_USER_EMAIL,
+    first_name: ENTERPRISE_USER_FIRST_NAME,
+    given_name: ENTERPRISE_USER_FIRST_NAME,
+    last_name: ENTERPRISE_USER_LAST_NAME,
+    family_name: ENTERPRISE_USER_LAST_NAME,
     is_admin: false,
     is_llmo_administrator: false,
     tenants: [{
@@ -227,8 +326,9 @@ export async function createS2SConsumerUnknownToken() {
 }
 
 /**
- * S2S consumer holding `site:readAll` + `organization:readAll` (CONSUMER_2).
- * Used to assert the positive path for cross-tenant list endpoints.
+ * S2S consumer holding `site:readAll` + `organization:readAll` + `trialUser:read` +
+ * `entitlement:create` (CONSUMER_2). Used to assert the positive path for cross-tenant
+ * list endpoints and the entitlement:create grant path (SITES-50526).
  */
 export async function createS2SConsumerReadAllToken() {
   return createS2SConsumerToken({
@@ -239,17 +339,22 @@ export async function createS2SConsumerReadAllToken() {
 
 export async function createAllTokens() {
   const [
-    admin, user, trialUser, delegatedUser, delegatedUserTruncated, delegatedUserNoSource,
-    readOnlyAdmin,
+    admin, user, trialUser, llmoAdmin, enterpriseUser,
+    delegatedUser, delegatedUserTruncated, delegatedUserNoSource,
+    readOnlyAdmin, brandManager, facsManager,
     s2sConsumerReadOnly, s2sConsumerReadAll, s2sConsumerUnknown,
   ] = await Promise.all([
     createAdminToken(),
     createUserToken(),
     createTrialUserToken(),
+    createLlmoAdminToken(),
+    createEnterpriseUserToken(),
     createDelegatedUserToken(),
     createDelegatedUserTruncatedToken(),
     createDelegatedUserNoSourceToken(),
     createReadOnlyAdminToken(),
+    createBrandManagerToken(),
+    createFacsManagerToken(),
     createS2SConsumerReadOnlyToken(),
     createS2SConsumerReadAllToken(),
     createS2SConsumerUnknownToken(),
@@ -258,10 +363,14 @@ export async function createAllTokens() {
     admin,
     user,
     trialUser,
+    llmoAdmin,
+    enterpriseUser,
     delegatedUser,
     delegatedUserTruncated,
     delegatedUserNoSource,
     readOnlyAdmin,
+    brandManager,
+    facsManager,
     s2sConsumerReadOnly,
     s2sConsumerReadAll,
     s2sConsumerUnknown,

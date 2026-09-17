@@ -379,6 +379,25 @@ describe('onboard-modal', () => {
       expect(forceBlock.element.options[0].value).to.equal('force');
     });
 
+    it('should include force_tier_update_input checkbox block in modal', async () => {
+      const startOnboardingAction = startOnboarding(context);
+
+      await startOnboardingAction({
+        ack: ackMock,
+        body,
+        client: clientMock,
+        respond: respondMock,
+      });
+
+      const { blocks } = clientMock.views.open.firstCall.args[0].view;
+      const tierBlock = blocks.find((b) => b.block_id === 'force_tier_update_input');
+
+      expect(tierBlock).to.exist;
+      expect(tierBlock.element.type).to.equal('checkboxes');
+      expect(tierBlock.element.action_id).to.equal('force_tier_update');
+      expect(tierBlock.element.options[0].value).to.equal('override');
+    });
+
     it('should handle unknown profile value gracefully', async () => {
       const initialValues = { profile: 'unknown-profile' };
       body.actions[0].value = JSON.stringify(initialValues);
@@ -1405,6 +1424,78 @@ describe('onboard-modal', () => {
       await onboardSiteModalAction({ ack: ackMock, body, client: clientMock });
 
       expect(capturedAdditionalParams).to.not.have.property('force');
+    });
+
+    it('should pass forceTierUpdate=true in additionalParams when force tier update checkbox is checked', async () => {
+      let capturedAdditionalParams;
+      const capturingModule = await esmock('../../../../src/support/slack/actions/onboard-modal.js', {
+        '../../../../src/utils/slack/base.js': {
+          loadProfileConfig: sinon.stub().resolves({ audits: {}, imports: {} }),
+        },
+        '../../../../src/support/utils.js': {
+          onboardSingleSite: sinon.stub().callsFake(
+            async (_url, _ims, _config, _profile, _wait, _slack, _ctx, additionalParams) => {
+              capturedAdditionalParams = additionalParams;
+              return { siteId: 'site123', errors: [] };
+            },
+          ),
+        },
+        '../../../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: sinon.stub().resolves(),
+        },
+        '@adobe/spacecat-shared-utils': {
+          isValidUrl,
+          detectBotBlocker: sinon.stub().resolves({ crawlable: true }),
+        },
+      });
+
+      body.view.state.values.force_tier_update_input = {
+        force_tier_update: {
+          selected_options: [{ value: 'override' }],
+        },
+      };
+
+      const onboardSiteModalAction = capturingModule.onboardSiteModal(context);
+      configurationMock.findLatest.resolves(configurationMock);
+
+      await onboardSiteModalAction({ ack: ackMock, body, client: clientMock });
+
+      expect(capturedAdditionalParams).to.have.property('forceTierUpdate', true);
+    });
+
+    it('should not pass forceTierUpdate when force tier update checkbox is not checked', async () => {
+      let capturedAdditionalParams;
+      const capturingModule = await esmock('../../../../src/support/slack/actions/onboard-modal.js', {
+        '../../../../src/utils/slack/base.js': {
+          loadProfileConfig: sinon.stub().resolves({ audits: {}, imports: {} }),
+        },
+        '../../../../src/support/utils.js': {
+          onboardSingleSite: sinon.stub().callsFake(
+            async (_url, _ims, _config, _profile, _wait, _slack, _ctx, additionalParams) => {
+              capturedAdditionalParams = additionalParams;
+              return { siteId: 'site123', errors: [] };
+            },
+          ),
+        },
+        '../../../../src/support/brand-profile-trigger.js': {
+          triggerBrandProfileAgent: sinon.stub().resolves(),
+        },
+        '@adobe/spacecat-shared-utils': {
+          isValidUrl,
+          detectBotBlocker: sinon.stub().resolves({ crawlable: true }),
+        },
+      });
+
+      body.view.state.values.force_tier_update_input = {
+        force_tier_update: { selected_options: [] },
+      };
+
+      const onboardSiteModalAction = capturingModule.onboardSiteModal(context);
+      configurationMock.findLatest.resolves(configurationMock);
+
+      await onboardSiteModalAction({ ack: ackMock, body, client: clientMock });
+
+      expect(capturedAdditionalParams).to.not.have.property('forceTierUpdate');
     });
 
     describe('Bot Protection Detection', () => {

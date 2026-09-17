@@ -159,7 +159,49 @@ describe('llmo-source', () => {
     } catch (err) {
       expect(err.isConfigError).to.equal(true);
       expect(tracingFetchStub).to.not.have.been.called;
+      // No attribution log for a fetch that never happens (guard precedes it).
+      expect(context.log.info).to.not.have.been.calledWith('llmo_source_client');
     }
+  });
+
+  describe('client attribution log (llmo_source_client)', () => {
+    it('logs x-client-type, referer, user-agent and auth identity 1:1 with the url', async () => {
+      tracingFetchStub.resolves(mockResponse({}));
+      context.pathInfo = {
+        headers: {
+          'x-client-type': 'BP Data Quality Monitor - Spacecat/1.0',
+          referer: 'https://llmo-dashboard.adobecqms.net/',
+          'user-agent': 'Mozilla/5.0 Chrome/150.0.0.0',
+        },
+      };
+      context.attributes = {
+        authInfo: { getType: () => 'jwt' },
+      };
+
+      await fetchLlmoSource(context, TEST_URL);
+
+      expect(context.log.info).to.have.been.calledWith('llmo_source_client', {
+        event: 'llmo_source_client',
+        url: TEST_URL,
+        xClientType: 'BP Data Quality Monitor - Spacecat/1.0',
+        referer: 'https://llmo-dashboard.adobecqms.net/',
+        userAgent: 'Mozilla/5.0 Chrome/150.0.0.0',
+        authType: 'jwt',
+      });
+    });
+
+    it('emits nulls (never throws) when headers and authInfo are absent', async () => {
+      tracingFetchStub.resolves(mockResponse({}));
+      await fetchLlmoSource(context, TEST_URL);
+      expect(context.log.info).to.have.been.calledWith('llmo_source_client', {
+        event: 'llmo_source_client',
+        url: TEST_URL,
+        xClientType: null,
+        referer: null,
+        userAgent: null,
+        authType: null,
+      });
+    });
   });
 
   describe('llmoSourceErrorResponse', () => {

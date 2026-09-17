@@ -759,6 +759,7 @@ The host you call determines the `x-product` value at the edge — see [Host-dri
 
 - **S2S Admin Operations Guide**: `docs/s2s/S2S_ADMIN_GUIDE.md`
 - **Secret Rotation Guide**: `docs/s2s/SECRET_ROTATION_GUIDE.md`
+- **Accessing Semrush Data via Serenity APIs**: `docs/s2s/SEMRUSH_SERENITY_ACCESS_GUIDE.md` — end-to-end example (IMS token → customer-scoped session token → Elements API call) for consumers reading Brand Presence/Semrush data
 - **Adobe Server-to-Server Authentication**: [Official Documentation](https://developer.adobe.com/developer-console/docs/guides/authentication/ServerToServerAuthentication/)
 - **SpaceCat API Documentation**: [API Reference](https://opensource.adobe.com/spacecat-api-service/)
 

@@ -21,6 +21,8 @@ import yaml from 'js-yaml';
 import {
   classifyIntents,
   contentToString,
+  DRS_CATEGORY_SPEC,
+  SYSTEM_PROMPT,
 } from '../../src/support/intent-classifier.js';
 import { INTENT_VALUES } from '../../src/support/intent.js';
 
@@ -66,6 +68,13 @@ describe('intent-classifier', () => {
   afterEach(() => sinon.restore());
 
   describe('createIntentClassifier', () => {
+    // Byte-for-byte parity guard for the native/DRS path: the 6-bucket refactor
+    // reuses SYSTEM_PROMPT as-is for DRS_CATEGORY_SPEC.systemPrompt, so the
+    // native prompt must be strictly the same string, not a copy that can drift.
+    it('reuses SYSTEM_PROMPT verbatim as the DRS category spec system prompt', () => {
+      expect(DRS_CATEGORY_SPEC.systemPrompt).to.equal(SYSTEM_PROMPT);
+    });
+
     it('returns null when Azure OpenAI is not configured', async () => {
       const { mod, ctorSpy } = await loadWithModel(() => ({ content: '{}' }));
       const classify = mod.createIntentClassifier({ env: {}, log });
@@ -205,6 +214,21 @@ describe('intent-classifier', () => {
       const result = await classifyIntents(classify, ['fast', 'slow'], { maxConcurrency: 2, timeoutMs: 40 });
       expect(result.get('fast')).to.equal('planning');
       expect(result.has('slow')).to.be.false;
+    });
+
+    it('does not start new classify calls after the batch times out', async () => {
+      // Simulates the real failure mode: classify resolves slowly (after the cap)
+      // so without cursor drain each worker loops and starts the next item.
+      let callCount = 0;
+      const classify = () => new Promise((resolve) => {
+        callCount += 1;
+        setTimeout(() => resolve(null), 30); // slower than the cap
+      });
+      // 1 worker, 3 texts, cap fires at 10ms — worker is mid-call on text[0].
+      // Without cursor drain: worker finishes text[0] at ~30ms, loops, picks text[1], text[2].
+      // With cursor drain: worker finishes text[0] then exits — callCount must stay 1.
+      await classifyIntents(classify, ['a', 'b', 'c'], { maxConcurrency: 1, timeoutMs: 10 });
+      expect(callCount).to.equal(1);
     });
 
     it('waits for all classifications when the batch timeout is disabled (0)', async () => {

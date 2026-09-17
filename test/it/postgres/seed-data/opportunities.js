@@ -16,6 +16,8 @@
  * - OPPTY_1: SITE_1, code-suggestions, NEW — main oppty with suggestions/fixes
  * - OPPTY_2: SITE_1, broken-backlinks, RESOLVED — different status for by-status filter
  * - OPPTY_3: SITE_3 (denied), code-suggestions, NEW — for 403 tests
+ * - OPPTY_4: SITE_1, structured-data, IN_PROGRESS — second oppty with a fix,
+ *   for site-wide aggregation
  *
  * Format: snake_case (v3 / PostgreSQL / PostgREST)
  */
@@ -54,5 +56,16 @@ export const opportunities = [
     description: 'Opportunity on denied site',
     status: 'NEW',
     data: { cwvMetric: 'cls', currentScore: 0.25 },
+  },
+  {
+    id: 'aa444444-4444-4444-a444-444444444444',
+    site_id: '33333333-3333-4333-b333-333333333333',
+    type: 'structured-data',
+    origin: 'AI',
+    title: 'Fix structured data issues',
+    description: 'Second opportunity with its own fix, for site-wide aggregation tests',
+    status: 'IN_PROGRESS',
+    data: { issues: 2 },
+    tags: ['seo', 'structured-data'],
   },
 ];

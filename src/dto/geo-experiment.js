@@ -25,6 +25,7 @@ export const GeoExperimentDto = {
       suggestionIds: experiment.getSuggestionIds(),
       promptsCount: experiment.getPromptsCount(),
       promptsLocation: experiment.getPromptsLocation() ?? null,
+      insightsLocation: experiment.getInsightsLocation?.() ?? null,
       metadata: experiment.getMetadata() ?? null,
       error: experiment.getError() ?? null,
       startTime: experiment.getStartTime() ?? null,

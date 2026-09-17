@@ -33,9 +33,6 @@ import {
 } from '../support/ai-visibility/handlers/brands.js';
 import {
   handleCompetitorsMetrics,
-  handleCompetitorsGapTopics,
-  handleCompetitorsGapSourceDomains,
-  handleCompetitorsGapPrompts,
 } from '../support/ai-visibility/handlers/competitors.js';
 import {
   handlePromptsResponses,
@@ -59,10 +56,42 @@ import { handleBrandPrompts as handleBrandPromptsV1 } from '../support/ai-visibi
 import { handleBrandPromptsExport as handleBrandPromptsExportV1 } from '../support/ai-visibility/handlers/v1/prompt/brand-prompts-export.js';
 import { handleGapPrompts as handleGapPromptsV1 } from '../support/ai-visibility/handlers/v1/prompt/gap-prompts.js';
 import { handleGapPromptsExport as handleGapPromptsExportV1 } from '../support/ai-visibility/handlers/v1/prompt/gap-prompts-export.js';
+import { handleGapPromptsTotals as handleGapPromptsTotalsV1 } from '../support/ai-visibility/handlers/v1/prompt/gap-prompts-totals.js';
 import { handlePromptResponse as handlePromptResponseV1 } from '../support/ai-visibility/handlers/v1/prompt/prompt-response.js';
+import { handleGapSourceDomains as handleGapSourceDomainsV1 } from '../support/ai-visibility/handlers/v1/source/gap-source-domains.js';
+import { handleGapSourceDomainsExport as handleGapSourceDomainsExportV1 } from '../support/ai-visibility/handlers/v1/source/gap-source-domains-export.js';
+import { handleGapSourceDomainsTotals as handleGapSourceDomainsTotalsV1 } from '../support/ai-visibility/handlers/v1/source/gap-source-domains-totals.js';
+import { handleCitedPages as handleCitedPagesV1 } from '../support/ai-visibility/handlers/v1/source/cited-pages.js';
+import { handleCitedPagesExport as handleCitedPagesExportV1 } from '../support/ai-visibility/handlers/v1/source/cited-pages-export.js';
+import { handleCitedPagesTotals as handleCitedPagesTotalsV1 } from '../support/ai-visibility/handlers/v1/source/cited-pages-totals.js';
+import { handleCitedSources as handleCitedSourcesV1 } from '../support/ai-visibility/handlers/v1/source/cited-sources.js';
+import { handleCitedSourcesExport as handleCitedSourcesExportV1 } from '../support/ai-visibility/handlers/v1/source/cited-sources-export.js';
+import { handleCitedSourcesTotals as handleCitedSourcesTotalsV1 } from '../support/ai-visibility/handlers/v1/source/cited-sources-totals.js';
 import { handleStatsByCountry as handleBrandStatsByCountryV1 } from '../support/ai-visibility/handlers/v1/brand/stats-by-country.js';
 import { handleStatsByLLM as handleBrandStatsByLLMV1 } from '../support/ai-visibility/handlers/v1/brand/stats-by-llm.js';
+import { handleCompetitors as handleBrandCompetitorsV1 } from '../support/ai-visibility/handlers/v1/brand/competitors.js';
+import { handleCompetitorsStats as handleBrandCompetitorsStatsV1 } from '../support/ai-visibility/handlers/v1/brand/competitors-stats.js';
+import { handleTopBrands as handleBrandTopBrandsV1 } from '../support/ai-visibility/handlers/v1/brand/top-brands.js';
+import { handleBrandsByTopicFts as handleBrandsByTopicFtsV1 } from '../support/ai-visibility/handlers/v1/brand/brands-by-topic-fts.js';
+import { handleBrandsByTopicFtsExport as handleBrandsByTopicFtsExportV1 } from '../support/ai-visibility/handlers/v1/brand/brands-by-topic-fts-export.js';
+import { handleBrandsByTopicFtsTotals as handleBrandsByTopicFtsTotalsV1 } from '../support/ai-visibility/handlers/v1/brand/brands-by-topic-fts-totals.js';
+import { handleMetricsByFts as handleMetricsByFtsV1 } from '../support/ai-visibility/handlers/v1/topic/metrics-by-fts.js';
+import { handleTopicsByFts as handleTopicsByFtsV1 } from '../support/ai-visibility/handlers/v1/topic/topics-by-fts.js';
+import { handleTopicsByFtsExport as handleTopicsByFtsExportV1 } from '../support/ai-visibility/handlers/v1/topic/topics-by-fts-export.js';
+import { handleTopicsByFtsTotals as handleTopicsByFtsTotalsV1 } from '../support/ai-visibility/handlers/v1/topic/topics-by-fts-totals.js';
+import { handlePromptsByTopicFts as handlePromptsByTopicFtsV1 } from '../support/ai-visibility/handlers/v1/prompt/prompts-by-topic-fts.js';
+import { handlePromptsByTopicFtsExport as handlePromptsByTopicFtsExportV1 } from '../support/ai-visibility/handlers/v1/prompt/prompts-by-topic-fts-export.js';
+import { handlePromptsByTopicFtsTotals as handlePromptsByTopicFtsTotalsV1 } from '../support/ai-visibility/handlers/v1/prompt/prompts-by-topic-fts-totals.js';
+import { handlePromptsByTopicIds as handlePromptsByTopicIdsV1 } from '../support/ai-visibility/handlers/v1/prompt/prompts-by-topic-ids.js';
+import { handlePromptsByTopicIdsTotals as handlePromptsByTopicIdsTotalsV1 } from '../support/ai-visibility/handlers/v1/prompt/prompts-by-topic-ids-totals.js';
+import { handleSourceDomainsByTopicFts as handleSourceDomainsByTopicFtsV1 } from '../support/ai-visibility/handlers/v1/source/source-domains-by-topic-fts.js';
+import { handleSourceDomainsByTopicFtsExport as handleSourceDomainsByTopicFtsExportV1 } from '../support/ai-visibility/handlers/v1/source/source-domains-by-topic-fts-export.js';
+import { handleSourceDomainsByTopicFtsTotals as handleSourceDomainsByTopicFtsTotalsV1 } from '../support/ai-visibility/handlers/v1/source/source-domains-by-topic-fts-totals.js';
 import { handleMeta as handleMetaV1 } from '../support/ai-visibility/handlers/v1/meta/meta.js';
+import { handlePromptsResearchExport as handlePromptsResearchExportV1 } from '../support/ai-visibility/handlers/v1/prompt-research/prompts-export.js';
+import { handleBrandsResearchExport as handleBrandsResearchExportV1 } from '../support/ai-visibility/handlers/v1/prompt-research/brands-export.js';
+import { handleSourceDomainsResearchExport as handleSourceDomainsResearchExportV1 } from '../support/ai-visibility/handlers/v1/prompt-research/source-domains-export.js';
+import { handleTopicsResearchExport as handleTopicsResearchExportV1 } from '../support/ai-visibility/handlers/v1/prompt-research/topics-export.js';
 import { handleMeta } from '../support/ai-visibility/handlers/meta.js';
 
 const ROUTE_MAP = [
@@ -76,9 +105,6 @@ const ROUTE_MAP = [
   ['/brands/source-opportunities', handleBrandSourceOpportunities],
   ['/brands/competitors', handleBrandCompetitors],
   ['/competitors/metrics', handleCompetitorsMetrics],
-  ['/competitors/gap-topics', handleCompetitorsGapTopics],
-  ['/competitors/gap-source-domains', handleCompetitorsGapSourceDomains],
-  ['/competitors/gap-prompts', handleCompetitorsGapPrompts],
   ['/meta', handleMeta],
   ['/prompts/responses/latest', handlePromptsResponsesLatest],
   ['/prompts/responses', handlePromptsResponses],
@@ -88,6 +114,10 @@ const ROUTE_MAP = [
   ['/topics/research/source-domains', handleTopicsResearchSourceDomains],
   ['/topics/research', handleTopicsResearch],
   ['/topics/stats', handleTopicsStats],
+  ['/v1/prompt-research/prompts-export', handlePromptsResearchExportV1],
+  ['/v1/prompt-research/brands-export', handleBrandsResearchExportV1],
+  ['/v1/prompt-research/source-domains-export', handleSourceDomainsResearchExportV1],
+  ['/v1/prompt-research/topics-export', handleTopicsResearchExportV1],
   ['/v1/topic/brand-topics', handleBrandTopicsV1],
   ['/v1/topic/brand-topics-export', handleBrandTopicsExportV1],
   ['/v1/topic/brand-topics-totals', handleBrandTopicsTotalsV1],
@@ -98,9 +128,37 @@ const ROUTE_MAP = [
   ['/v1/prompt/brand-prompts-export', handleBrandPromptsExportV1],
   ['/v1/prompt/gap-prompts', handleGapPromptsV1],
   ['/v1/prompt/gap-prompts-export', handleGapPromptsExportV1],
+  ['/v1/prompt/gap-prompts-totals', handleGapPromptsTotalsV1],
   ['/v1/prompt/prompt-response', handlePromptResponseV1],
+  ['/v1/source/gap-source-domains', handleGapSourceDomainsV1],
+  ['/v1/source/gap-source-domains-export', handleGapSourceDomainsExportV1],
+  ['/v1/source/gap-source-domains-totals', handleGapSourceDomainsTotalsV1],
+  ['/v1/source/cited-pages', handleCitedPagesV1],
+  ['/v1/source/cited-pages-export', handleCitedPagesExportV1],
+  ['/v1/source/cited-pages-totals', handleCitedPagesTotalsV1],
+  ['/v1/source/cited-sources', handleCitedSourcesV1],
+  ['/v1/source/cited-sources-export', handleCitedSourcesExportV1],
+  ['/v1/source/cited-sources-totals', handleCitedSourcesTotalsV1],
   ['/v1/brand/stats-by-country', handleBrandStatsByCountryV1],
   ['/v1/brand/stats-by-llm', handleBrandStatsByLLMV1],
+  ['/v1/brand/competitors', handleBrandCompetitorsV1],
+  ['/v1/brand/competitors-stats', handleBrandCompetitorsStatsV1],
+  ['/v1/brand/top-brands', handleBrandTopBrandsV1],
+  ['/v1/topic/metrics-by-fts', handleMetricsByFtsV1],
+  ['/v1/topic/topics-by-fts', handleTopicsByFtsV1],
+  ['/v1/topic/topics-by-fts-export', handleTopicsByFtsExportV1],
+  ['/v1/topic/topics-by-fts-totals', handleTopicsByFtsTotalsV1],
+  ['/v1/prompt/prompts-by-topic-fts', handlePromptsByTopicFtsV1],
+  ['/v1/prompt/prompts-by-topic-fts-export', handlePromptsByTopicFtsExportV1],
+  ['/v1/prompt/prompts-by-topic-fts-totals', handlePromptsByTopicFtsTotalsV1],
+  ['/v1/prompt/prompts-by-topic-ids', handlePromptsByTopicIdsV1],
+  ['/v1/prompt/prompts-by-topic-ids-totals', handlePromptsByTopicIdsTotalsV1],
+  ['/v1/brand/brands-by-topic-fts', handleBrandsByTopicFtsV1],
+  ['/v1/brand/brands-by-topic-fts-export', handleBrandsByTopicFtsExportV1],
+  ['/v1/brand/brands-by-topic-fts-totals', handleBrandsByTopicFtsTotalsV1],
+  ['/v1/source/source-domains-by-topic-fts', handleSourceDomainsByTopicFtsV1],
+  ['/v1/source/source-domains-by-topic-fts-export', handleSourceDomainsByTopicFtsExportV1],
+  ['/v1/source/source-domains-by-topic-fts-totals', handleSourceDomainsByTopicFtsTotalsV1],
   ['/v1/meta/meta', handleMetaV1],
 ];
 

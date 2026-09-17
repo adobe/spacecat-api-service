@@ -149,7 +149,7 @@ function ScrapeJobController(context) {
    * header is resolved server-side in this Lambda (HEAD probe + optional IMS
    * promise-token exchange + `retrievePageAuthentication`), merged into
    * `customHeaders`, and `options.enableAuthentication` is stripped before
-   * delegation. This mirrors the `createBetaPreflightJob` pattern.
+   * delegation.
    *
    * Why bake the header here instead of letting content-scraper resolve it:
    * content-scraper's SQS Event Source Mappings target the unqualified Lambda

@@ -17,9 +17,10 @@ import {
   isValidUUID,
 } from '@adobe/spacecat-shared-utils';
 import {
-  accepted, badRequest, internalServerError, notFound, ok,
+  accepted, badRequest, internalServerError, ok,
 } from '@adobe/spacecat-shared-http-utils';
 import { AsyncJob } from '@adobe/spacecat-shared-data-access';
+import { loadJobScopedToCaller } from '../support/async-job-access.js';
 
 // RFC 1035 caps a fully-qualified domain name at 253 octets.
 const MAX_DOMAIN_LENGTH = 253;
@@ -170,11 +171,17 @@ function SiteDetectionController(ctx, log, env) {
     }
 
     try {
-      const job = await dataAccess.AsyncJob.findById(jobId);
+      // Scope the read to a site-detection job (jobType allowlist). site-detection
+      // jobs have no owning site (metadata carries { domain, hlxVersion }), so this
+      // hardens the reader against being used to fetch other job types (e.g.
+      // token-bearing serenity-classify jobs) through a shared AsyncJob table.
+      const { job, error: accessError } = await loadJobScopedToCaller(ctx, {
+        jobId,
+        allowedJobTypes: ['site-detection'],
+      });
 
-      if (!job) {
-        log.warn(`Job with ID ${jobId} not found`);
-        return notFound(`Job with ID ${jobId} not found`);
+      if (accessError) {
+        return accessError;
       }
 
       const result = job.getResult();

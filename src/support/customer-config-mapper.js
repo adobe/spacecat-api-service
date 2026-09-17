@@ -12,6 +12,7 @@
 
 import { hasText, isNonEmptyObject } from '@adobe/spacecat-shared-utils';
 import crypto from 'crypto';
+import { BRAND_GUIDANCE_MAX_LENGTH, sanitizeGuidanceText } from './brand-guidance.js';
 
 /**
  * Default verticals list for migration/initialization.
@@ -41,6 +42,33 @@ const DEFAULT_VERTICALS = [
   'Professional Services',
   'Government & Public Services',
 ];
+
+function normalizeBrandGuidance(value) {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === null) {
+    return null;
+  }
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  // Strip unsafe control/invisible/bidi chars, matching the storage write path
+  // (brands-storage.js) — this migration path writes via writeCustomerConfigV2ToPostgres,
+  // which does NOT route through normalizeNullableText, so it must sanitize here too.
+  const trimmed = sanitizeGuidanceText(value).trim();
+  if (!hasText(trimmed)) {
+    return null;
+  }
+  // Truncate on code-point boundaries (spread, not slice): a plain slice(0, n) counts
+  // UTF-16 code units and can cut an emoji / non-BMP CJK char in half, leaving a lone
+  // surrogate that is invalid UTF-8 and breaks Postgres/JSON downstream. This is a bulk
+  // migration path, so it truncates (rather than rejecting) to never hard-fail an import.
+  const codePoints = [...trimmed];
+  return codePoints.length > BRAND_GUIDANCE_MAX_LENGTH
+    ? codePoints.slice(0, BRAND_GUIDANCE_MAX_LENGTH).join('')
+    : trimmed;
+}
 
 /**
  * Generates a deterministic hash from a string.
@@ -72,6 +100,41 @@ function generatePromptId(brandName, promptText) {
   return `${brandSlug}-${hash}`;
 }
 
+/** Fallback region when a caller has no market/region information at all. */
+const DEFAULT_BRAND_REGION = 'US';
+
+/**
+ * Maps the legacy `GL` "worldwide" sentinel (Greenland's real ISO 3166-1
+ * alpha-2 code, historically misused as a global placeholder — #3168)
+ * onto DEFAULT_BRAND_REGION. Case-insensitive, whitespace-trim-aware; any
+ * other value passes through unchanged.
+ * @param {*} region
+ * @returns {*}
+ */
+function normalizeGlRegionSentinel(region) {
+  if (typeof region !== 'string') {
+    return region;
+  }
+  return region.trim().toLowerCase() === 'gl' ? DEFAULT_BRAND_REGION : region;
+}
+
+/**
+ * Coerces a raw region array to strings, normalizes the GL sentinel, drops
+ * blanks, and deduplicates (normalizing GL can otherwise collapse two
+ * distinct input values onto the same US region). Shared by every write path
+ * that persists a raw, client-supplied regions array directly (#3168).
+ * @param {Array<*>} regions
+ * @returns {string[]}
+ */
+function sanitizeRegions(regions) {
+  return [...new Set(
+    (regions || [])
+      .map((r) => (typeof r === 'string' ? r : String(r)))
+      .map(normalizeGlRegionSentinel)
+      .filter(hasText),
+  )];
+}
+
 /**
  * Converts LLMO config (V1) to Customer Config (V2)
  * @param {object} llmoConfig - V1 LLMO configuration
@@ -90,20 +153,23 @@ export function convertV1ToV2(llmoConfig, brandName, imsOrgId) {
 
   const brands = [];
 
-  // Collect all unique regions from V1 config
+  // Collect all unique regions from V1 config. Normalizes the legacy GL
+  // sentinel to DEFAULT_BRAND_REGION before lowercasing so an explicit
+  // (not just missing) GL/gl value can never reach allRegions (#3168).
   const allRegions = new Set();
   const allUrls = new Set();
+  const collectRegion = (r) => allRegions.add(normalizeGlRegionSentinel(r).toLowerCase());
 
   // From brand aliases
   const brandAliases = llmoConfig.brands?.aliases || [];
   brandAliases.forEach((alias) => {
     const regions = alias.region || alias.regions || [];
-    regions.forEach((r) => allRegions.add(r.toLowerCase()));
+    regions.forEach(collectRegion);
   });
 
   // From competitors
   (llmoConfig.competitors?.competitors || []).forEach((comp) => {
-    (comp.regions || []).forEach((r) => allRegions.add(r.toLowerCase()));
+    (comp.regions || []).forEach(collectRegion);
   });
 
   // From categories
@@ -115,7 +181,7 @@ export function convertV1ToV2(llmoConfig, brandName, imsOrgId) {
     } else if (category.region) {
       regions = [category.region];
     }
-    regions.forEach((r) => allRegions.add(r.toLowerCase()));
+    regions.forEach(collectRegion);
 
     // Collect URLs from categories
     (category.urls || []).forEach((urlObj) => {
@@ -129,11 +195,11 @@ export function convertV1ToV2(llmoConfig, brandName, imsOrgId) {
   const topics = llmoConfig.topics || {};
   Object.values(topics).forEach((topic) => {
     (topic.prompts || []).forEach((prompt) => {
-      (prompt.regions || []).forEach((r) => allRegions.add(r.toLowerCase()));
+      (prompt.regions || []).forEach(collectRegion);
     });
   });
 
-  const brandRegions = allRegions.size > 0 ? Array.from(allRegions) : ['gl'];
+  const brandRegions = allRegions.size > 0 ? Array.from(allRegions) : [DEFAULT_BRAND_REGION];
   const brandUrls = Array.from(allUrls).map((url) => ({ value: url, type: 'base' }));
 
   // Only create a brand if we have brand aliases
@@ -166,6 +232,8 @@ export function convertV1ToV2(llmoConfig, brandName, imsOrgId) {
     origin: 'system',
     region: brandRegions,
     description: '',
+    brandContext: normalizeBrandGuidance(llmoConfig.claims?.brandContext),
+    mentionSentimentGuidance: normalizeBrandGuidance(llmoConfig.claims?.sentimentGuidance),
     updatedAt: primaryAlias.updatedAt || new Date().toISOString(),
     updatedBy: 'system',
     vertical: '',
@@ -173,12 +241,13 @@ export function convertV1ToV2(llmoConfig, brandName, imsOrgId) {
     socialAccounts: [],
     brandAliases: brandAliases.map((alias) => ({
       name: alias.name || (alias.aliases && alias.aliases[0]) || brandName,
-      regions: alias.region || alias.regions || ['gl'],
+      regions: (alias.region || alias.regions || [DEFAULT_BRAND_REGION])
+        .map(normalizeGlRegionSentinel),
     })),
     competitors: (llmoConfig.competitors?.competitors || []).map((comp) => ({
       name: comp.name,
       url: comp.url || '',
-      regions: comp.regions || ['gl'],
+      regions: (comp.regions || [DEFAULT_BRAND_REGION]).map(normalizeGlRegionSentinel),
     })),
     relatedBrands: [],
     earnedContent: [],
@@ -222,7 +291,7 @@ export function convertV1ToV2(llmoConfig, brandName, imsOrgId) {
             id: prompt.id || generatePromptId(brandName, prompt.prompt),
             prompt: prompt.prompt,
             status: prompt.status || 'active',
-            regions: prompt.regions || ['gl'],
+            regions: (prompt.regions || [DEFAULT_BRAND_REGION]).map(normalizeGlRegionSentinel),
             origin: prompt.origin || 'human',
             source: prompt.source || 'config',
             updatedBy: prompt.updatedBy || 'system',
@@ -254,7 +323,7 @@ export function convertV1ToV2(llmoConfig, brandName, imsOrgId) {
             id: prompt.id || generatePromptId(brandName, prompt.prompt),
             prompt: prompt.prompt,
             status: prompt.status || 'active',
-            regions: prompt.regions || ['gl'],
+            regions: (prompt.regions || [DEFAULT_BRAND_REGION]).map(normalizeGlRegionSentinel),
             origin: 'ai',
             source: prompt.source || 'flow',
             updatedBy: prompt.updatedBy || 'system',
@@ -307,7 +376,7 @@ export function convertV1ToV2(llmoConfig, brandName, imsOrgId) {
       id: promptId,
       prompt: prompt.prompt,
       status: 'deleted',
-      regions: prompt.regions || ['gl'],
+      regions: (prompt.regions || [DEFAULT_BRAND_REGION]).map(normalizeGlRegionSentinel),
       origin: prompt.origin || 'human',
       source: prompt.source || 'config',
       updatedBy: prompt.updatedBy || 'system',
@@ -332,7 +401,12 @@ export function convertV1ToV2(llmoConfig, brandName, imsOrgId) {
   };
 }
 
-export { generateBrandId };
+export {
+  generateBrandId,
+  DEFAULT_BRAND_REGION,
+  normalizeGlRegionSentinel,
+  sanitizeRegions,
+};
 
 export default {
   convertV1ToV2,

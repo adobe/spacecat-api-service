@@ -1,0 +1,77 @@
+# Serenity support — type-checking convention
+
+This directory (and the Serenity controller logic that drives it) is the
+**opt-in TypeScript type-checking scope** for spacecat-api-service. The point is
+to lean on the typed API clients and typed models as hard as possible so we make
+fewer wiring mistakes against Semrush / data-access / PostgREST.
+
+See `docs/decisions/005-opt-in-type-checking.md` for the why and the ratchet
+plan. `npm run type-check` is a **blocking** gate in CI
+(`.github/workflows/ci.yaml`) and in `.husky/pre-commit`. It runs two tiers: the
+base pass over every `// @ts-check` file, then a strict pass (`noImplicitAny`)
+over the smaller file list in `tsconfig.strict.json`.
+
+## Rules for every JS file here
+
+1. **Always add `// @ts-check`** as the first non-license line (blank line above
+   and below). Every file in this directory carries it; a new file without it is
+   silently NOT type-checked, because tsconfig uses `checkJs: false` — the
+   per-file pragma is the opt-in seam, not the `include` glob.
+2. **Keep the file inside the tsconfig `include` scope.** New subfolders under
+   `src/support/serenity/**` are covered automatically. A Serenity file placed
+   elsewhere (e.g. a controller) must be added to `include` explicitly AND carry
+   the pragma — both are required; either alone type-checks nothing.
+3. **Use the typed clients/models, don't reach around them.** Prefer the typed
+   transport (`rest-transport.js`) and the typed data-access models over raw
+   PostgREST calls or `any`. If a value is genuinely untyped, narrow or assert it
+   locally at the boundary — never widen a shared helper's signature to make a
+   call site compile.
+4. **Write JSDoc `@param` tags in signature order, and never stop short of a
+   destructured options arg.** Tags bind to parameters positionally, so an options
+   arg with `= []`/`= {}` defaults that sits behind an undocumented positional
+   infers `never[]`/missing-prop errors — document every param up to and including
+   it. Documenting a *prefix* of the signature is fine and common: annotate the
+   params whose types are knowable and leave the rest. Know what that costs,
+   though — an undocumented param is implicitly `any`, and TS treats it as
+   **optional**, so it is unchecked and it does not contribute to arity checking.
+   Prefer completing the signature when the types are obvious.
+5. **Annotate the transport `@param {SerenityTransport} transport`** — never
+   `{object}` or `{any}`. Import the typedef once per file:
+   `/** @typedef {import('./rest-transport.js').SerenityTransport} SerenityTransport */`.
+   An `{object}`-annotated value is `any`, which erases member existence, argument
+   count *and* argument types on every call made through it, so the generated
+   Semrush types are never reached. The same applies to any other value whose type
+   is knowable — reach for the named type rather than `{object}`.
+6. **A new transport method documents its own parameters.** Naming the transport is
+   only half the gate: an undocumented parameter is implicitly `any` and TS therefore
+   treats it as *optional*, so a method with no `@param` tags accepts any argument
+   count. Derive request shapes from the generated contracts (see the typedefs at the
+   top of `rest-transport.js`) instead of restating them, so a vendor spec change
+   fails the build here rather than reaching the wire.
+   `test/types/base/serenity-transport.types.js` pins both halves.
+
+## Known idioms / gotchas (matched in the existing files)
+
+- **`hasText` is NOT a type guard.** `@adobe/spacecat-shared-utils`'s `hasText`
+  is typed `(str: string): boolean`, so it does not narrow `string | null` →
+  `string`. Narrow locally: `if (!x || !hasText(x)) { ... }`. Do not change the
+  shared helper.
+- **data-access models are type-only exports.** `@adobe/spacecat-shared-data-access`'s
+  `index.d.ts` re-exports its models with `export type *`, so `import { Site }`
+  binds a *type*, not the runtime class value. To use a static like
+  `Site.DELIVERY_TYPES.OTHER`, reach the value through a namespace import and
+  assert the shape you need (see `site-linkage.js`) rather than hard-coding the
+  literal.
+- **Options arg with a default.** When a function takes `({ ... } = {})`, mark
+  the options object and its fields optional in JSDoc (`@param {object} [opts]`,
+  `@param {string} [opts.foo]`) and narrow the fields before use — otherwise the
+  `= {}` default trips a "missing required properties" error.
+- **Unknown members are NOT reported here.** `noImplicitAny: false` suppresses
+  `TS2339` in JS files outright — even against a fully-typed receiver — so
+  `transport.noSuchMethod()` and a wrong assumption about a response's shape both
+  compile clean. Only the strict tier reports them, and it covers
+  `rest-transport.js` alone today. Don't read a green `type-check` as proof that a
+  member exists.
+- Pragmatic floor (see ADR-005): `noImplicitAny: false` and
+  `useUnknownInCatchVariables: false`. Don't rely on those staying relaxed — the
+  ratchet tightens them later, per file, via `tsconfig.strict.json`.

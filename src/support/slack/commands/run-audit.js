@@ -26,19 +26,80 @@ import {
   postSiteNotFoundMessage,
 } from '../../../utils/slack/base.js';
 
-import { triggerAuditForSite } from '../../utils.js';
+import { isOffsiteAuditType, triggerAuditForSite } from '../../utils.js';
 
 const PHRASES = ['run audit'];
 const LHS_MOBILE = 'lhs-mobile';
 const PRERENDER = 'prerender';
-const PRERENDER_BATCH_SIZE = 320;
+
+// Structured logging taxonomy constants (05-logging.md, "Structured logging taxonomy").
+// `domain` is a fixed marker on every line in this family. `audit` maps this command's
+// own audit-type strings to the short taxonomy values used across the doc/runbooks and
+// by spacecat-audit-worker's own AUDIT enum (offsite-logging.js) — match those exactly.
+const OFFSITE_DOMAIN = 'offsite';
+const OFFSITE_AUDIT_LOG_TYPE = {
+  'offsite-brand-presence': 'brand-presence',
+  'cited-analysis': 'cited',
+  'reddit-analysis': 'reddit',
+  'youtube-analysis': 'youtube',
+  'wikipedia-analysis': 'wikipedia',
+};
+// Falls back to the raw auditType if a new offsite type is ever added to
+// OFFSITE_AUDIT_TYPES (utils.js) without a matching entry here, so a missing mapping
+// shows up as e.g. `audit=some-new-analysis` in the log line instead of `audit=undefined`.
+const toOffsiteAuditLogType = (auditType) => OFFSITE_AUDIT_LOG_TYPE[auditType] ?? auditType;
+
+/**
+ * Builds the success message for `audit_orchestration_spacecat_request_dispatched`.
+ * `offsite-brand-presence` uses its own wording to match the message
+ * `spacecat-jobs-dispatcher` emits for the same event/audit type.
+ * @param {string} auditType - The resolved offsite audit type.
+ * @returns {string} The message text.
+ */
+const getQueuedOffsiteMessage = (auditType) => (auditType === 'offsite-brand-presence'
+  ? 'Queued offsite-brand-presence for site'
+  : 'Queued offsite analysis for site');
+
+/**
+ * Strips control characters (including DEL) from externally-influenced error text
+ * (e.g. an SQS/AWS SDK error's `.name`/`.message`) before it goes into a structured log
+ * line, replacing each with a single space. Mirrors the narrow sanitization rule from
+ * spacecat-audit-worker's offsite-logging.js `sanitizeForLog` — this only guards against
+ * control-character injection into the log line, not a full port of that logger.
+ * @param {*} value - The raw value to sanitize.
+ * @returns {string} The sanitized string.
+ */
+function sanitizeErrorText(value) {
+  if (value == null) {
+    return '';
+  }
+  let out = '';
+  for (const ch of String(value)) {
+    const code = ch.codePointAt(0);
+    out += (code < 0x20 || code === 0x7f) ? ' ' : ch;
+  }
+  return out;
+}
+
+/**
+ * Renders a single `key=value` structured-log field for externally-influenced error text,
+ * quoting (and escaping embedded double quotes) whenever the sanitized value contains
+ * whitespace, `"`, or `=` — otherwise a raw AWS error message would break the field
+ * boundary of the line it's appended to. Mirrors offsite-logging.js's `renderField`.
+ * @param {string} key - The field name.
+ * @param {*} value - The raw value.
+ * @returns {string} The rendered `key=value` (or `key="value"`) field.
+ */
+function renderErrorField(key, value) {
+  const str = sanitizeErrorText(value);
+  return /[\s"=]/.test(str) ? `${key}="${str.replace(/"/g, "'")}"` : `${key}=${str}`;
+}
 const PRERENDER_MODES = {
   ALL: 'all',
   AI_ONLY: 'ai-only',
   AI_ONLY_CURRENT: 'ai-only-current',
   AI_ONLY_MISSING: 'ai-only-missing',
 };
-const PRERENDER_SUGGESTION_STATUSES = ['NEW', 'FIXED'];
 const ALL_AUDITS = [
   'apex',
   'cwv',
@@ -108,23 +169,24 @@ function RunAuditCommand(context) {
   const baseCommand = BaseCommand({
     id: 'run-audit',
     name: 'Run Audit',
-    description: 'Run audit for a previously added site. Supports both positional and keyword arguments. Runs lhs-mobile by default if no audit type is specified. Use `audit:all` to run all audits. For prerender: `mode:all` runs full audit for NEW/FIXED suggestions; `mode:ai-only` runs AI-only for NEW/FIXED; `mode:ai-only-current` runs AI-only for current-tab suggestions only (NEW, not covered/deployed); `mode:ai-only-missing` runs AI-only for current-tab suggestions missing an AI summary. CSV uploads are batched at 320 URLs.',
+    description: 'Run audit for a previously added site. Supports both positional and keyword arguments. Runs lhs-mobile by default if no audit type is specified. Use `audit:all` to run all audits. For prerender: `mode:all` runs full audit for NEW/FIXED suggestions; `mode:ai-only` runs AI-only for NEW/FIXED; `mode:ai-only-current` runs AI-only for current-tab suggestions only (NEW, not covered/deployed); `mode:ai-only-missing` runs AI-only for NEW/FIXED suggestions missing an AI summary.',
     phrases: PHRASES,
     usageText: `${PHRASES[0]} {site} [auditType] [auditData] OR {site} audit:{auditType} [mode:all|ai-only|ai-only-current|ai-only-missing] [key:value ...]`,
   });
 
   const { dataAccess, log } = context;
-  const { Configuration, Site, Opportunity } = dataAccess;
+  const { Configuration, Site } = dataAccess;
 
   const buildEffectiveData = (baseData, mode) => {
-    if (mode !== PRERENDER_MODES.AI_ONLY
+    if (mode !== PRERENDER_MODES.ALL
+      && mode !== PRERENDER_MODES.AI_ONLY
       && mode !== PRERENDER_MODES.AI_ONLY_CURRENT
       && mode !== PRERENDER_MODES.AI_ONLY_MISSING) {
       return baseData;
     }
     return JSON.stringify({
       ...(baseData ? JSON.parse(baseData) : {}),
-      mode: PRERENDER_MODES.AI_ONLY,
+      mode,
     });
   };
 
@@ -154,108 +216,6 @@ function RunAuditCommand(context) {
   };
 
   /**
-   * Fetches unique URLs from prerender suggestions with NEW or FIXED status.
-   * @param {string} siteId - The site ID.
-   * @returns {Promise<string[]>} Deduplicated URLs.
-   */
-  const fetchPrerenderSuggestionUrls = async (siteId) => {
-    const opportunities = await Opportunity.allBySiteId(siteId);
-    const prerenderOpps = opportunities.filter(
-      (opp) => opp.getType() === PRERENDER,
-    );
-
-    const urls = new Set();
-    for (const opp of prerenderOpps) {
-      // eslint-disable-next-line no-await-in-loop
-      const suggestions = await opp.getSuggestions();
-      suggestions
-        .filter((s) => PRERENDER_SUGGESTION_STATUSES
-          .includes(s.getStatus()))
-        .forEach((s) => {
-          const url = s.getData()?.url;
-          if (url && isValidUrl(url) && !url.includes('*')) {
-            urls.add(url);
-          }
-        });
-    }
-
-    return [...urls];
-  };
-
-  /**
-   * Returns true when a suggestion belongs to the "current" tab:
-   * status NEW, valid non-wildcard URL, not coveredByDomainWide,
-   * not edgeDeployed, not coveredByPattern.
-   * @param {object} s - A suggestion object.
-   * @returns {boolean}
-   */
-  const isCurrentTabSuggestion = (s) => {
-    if (s.getStatus() !== 'NEW') {
-      return false;
-    }
-    const d = s.getData();
-    if (!d?.url || d.url.includes('*')) {
-      return false;
-    }
-    if (d.coveredByDomainWide || d.edgeDeployed || d.coveredByPattern) {
-      return false;
-    }
-    return isValidUrl(d.url);
-  };
-
-  /**
-   * Fetches unique URLs from prerender suggestions matching the "current" tab:
-   * status NEW, not coveredByDomainWide, not edgeDeployed, not coveredByPattern.
-   * @param {string} siteId - The site ID.
-   * @returns {Promise<string[]>} Deduplicated URLs.
-   */
-  const fetchCurrentPrerenderSuggestionUrls = async (siteId) => {
-    const opportunities = await Opportunity.allBySiteId(siteId);
-    const prerenderOpps = opportunities.filter(
-      (opp) => opp.getType() === PRERENDER,
-    );
-
-    const urls = new Set();
-    for (const opp of prerenderOpps) {
-      // eslint-disable-next-line no-await-in-loop
-      const suggestions = await opp.getSuggestions();
-      suggestions
-        .filter(isCurrentTabSuggestion)
-        .forEach((s) => {
-          urls.add(s.getData().url);
-        });
-    }
-
-    return [...urls];
-  };
-
-  /**
-   * Fetches unique URLs from current-tab prerender suggestions that are also
-   * missing an AI summary (aiSummary is absent or empty).
-   * @param {string} siteId - The site ID.
-   * @returns {Promise<string[]>} Deduplicated URLs.
-   */
-  const fetchMissingAiPrerenderSuggestionUrls = async (siteId) => {
-    const opportunities = await Opportunity.allBySiteId(siteId);
-    const prerenderOpps = opportunities.filter(
-      (opp) => opp.getType() === PRERENDER,
-    );
-
-    const urls = new Set();
-    for (const opp of prerenderOpps) {
-      // eslint-disable-next-line no-await-in-loop
-      const suggestions = await opp.getSuggestions();
-      suggestions
-        .filter((s) => isCurrentTabSuggestion(s) && !s.getData().aiSummary)
-        .forEach((s) => {
-          urls.add(s.getData().url);
-        });
-    }
-
-    return [...urls];
-  };
-
-  /**
    * Runs an audit for the given site.
    * @param {string} baseURL - The base URL of the site.
    * @param {string} auditType - The type of audit to run.
@@ -271,6 +231,13 @@ function RunAuditCommand(context) {
       const configuration = await Configuration.findLatest();
 
       if (!isNonEmptyObject(site)) {
+        if (isOffsiteAuditType(auditType)) {
+          // Nothing was owed here — an operator's manual command hitting a site that doesn't
+          // exist is an expected business-logic outcome, not a system fault. `warn` keeps it
+          // visible for dashboards without paging; error stays reserved for outcome=failure
+          // (see the SQS dispatch failure below, which genuinely loses completed work).
+          log.warn(`No site found with base URL domain=${OFFSITE_DOMAIN} audit=${toOffsiteAuditLogType(auditType)} event=audit_orchestration_start outcome=skip reason=site_not_found`);
+        }
         await postSiteNotFoundMessage(say, baseURL);
         return;
       }
@@ -281,7 +248,18 @@ function RunAuditCommand(context) {
         await Promise.all(
           auditTypesToRun.map(async (enabledAuditType) => {
             try {
-              await triggerAuditForSite(site, enabledAuditType, undefined, slackContext, context);
+              // Skip audit types explicitly disabled for this site (deny-list).
+              if (configuration.isHandlerDisabledForSite(enabledAuditType, site)) {
+                log.info(`Skipping audit ${enabledAuditType} for site ${baseURL}: explicitly disabled.`);
+                return;
+              }
+              await triggerAuditForSite(
+                site,
+                enabledAuditType,
+                undefined,
+                slackContext,
+                context,
+              );
             } catch (error) {
               log.error(`Error running audit ${enabledAuditType.id} for site ${baseURL}`, error);
               await postErrorMessage(say, error);
@@ -296,13 +274,16 @@ function RunAuditCommand(context) {
           return;
         }
 
-        // Check entitlements for all product codes
+        // Check site enrollment for all product codes. We check `siteEnrollment`
+        // (not `entitlement`) for parity with the audit worker's downstream gate
+        // (see audit-utils#checkProductCodeEntitlements). Org-level entitlement
+        // alone is insufficient — the specific site must be enrolled.
         const entitlementChecks = await Promise.all(
           handler.productCodes.map(async (productCode) => {
             try {
               const tierClient = await TierClient.createForSite(context, site, productCode);
               const tierResult = await tierClient.checkValidEntitlement();
-              return tierResult.entitlement || false;
+              return tierResult.siteEnrollment || false;
             } catch (error) {
               context.log.error(`Failed to check entitlement for product code ${productCode}:`, error);
               return false;
@@ -310,13 +291,62 @@ function RunAuditCommand(context) {
           }),
         );
 
-        // Block audit if site has no entitlement for any of the product codes
-        if (!entitlementChecks.some((hasEntitlement) => hasEntitlement)) {
+        // Block audit if site has no enrollment for any of the product codes
+        if (!entitlementChecks.some((hasEnrollment) => hasEnrollment)) {
+          if (isOffsiteAuditType(auditType)) {
+            // Expected business-logic outcome (a site simply isn't entitled), not a system
+            // fault — see the site_not_found warn above for the same reasoning.
+            log.warn(`Site not entitled for this audit type domain=${OFFSITE_DOMAIN} audit=${toOffsiteAuditLogType(auditType)} event=audit_orchestration_start outcome=skip siteId=${site.getId()} reason=not_entitled`);
+          }
           await say(`:x: Will not audit site '${baseURL}' because site is not entitled for this audit.`);
           return;
         }
 
-        await triggerAuditForSite(site, auditType, auditData, slackContext, context);
+        // Block audit if the handler is explicitly disabled for this site (deny-list).
+        if (configuration.isHandlerDisabledForSite(auditType, site)) {
+          if (isOffsiteAuditType(auditType)) {
+            // Expected business-logic outcome (an admin explicitly disabled this handler for
+            // this site), not a system fault — see the site_not_found warn above.
+            log.warn(`Handler disabled for this site domain=${OFFSITE_DOMAIN} audit=${toOffsiteAuditLogType(auditType)} event=audit_orchestration_start outcome=skip siteId=${site.getId()} reason=handler_disabled`);
+          }
+          await say(`:x: Audit \`${auditType}\` is explicitly disabled for site \`${baseURL}\`. Re-enable it via the audit configuration before running on-demand.`);
+          return;
+        }
+
+        if (isOffsiteAuditType(auditType)) {
+          try {
+            await triggerAuditForSite(
+              site,
+              auditType,
+              auditData,
+              slackContext,
+              context,
+            );
+            log.info(`${getQueuedOffsiteMessage(auditType)} domain=${OFFSITE_DOMAIN} audit=${toOffsiteAuditLogType(auditType)} event=audit_orchestration_spacecat_request_dispatched outcome=success peer=spacecat-audit-worker direction=outbound siteId=${site.getId()}`);
+          } catch (error) {
+            // Own this failure fully here (structured log + user-facing reply) rather than
+            // re-throwing into the generic outer catch below, which would log a second,
+            // unstructured "Error running audit..." line for the same single SQS failure
+            // (catch-log-throw) and inflate error counts for on-call triage.
+            log.error(`Failed to queue offsite analysis for site domain=${OFFSITE_DOMAIN} audit=${toOffsiteAuditLogType(auditType)} event=audit_orchestration_spacecat_request_dispatched outcome=failure peer=spacecat-audit-worker direction=outbound siteId=${site.getId()} reason=sqs_send_failed ${renderErrorField('errorName', error.name)} ${renderErrorField('errorMessage', error.message)}`);
+            try {
+              await postErrorMessage(say, error);
+            } catch {
+              // The structured log line above already captured this failure; a broken
+              // Slack reply on top of it must not escape into the outer catch below,
+              // which would log a second, misleading, unstructured error line for the
+              // same single SQS failure and attempt yet another Slack reply.
+            }
+          }
+        } else {
+          await triggerAuditForSite(
+            site,
+            auditType,
+            auditData,
+            slackContext,
+            context,
+          );
+        }
       }
     } catch (error) {
       log.error(`Error running audit ${auditType} for site ${baseURL}`, error);
@@ -336,23 +366,20 @@ function RunAuditCommand(context) {
         return;
       }
 
-      if (!configuration.isHandlerEnabledForSite(auditType, site)) {
-        await say(`:x: Will not audit site '${baseURL}' because audits of type '${auditType}' are disabled for this site.`);
-        return;
-      }
-
       const handler = configuration.getHandlers()?.[auditType];
       if (!isNonEmptyArray(handler?.productCodes)) {
         await say(`:x: Will not audit site '${baseURL}' because no product codes are configured for audit type '${auditType}'.`);
         return;
       }
 
+      // Check site enrollment for all product codes (see runAuditForSite for rationale
+      // on using `siteEnrollment` instead of `entitlement`).
       const entitlementChecks = await Promise.all(
         handler.productCodes.map(async (productCode) => {
           try {
             const tierClient = await TierClient.createForSite(context, site, productCode);
             const tierResult = await tierClient.checkValidEntitlement();
-            return tierResult.entitlement || false;
+            return tierResult.siteEnrollment || false;
           } catch (error) {
             context.log.error(`Failed to check entitlement for product code ${productCode}:`, error);
             return false;
@@ -360,35 +387,26 @@ function RunAuditCommand(context) {
         }),
       );
 
-      if (!entitlementChecks.some((hasEntitlement) => hasEntitlement)) {
+      if (!entitlementChecks.some((hasEnrollment) => hasEnrollment)) {
         await say(`:x: Will not audit site '${baseURL}' because site is not entitled for this audit.`);
         return;
       }
 
-      const batchCount = Math.ceil(
-        urls.length / PRERENDER_BATCH_SIZE,
-      );
-
-      for (let i = 0; i < batchCount; i += 1) {
-        const start = i * PRERENDER_BATCH_SIZE;
-        const batch = urls.slice(start, start + PRERENDER_BATCH_SIZE);
-        // eslint-disable-next-line no-await-in-loop
-        await triggerAuditForSite(
-          site,
-          auditType,
-          auditData,
-          slackContext,
-          context,
-          { urls: batch },
-        );
-
-        const batchLabel = batchCount > 1
-          ? ` (batch ${i + 1}/${batchCount})`
-          : '';
-        // eslint-disable-next-line no-await-in-loop
-        await say(`:white_check_mark: ${auditType} audit queued`
-          + ` for ${batch.length} URLs${batchLabel}.`);
+      // Block audit if the handler is explicitly disabled for this site (deny-list).
+      if (configuration.isHandlerDisabledForSite(auditType, site)) {
+        await say(`:x: Audit \`${auditType}\` is explicitly disabled for site \`${baseURL}\`. Re-enable it via the audit configuration before running on-demand.`);
+        return;
       }
+
+      await triggerAuditForSite(
+        site,
+        auditType,
+        auditData,
+        slackContext,
+        context,
+        { urls },
+      );
+      await say(`:white_check_mark: ${auditType} audit queued for ${urls.length} URLs.`);
     } catch (error) {
       log.error(`Error running audit ${auditType} for site ${baseURL}`, error);
       await postErrorMessage(say, error);
@@ -423,10 +441,18 @@ function RunAuditCommand(context) {
         [baseURLInputArg] = positionalArgs;
         auditTypeInputArg = keywords.audit;
 
-        // Build audit data from remaining keywords (excluding 'audit' and 'mode')
+        // Build audit data from remaining keywords (excluding 'audit').
+        // 'mode' is also excluded here ONLY for prerender — prerender does its own
+        // suggestion selection/batching on the API side (see PRERENDER_MODES /
+        // buildEffectiveData below) and re-injects a normalized `mode` value itself.
+        // Other audit types (e.g. toc's mode:ai-only, LLMO-6167) have no API-side
+        // selection logic of their own — mode must pass through untouched so the
+        // audit-worker can act on it directly.
         const auditDataKeywords = { ...keywords };
         delete auditDataKeywords.audit;
-        delete auditDataKeywords.mode;
+        if (auditTypeInputArg === PRERENDER) {
+          delete auditDataKeywords.mode;
+        }
 
         auditDataInputArg = Object.keys(auditDataKeywords).length > 0
           ? JSON.stringify(auditDataKeywords)
@@ -436,7 +462,21 @@ function RunAuditCommand(context) {
         [baseURLInputArg, auditTypeInputArg, auditDataInputArg] = positionalArgs;
       }
 
-      log.info(`run-audit: baseURL="${baseURLInputArg}", auditType="${auditTypeInputArg}", auditData="${auditDataInputArg}"`);
+      if (isOffsiteAuditType(auditTypeInputArg)) {
+        // baseURLInputArg is raw Slack user input, not yet validated by
+        // extractURLFromSlackInput/isValidUrl below — sanitize it before it goes into this
+        // structured field, same as an error's name/message would be, so a crafted value
+        // (e.g. containing a space and its own key=value pairs) can't inject fake fields
+        // into this line. auditTypeInputArg needs no such treatment here: isOffsiteAuditType
+        // already gates it to a fixed whitelist.
+        log.info(
+          `run-audit: baseURL="${baseURLInputArg}", auditType="${auditTypeInputArg}", auditData="${auditDataInputArg}" `
+          + `domain=${OFFSITE_DOMAIN} audit=${toOffsiteAuditLogType(auditTypeInputArg)} `
+          + `event=audit_orchestration_start outcome=start auditType=${auditTypeInputArg} ${renderErrorField('baseURL', baseURLInputArg)}`,
+        );
+      } else {
+        log.info(`run-audit: baseURL="${baseURLInputArg}", auditType="${auditTypeInputArg}", auditData="${auditDataInputArg}"`);
+      }
 
       const hasFiles = isNonEmptyArray(files);
       const baseURL = extractURLFromSlackInput(baseURLInputArg);
@@ -474,44 +514,10 @@ function RunAuditCommand(context) {
           [PRERENDER_MODES.AI_ONLY_CURRENT]: 'AI-only-current',
           [PRERENDER_MODES.AI_ONLY_MISSING]: 'AI-only-missing',
         };
-        const MODE_HINTS = {
-          [PRERENDER_MODES.ALL]: 'with status NEW or FIXED',
-          [PRERENDER_MODES.AI_ONLY]: 'with status NEW or FIXED',
-          [PRERENDER_MODES.AI_ONLY_CURRENT]: 'matching current-tab filters',
-          [PRERENDER_MODES.AI_ONLY_MISSING]: 'matching current-tab filters with missing AI summary',
-        };
         const modeLabel = MODE_LABELS[prerenderMode];
-        await say(`:hourglass_flowing_sand: Fetching ${modeLabel}`
-          + ` prerender suggestions for ${baseURL}…`);
-
-        const site = await Site.findByBaseURL(baseURL);
-        if (!isNonEmptyObject(site)) {
-          await postSiteNotFoundMessage(say, baseURL);
-          return;
-        }
-
-        let urls;
-        if (prerenderMode === PRERENDER_MODES.AI_ONLY_CURRENT) {
-          urls = await fetchCurrentPrerenderSuggestionUrls(site.getId());
-        } else if (prerenderMode === PRERENDER_MODES.AI_ONLY_MISSING) {
-          urls = await fetchMissingAiPrerenderSuggestionUrls(site.getId());
-        } else {
-          urls = await fetchPrerenderSuggestionUrls(site.getId());
-        }
-
-        if (urls.length === 0) {
-          const hint = MODE_HINTS[prerenderMode];
-          await say(':white_check_mark: No active suggestions'
-            + ` ${hint} for *${baseURL}*`
-            + ' — nothing to audit.');
-          return;
-        }
-
         const effectiveData = buildEffectiveData(auditDataInputArg, prerenderMode);
-        await say(`:adobe-run: Triggering ${PRERENDER} audit`
-          + ` for ${baseURL} with ${urls.length} URLs`
-          + ` (${modeLabel} mode).`);
-        await runPrerenderAuditForUrls(baseURL, PRERENDER, effectiveData, urls, slackContext);
+        await say(`:adobe-run: Triggering ${PRERENDER} audit for ${baseURL} (${modeLabel} mode).`);
+        await runAuditForSite(baseURL, PRERENDER, effectiveData, slackContext);
       } else if (isPrerenderCsvRun) {
         const urls = await parsePrerenderUrlsFromCsv(files, botToken, say);
         if (!urls) {

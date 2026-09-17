@@ -18,11 +18,10 @@ import {
   SITE_2_ID,
   SITE_3_ID,
   BRAND_1_ID,
-  ORG_LEGACY_LLMO_ID,
-  SITE_LEGACY_LLMO_ID,
   NON_EXISTENT_ORG_ID,
   NON_EXISTENT_SITE_ID,
 } from '../seed-ids.js';
+import { upsertFeatureFlag } from '../../../../src/support/feature-flags-storage.js';
 
 /**
  * Integration tests for the LLMO-4716 (org, site) → brand resolver endpoint.
@@ -30,10 +29,16 @@ import {
  * Validates:
  *  - resolver gating on `resolveLlmoOnboardingMode === v2`
  *  - primary `brands.site_id` lookup
- *  - 404 on v1 / brandalf_migration / no-active-brand
+ *  - 200 for brandalf and brandalf_migration orgs; 404 on no-active-brand
  *  - 403 on tenant isolation (site does not belong to org)
  *  - 404 on missing org / site
  *  - 403 on cross-org user access
+ *
+ * The resolver's v1 → 404 gate is covered by controller unit tests
+ * (test/controllers/brands.test.js). It is not exercised here: since LLMO-7108
+ * removed the legacy-site cutoff, the only remaining v1 path is the
+ * LLMO_ONBOARDING_DEFAULT_VERSION kill switch, which is fixed at IT-harness
+ * startup and cannot be toggled per-test over HTTP.
  *
  * Each describe block calls `resetData()` to start from baseline, then uses
  * the postgrestClient directly to set up the brandalf flag and brand→site
@@ -49,24 +54,23 @@ import {
 export default function brandForOrgSiteTests(getHttpClient, resetData, getPostgrestClient) {
   describe('GET /v2/orgs/:spaceCatId/sites/:siteId/brand (LLMO-4716)', () => {
     /**
-     * Sets a feature flag for the given org. Used to set brandalf=true (the
-     * primary gate) and brandalf_migration=true (the dual-publish window
-     * Adobe is in today).
+     * Sets an org-level feature flag for the given org. Used to set
+     * brandalf=true (the primary gate) and brandalf_migration=true (the
+     * dual-publish window Adobe is in today).
+     *
+     * Goes through the production storage helper rather than its own PostgREST
+     * write, so the setup path stays valid under whatever shape the table's
+     * unique key has.
      */
     async function setFlag(orgId, flagName, value) {
-      const pg = getPostgrestClient();
-      const { error } = await pg
-        .from('feature_flags')
-        .upsert({
-          organization_id: orgId,
-          product: 'LLMO',
-          flag_name: flagName,
-          flag_value: value,
-          updated_by: 'it-setup',
-        }, { onConflict: 'organization_id,product,flag_name' });
-      if (error) {
-        throw new Error(`Failed to set ${flagName} flag: ${error.message}`);
-      }
+      await upsertFeatureFlag({
+        organizationId: orgId,
+        product: 'LLMO',
+        flagName,
+        value,
+        updatedBy: 'it-setup',
+        postgrestClient: getPostgrestClient(),
+      });
     }
 
     const setBrandalfTrue = (orgId) => setFlag(orgId, 'brandalf', true);
@@ -143,44 +147,6 @@ export default function brandForOrgSiteTests(getHttpClient, resetData, getPostgr
         );
         expect(res.status).to.equal(200);
         expect(res.body.id).to.equal(BRAND_1_ID);
-      });
-    });
-
-    describe('v1 org (resolver returns v1)', () => {
-      // ORG_LEGACY_LLMO_ID owns SITE_LEGACY_LLMO_ID with created_at before the
-      // 2026-04-01 Brandalf GA cutoff → resolveLlmoOnboardingMode falls into
-      // the "pre-cutoff sites" branch and returns v1 even without a brandalf
-      // flag set. ORG_1 cannot be used here because all its sites are
-      // post-cutoff, so the resolver returns v2 by default.
-      const LEGACY_BRAND_ID = 'a1ffffff-ffff-4fff-bfff-ffffffffffff';
-
-      before(async () => {
-        await resetData();
-        // Insert a brand for the legacy org bound to the legacy site, so the
-        // test exercises "endpoint correctly 404s even when a brand WOULD have
-        // matched" — proving the resolver gate works.
-        const pg = getPostgrestClient();
-        const { error } = await pg.from('brands').upsert({
-          id: LEGACY_BRAND_ID,
-          organization_id: ORG_LEGACY_LLMO_ID,
-          name: 'Legacy Brand',
-          status: 'active',
-          origin: 'human',
-          regions: ['us'],
-          site_id: SITE_LEGACY_LLMO_ID,
-          updated_by: 'it-setup',
-        });
-        if (error) {
-          throw new Error(`Failed to seed legacy brand: ${error.message}`);
-        }
-      });
-
-      it('returns 404 even when a brand row exists for the site (gating works)', async () => {
-        const http = getHttpClient();
-        const res = await http.admin.get(
-          `/v2/orgs/${ORG_LEGACY_LLMO_ID}/sites/${SITE_LEGACY_LLMO_ID}/brand`,
-        );
-        expect(res.status).to.equal(404);
       });
     });
 

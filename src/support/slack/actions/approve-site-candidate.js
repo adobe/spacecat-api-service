@@ -19,6 +19,7 @@ import { Blocks, Elements, Message } from 'slack-block-builder';
 import { hasText } from '@adobe/spacecat-shared-utils';
 import { BUTTON_LABELS } from '../../../controllers/hooks.js';
 import { composeReply, extractURLFromSlackMessage } from './commons.js';
+import { deriveCodeFromHlxConfig } from '../../utils.js';
 import { getHlxConfigMessagePart } from '../../../utils/slack/base.js';
 import OrgDetectorAgent from '../../../agents/org-detector/agent.js';
 import { updateRumConfig } from '../../rum-config-service.js';
@@ -62,14 +63,23 @@ export default function approveSiteCandidate(lambdaContext) {
 
       // if site didn't exist before, then directly save it
       if (!site) {
+        const candidateHlxConfig = siteCandidate.getHlxConfig();
+        // Populate the top-level `code` attribute (the source of truth read by
+        // the import-worker and autofix-worker) from the resolved hlxConfig, so
+        // EDS sites discovered via CDN/RUM get a working code config on approval.
+        const derivedCode = deriveCodeFromHlxConfig(candidateHlxConfig);
         site = await Site.create({
           baseURL: siteCandidate.getBaseURL(),
-          hlxConfig: siteCandidate.getHlxConfig(),
+          hlxConfig: candidateHlxConfig,
+          ...(derivedCode ? { code: derivedCode } : {}),
           isLive: true,
           ...(isFnF
             ? { organizationId: friendsFamilyOrgId }
             : { organizationId: defaultOrgId }),
         });
+        if (derivedCode) {
+          log.info(`[approve-site-candidate] Set top-level code for ${site.getBaseURL()} from hlxConfig: owner=${derivedCode.owner}, repo=${derivedCode.repo}, ref=${derivedCode.ref}`);
+        }
         try {
           await updateRumConfig(site, lambdaContext);
         } catch (e) {
@@ -82,8 +92,19 @@ export default function approveSiteCandidate(lambdaContext) {
           site.toggleLive();
         }
         // make sure hlx config is set
-        site.setHlxConfig(siteCandidate.getHlxConfig());
+        const candidateHlxConfig = siteCandidate.getHlxConfig();
+        site.setHlxConfig(candidateHlxConfig);
         site.setDeliveryType(SiteModel.DELIVERY_TYPES.AEM_EDGE);
+        // Backfill the top-level `code` attribute from hlxConfig only when it is
+        // not already set, so an existing explicit code config is never clobbered.
+        const existingCode = site.getCode() || {};
+        if (Object.keys(existingCode).length === 0) {
+          const derivedCode = deriveCodeFromHlxConfig(candidateHlxConfig);
+          if (derivedCode) {
+            site.setCode(derivedCode);
+            log.info(`[approve-site-candidate] Backfilled top-level code for ${site.getBaseURL()} from hlxConfig: owner=${derivedCode.owner}, repo=${derivedCode.repo}, ref=${derivedCode.ref}`);
+          }
+        }
         site = await site.save();
         try {
           await updateRumConfig(site, lambdaContext);

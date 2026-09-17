@@ -21,21 +21,19 @@ describe('rum-config-service', () => {
   const sandbox = sinon.createSandbox();
 
   let updateRumConfig;
-  let retrieveDomainkeyStub;
-  let rumApiClientStub;
+  let resolveRumDomainKeyStub;
   let toDynamoItemStub;
   let site;
   let siteConfig;
   let context;
 
   before(async () => {
-    retrieveDomainkeyStub = sandbox.stub();
-    rumApiClientStub = { retrieveDomainkey: retrieveDomainkeyStub };
+    resolveRumDomainKeyStub = sandbox.stub();
     toDynamoItemStub = sandbox.stub().returns({});
 
     ({ updateRumConfig } = await esmock('../../src/support/rum-config-service.js', {
       '@adobe/spacecat-shared-rum-api-client': {
-        default: { createFrom: () => rumApiClientStub },
+        resolveRumDomainKey: resolveRumDomainKeyStub,
       },
       '@adobe/spacecat-shared-data-access/src/models/site/config.js': {
         Config: { toDynamoItem: toDynamoItemStub },
@@ -47,7 +45,6 @@ describe('rum-config-service', () => {
     sandbox.reset();
 
     siteConfig = {
-      getFetchConfig: sandbox.stub().returns({}),
       updateRumConfig: sandbox.stub(),
     };
 
@@ -63,33 +60,21 @@ describe('rum-config-service', () => {
   });
 
   describe('updateRumConfig', () => {
-    it('sets hasDomainKey true and saves when RUM key is found on base hostname', async () => {
-      retrieveDomainkeyStub.resolves('dom-key-abc');
+    it('returns true and saves when resolveRumDomainKey finds a key', async () => {
+      resolveRumDomainKeyStub.resolves({ hasDomainKey: true, timedOut: false });
 
       const result = await updateRumConfig(site, context);
 
       expect(result).to.be.true;
+      expect(resolveRumDomainKeyStub).to.have.been.calledOnceWith(site, context);
       expect(siteConfig.updateRumConfig).to.have.been.calledOnceWith(true);
       expect(toDynamoItemStub).to.have.been.calledOnceWith(siteConfig);
       expect(site.setConfig).to.have.been.calledOnce;
       expect(site.save).to.have.been.calledOnce;
     });
 
-    it('falls back to www.example.com when example.com lookup fails', async () => {
-      retrieveDomainkeyStub
-        .withArgs('example.com').rejects(new Error('not found'))
-        .withArgs('www.example.com').resolves('dom-key-www');
-
-      const result = await updateRumConfig(site, context);
-
-      expect(result).to.be.true;
-      expect(retrieveDomainkeyStub).to.have.been.calledWith('example.com');
-      expect(retrieveDomainkeyStub).to.have.been.calledWith('www.example.com');
-      expect(siteConfig.updateRumConfig).to.have.been.calledOnceWith(true);
-    });
-
-    it('sets hasDomainKey false and saves when all candidates fail', async () => {
-      retrieveDomainkeyStub.rejects(new Error('not found'));
+    it('returns false and saves when resolveRumDomainKey finds no key', async () => {
+      resolveRumDomainKeyStub.resolves({ hasDomainKey: false, timedOut: false });
 
       const result = await updateRumConfig(site, context);
 
@@ -100,23 +85,29 @@ describe('rum-config-service', () => {
       expect(site.save).to.have.been.calledOnce;
     });
 
-    it('sets hasDomainKey false and clears timer when RUM check times out', async () => {
-      retrieveDomainkeyStub.returns(new Promise(() => {})); // never resolves
+    it('returns false and saves when resolveRumDomainKey times out', async () => {
+      resolveRumDomainKeyStub.resolves({ hasDomainKey: false, timedOut: true });
 
-      const clock = sinon.useFakeTimers();
-      const promise = updateRumConfig(site, context);
-      await clock.tickAsync(4000);
-      const result = await promise;
-      clock.restore();
+      const result = await updateRumConfig(site, context);
 
       expect(result).to.be.false;
       expect(siteConfig.updateRumConfig).to.have.been.calledOnceWith(false);
-      expect(site.setConfig).to.have.been.calledOnce;
+      expect(site.save).to.have.been.calledOnce;
+    });
+
+    it('returns false and saves when resolveRumDomainKey throws unexpectedly', async () => {
+      resolveRumDomainKeyStub.rejects(new Error('unexpected internal error'));
+
+      const result = await updateRumConfig(site, context);
+
+      expect(result).to.be.false;
+      expect(context.log.warn).to.have.been.calledWithMatch(/resolveRumDomainKey failed/);
+      expect(siteConfig.updateRumConfig).to.have.been.calledOnceWith(false);
       expect(site.save).to.have.been.calledOnce;
     });
 
     it('skips config mutation and save when { save: false } is passed', async () => {
-      retrieveDomainkeyStub.resolves('dom-key-abc');
+      resolveRumDomainKeyStub.resolves({ hasDomainKey: true, timedOut: false });
 
       const result = await updateRumConfig(site, context, { save: false });
 
@@ -124,96 +115,6 @@ describe('rum-config-service', () => {
       expect(siteConfig.updateRumConfig).to.not.have.been.called;
       expect(site.setConfig).to.not.have.been.called;
       expect(site.save).to.not.have.been.called;
-    });
-
-    it('tries overrideBaseURL hostname first when set', async () => {
-      siteConfig.getFetchConfig.returns({ overrideBaseURL: 'https://override.example.com' });
-      retrieveDomainkeyStub
-        .withArgs('override.example.com').resolves('dom-key-override');
-
-      const result = await updateRumConfig(site, context);
-
-      expect(result).to.be.true;
-      expect(retrieveDomainkeyStub.firstCall.args[0]).to.equal('override.example.com');
-      expect(retrieveDomainkeyStub).to.have.been.calledOnce;
-    });
-
-    it('falls back through override www, base, and base www when override bare fails', async () => {
-      siteConfig.getFetchConfig.returns({ overrideBaseURL: 'https://override.example.com' });
-      retrieveDomainkeyStub.withArgs('override.example.com')
-        .rejects(new Error('not found'));
-      retrieveDomainkeyStub.withArgs('www.override.example.com')
-        .rejects(new Error('not found'));
-      retrieveDomainkeyStub.withArgs('example.com')
-        .rejects(new Error('not found'));
-      retrieveDomainkeyStub.withArgs('www.example.com')
-        .resolves('dom-key-www');
-
-      const result = await updateRumConfig(site, context);
-
-      expect(result).to.be.true;
-      expect(retrieveDomainkeyStub.args.map((a) => a[0])).to.deep.equal([
-        'override.example.com',
-        'www.override.example.com',
-        'example.com',
-        'www.example.com',
-      ]);
-    });
-
-    it('does not duplicate www candidate when overrideBaseURL already has www', async () => {
-      siteConfig.getFetchConfig.returns({ overrideBaseURL: 'https://www.override.example.com' });
-      retrieveDomainkeyStub.resolves('dom-key-www');
-
-      await updateRumConfig(site, context);
-
-      const calledDomains = retrieveDomainkeyStub.args.map((a) => a[0]);
-      expect(calledDomains.filter((d) => d === 'www.override.example.com')).to.have.lengthOf(1);
-    });
-
-    it('falls back to baseURL when overrideBaseURL is malformed', async () => {
-      siteConfig.getFetchConfig.returns({ overrideBaseURL: 'not-a-valid-url' });
-      retrieveDomainkeyStub.resolves('dom-key-abc');
-
-      const result = await updateRumConfig(site, context);
-
-      expect(result).to.be.true;
-      expect(context.log.warn).to.have.been.calledWithMatch(/Malformed overrideBaseURL/);
-      expect(retrieveDomainkeyStub.firstCall.args[0]).to.equal('example.com');
-    });
-
-    it('does not add bare variant when baseURL already starts with www', async () => {
-      site = { ...site, getBaseURL: () => 'https://www.example.com' };
-      retrieveDomainkeyStub.resolves('dom-key-www');
-
-      const result = await updateRumConfig(site, context);
-
-      expect(result).to.be.true;
-      const calledDomains = retrieveDomainkeyStub.args.map((a) => a[0]);
-      expect(calledDomains).to.deep.equal(['www.example.com']);
-    });
-
-    it('stops iterating candidates once cancelled by timeout', async () => {
-      let rejectFirst;
-      retrieveDomainkeyStub.withArgs('example.com').returns(
-        new Promise((_, reject) => { rejectFirst = reject; }),
-      );
-      retrieveDomainkeyStub.withArgs('www.example.com').resolves('dom-key-www');
-
-      const clock = sinon.useFakeTimers();
-      const resultPromise = updateRumConfig(site, context);
-
-      await clock.tickAsync(4000); // fires timeout, sets cancelled=true
-      clock.restore();
-
-      rejectFirst(new Error('slow network'));
-      // drain microtasks so inner IIFE processes the rejection and checks cancelled
-      await new Promise(setImmediate);
-
-      const result = await resultPromise;
-
-      expect(result).to.be.false;
-      expect(retrieveDomainkeyStub).to.have.been.calledOnce;
-      expect(retrieveDomainkeyStub).not.to.have.been.calledWith('www.example.com');
     });
   });
 });

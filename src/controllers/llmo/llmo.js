@@ -12,7 +12,7 @@
 
 import { gunzipSync } from 'zlib';
 import {
-  ok, badRequest, forbidden, createResponse, notFound, internalServerError,
+  ok, created, badRequest, forbidden, createResponse, notFound, internalServerError,
   unauthorized,
 } from '@adobe/spacecat-shared-http-utils';
 import {
@@ -24,13 +24,17 @@ import {
   schemas,
   composeBaseURL,
   isValidUrl,
+  allHaveSamePathname,
 } from '@adobe/spacecat-shared-utils';
 import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import crypto from 'crypto';
-import { getDomain } from 'tldts';
+import { getDomain, parse as parseDomain } from 'tldts';
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
-import TokowakaClient, { calculateForwardedHost } from '@adobe/spacecat-shared-tokowaka-client';
+import TierClient from '@adobe/spacecat-shared-tier-client';
+import TokowakaClient, {
+  calculateForwardedHost,
+} from '@adobe/spacecat-shared-tokowaka-client';
 import { ImsClient } from '@adobe/spacecat-shared-ims-client';
 import AccessControlUtil from '../../support/access-control-util.js';
 import { UnauthorizedProductError } from '../../support/errors.js';
@@ -44,6 +48,7 @@ import {
   OPTIMIZE_AT_EDGE_ENABLED_MARKING_TYPE,
   EDGE_OPTIMIZE_MARKING_DELAY_SECONDS,
   detectAemCsFastlyForDomain,
+  hasSubpath,
 } from '../../support/edge-routing-utils.js';
 import { triggerBrandProfileAgent } from '../../support/brand-profile-trigger.js';
 import { getImsTokenFromPromiseToken, authorizeEdgeCdnRouting } from '../../support/edge-routing-auth.js';
@@ -63,8 +68,9 @@ import {
   performLlmoOnboarding,
   performLlmoOffboarding,
   postLlmoAlert,
-  appendRowsToQueryIndex,
+  reindexQueryIndexPaths,
   previewAndPublishQueryIndex,
+  isSafeRelativeFilePath,
 } from './llmo-onboarding.js';
 import { queryLlmoFiles } from './llmo-query-handler.js';
 import {
@@ -85,7 +91,12 @@ import {
 import { updateModifiedByDetails } from './llmo-config-metadata.js';
 import { notifyOptInIfNeeded } from './cdn-opt-in-notification.js';
 import { handleLlmoRationale } from './llmo-rationale.js';
-import { handleBrandClaims } from './brand-claims.js';
+import {
+  handleBrandClaims,
+  handleBrandClaimsFeedback,
+  handleBrandClaimsWeeks,
+  handleRequestBrandClaims,
+} from './brand-claims.js';
 import { handleDemoBrandPresence, handleDemoRecommendations } from './opportunity-workspace-demo.js';
 import { notifyStrategyChanges } from '../../support/opportunity-workspace-notifications.js';
 
@@ -95,6 +106,9 @@ const { llmoConfig: llmoConfigSchema } = schemas;
 
 const IMS_ORG_ID_REGEX = /^[a-z0-9]{24}@AdobeOrg$/i;
 const VALID_CADENCES = ['daily', 'weekly-paid', 'weekly-free'];
+// Well above any real site's file count (heritage-sg, the largest observed, had 45)
+// -- just a backstop against pathological/abusive request sizes on this admin-only route.
+const MAX_REINDEX_FILES_PER_REQUEST = 200;
 
 /** Site IDs for which HLX `brandpresence` sheet data is blocked (PG migration). */
 const HLX_BRANDPRESENCE_PG_MIGRATION_SITE_IDS = new Set([
@@ -517,8 +531,8 @@ function LlmoController(ctx) {
         return siteValidation;
       }
 
-      if (!accessControlUtil.isLLMOAdministrator()) {
-        return forbidden('Only LLMO administrators can update the LLMO config');
+      if (!await accessControlUtil.hasLlmoCapabilityForSite(siteValidation.site)) {
+        return forbidden(accessControlUtil.llmoForbiddenMessage('Only LLMO administrators can update the LLMO config'));
       }
 
       // Support gzip-compressed request bodies (Content-Type: application/gzip)
@@ -587,6 +601,7 @@ function LlmoController(ctx) {
         `${stats.deletedPrompts.total} deleted prompts${stats.deletedPrompts.modified ? ` (${stats.deletedPrompts.modified} modified)` : ''}`,
         `${stats.ignoredPrompts.total} ignored prompts${stats.ignoredPrompts.modified ? ` (${stats.ignoredPrompts.modified} modified)` : ''}`,
         `${stats.categoryUrls.total} category URLs`,
+        ...(stats.claims.modified ? ['claims guidance modified'] : []),
       ];
       const configSummary = summaryParts.join(', ');
 
@@ -618,8 +633,8 @@ function LlmoController(ctx) {
       return siteValidation;
     }
 
-    if (!accessControlUtil.isLLMOAdministrator()) {
-      return forbidden('Only LLMO administrators can add questions');
+    if (!await accessControlUtil.hasLlmoCapabilityForSite(siteValidation.site)) {
+      return forbidden(accessControlUtil.llmoForbiddenMessage('Only LLMO administrators can add questions'));
     }
     const { site, config } = siteValidation;
 
@@ -667,8 +682,8 @@ function LlmoController(ctx) {
       return siteValidation;
     }
 
-    if (!accessControlUtil.isLLMOAdministrator()) {
-      return forbidden('Only LLMO administrators can remove questions');
+    if (!await accessControlUtil.hasLlmoCapabilityForSite(siteValidation.site)) {
+      return forbidden(accessControlUtil.llmoForbiddenMessage('Only LLMO administrators can remove questions'));
     }
     const { site, config } = siteValidation;
 
@@ -693,8 +708,8 @@ function LlmoController(ctx) {
       return siteValidation;
     }
 
-    if (!accessControlUtil.isLLMOAdministrator()) {
-      return forbidden('Only LLMO administrators can update questions');
+    if (!await accessControlUtil.hasLlmoCapabilityForSite(siteValidation.site)) {
+      return forbidden(accessControlUtil.llmoForbiddenMessage('Only LLMO administrators can update questions'));
     }
     const { site, config } = siteValidation;
 
@@ -733,8 +748,8 @@ function LlmoController(ctx) {
         return siteValidation;
       }
 
-      if (!accessControlUtil.isLLMOAdministrator()) {
-        return forbidden('Only LLMO administrators can add customer intent');
+      if (!await accessControlUtil.hasLlmoCapabilityForSite(siteValidation.site)) {
+        return forbidden(accessControlUtil.llmoForbiddenMessage('Only LLMO administrators can add customer intent'));
       }
       const { site, config } = siteValidation;
 
@@ -850,8 +865,8 @@ function LlmoController(ctx) {
       }
       const { site, config } = siteValidation;
 
-      if (!accessControlUtil.isLLMOAdministrator()) {
-        return forbidden('Only LLMO administrators can update the CDN logs filter');
+      if (!accessControlUtil.hasAdminAccess()) {
+        return forbidden('Only administrators can update the CDN logs filter');
       }
 
       if (!isObject(data)) {
@@ -884,8 +899,8 @@ function LlmoController(ctx) {
       }
       const { site, config } = siteValidation;
 
-      if (!accessControlUtil.isLLMOAdministrator()) {
-        return forbidden('Only LLMO administrators can update the CDN bucket config');
+      if (!accessControlUtil.hasAdminAccess()) {
+        return forbidden('Only administrators can update the CDN bucket config');
       }
 
       if (!isObject(data)) {
@@ -925,8 +940,6 @@ function LlmoController(ctx) {
    * @param {string} [context.data.imsOrgId] - Optional IMS org ID override
    *   (must match `/^[a-z0-9]{24}@AdobeOrg$/i`). When omitted the org ID
    *   is read from the authenticated user's JWT token.
-   * @param {boolean} [context.data['temp-onboarding']] - When true, skips updating
-   *   helix-query.yaml in project-elmo-ui-data during onboarding.
    * @returns {Promise<Response>} The onboarding response.
    */
   const onboardCustomer = async (context) => {
@@ -934,8 +947,8 @@ function LlmoController(ctx) {
     const { data } = context;
 
     try {
-      if (!accessControlUtil.isLLMOAdministrator()) {
-        return forbidden('Only LLMO administrators can onboard');
+      if (!accessControlUtil.hasLlmoAdminCapability()) {
+        return forbidden(accessControlUtil.llmoForbiddenMessage('Only LLMO administrators can onboard'));
       }
 
       // Validate required fields
@@ -946,7 +959,6 @@ function LlmoController(ctx) {
       const {
         domain, brandName, imsOrgId: payloadImsOrgId, cadence, region,
       } = data;
-      const tempOnboarding = data['temp-onboarding'] === true;
 
       if (!domain || !brandName) {
         return badRequest('domain and brandName are required');
@@ -1012,7 +1024,6 @@ function LlmoController(ctx) {
           brandName,
           imsOrgId,
           cadence,
-          tempOnboarding,
           ...(region ? { region } : {}),
         },
         context,
@@ -1032,7 +1043,7 @@ function LlmoController(ctx) {
         log.warn(`LLMO onboarding: failed to trigger brand-profile workflow for site ${result.siteId}`, hookError);
       }
 
-      log.info(`LLMO onboarding completed successfully for domain ${domain}`);
+      log.info(`LLMO onboarding ${result.brandActivation?.requiredWorkFailed ? 'completed with warnings' : 'completed successfully'} for domain ${domain}`);
 
       return ok({
         message: result.message,
@@ -1044,14 +1055,179 @@ function LlmoController(ctx) {
         organizationId: result.organizationId,
         siteId: result.siteId,
         detectedCdn: result.detectedCdn,
+        // Intentionally always 'completed', never 'failed', even when
+        // brandActivation.requiredWorkFailed is true: the site/org/entitlement/config work this
+        // endpoint owns did succeed (hence the 200 response), and 'failed' would overclaim a
+        // total failure the enum has no room to qualify. requiredWorkFailed is the correct field
+        // for a caller to branch on for the "succeeded with a degraded step" case.
         status: 'completed',
         createdAt: new Date().toISOString(),
         brandProfileExecutionName,
+        // LLMO-7218 AC4: structured submission-level context (which required step failed, if
+        // any) so a caller doesn't have to reconstruct it from logs. Absent for siteOnly
+        // onboarding, which never runs brand activation.
+        ...(result.brandActivation ? { brandActivation: result.brandActivation } : {}),
         ...(region ? { region } : {}),
       });
     } catch (error) {
       log.error(`Error during LLMO onboarding: ${error.message}`);
       return badRequest(cleanupHeaderValue(error.message));
+    }
+  };
+
+  /**
+   * Paid-gated self-serve, site-only onboarding (LLMO-5606, Piece 1 of LLMO-3749).
+   *
+   * Stands up the site entity, entitlement/enrollment, base LLMO config, and
+   * site-analysis audits — "nothing DRS": no brand entity, no prompt generation,
+   * no brand-presence schedule, no llmo-customer-analysis. Reuses the canonical
+   * `performLlmoOnboarding` via the `siteOnly` flag. Activating a brand +
+   * generating prompts is Piece 2 (LLMO-5605).
+   *
+   * Org-scoped (`/v2/orgs/:spaceCatId/...`). Gated on org membership + an explicit
+   * PAID LLMO entitlement (no admin claim — this is customer self-serve, mirroring
+   * the v2 brand-management routes). Customers never see
+   * the internal failure reason — both failures and successes are posted to ops in
+   * SLACK_LLMO_ALERTS_CHANNEL_ID. Runs synchronously; `status: 'processing'` is
+   * honest because the triggered audits run asynchronously.
+   *
+   * @param {object} context - The request context.
+   * @param {string} context.params.spaceCatId - SpaceCat organization ID (UUID).
+   * @param {string} context.data.domain - Domain to onboard (normalized via composeBaseURL).
+   * @param {string} context.data.brandName - Brand label (siteConfig LLMO brand, not an entity).
+   * @param {string} [context.data.deliveryType] - Optional delivery type for site creation.
+   * @returns {Promise<Response>} 201 with site details, or 400/403/404 on failure.
+   */
+  const onboardSiteOnly = async (context) => {
+    const { log, env, dataAccess } = context;
+    const { Organization } = dataAccess;
+    const { spaceCatId } = context.params;
+    const { data } = context;
+
+    // Customers never see the internal reason - only a generic failure. The
+    // project-elmo-ui client renders its own localized copy (with a link to the
+    // onboarding guide) instead of this raw text - this string only reaches a
+    // caller that skips the UI (e.g. a direct API/curl consumer), so it stays a
+    // short, plain fallback. Kept ASCII-only (no em dash / curly quotes): it's
+    // copied verbatim into the `x-error` response header by
+    // badRequest()/internalServerError(), and a character outside the
+    // header-safe range (see cleanupHeaderValue) crashes the response with a 500
+    // "Invalid character in header content" instead of the intended 400/500 body.
+    const GENERIC_ONBOARD_ERROR = "We couldn't onboard this domain right now. Please contact support.";
+
+    try {
+      // --- Resolve org (404 if missing) ---
+      const organization = await Organization.findById(spaceCatId);
+      if (!organization) {
+        return notFound('Organization not found');
+      }
+
+      // --- Auth gate: org membership + explicit PAID entitlement ---
+      // Mirrors the v2 brand-management routes (brands.js), which gate on
+      // hasAccess(organization) alone. This is a paid-customer self-serve
+      // endpoint, so it deliberately does NOT require a platform-admin /
+      // LLMO-admin claim: those are never set on a real customer IMS token
+      // (the IMS handler grants the admin scope only for @adobe.com platform
+      // admins), so requiring them would 403 every paying customer. The
+      // explicit PAID check below is the additional, stricter gate.
+      if (!await accessControlUtil.hasAccess(organization)) {
+        return forbidden('Only members of the organization can onboard a site');
+      }
+
+      // Explicit PAID check. PAID is stricter than the platform's any-tier
+      // "LLMO-enabled" bar, so a FREE_TRIAL org 403s here. There is no status
+      // column on entitlements (getStatus() is an unbacked stub; revocation =
+      // row delete), so a PAID row existing is the "currently paying" signal.
+      const tierClient = TierClient.createForOrg(
+        context,
+        organization,
+        EntitlementModel.PRODUCT_CODES.LLMO,
+      );
+      const { entitlement } = await tierClient.checkValidEntitlement();
+      if (!entitlement || entitlement.getTier() !== EntitlementModel.TIERS.PAID) {
+        return forbidden('A paid LLMO entitlement is required to onboard a site');
+      }
+
+      // --- Validate request body ---
+      if (!data || typeof data !== 'object') {
+        return badRequest('Onboarding data is required');
+      }
+      const { domain, brandName, deliveryType } = data;
+      if (!hasText(domain) || !hasText(brandName)) {
+        return badRequest('domain and brandName are required and must be non-empty strings');
+      }
+      // Customer-facing endpoint — bound the inputs. RFC 1035 caps a hostname at
+      // 253 chars; brandName is a label, so cap it defensively too.
+      if (domain.trim().length > 253) {
+        return badRequest('domain is too long');
+      }
+      if (brandName.trim().length > 256) {
+        return badRequest('brandName is too long');
+      }
+
+      const baseURL = composeBaseURL(domain.trim());
+      if (!isValidUrl(baseURL)) {
+        return badRequest('domain is invalid');
+      }
+
+      // SSRF guard: onboarding triggers outbound probes against this host (CDN
+      // detection, Ahrefs), so reject anything that isn't a public registrable
+      // domain — IP literals (including the 169.254.169.254 metadata address),
+      // localhost, and single-label/internal hosts all fail here. (Resolve-time
+      // private-IP-range checks are a deeper, cross-cutting follow-up.)
+      const { isIp, domain: registrableDomain } = parseDomain(new URL(baseURL).hostname);
+      if (isIp || !registrableDomain) {
+        log.warn(`Site-only onboarding rejected non-public host for org ${spaceCatId}, domain ${domain}`);
+        return badRequest('domain is invalid');
+      }
+
+      const dataFolder = generateDataFolder(baseURL, env.ENV);
+      const imsOrgId = organization.getImsOrgId();
+
+      log.info(`Starting site-only LLMO onboarding for org ${spaceCatId} (IMS ${imsOrgId}), domain ${domain}`);
+
+      // validateSiteNotOnboarded returns { isValid, error } (never throws) and
+      // already ops-alerts the conflict cases. Surface only a generic 400.
+      const validation = await validateSiteNotOnboarded(baseURL, imsOrgId, dataFolder, context);
+      if (!validation.isValid) {
+        log.warn(`Site-only onboarding rejected for org ${spaceCatId}, domain ${domain}: ${validation.error}`);
+        return badRequest(cleanupHeaderValue(GENERIC_ONBOARD_ERROR));
+      }
+
+      // --- Orchestrate (siteOnly: true; no `say` → zero customer Slack) ---
+      const result = await performLlmoOnboarding(
+        {
+          domain,
+          brandName,
+          imsOrgId,
+          deliveryType,
+          siteOnly: true,
+        },
+        context,
+      );
+
+      await postLlmoAlert(
+        `:white_check_mark: Site-only onboarding succeeded for ${result.baseURL} `
+        + `(org ${result.organizationId}, site ${result.siteId})`,
+        context,
+      );
+
+      log.info(`Site-only LLMO onboarding completed for org ${spaceCatId}, site ${result.siteId}`);
+
+      return created({
+        siteId: result.siteId,
+        organizationId: result.organizationId,
+        baseURL: result.baseURL,
+        dataFolder: result.dataFolder,
+        status: 'processing',
+      });
+    } catch (error) {
+      log.error(`Error during site-only LLMO onboarding for org ${spaceCatId}: ${error.message}`);
+      await postLlmoAlert(
+        `:x: Site-only onboarding failed for org ${spaceCatId}: ${error.message}`,
+        context,
+      );
+      return internalServerError(cleanupHeaderValue(GENERIC_ONBOARD_ERROR));
     }
   };
 
@@ -1216,8 +1392,9 @@ function LlmoController(ctx) {
         return siteValidation;
       }
 
-      // Delegate to the rationale handler for the actual processing
-      return await handleLlmoRationale(context);
+      // Delegate to the rationale handler, reusing the already-resolved site
+      // so it doesn't repeat the Site.findById lookup.
+      return await handleLlmoRationale(context, siteValidation.site);
     } catch (error) {
       log.error(`Error getting LLMO rationale for site ${siteId}: ${error.message}`);
       return badRequest(cleanupHeaderValue(error.message));
@@ -1240,6 +1417,61 @@ function LlmoController(ctx) {
     } catch (error) {
       log.error(`Error getting brand claims for site ${siteId}: ${error.message}`);
       return badRequest(cleanupHeaderValue(error.message));
+    }
+  };
+
+  // Lists the ISO weeks with an available brand claims run (newest first)
+  const getBrandClaimsWeeks = async (context) => {
+    const { log } = context;
+    const { siteId } = context.params;
+    try {
+      // Validate site and LLMO access
+      const siteValidation = await getSiteAndValidateLlmo(context);
+      if (siteValidation.status) {
+        return siteValidation;
+      }
+
+      // Delegate to the brand claims weeks handler for the actual processing
+      return await handleBrandClaimsWeeks(context);
+    } catch (error) {
+      log.error(`Error listing brand claims weeks for site ${siteId}: ${error.message}`);
+      return badRequest(cleanupHeaderValue(error.message));
+    }
+  };
+
+  // Handles on-demand Brand Claims trigger requests (LLMO-7263, trial customers)
+  const requestBrandClaims = async (context) => {
+    const { log } = context;
+    const { siteId } = context.params;
+    try {
+      // Validate site and LLMO access (trials are LLMO-entitled)
+      const siteValidation = await getSiteAndValidateLlmo(context);
+      if (siteValidation.status) {
+        return siteValidation;
+      }
+
+      return await handleRequestBrandClaims(context, siteValidation.site);
+    } catch (error) {
+      log.error(`Error requesting brand claims for site ${siteId}: ${error.message}`);
+      return badRequest(cleanupHeaderValue(error.message));
+    }
+  };
+
+  const submitBrandClaimsFeedback = async (context) => {
+    const { log } = context;
+    const { siteId } = context.params;
+    try {
+      const site = await context.dataAccess.Site.findById(siteId);
+      if (!site) {
+        return notFound(`Site not found: ${siteId}`);
+      }
+      if (!await accessControlUtil.hasAccess(site)) {
+        return forbidden('Only users belonging to the organization can view its sites');
+      }
+      return await handleBrandClaimsFeedback(context, site);
+    } catch (error) {
+      log.error(`Error submitting Brand Claims feedback for site ${siteId}: ${error.message}`);
+      return internalServerError('Unable to submit Brand Claims feedback');
     }
   };
 
@@ -1323,8 +1555,8 @@ function LlmoController(ctx) {
         return forbidden('User does not have access to this site');
       }
 
-      if (!accessControlUtil.isLLMOAdministrator()) {
-        return forbidden('Only LLMO administrators can update the edge optimize config');
+      if (!await accessControlUtil.hasLlmoCapabilityForSite(site)) {
+        return forbidden(accessControlUtil.llmoForbiddenMessage('Only LLMO administrators can update the edge optimize config'));
       }
 
       if (!await accessControlUtil.isOwnerOfSite(site)) {
@@ -1450,7 +1682,12 @@ function LlmoController(ctx) {
           log.error('[cdn-opt-in-notification] Unhandled error:', err);
         }
       }
-
+      if (hasSubpath(baseURL)) {
+        log.info(`[edge-optimize-routing] ${baseURL} subpath sites not eligible for auto routing`);
+        return ok({
+          ...metaconfig,
+        });
+      }
       let cdnTypeNormalized = null;
       if (hasText(cdnType)) {
         log.info(`[edge-optimize-routing] ${baseURL} CDN routing config requested for site ${siteId},`
@@ -1576,7 +1813,7 @@ function LlmoController(ctx) {
           try {
             await context.sqs.sendMessage(
               env.IMPORT_WORKER_QUEUE_URL,
-              { type: OPTIMIZE_AT_EDGE_ENABLED_MARKING_TYPE },
+              { type: OPTIMIZE_AT_EDGE_ENABLED_MARKING_TYPE, siteId },
               undefined,
               { delaySeconds: EDGE_OPTIMIZE_MARKING_DELAY_SECONDS },
             );
@@ -1632,8 +1869,8 @@ function LlmoController(ctx) {
         return forbidden('User does not have access to this site');
       }
 
-      if (!accessControlUtil.isLLMOAdministrator()) {
-        return forbidden('Only LLMO administrators can get the edge optimize config');
+      if (!await accessControlUtil.hasLlmoCapabilityForSite(site)) {
+        return forbidden(accessControlUtil.llmoForbiddenMessage('Only LLMO administrators can get the edge optimize config'));
       }
 
       const baseURL = site.getBaseURL();
@@ -1881,12 +2118,16 @@ function LlmoController(ctx) {
         return forbidden('User does not have access to this site');
       }
 
-      if (!accessControlUtil.isLLMOAdministrator()) {
-        return forbidden('Only LLMO administrators can add staging domains');
+      if (!await accessControlUtil.hasLlmoCapabilityForSite(site)) {
+        return forbidden(accessControlUtil.llmoForbiddenMessage('Only LLMO administrators can add staging domains'));
       }
 
       if (!areDomainsSameAsBase(stagingDomains, site.getBaseURL())) {
         return badRequest('Staging domains must belong to the same base domain as the production site');
+      }
+
+      if (!allHaveSamePathname(stagingDomains, site.getBaseURL())) {
+        return badRequest('Staging domains must be within the site pathname scope of the production site');
       }
 
       const tokowakaClient = TokowakaClient.createFrom(context);
@@ -1961,8 +2202,8 @@ function LlmoController(ctx) {
     const { data } = context;
 
     try {
-      if (!accessControlUtil.isLLMOAdministrator()) {
-        return forbidden('Only LLMO administrators can update the query index');
+      if (!accessControlUtil.hasLlmoAdminCapability()) {
+        return forbidden(accessControlUtil.llmoForbiddenMessage('Only LLMO administrators can update the query index'));
       }
 
       if (!data || typeof data !== 'object') {
@@ -1979,8 +2220,22 @@ function LlmoController(ctx) {
         return badRequest('fileNames must be a non-empty array of strings');
       }
 
+      if (fileNames.length > MAX_REINDEX_FILES_PER_REQUEST) {
+        return badRequest(`fileNames must not exceed ${MAX_REINDEX_FILES_PER_REQUEST} entries per request`);
+      }
+
       if (fileNames.some((f) => typeof f !== 'string' || !f.trim())) {
         return badRequest('Each fileName must be a non-empty string');
+      }
+
+      // Each fileName is interpolated into the Helix Admin API reindex URL
+      // (adobe/project-elmo-ui-data/main/<dataFolder>/<fileName>.json). Real fileNames
+      // for this endpoint include a subdirectory (e.g. `brand-presence/2026-w28-chatgpt`,
+      // per the LLMO-6320 RCA), so this can't reuse the single-segment isSafePathSegment
+      // guard -- it must allow '/' between segments while still rejecting '..' and
+      // absolute-path anchors so a caller can't escape the site's own dataFolder.
+      if (fileNames.some((f) => !isSafeRelativeFilePath(f))) {
+        return badRequest('Each fileName must be a relative path of alphanumerics, hyphens, underscores, dots, or slashes, with no ".." segments');
       }
 
       const { dataAccess } = context;
@@ -2001,16 +2256,16 @@ function LlmoController(ctx) {
 
       const { dataFolder } = llmoConfig;
 
-      await appendRowsToQueryIndex(dataFolder, fileNames, env, log);
+      await reindexQueryIndexPaths(dataFolder, fileNames, env, log);
       await previewAndPublishQueryIndex(dataFolder, env, log);
 
-      log.info(`Successfully updated query-index.xlsx for domain ${domain} with ${fileNames.length} entries`);
+      log.info(`Successfully reindexed query-index.json for domain ${domain} with ${fileNames.length} entries`);
 
       return ok({
-        message: 'query-index.xlsx updated, previewed, and published successfully',
+        message: 'query-index.json reindexed, previewed, and published successfully',
         domain,
         dataFolder,
-        entriesAdded: fileNames.length,
+        entriesReindexed: fileNames.length,
       });
     } catch (error) {
       log.error(`Failed to update query-index for domain ${data?.domain}: ${error.message}`);
@@ -2080,11 +2335,15 @@ function LlmoController(ctx) {
     patchLlmoCdnBucketConfig,
     updateLlmoConfig,
     onboardCustomer,
+    onboardSiteOnly,
     offboardCustomer,
     queryFiles,
     patchLlmoDataRow,
     getLlmoRationale,
     getBrandClaims,
+    getBrandClaimsWeeks,
+    requestBrandClaims,
+    submitBrandClaimsFeedback,
     getDemoBrandPresence,
     getDemoRecommendations,
     createOrUpdateEdgeConfig,

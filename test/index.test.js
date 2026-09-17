@@ -11,6 +11,7 @@
  */
 
 import { Request } from '@adobe/fetch';
+import crypto from 'crypto';
 import { expect, use } from 'chai';
 import sinonChai from 'sinon-chai';
 import sinon from 'sinon';
@@ -119,7 +120,10 @@ describe('Index Tests', () => {
         authInfo: new AuthInfo()
           .withType('api-key')
           .withAuthenticated(true)
-          .withProfile({ user_id: 'test-user' }),
+          // is_admin marks this shared test identity as an internal admin (the
+          // api-key here doubles as ADMIN_API_KEY and hasAdminAccess is stubbed
+          // true below), so facsWrapper bypasses it as an internal identity.
+          .withProfile({ user_id: 'test-user', is_admin: true }),
       },
       env: {
         USER_API_KEY: apiKey,
@@ -133,6 +137,7 @@ describe('Index Tests', () => {
         IMS_CLIENT_CODE: 'mock-client-code',
         IMS_CLIENT_SECRET: 'mock-client-secret',
         IMPORT_CONFIGURATION: '{}',
+        POSTGREST_URL: 'https://postgrest.test',
         REPORT_JOBS_QUEUE_URL: 'https://sqs.example.com/reports-queue',
         S3_REPORT_BUCKET: 'test-reports-bucket',
         S3_MYSTIQUE_BUCKET: 'test-mystique-bucket',
@@ -173,7 +178,11 @@ describe('Index Tests', () => {
           findByHashedApiKey: sinon.stub().resolves(null),
         },
         Opportunity: {},
-        Suggestion: {},
+        Suggestion: { findById: sinon.stub() },
+        TaskManagementConnection: { allByOrganizationId: sinon.stub() },
+        Ticket: { findById: sinon.stub() },
+        TicketSuggestion: { findBySuggestionId: sinon.stub() },
+        IdempotencyKey: { findActiveKey: sinon.stub(), create: sinon.stub() },
       },
       s3Client: {
         send: sinon.stub(),
@@ -202,6 +211,117 @@ describe('Index Tests', () => {
     expect(resp.headers.plain()['x-error']).to.equal('wrong path format');
   });
 
+  // VULN-39365. These exercise the REAL middleware chain in src/index.js, not the wrapper in
+  // isolation: a correct slackSignatureWrapper that is mis-ordered or not mounted would leave
+  // the original forged-payload vulnerability live while the unit tests still passed.
+  //
+  // A `url_verification` body is used deliberately -- SlackController short-circuits it before
+  // initialising Bolt, so these assert the middleware chain without standing up a Slack app.
+  describe('Slack signature verification (wired through main)', () => {
+    const slackPath = '/slack/events';
+    const slackBody = JSON.stringify({ type: 'url_verification', challenge: 'challenge-token' });
+
+    const sign = (body, timestamp) => `v0=${crypto
+      .createHmac('sha256', slackSigningSecret)
+      .update(`v0:${timestamp}:${body}`, 'utf8')
+      .digest('hex')}`;
+
+    const slackRequest = (body, headers) => new Request(`${baseUrl}${slackPath}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...headers },
+      body,
+    });
+
+    beforeEach(() => {
+      // Deliberately set ONLY `suffix`, which in production comes from the Lambda adapter and
+      // NOT from enrichPathInfo. `method` and `headers` are left unset so they must be
+      // populated by the real enrichPathInfo in the chain -- otherwise these tests would
+      // supply the pathInfo the wrapper reads and would stay green even if a future `.with()`
+      // reorder broke the ordering they exist to protect.
+      context.pathInfo.suffix = slackPath;
+      delete context.pathInfo.method;
+      delete context.pathInfo.headers;
+    });
+
+    it('rejects an unsigned POST before it reaches the Slack controller', async () => {
+      const resp = await main(slackRequest(slackBody), context);
+
+      expect(resp.status).to.equal(401);
+      expect(resp.headers.plain()['x-error']).to.equal('slack signature verification failed');
+      // Proves the wrapper ran BEFORE the controller: otherwise the url_verification
+      // short-circuit would have echoed the challenge back.
+      expect(await resp.text()).to.not.contain('challenge-token');
+    });
+
+    it('rejects a POST signed with the wrong secret', async () => {
+      const timestamp = `${Math.floor(Date.now() / 1000)}`;
+      const forged = `v0=${crypto.createHmac('sha256', 'not-the-secret').update(`v0:${timestamp}:${slackBody}`, 'utf8').digest('hex')}`;
+
+      const resp = await main(slackRequest(slackBody, {
+        'x-slack-request-timestamp': timestamp,
+        'x-slack-signature': forged,
+      }), context);
+
+      expect(resp.status).to.equal(401);
+    });
+
+    it('lets a correctly signed POST through with its body still parseable', async () => {
+      const timestamp = `${Math.floor(Date.now() / 1000)}`;
+
+      const resp = await main(slackRequest(slackBody, {
+        'x-slack-request-timestamp': timestamp,
+        'x-slack-signature': sign(slackBody, timestamp),
+      }), context);
+
+      // Reaching the controller AND echoing the challenge proves bodyData still parsed the
+      // body after the wrapper consumed a clone of it.
+      expect(resp.status).to.equal(200);
+      expect(await resp.json()).to.deep.equal({ challenge: 'challenge-token' });
+    });
+
+    it('verifies a signed form-urlencoded interactive payload end to end', async () => {
+      // Slack posts interactive payloads (button clicks, modals) as form-urlencoded and signs
+      // the ENCODED body. This is the shape that reaches privileged handlers like approveOrg.
+      const payload = JSON.stringify({ type: 'block_actions', actions: [{ action_id: 'noop' }] });
+      const body = `payload=${encodeURIComponent(payload)}`;
+      const timestamp = `${Math.floor(Date.now() / 1000)}`;
+
+      const resp = await main(slackRequest(body, {
+        'content-type': 'application/x-www-form-urlencoded',
+        'x-slack-request-timestamp': timestamp,
+        'x-slack-signature': sign(body, timestamp),
+      }), context);
+
+      // Two things are under test, and both are proven by getting PAST these two layers:
+      //  1. the signature verified over the form-encoded bytes (not a 401), and
+      //  2. bodyData still parsed the body after the wrapper read a clone of it -- a broken
+      //     clone would surface as bodyData's own 400 'error parsing request body'.
+      // What Bolt then does with the payload is the controller's business, not this test's.
+      const xError = resp.headers.plain()['x-error'];
+      expect(resp.status).to.not.equal(401);
+      expect(xError).to.not.equal('slack signature verification failed');
+      expect(xError).to.not.equal('error parsing request body');
+    });
+
+    it('does not process Slack events over GET', async () => {
+      // The GET route is gone. The wrapper guards every non-preflight method on this suffix,
+      // so an unsigned GET is rejected at the signature layer rather than reaching a handler.
+      const resp = await main(new Request(`${baseUrl}${slackPath}`), context);
+
+      expect(resp.status).to.equal(401);
+      expect(await resp.text()).to.not.contain('challenge-token');
+    });
+
+    it('still answers an OPTIONS preflight on the Slack route', async () => {
+      const resp = await main(
+        new Request(`${baseUrl}${slackPath}`, { method: 'OPTIONS' }),
+        context,
+      );
+
+      expect(resp.status).to.equal(204);
+    });
+  });
+
   it('handles options request', async () => {
     context.pathInfo.suffix = '/test';
 
@@ -212,7 +332,7 @@ describe('Index Tests', () => {
     expect(resp.status).to.equal(204);
     expect(resp.headers.plain()).to.eql({
       'access-control-allow-methods': 'GET, HEAD, PATCH, POST, OPTIONS, DELETE',
-      'access-control-allow-headers': 'x-api-key, authorization, origin, x-requested-with, content-type, accept, x-import-api-key, x-client-type, x-trigger-audits, x-view-as-trial, x-promise-token',
+      'access-control-allow-headers': 'x-api-key, authorization, origin, x-requested-with, content-type, accept, x-import-api-key, x-client-type, x-trigger-audits, x-view-as-trial, x-view-full-experience, x-promise-token, x-promise-audience, if-match, idempotency-key',
       'access-control-max-age': '86400',
       'access-control-allow-origin': '*',
       'content-type': 'application/json; charset=utf-8',
@@ -373,21 +493,6 @@ describe('Index Tests', () => {
     expect(resp.headers.plain()['x-error']).to.equal('Job Id is invalid. Please provide a valid UUID.');
   });
 
-  it('rejects /sites/:siteId/preflights/:preflightId with invalid preflightId UUID', async () => {
-    const validSiteId = 'a1b2c3d4-1234-5678-9abc-def012345678';
-    context.pathInfo.suffix = `/sites/${validSiteId}/preflights/not-a-uuid`;
-
-    request = new Request(
-      `${baseUrl}/sites/${validSiteId}/preflights/not-a-uuid`,
-      { headers: { 'x-api-key': apiKey } },
-    );
-
-    const resp = await main(request, context);
-
-    expect(resp.status).to.equal(400);
-    expect(resp.headers.plain()['x-error']).to.equal('Preflight Id is invalid. Please provide a valid UUID.');
-  });
-
   it('rejects bare /tools/scrape/jobs/by-base-url misroute with invalid jobId', async () => {
     context.pathInfo.suffix = '/tools/scrape/jobs/by-base-url';
 
@@ -408,6 +513,20 @@ describe('Index Tests', () => {
 
     expect(resp.status).to.equal(400);
     expect(resp.headers.plain()['x-error']).to.equal('Job Id is invalid. Please provide a valid UUID.');
+  });
+
+  it('rejects task-management connection route with invalid connectionId', async () => {
+    const orgId = 'e730ec12-4325-4bdd-ac71-0f4aa5b18cff';
+    context.pathInfo.suffix = `/organizations/${orgId}/task-management/connections/not-a-uuid`;
+
+    request = new Request(`${baseUrl}/organizations/${orgId}/task-management/connections/not-a-uuid`, {
+      headers: { 'x-api-key': apiKey },
+    });
+
+    const resp = await main(request, context);
+
+    expect(resp.status).to.equal(400);
+    expect(resp.headers.plain()['x-error']).to.equal('Connection Id is invalid. Please provide a valid UUID.');
   });
 
   it('handles dynamic route errors', async () => {
@@ -467,6 +586,26 @@ describe('Index Tests', () => {
     expect(capturedOpts.internalRoutes, 'internalRoutes must be a non-empty array').to.be.an('array').that.is.not.empty;
     // Sanity-check a known internal route is present so an accidental empty list is caught
     expect(capturedOpts.internalRoutes).to.include('POST /event/fulfillment');
+    expect(testMain).to.exist; // reference to satisfy no-unused-vars
+  });
+
+  it('wires facsWrapper with routeFacsCapabilities (PRODUCTS_ROUTES present)', async () => {
+    let capturedOpts;
+    const { main: testMain } = await esmock('../src/index.js', {
+      '@adobe/spacecat-shared-http-utils': {
+        facsWrapper: (fn, opts) => {
+          capturedOpts = opts;
+          return fn;
+        },
+        s2sAuthWrapper: s2sAuthWrapperStub,
+      },
+    });
+    expect(capturedOpts, 'facsWrapper must receive an options object').to.be.an('object');
+    expect(capturedOpts, 'routeFacsCapabilities must be passed to facsWrapper').to.have.property('routeFacsCapabilities');
+    expect(capturedOpts.routeFacsCapabilities, 'routeFacsCapabilities must be an object').to.be.an('object');
+    // The wrapper requires PRODUCTS_ROUTES; sanity-check it is present and non-empty.
+    expect(capturedOpts.routeFacsCapabilities).to.have.property('PRODUCTS_ROUTES');
+    expect(capturedOpts.routeFacsCapabilities.PRODUCTS_ROUTES, 'PRODUCTS_ROUTES must be a non-empty object').to.be.an('object').that.is.not.empty;
     expect(testMain).to.exist; // reference to satisfy no-unused-vars
   });
 });

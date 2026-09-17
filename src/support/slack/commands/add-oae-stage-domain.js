@@ -12,6 +12,7 @@
 
 import { Config } from '@adobe/spacecat-shared-data-access/src/models/site/config.js';
 import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
+import { hasSamePathname } from '@adobe/spacecat-shared-utils';
 import BaseCommand from './base.js';
 import {
   extractURLFromSlackInput,
@@ -109,6 +110,10 @@ function AddOaeStageDomainCommand(context) {
         const existing = await Site.findByBaseURL(stageBaseURL);
         if (existing && existing.getOrganizationId() !== organizationId) {
           throw new Error(`Stage domain \`${domain}\` already belongs to a different organization.`);
+        }
+
+        if (!hasSamePathname(stageBaseURL, prodBaseURL)) {
+          throw new Error(`Stage domain \`${domain}\` must be within the site pathname scope of the production site`);
         }
       }
       /* eslint-enable no-await-in-loop */

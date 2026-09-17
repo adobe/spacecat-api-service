@@ -14,7 +14,7 @@ import { use, expect } from 'chai';
 import chaiAsPromised from 'chai-as-promised';
 import sinon from 'sinon';
 
-import { FixDto } from '../../src/dto/fix.js';
+import { FixDto, withLegacyDocumentPath } from '../../src/dto/fix.js';
 import { SuggestionDto } from '../../src/dto/suggestion.js';
 
 use(chaiAsPromised);
@@ -34,6 +34,7 @@ describe('Fix DTO', () => {
     getUpdatedAt: () => '2025-01-02T00:00:00.000Z',
     getExecutedBy: () => 'user@example.com',
     getExecutedAt: () => '2025-01-03T00:00:00.000Z',
+    getDeployedAt: () => '2025-01-03T06:00:00.000Z',
     getPublishedAt: () => '2025-01-04T00:00:00.000Z',
     getChangeDetails: () => ({ field: 'value' }),
     getStatus: () => 'PENDING',
@@ -68,12 +69,21 @@ describe('Fix DTO', () => {
         updatedAt: '2025-01-02T00:00:00.000Z',
         executedBy: 'user@example.com',
         executedAt: '2025-01-03T00:00:00.000Z',
+        deployedAt: '2025-01-03T06:00:00.000Z',
         publishedAt: '2025-01-04T00:00:00.000Z',
         changeDetails: { field: 'value' },
         status: 'PENDING',
         origin: 'MANUAL',
       });
       expect(json).to.not.have.property('suggestions');
+    });
+
+    it('emits deployedAt as null for fixes predating the deployed_at column', () => {
+      const fix = createMockFix({ getDeployedAt: () => null });
+
+      const json = FixDto.toJSON(fix);
+
+      expect(json.deployedAt).to.equal(null);
     });
 
     it('converts a fix entity with suggestions to JSON', () => {
@@ -119,8 +129,19 @@ describe('Fix DTO', () => {
       expect(json.suggestions[0].id).to.equal('suggestion-id-1');
       expect(json.suggestions[1].id).to.equal('suggestion-id-2');
       expect(SuggestionDto.toJSON).to.have.been.calledTwice;
-      expect(SuggestionDto.toJSON).to.have.been.calledWith(suggestion1);
-      expect(SuggestionDto.toJSON).to.have.been.calledWith(suggestion2);
+      expect(SuggestionDto.toJSON).to.have.been.calledWith(suggestion1, 'full', null, null);
+      expect(SuggestionDto.toJSON).to.have.been.calledWith(suggestion2, 'full', null, null);
+    });
+
+    it('passes locale through to embedded suggestion DTOs', () => {
+      const suggestion = createMockSuggestion('suggestion-id-1');
+      const fix = createMockFix({ _suggestions: [suggestion] });
+
+      sandbox.stub(SuggestionDto, 'toJSON').returns({ id: 'suggestion-id-1' });
+
+      FixDto.toJSON(fix, 'fr_fr');
+
+      expect(SuggestionDto.toJSON).to.have.been.calledOnceWith(suggestion, 'full', null, 'fr_fr');
     });
 
     it('converts a fix entity with empty suggestions array to JSON', () => {
@@ -164,6 +185,43 @@ describe('Fix DTO', () => {
       expect(json).to.not.have.property('suggestions');
     });
 
+    it('includes executedByUser when _executedByUser is set', () => {
+      const fix = createMockFix({
+        _executedByUser: { firstName: 'Jane', lastName: 'Doe', email: 'jane@example.com' },
+      });
+
+      const json = FixDto.toJSON(fix);
+
+      expect(json).to.have.property('executedByUser');
+      expect(json.executedByUser).to.deep.equal({
+        firstName: 'Jane',
+        lastName: 'Doe',
+        email: 'jane@example.com',
+      });
+    });
+
+    it('excludes executedByUser when _executedByUser is not set', () => {
+      const fix = createMockFix();
+
+      const json = FixDto.toJSON(fix);
+
+      expect(json).to.not.have.property('executedByUser');
+    });
+
+    it('passes through null name fields when IMS profile has no name data', () => {
+      const fix = createMockFix({
+        _executedByUser: { firstName: null, lastName: null, email: 'unknown@example.com' },
+      });
+
+      const json = FixDto.toJSON(fix);
+
+      expect(json.executedByUser).to.deep.equal({
+        firstName: null,
+        lastName: null,
+        email: 'unknown@example.com',
+      });
+    });
+
     it('correctly maps suggestions using SuggestionDto.toJSON', () => {
       const suggestion = createMockSuggestion('suggestion-id-123');
       const fix = createMockFix({
@@ -188,7 +246,69 @@ describe('Fix DTO', () => {
       const json = FixDto.toJSON(fix);
 
       expect(json.suggestions).to.deep.equal([expectedSuggestionJson]);
-      expect(SuggestionDto.toJSON).to.have.been.calledOnceWith(suggestion);
+      expect(SuggestionDto.toJSON).to.have.been.calledOnceWith(suggestion, 'full', null, null);
+    });
+
+    it('back-fills top-level documentPath from a v2 changeDetails.target.documentPath', () => {
+      const fix = createMockFix({
+        getChangeDetails: () => ({
+          schemaVersion: 2,
+          surface: 'ASO',
+          actorType: 'IMS_USER',
+          target: {
+            changeType: 'link-replace',
+            documentPath: 'https://author.example.com/mnt/overlay/.../redirects.xlsx',
+            changes: [],
+          },
+        }),
+      });
+
+      const json = FixDto.toJSON(fix);
+
+      expect(json.changeDetails.documentPath).to.equal(
+        'https://author.example.com/mnt/overlay/.../redirects.xlsx',
+      );
+      // original v2 record is preserved, not replaced
+      expect(json.changeDetails.target.documentPath).to.equal(
+        'https://author.example.com/mnt/overlay/.../redirects.xlsx',
+      );
+    });
+
+    it('does not overwrite an existing top-level documentPath', () => {
+      const fix = createMockFix({
+        getChangeDetails: () => ({
+          documentPath: 'https://legacy.example.com/edit.html',
+          target: { documentPath: 'https://v2.example.com/edit.html' },
+        }),
+      });
+
+      const json = FixDto.toJSON(fix);
+
+      expect(json.changeDetails.documentPath).to.equal('https://legacy.example.com/edit.html');
+    });
+
+    it('leaves changeDetails untouched when neither documentPath location is set', () => {
+      const fix = createMockFix({ getChangeDetails: () => ({ schemaVersion: 2, target: {} }) });
+
+      const json = FixDto.toJSON(fix);
+
+      expect(json.changeDetails).to.deep.equal({ schemaVersion: 2, target: {} });
+    });
+
+    it('handles a null/undefined changeDetails without throwing', () => {
+      const fix = createMockFix({ getChangeDetails: () => null });
+
+      const json = FixDto.toJSON(fix);
+
+      expect(json.changeDetails).to.equal(null);
+    });
+  });
+
+  describe('withLegacyDocumentPath', () => {
+    it('returns the input unchanged when there is nothing to back-fill', () => {
+      expect(withLegacyDocumentPath(undefined)).to.equal(undefined);
+      expect(withLegacyDocumentPath(null)).to.equal(null);
+      expect(withLegacyDocumentPath({ foo: 'bar' })).to.deep.equal({ foo: 'bar' });
     });
   });
 });

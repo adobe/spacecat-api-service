@@ -78,16 +78,17 @@ const printSiteDetails = async (site, isAuditEnabled = true, psiStrategy = 'mobi
 
   const auditDisabledText = !isAuditEnabled ? ':warning: LHS audits have been disabled for site or strategy! This is usually done when PSI audits experience errors due to the target having issues (e.g. DNS or 404).\n' : '';
 
-  // Fetch organization to get IMS Org ID
+  // Fetch organization to get IMS Org ID and name
   const organization = await site.getOrganization();
   const imsOrgId = organization?.getImsOrgId();
+  const orgName = organization?.getName();
 
   return `${auditDisabledText}
       :identification_card: ${site.getId()}
       :cat-egory-white: ${site.getDeliveryType()}
       :github-4173: ${site.getGitHubURL() || '_not set_'}
       :space-cat: ${site.getOrganizationId() || '_not set_'}
-      :ims: ${imsOrgId || '_not set_'}
+      :ims: ${imsOrgId ? `${imsOrgId}${orgName ? ` (${orgName})` : ''}` : '_not set_'}
       ${site.getIsLive() ? `:rocket: Is live (${formatDate(site.getIsLiveToggledAt())})` : ':submarine: Is not live'}
       :lighthouse: ${viewPSILink}${runPSILink}
     `;

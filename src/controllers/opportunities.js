@@ -25,13 +25,27 @@ import {
   arrayEquals,
   isValidUUID,
 } from '@adobe/spacecat-shared-utils';
+import { Opportunity as OpportunityModel } from '@adobe/spacecat-shared-data-access';
 import { OpportunityDto } from '../dto/opportunity.js';
+import { isValidLocale } from '../utils/validations.js';
+import { applyFieldProjection } from '../utils/field-projection.js';
+import { lookupByUrl } from '../support/lookup-by-url.js';
+import { requirePostgrestClient } from '../support/postgrest-availability.js';
 import AccessControlUtil from '../support/access-control-util.js';
-import { grantSuggestionsForOpportunity } from '../support/grant-suggestions-handler.js';
+import { filterOpportunitiesByFacsComposite } from '../support/facs-composite-resolvers.js';
+import {
+  grantSuggestionsForOpportunity,
+  revokeExistingGrants,
+  revokeGrantsForOpportunity,
+} from '../support/grant-suggestions-handler.js';
 import { getIsSummitPlgEnabled } from '../support/utils.js';
 
 const VALIDATION_ERROR_NAME = 'ValidationError';
 const SUMMIT_PLG_ALLOWED_TYPES = ['broken-backlinks', 'cwv', 'alt-text'];
+
+// Lightweight default projection for the by-url lookup (omits the heavy `data` blob;
+// callers opt in via `fields=...,data`).
+const OPPORTUNITY_BY_URL_LIGHTWEIGHT_FIELDS = ['id', 'type', 'status', 'title', 'updatedAt'];
 
 /**
  * Opportunities controller.
@@ -63,7 +77,7 @@ function OpportunitiesController(ctx) {
    * @returns {Promise<Array>} Filtered (or unfiltered) opportunities
    */
   async function filterForSummitPlg(site, opportunities, requestContext) {
-    if (await getIsSummitPlgEnabled(site, ctx, requestContext)) {
+    if (await getIsSummitPlgEnabled(site, ctx, requestContext, accessControlUtil)) {
       return opportunities.filter(
         (oppty) => SUMMIT_PLG_ALLOWED_TYPES.includes(oppty.getType()),
       );
@@ -96,6 +110,11 @@ function OpportunitiesController(ctx) {
    */
   const getAllForSite = async (context) => {
     const siteId = context.params?.siteId;
+    const locale = context.data?.locale ?? null;
+
+    if (!isValidLocale(locale)) {
+      return badRequest('Invalid locale format');
+    }
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -110,10 +129,16 @@ function OpportunitiesController(ctx) {
     }
 
     const allOpptys = await Opportunity.allBySiteId(siteId);
-    const opptys = (await filterForSummitPlg(site, allOpptys, context))
-      .map((oppty) => OpportunityDto.toJSON(oppty));
+    const summitFiltered = await filterForSummitPlg(site, allOpptys, context);
+    // D4: narrow to the caller's ReBAC-permitted opportunity types (composite key).
+    const opptys = filterOpportunitiesByFacsComposite(context, summitFiltered)
+      .map((oppty) => OpportunityDto.toJSON(oppty, locale));
 
-    return ok(opptys);
+    const { list, error } = applyFieldProjection(opptys, context.data?.fields);
+    if (error) {
+      return badRequest(error);
+    }
+    return ok(list);
   };
 
   /**
@@ -124,6 +149,11 @@ function OpportunitiesController(ctx) {
   const getByStatus = async (context) => {
     const siteId = context.params?.siteId;
     const status = context.params?.status;
+    const locale = context.data?.locale ?? null;
+
+    if (!isValidLocale(locale)) {
+      return badRequest('Invalid locale format');
+    }
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -141,10 +171,97 @@ function OpportunitiesController(ctx) {
     }
 
     const allOpptys = await Opportunity.allBySiteIdAndStatus(siteId, status);
-    const opptys = (await filterForSummitPlg(site, allOpptys, context))
-      .map((oppty) => OpportunityDto.toJSON(oppty));
+    const summitFiltered = await filterForSummitPlg(site, allOpptys, context);
+    // D4: narrow to the caller's ReBAC-permitted opportunity types (composite key).
+    const opptys = filterOpportunitiesByFacsComposite(context, summitFiltered)
+      .map((oppty) => OpportunityDto.toJSON(oppty, locale));
 
-    return ok(opptys);
+    const { list, error } = applyFieldProjection(opptys, context.data?.fields);
+    if (error) {
+      return badRequest(error);
+    }
+    return ok(list);
+  };
+
+  /**
+   * Looks up opportunities backed by any of the supplied source URLs, across all of the site's
+   * opportunity types. POST body: `{ urls: [...], fields?, status?, limit?, cursor?, locale? }`
+   * (all parameters travel in the body, not as query params - this middleware stack only ever
+   * exposes `request.json()` as `context.data` for a JSON POST, mirroring the agentic-traffic
+   * hits-by-urls endpoint). See the Lookup Service architecture doc ("Offsite Intelligence -
+   * Funneling"), section 4.2, in the gambit-ai-toolkit knowledge base.
+   * @param {Object} context of the request
+   * @returns {Promise<Response>} Normalized results + opportunities map + pagination.
+   */
+  const getByUrl = async (context) => {
+    const siteId = context.params?.siteId;
+    const locale = context.data?.locale ?? null;
+
+    if (!isValidLocale(locale)) {
+      return badRequest('Invalid locale format');
+    }
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('Only users belonging to the organization of the site can view its opportunities');
+    }
+
+    // requirePostgrestClient (not requirePostgrest) because this controller closes over
+    // `dataAccess` once per request rather than reading it off the per-call `context` argument.
+    const postgrestClient = dataAccess.services?.postgrestClient;
+    const guard = requirePostgrestClient(postgrestClient, {
+      errorMessage: 'URL lookup requires Postgres (DATA_SERVICE_PROVIDER=postgres)',
+    });
+    if (guard) {
+      return guard;
+    }
+
+    const { response, error } = await lookupByUrl(postgrestClient, {
+      table: 'opportunity_urls',
+      siteId,
+      rawUrls: context.data?.urls,
+      params: context.data ?? {},
+      log: ctx.log,
+      validStatuses: Object.values(OpportunityModel.STATUSES),
+      defaultExcludedStatuses: [OpportunityModel.STATUSES.IGNORED],
+      fetchEntities: async (ids) => {
+        const { data } = await Opportunity.batchGetByKeys(ids.map((id) => ({ opportunityId: id })));
+        return data ?? [];
+      },
+      // Narrow to what the caller may see, exactly like getAllForSite/getByStatus: the
+      // site-ownership check first (the index row is derived, best-effort-written data, and
+      // must never be the sole authority for a tenancy decision - see ADR/design doc), then
+      // Summit-PLG type gating + D4 FACS composite (per-opportunity-type ReBAC).
+      filterEntities: async (opptys) => {
+        const owned = opptys.filter((o) => o.getSiteId() === siteId);
+        if (owned.length !== opptys.length) {
+          ctx.log?.warn?.(`[opportunities.getByUrl] dropped ${opptys.length - owned.length} opportunity(ies) `
+            + `whose siteId did not match the requested site ${siteId} - the opportunity_urls index may be stale`);
+        }
+        const permitted = await filterForSummitPlg(site, owned, context);
+        return filterOpportunitiesByFacsComposite(context, permitted);
+      },
+      getId: (oppty) => oppty.getId(),
+      getStatus: (oppty) => oppty.getStatus(),
+      getSortKey: (oppty) => oppty.getId(),
+      toFullDto: (oppty) => OpportunityDto.toJSON(oppty, locale),
+      lightweightFields: OPPORTUNITY_BY_URL_LIGHTWEIGHT_FIELDS,
+      forceFields: ['id'],
+      idListKey: 'opportunityIds',
+      mapKey: 'opportunities',
+      includeNoMatchInResults: true,
+    });
+    if (error) {
+      return badRequest(error);
+    }
+    return ok(response);
   };
 
   /**
@@ -155,6 +272,11 @@ function OpportunitiesController(ctx) {
   const getByID = async (context) => {
     const siteId = context.params?.siteId;
     const opptyId = context.params?.opportunityId;
+    const locale = context.data?.locale ?? null;
+
+    if (!isValidLocale(locale)) {
+      return badRequest('Invalid locale format');
+    }
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -176,7 +298,7 @@ function OpportunitiesController(ctx) {
     if (!oppty || oppty.getSiteId() !== siteId) {
       return notFound('Opportunity not found');
     }
-    if (await getIsSummitPlgEnabled(site, ctx, context)) {
+    if (await getIsSummitPlgEnabled(site, ctx, context, accessControlUtil)) {
       try {
         await grantSuggestionsForOpportunity(dataAccess, site, oppty);
       /* c8 ignore next 3 */
@@ -184,7 +306,7 @@ function OpportunitiesController(ctx) {
         ctx.log?.warn?.('Grant suggestions handler failed', err?.message ?? err);
       }
     }
-    return ok(OpportunityDto.toJSON(oppty));
+    return ok(OpportunityDto.toJSON(oppty, locale));
   };
 
   /**
@@ -257,6 +379,7 @@ function OpportunitiesController(ctx) {
     const { auditId, runbook, data, title, description, status, guidance, tags } = context.data;
     // update opportunity with new data
     let hasUpdates = false;
+    let isResolving = false;
     try {
       if (auditId && auditId !== opportunity.getAuditId()) {
         hasUpdates = true;
@@ -281,6 +404,7 @@ function OpportunitiesController(ctx) {
       }
       if (status && status !== opportunity.getStatus()) {
         hasUpdates = true;
+        isResolving = status === OpportunityModel.STATUSES.RESOLVED;
         opportunity.setStatus(status);
       }
       if (isNonEmptyObject(guidance)) {
@@ -294,6 +418,20 @@ function OpportunitiesController(ctx) {
       if (hasUpdates) {
         opportunity.setUpdatedBy(profile.email || 'system');
         const updatedOppty = await opportunity.save(opportunity);
+
+        if (isResolving) {
+          try {
+            // No requestContext: revocation must apply regardless of the caller
+            // (UI or backend-initiated resolve), unlike the UI-only PLG filtering above.
+            if (await getIsSummitPlgEnabled(site, ctx)) {
+              await revokeExistingGrants(dataAccess, updatedOppty);
+            }
+          /* c8 ignore next 3 */
+          } catch (err) {
+            ctx.log?.warn?.(`Revoke existing grants handler failed for opportunity ${opportunityId} on site ${siteId}`, err?.message ?? err);
+          }
+        }
+
         return ok(OpportunityDto.toJSON(updatedOppty));
       }
     } catch (e) {
@@ -333,6 +471,12 @@ function OpportunitiesController(ctx) {
     }
 
     try {
+      await revokeGrantsForOpportunity(dataAccess, opportunity);
+    } catch (revokeError) {
+      ctx.log?.warn?.(`Failed to revoke grants for opportunity ${opportunityId} on site ${siteId}`, revokeError?.message ?? revokeError);
+    }
+
+    try {
       await opportunity.remove(); // also removes suggestions associated with opportunity
       return noContent();
     } catch (e) {
@@ -345,6 +489,7 @@ function OpportunitiesController(ctx) {
     getAllForSite,
     getByID,
     getByStatus,
+    getByUrl,
     patchOpportunity,
     removeOpportunity,
   };

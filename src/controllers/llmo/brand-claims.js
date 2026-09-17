@@ -10,15 +10,108 @@
  * governing permissions and limitations under the License.
  */
 
+import { createHmac } from 'node:crypto';
 import {
-  badRequest, notFound,
+  badRequest, notFound, accepted, internalServerError, createResponse,
 } from '@adobe/spacecat-shared-http-utils';
+import { hasText, isValidUUID } from '@adobe/spacecat-shared-utils';
+import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
+import { HeadObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
 import { cachedOk } from '../../support/cached-response.js';
+import { dateToIsoWeek } from '../../support/elements/week-utils.js';
+import { isValidLocale } from '../../utils/validations.js';
+import { postSlackMessage } from '../../utils/slack/base.js';
+import { getBrandById } from '../../support/brands-storage.js';
+import { redactFeedbackContent } from '../../support/feedback-redaction.js';
+import { resolveCallerImsUserId } from '../../support/utils.js';
+
+const CLAIMS_PREFIX = 'brand_claims/llmo';
+const WEEK_RE = /^\d{4}-W\d{2}$/;
+
+// Default and hard cap for the `weeks` listing endpoint. The UI shows the most
+// recent runs, so the default is small; the cap bounds an unbounded caller-
+// supplied `limit` (a year of weekly runs) without ever paging past one S3 list.
+const DEFAULT_WEEKS_LIMIT = 15;
+const MAX_WEEKS_LIMIT = 52;
+const PRODUCT_FEEDBACK_PREFIX = 'product_feedback/brand_claims';
+const PRODUCT_FEEDBACK_NOTE_MAX_LENGTH = 4000;
+const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/**
+ * List the ISO-week (`YYYY-Www`) run folders under a site's brand-claims prefix,
+ * newest first. Zero-padded `YYYY-Www` sorts lexicographically, so a descending
+ * string sort orders the weeks chronologically. Non-week folders (e.g. a legacy
+ * flat file's sibling) are ignored. Throws on an S3 failure — callers decide
+ * whether to fall back or surface the error.
+ *
+ * @returns {Promise<{ weeks: string[], prefix: string }>} descending week segments.
+ */
+async function listWeekFolders(s3, bucketName, siteId, log) {
+  const prefix = `${CLAIMS_PREFIX}/${siteId}/`;
+  const res = await s3.s3Client.send(new ListObjectsV2Command({
+    Bucket: bucketName,
+    Prefix: prefix,
+    Delimiter: '/',
+  }));
+  // One folder per ISO week keeps this well under the 1000-prefix page limit
+  // (~19 years), so pagination is intentionally omitted; warn if that changes.
+  if (res.IsTruncated) {
+    log.warn(`Brand claims week listing truncated for site ${siteId}; week resolution may be incomplete`);
+  }
+  const weeks = [];
+  for (const cp of res.CommonPrefixes || []) {
+    const seg = cp.Prefix.slice(prefix.length).replace(/\/$/, '');
+    if (WEEK_RE.test(seg)) {
+      weeks.push(seg);
+    }
+  }
+  weeks.sort((a, b) => (a < b ? 1 : -1)); // newest first
+  return { weeks, prefix };
+}
+
+// Audit type + 7-day cooldown for on-demand Brand Claims runs (LLMO-7263). Trial
+// customers may request a fresh run at most once per week; the UI shows the same
+// window, and this is the authoritative server-side backstop (the UI gate is
+// bypassable). Kept in step with project-elmo-ui's BRAND_CLAIMS_REQUEST_COOLDOWN_MS.
+const BRAND_CLAIMS_AUDIT_TYPE = 'brand-claims';
+const BRAND_CLAIMS_REQUEST_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
+// `model` is interpolated into the S3 key, so constrain it to alphanumerics,
+// dots, hyphens, underscores — no `/` — to prevent using HeadObject as an
+// object-existence probe across arbitrary key paths.
+const MODEL_RE = /^[\w.-]+$/;
+// `locale` is interpolated into the S3 key too, so it is validated with the shared
+// `isValidLocale` (strict `xx_yy` shape) before it can reach a key — one definition of
+// "valid locale" across the service, and it blocks `..`, slashes, and arbitrary path
+// segments (S3 key injection) just like MODEL_RE.
+
+/**
+ * Latest run key for a site: the lexically-greatest `YYYY-Www` folder under the
+ * site prefix. Returns null when no week folder exists yet (caller falls back to
+ * the legacy flat key).
+ */
+async function latestWeekKey(s3, bucketName, siteId, log) {
+  try {
+    const { weeks, prefix } = await listWeekFolders(s3, bucketName, siteId, log);
+    return weeks.length ? `${prefix}${weeks[0]}/data.json.gz` : null;
+  } catch (err) {
+    // Best-effort: a listing failure falls back to the legacy flat key rather
+    // than failing the request (a genuinely missing object still 404s at HEAD).
+    log.warn(`Failed to list brand claims weeks for site ${siteId}: ${err.message}`);
+    return null;
+  }
+}
 
 /**
  * Handles the brand claims retrieval by generating a presigned S3 URL.
  * Data files are .json.gz and can exceed Lambda's 6MB response limit,
  * so this endpoint returns a presigned URL rather than the data directly.
+ *
+ * Runs are stored per ISO week (`{siteId}/{YYYY-Www}/data.json.gz`). With no
+ * selector, the latest week is served (falling back to the legacy flat
+ * `{siteId}/data.json.gz` for sites not yet migrated). A `week` (`YYYY-Www`, as
+ * returned by the weeks-listing endpoint) keys that week directly; a `date`
+ * (`YYYY-MM-DD`) resolves to its ISO week; `week` wins if both are set. A
+ * `model` selects a legacy flat `{model}.json.gz` file, unchanged.
  *
  * @param {object} context - The request context containing log, s3, env, and params
  * @returns {Promise<Response>} The brand claims presigned URL response
@@ -26,7 +119,9 @@ import { cachedOk } from '../../support/cached-response.js';
 export async function handleBrandClaims(context) {
   const { log, s3 } = context;
   const { siteId } = context.params;
-  const { model } = context.data;
+  const {
+    model, date, week, locale,
+  } = context.data;
 
   if (!s3 || !s3.s3Client) {
     return badRequest('S3 storage is not configured for this environment');
@@ -37,14 +132,106 @@ export async function handleBrandClaims(context) {
     return badRequest('S3 bucket is not configured for this environment');
   }
 
-  const s3Key = model
-    ? `brand_claims/llmo/${siteId}/${model}.json.gz`
-    : `brand_claims/llmo/${siteId}/data.json.gz`;
+  if (model !== undefined && !MODEL_RE.test(model)) {
+    return badRequest('Invalid model parameter');
+  }
 
-  log.info(`Getting brand claims for site ${siteId}, model: ${model || 'default'}`);
+  // `locale` selects a localized sibling of the default `data.json.gz`
+  // (`data.<locale>.json.gz`). It applies ONLY to the default `data` family, so
+  // it is ignored when `model` is set (model files are not localized) — model
+  // wins, keeping the two selectors from interacting. Validate strictly here,
+  // before it can reach an S3 key (trust boundary).
+  const useLocale = !model && hasText(locale);
+  if (useLocale && !isValidLocale(locale)) {
+    return badRequest('Invalid locale parameter: expected e.g. ja_jp');
+  }
+
+  // Model files are managed flat (not week-partitioned) and take precedence;
+  // `week` (a `YYYY-Www` returned by the weeks-listing endpoint) keys its folder
+  // directly; `date` resolves to its ISO week; otherwise default to the legacy
+  // flat key and upgrade it to the latest week (via a list) inside the try below.
+  // `week` and `date` are two spellings of the same selector — `week` wins when
+  // both are set (it needs no date→week conversion). Each is validated only in
+  // the branch that uses it.
+  let s3Key;
+  if (model) {
+    s3Key = `${CLAIMS_PREFIX}/${siteId}/${model}.json.gz`;
+  } else if (week) {
+    if (!WEEK_RE.test(week)) {
+      return badRequest('Invalid week parameter: expected YYYY-Www format');
+    }
+    s3Key = `${CLAIMS_PREFIX}/${siteId}/${week}/data.json.gz`;
+  } else if (date) {
+    // Round-trip parse (UTC): rejects unparseable dates AND ones JS silently
+    // rolls over (e.g. 2026-02-30 -> Mar 2), which would key the wrong week.
+    const parsed = new Date(`${date}T00:00:00Z`);
+    if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date) {
+      return badRequest('Invalid date parameter: expected YYYY-MM-DD format');
+    }
+    s3Key = `${CLAIMS_PREFIX}/${siteId}/${dateToIsoWeek(date)}/data.json.gz`;
+  } else {
+    s3Key = `${CLAIMS_PREFIX}/${siteId}/data.json.gz`;
+  }
+
+  let selectorLog = '';
+  if (week) {
+    selectorLog = `, week: ${week}`;
+  } else if (date) {
+    selectorLog = `, date: ${date}`;
+  }
+  log.info(`Getting brand claims for site ${siteId}, model: ${model || 'default'}${selectorLog}`);
 
   try {
     const { getSignedUrl, GetObjectCommand } = s3;
+
+    if (!model && !week && !date) {
+      const latest = await latestWeekKey(s3, bucketName, siteId, log);
+      if (latest) {
+        s3Key = latest;
+      }
+    }
+
+    // Localization: when a valid `locale` is requested, prefer the localized
+    // sibling that mystique writes next to the resolved English file
+    // (`data.json.gz` -> `data.<locale>.json.gz`, in the same week/flat folder),
+    // and transparently fall back to English when that sibling does not exist.
+    // getSignedUrl never checks existence, so an explicit HeadObject is the only
+    // way to detect a missing localized file. `servedLocale` reports which one
+    // the caller actually got so the UI can tell whether it fell back.
+    let servedLocale = 'default';
+    let verified = false;
+    const localizedKey = useLocale ? s3Key.replace(/data\.json\.gz$/, `data.${locale}.json.gz`) : s3Key;
+    // The regex-replace only produces a distinct key when the resolved English key ends
+    // in `data.json.gz` (true for every default-family branch today). Guard on
+    // `localizedKey !== s3Key` so that if a future key shape ever breaks that invariant,
+    // the replace no-op can't make us HEAD the English object and then report
+    // `servedLocale = locale` for an English file — a silent misreport.
+    if (useLocale && localizedKey !== s3Key) {
+      try {
+        await s3.s3Client.send(new HeadObjectCommand({ Bucket: bucketName, Key: localizedKey }));
+        s3Key = localizedKey;
+        servedLocale = locale;
+        verified = true; // localized object confirmed present; no second HEAD needed
+      } catch (localeError) {
+        if (localeError.name === 'NotFound' || localeError.$metadata?.httpStatusCode === 404) {
+          log.info(`Localized brand claims not found for site ${siteId} locale ${locale}; falling back to English`);
+        } else {
+          throw localeError; // NoSuchBucket / transient faults -> shared handler below
+        }
+      }
+    }
+
+    // Presigning a GetObject URL is an offline operation and never checks that
+    // the object exists, so without this HeadObject the endpoint would happily
+    // hand out a URL that 404s on fetch. Verify existence first and return a
+    // clean 404 otherwise (mirrors getFanoutReport). Skipped only when the
+    // localized HEAD above already confirmed this exact key. This also lets
+    // callers use the endpoint as a cheap availability probe (e.g. an "all
+    // brands" view).
+    if (!verified) {
+      await s3.s3Client.send(new HeadObjectCommand({ Bucket: bucketName, Key: s3Key }));
+    }
+
     const command = new GetObjectCommand({
       Bucket: bucketName,
       Key: s3Key,
@@ -56,20 +243,405 @@ export async function handleBrandClaims(context) {
     return cachedOk({
       siteId,
       model: model || 'default',
+      requestedLocale: useLocale ? locale : null,
+      servedLocale,
       presignedUrl: url,
       expiresAt: new Date(Date.now() + expiresIn * 1000).toISOString(),
     });
   } catch (s3Error) {
-    if (s3Error.name === 'NoSuchKey') {
+    if (s3Error.name === 'NotFound' || s3Error.$metadata?.httpStatusCode === 404) {
       log.warn(`Brand claims file not found for site ${siteId} at ${s3Key}`);
       return notFound(`Brand claims data not found for site ${siteId}`);
     }
     if (s3Error.name === 'NoSuchBucket') {
       log.error(`S3 bucket ${bucketName} not found`);
-      return badRequest(`Storage bucket not found: ${bucketName}`);
+      return badRequest('S3 storage is not properly configured for this environment');
     }
 
+    // Keep the raw AWS error (message, bucket, key layout) in the log only — echoing it
+    // to the client leaks recon primitives (e.g. an AccessDenied surfaces account/role/
+    // bucket), and trial users can reach this endpoint. Return generic text + a 5xx, so a
+    // real S3 fault isn't mislabelled a 400 (mirrors handleBrandClaimsWeeks).
     log.error(`S3 error retrieving brand claims for site ${siteId}: ${s3Error.message}`);
-    return badRequest(`Error retrieving brand claims: ${s3Error.message}`);
+    return internalServerError('Unable to retrieve brand claims');
   }
+}
+
+/**
+ * Lists the ISO weeks (`YYYY-Www`) for which a brand-claims run exists for a
+ * site, newest first, capped at `limit` (default 15, max 52). The UI uses this
+ * to offer a week picker instead of only ever showing the latest run; a listed
+ * week is fetched directly via `GET .../brand-claims?week=<YYYY-Www>` (or the
+ * `?date=<any-date-in-that-week>` alternative). Returns an empty list (not a
+ * 404) when no week-partitioned runs exist, so the caller can distinguish
+ * "no history yet" from a hard failure.
+ *
+ * @param {object} context - The request context containing log, s3, and params.
+ * @returns {Promise<Response>} `{ siteId, weeks, count }`.
+ */
+export async function handleBrandClaimsWeeks(context) {
+  const { log, s3 } = context;
+  const { siteId } = context.params;
+
+  if (!s3 || !s3.s3Client) {
+    return badRequest('S3 storage is not configured for this environment');
+  }
+
+  const bucketName = s3.s3Bucket;
+  if (!bucketName) {
+    return badRequest('S3 bucket is not configured for this environment');
+  }
+
+  // Optional `limit`: parsed leniently, then clamped to [1, MAX_WEEKS_LIMIT];
+  // a missing or non-numeric value falls back to the default rather than 400ing.
+  const rawLimit = Number.parseInt(context.data?.limit, 10);
+  const limit = Number.isFinite(rawLimit)
+    ? Math.min(Math.max(rawLimit, 1), MAX_WEEKS_LIMIT)
+    : DEFAULT_WEEKS_LIMIT;
+
+  log.info(`Listing brand claims weeks for site ${siteId} (limit ${limit})`);
+
+  try {
+    const { weeks } = await listWeekFolders(s3, bucketName, siteId, log);
+    const limited = weeks.slice(0, limit);
+    return cachedOk({ siteId, weeks: limited, count: limited.length });
+  } catch (s3Error) {
+    // Keep infra details (bucket name, SDK message) in the log only; never echo
+    // them to external callers. A missing bucket is a misconfiguration (400);
+    // any other S3 fault is server-side, so 5xx it so outages show up as 5xx
+    // spikes rather than masquerading as client errors.
+    if (s3Error.name === 'NoSuchBucket') {
+      log.error(`S3 bucket ${bucketName} not found`);
+      return badRequest('S3 storage is not properly configured for this environment');
+    }
+    log.error(`S3 error listing brand claims weeks for site ${siteId}: ${s3Error.message}`);
+    return internalServerError('Unable to list brand claims weeks');
+  }
+}
+
+/**
+ * Persists an append-only Brand Claims product-feedback record in the shared
+ * ABV learning-data bucket. Tenant and identity context are derived server-side.
+ *
+ * @param {object} context - Request context.
+ * @param {object} site - Access-checked Site model.
+ * @returns {Promise<Response>} 202 when stored (or already stored).
+ */
+export async function handleBrandClaimsFeedback(context, site) {
+  const {
+    data = {}, dataAccess, env = {}, log, s3,
+  } = context;
+  const {
+    eventId, brandId, rating, comment,
+  } = data;
+
+  if (typeof eventId !== 'string' || !UUID_V4_RE.test(eventId)) {
+    return badRequest('eventId must be a valid UUID');
+  }
+  if (!isValidUUID(brandId)) {
+    return badRequest('brandId must be a valid UUID');
+  }
+  if (!['up', 'down'].includes(rating)) {
+    return badRequest('rating must be "up" or "down"');
+  }
+  if (comment !== undefined && typeof comment !== 'string') {
+    return badRequest('comment must be a string');
+  }
+
+  const trimmedComment = comment?.trim();
+  if (trimmedComment && trimmedComment.length > PRODUCT_FEEDBACK_NOTE_MAX_LENGTH) {
+    return createResponse({
+      message: `comment exceeds the ${PRODUCT_FEEDBACK_NOTE_MAX_LENGTH} character limit`,
+    }, 413);
+  }
+
+  const bucket = env.ABV_LEARNING_DATA_BUCKET;
+  const hashSalt = env.ABV_ID_HASH_SALT;
+  if (!hasText(bucket) || !hasText(hashSalt)
+    || !s3?.s3Client || !s3?.PutObjectCommand || !s3?.GetObjectCommand) {
+    log.error('Brand Claims feedback storage is not configured');
+    return internalServerError('Brand Claims feedback is temporarily unavailable');
+  }
+
+  const organizationId = site.getOrganizationId();
+  const postgrestClient = dataAccess?.services?.postgrestClient;
+  if (!postgrestClient?.from) {
+    log.error('Brand Claims feedback requires PostgREST brand lookup');
+    return internalServerError('Brand Claims feedback is temporarily unavailable');
+  }
+
+  const brand = await getBrandById(organizationId, brandId, postgrestClient);
+  if (!brand) {
+    return notFound(`Brand not found: ${brandId}`);
+  }
+  const siteId = site.getId();
+  const brandSiteIds = new Set([
+    brand.baseSiteId,
+    ...(Array.isArray(brand.siteIds) ? brand.siteIds : []),
+  ].filter(Boolean));
+  if (!brandSiteIds.has(siteId)) {
+    return badRequest('Brand does not belong to this site');
+  }
+
+  const organization = await dataAccess.Organization.findById(organizationId);
+  if (!organization) {
+    return notFound(`Organization not found: ${organizationId}`);
+  }
+
+  let tier = 'free';
+  try {
+    const entitlement = await dataAccess.Entitlement
+      .findByOrganizationIdAndProductCode(
+        organizationId,
+        EntitlementModel.PRODUCT_CODES.LLMO,
+      );
+    if (entitlement?.getTier?.() === EntitlementModel.TIERS.PAID) {
+      tier = 'paid';
+    }
+  } catch (error) {
+    log.error(`Failed to determine Brand Claims feedback tier for org ${organizationId}: ${error.message}`);
+    return internalServerError('Unable to submit Brand Claims feedback');
+  }
+
+  const rawUserId = resolveCallerImsUserId(context);
+  if (!rawUserId) {
+    log.error(`Brand Claims feedback caller identity is unavailable for org ${organizationId}`);
+    return internalServerError('Brand Claims feedback is temporarily unavailable');
+  }
+  const abvId = `abv_${createHmac('sha256', hashSalt).update(rawUserId).digest('hex').slice(0, 12)}`;
+  const timestamp = new Date().toISOString();
+  const { detailMarkdown: cleanComment, scrubHits } = redactFeedbackContent({
+    detailMarkdown: trimmedComment,
+  });
+  if (Object.keys(scrubHits).length > 0) {
+    log.info(`brand_claims_feedback.scrub_hit_total ${JSON.stringify(scrubHits)} event=${eventId}`);
+  }
+
+  const record = {
+    schemaVersion: 1,
+    recordType: 'product_feedback',
+    surface: 'brand_claims',
+    id: eventId,
+    timestamp,
+    rating,
+    ...(cleanComment ? { note: cleanComment } : {}),
+    abv_id: abvId,
+    organizationId,
+    customerName: organization.getName(),
+    imsOrgId: organization.getImsOrgId() ?? null,
+    siteId,
+    brandId: brand.id,
+    brand: brand.name,
+    tier,
+  };
+  const markerKey = `${PRODUCT_FEEDBACK_PREFIX}/idempotency/${eventId}.json`;
+  let recordToStore = record;
+  // Local S3 emulators used by integration tests do not configure a KMS backend
+  // for explicit SSE headers. AWS environments have no custom endpoint and must
+  // keep the bucket-policy-required AES256 header.
+  const encryption = env.AWS_ENDPOINT_URL_S3
+    ? {}
+    : { ServerSideEncryption: 'AES256' };
+
+  try {
+    await s3.s3Client.send(new s3.PutObjectCommand({
+      Bucket: bucket,
+      Key: markerKey,
+      Body: JSON.stringify(record),
+      ContentType: 'application/json',
+      ...encryption,
+      IfNoneMatch: '*',
+    }));
+  } catch (error) {
+    if (error?.name !== 'PreconditionFailed' && error?.$metadata?.httpStatusCode !== 412) {
+      log.error(`Failed to reserve Brand Claims product feedback event=${eventId}: ${error.message}`);
+      return internalServerError('Unable to submit Brand Claims feedback');
+    }
+    try {
+      const marker = await s3.s3Client.send(new s3.GetObjectCommand({
+        Bucket: bucket,
+        Key: markerKey,
+      }));
+      recordToStore = JSON.parse(await marker.Body.transformToString());
+      if (recordToStore?.id !== eventId
+        || !['up', 'down'].includes(recordToStore?.rating)
+        || !hasText(recordToStore?.timestamp)
+        || recordToStore.organizationId !== organizationId
+        || recordToStore.siteId !== siteId
+        || recordToStore.brandId !== brandId
+        || recordToStore.abv_id !== abvId) {
+        throw new Error('invalid idempotency marker');
+      }
+    } catch (markerError) {
+      log.error(`Failed to recover Brand Claims product feedback event=${eventId}: ${markerError.message}`);
+      return internalServerError('Unable to submit Brand Claims feedback');
+    }
+  }
+
+  const timestampKey = recordToStore.timestamp.replace(/[-:.TZ]/g, '');
+  const key = `${PRODUCT_FEEDBACK_PREFIX}/${recordToStore.rating}/${recordToStore.tier}/${recordToStore.timestamp.slice(0, 10)}/${timestampKey}_${eventId}.json`;
+  try {
+    await s3.s3Client.send(new s3.PutObjectCommand({
+      Bucket: bucket,
+      Key: key,
+      Body: JSON.stringify(recordToStore),
+      ContentType: 'application/json',
+      ...encryption,
+      IfNoneMatch: '*',
+    }));
+  } catch (error) {
+    if (error?.name === 'PreconditionFailed' || error?.$metadata?.httpStatusCode === 412) {
+      return accepted({ id: eventId });
+    }
+    log.error(`Failed to store Brand Claims product feedback event=${eventId}: ${error.message}`);
+    return internalServerError('Unable to submit Brand Claims feedback');
+  }
+  log.info(`Stored Brand Claims product feedback event=${eventId} org=${organizationId} site=${siteId} brand=${brandId}`);
+  return accepted({ id: eventId });
+}
+
+// Adobe corporate and test email domains (plus their subdomains) that mark a
+// requester as internal; every other domain is treated as an external customer.
+const INTERNAL_EMAIL_DOMAINS = ['adobe.com', 'adobetest.com'];
+
+/**
+ * Classifies the caller who triggered the request as an internal (Adobe) user or an
+ * external (customer) user, for the Slack alert, so operators can tell an internal or
+ * test run apart from a real customer request (LLMO-7263).
+ *
+ * The email is resolved the same way as the rest of the codebase (trial_email, then
+ * preferred_username, then profile.email — which may be an IMS GUID rather than an
+ * address) and classified purely by domain: an Adobe corporate/test domain
+ * (see INTERNAL_EMAIL_DOMAINS, incl. subdomains) is internal, any other domain is
+ * external. Returns null when no classifiable email is available (the alert then omits
+ * the "by ..." clause).
+ *
+ * @param {object} context - Request context (attributes.authInfo).
+ * @returns {'internal'|'external'|null}
+ */
+function getRequesterAudience(context) {
+  try {
+    const authInfo = context?.attributes?.authInfo;
+    const profile = authInfo?.getProfile?.() ?? authInfo?.profile ?? {};
+    const email = [profile.trial_email, profile.preferred_username, profile.email]
+      .find((v) => hasText(v));
+    // Domain is the part after the last '@'; a value without one (e.g. an IMS GUID)
+    // yields no domain and stays unclassified rather than being mislabelled.
+    const at = hasText(email) ? email.lastIndexOf('@') : -1;
+    const domain = at >= 0 ? email.slice(at + 1).toLowerCase().trim() : '';
+    if (!hasText(domain)) {
+      return null;
+    }
+    const isInternal = INTERNAL_EMAIL_DOMAINS
+      .some((d) => domain === d || domain.endsWith(`.${d}`));
+    return isInternal ? 'internal' : 'external';
+  } catch {
+    // Best-effort classification only — never let requester lookup throw into the
+    // (already queued) run or the Slack alert.
+    return null;
+  }
+}
+
+/**
+ * On-demand Brand Claims trigger for trial customers (LLMO-7263). Triggers the
+ * audit-worker `brand-claims` audit for the site with `onDemand: true`, which
+ * finds the latest Brand Presence sheet and publishes a one-shot
+ * `BRAND_PRESENCE_SHEET_WRITTEN` event (on_demand=true). The audit-worker owns
+ * the sheet lookup + event shape, so this endpoint just fires the trigger; the
+ * run happens once WITHOUT setting the persistent `brand_claims_enabled` flag
+ * (which the weekly emit would otherwise re-run every week). Site + LLMO access
+ * is validated by the caller.
+ *
+ * @param {object} context - Request context (log, sqs, env).
+ * @param {object} site - The resolved, access-checked Site model.
+ * @returns {Promise<Response>} 202 accepted, or a 5xx on a misconfiguration.
+ */
+export async function handleRequestBrandClaims(context, site) {
+  const { log, sqs, env } = context;
+
+  const queueUrl = env?.AUDIT_JOBS_QUEUE_URL;
+  if (!queueUrl) {
+    // Keep the config diagnostic in the log; return a generic message so the
+    // environment's configuration state isn't leaked to external trial callers.
+    log.error('Brand Claims on-demand: AUDIT_JOBS_QUEUE_URL is not configured');
+    return internalServerError('Brand Claims on-demand is temporarily unavailable');
+  }
+
+  // 7-day cooldown backstop: refuse a new run if the last brand-claims audit ran
+  // within the window. Mirrors the UI's disabled "Request new run" button so the two
+  // agree; because the UI button is bypassable this is the authoritative gate. Fails
+  // OPEN — a lookup error must not block a legitimate first/eligible request.
+  // Accepted TOCTOU gap: two requests arriving before the audit-worker persists its
+  // audit row both pass this check and both enqueue. The per-brand redelivery dedup
+  // (blackboard fact freshness in mystique) makes the duplicate a cheap no-op, so a
+  // best-effort check here is deliberate rather than a hard once-only lock.
+  // A prior audit that clears the cooldown means this request is a re-run rather than
+  // a first-ever run; the Slack alert below tags it so operators can tell them apart.
+  let isRerun = false;
+  try {
+    const latestAudit = await site.getLatestAuditByAuditType(BRAND_CLAIMS_AUDIT_TYPE);
+    isRerun = Boolean(latestAudit);
+    const ranAtMs = typeof latestAudit?.getAuditedAt === 'function'
+      ? Date.parse(latestAudit.getAuditedAt())
+      : NaN;
+    if (Number.isFinite(ranAtMs)) {
+      const elapsed = Date.now() - ranAtMs;
+      if (elapsed < BRAND_CLAIMS_REQUEST_COOLDOWN_MS) {
+        const availableAt = new Date(ranAtMs + BRAND_CLAIMS_REQUEST_COOLDOWN_MS).toISOString();
+        const retryAfterSeconds = Math.ceil((BRAND_CLAIMS_REQUEST_COOLDOWN_MS - elapsed) / 1000);
+        log.info(`Brand Claims on-demand: cooldown active for site ${site.getId()}, available at ${availableAt}`);
+        return createResponse(
+          {
+            siteId: site.getId(),
+            availableAt,
+            message: 'A Brand Claims run was requested recently; a new run can be requested once per 7 days.',
+          },
+          429,
+          { 'Retry-After': String(retryAfterSeconds) },
+        );
+      }
+    }
+  } catch (auditError) {
+    log.warn(`Brand Claims on-demand: cooldown lookup failed for site ${site.getId()}, allowing request: ${auditError.message}`);
+  }
+
+  try {
+    await sqs.sendMessage(queueUrl, {
+      type: 'brand-claims',
+      siteId: site.getId(),
+      onDemand: true,
+      auditContext: { trigger: 'on-demand-brand-claims' },
+    });
+  } catch (sqsError) {
+    // Enqueue failure is a server-side/infra fault, not a client error — surface it
+    // as 5xx (the caller's controller catch would otherwise map any throw to 400).
+    log.error(`Brand Claims on-demand: failed to enqueue audit for site ${site.getId()}: ${sqsError.message}`);
+    return internalServerError('Brand Claims on-demand is temporarily unavailable');
+  }
+  log.info(`Brand Claims on-demand: triggered brand-claims audit for site ${site.getId()}`);
+
+  // Dedicated channel for on-demand Brand Claims request alerts (LLMO-7263),
+  // set in Vault, so these can be routed/muted independently of other LLMO alerts.
+  const slackChannel = env?.SLACK_BRAND_CLAIMS_REQUEST_CHANNEL_ID;
+  const slackToken = env?.SLACK_BOT_TOKEN;
+  if (slackChannel && slackToken) {
+    try {
+      const audience = getRequesterAudience(context);
+      const requestedBy = audience ? ` by an ${audience} user` : '';
+      const rerunTag = isRerun ? ' (re-run)' : '';
+      await postSlackMessage(
+        slackChannel,
+        `:rocket: On-demand Brand Claims requested${rerunTag} for *${site.getBaseURL()}* (${site.getId()})${requestedBy}.`,
+        slackToken,
+      );
+    } catch (slackError) {
+      // Slack notification is best-effort — the trigger is already queued.
+      log.warn(`Brand Claims on-demand: Slack notification failed: ${slackError.message}`);
+    }
+  }
+
+  return accepted({
+    siteId: site.getId(),
+    message: 'Brand Claims run requested; results appear once the pipeline completes.',
+  });
 }

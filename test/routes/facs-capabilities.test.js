@@ -1,0 +1,561 @@
+/*
+ * Copyright 2026 Adobe. All rights reserved.
+ * This file is licensed to you under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License. You may obtain a copy
+ * of the License at http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed under
+ * the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTATIONS
+ * OF ANY KIND, either express or implied. See the License for the specific language
+ * governing permissions and limitations under the License.
+ */
+
+import { readFileSync } from 'fs';
+import { dirname, join } from 'path';
+import { fileURLToPath } from 'url';
+import { expect } from 'chai';
+
+import routeFacsCapabilities, { isFacsRebacResource } from '../../src/routes/facs-capabilities.js';
+import { isOpportunityDerivedCollectionRoute } from '../../src/support/facs-composite-resolvers.js';
+
+const testDir = dirname(fileURLToPath(import.meta.url));
+const projectRoot = join(testDir, '..', '..');
+
+/**
+ * Routes that the capabilities map declares **ahead** of their registration
+ * in `src/routes/index.js`. Now empty — H4 landed the controller + route
+ * registration for the hybrid-model surface, so all routes referenced by
+ * the capability map are live in `src/routes/index.js` and guarded by the
+ * regular stale-route check.
+ */
+const FORWARD_DECLARED_ROUTES = new Set([]);
+
+/**
+ * Params that appear only inside forward-declared routes. Now empty — see
+ * `FORWARD_DECLARED_ROUTES` above.
+ */
+const FORWARD_DECLARED_ROUTE_PARAMS = new Set([]);
+
+/**
+ * Reads `src/routes/index.js` and returns the set of every `'METHOD /path'` literal
+ * declared as a route key. Implementation mirrors the regex used elsewhere to lock
+ * the route surface (e.g. `test/routes/index.test.js`).
+ */
+function loadAllDeclaredRoutes() {
+  const source = readFileSync(join(projectRoot, 'src/routes/index.js'), 'utf8');
+  const re = /'((?:GET|POST|PATCH|PUT|DELETE) \/[^']*)'/g;
+  const out = new Set();
+  for (const m of source.matchAll(re)) {
+    out.add(m[1]);
+  }
+  return out;
+}
+
+/**
+ * Pins the structural contract `facsWrapper` (in `@adobe/spacecat-shared-http-utils`)
+ * depends on, plus the **union-equality** coverage invariant against
+ * `src/routes/index.js`:
+ *
+ *   - top level has the hybrid-model keys: `INTERNAL_ROUTES` (array),
+ *     `PRODUCTS_ROUTES` (object), `PRODUCTS_FACS_RESOURCE_PARAM_ALIASES`,
+ *     `FACS_NON_RESOURCE_PARAMS`.
+ *   - `INTERNAL_ROUTES` is an array of unique `'METHOD /path'` strings.
+ *   - `PRODUCTS_ROUTES` keys are uppercase product codes; each value is an object.
+ *   - each product route key is `'METHOD /path'`.
+ *   - each product route value is a single `'<product>/<capability>'` string
+ *     whose prefix equals the enclosing product key (case-insensitive).
+ *   - every route in either bucket exists in `src/routes/index.js` (no
+ *     stale entries), modulo `FORWARD_DECLARED_ROUTES`.
+ *
+ * Union-equality invariant:
+ *
+ *   (∪ PRODUCTS_ROUTES[*]) ⊎ INTERNAL_ROUTES = all declared routes
+ *
+ * Disjoint union — every declared route is owned either by at least one
+ * product OR by INTERNAL_ROUTES, never both. Routes CAN appear under
+ * multiple products simultaneously; we do NOT enforce pairwise-disjoint
+ * product maps. The invariant applies once for the union, not per product.
+ */
+describe('routeFacsCapabilities', () => {
+  const METHOD_PATH_RE = /^(GET|POST|PATCH|PUT|DELETE) \/.+$/;
+  const CAPABILITY_RE = /^[a-z][a-z0-9_-]*\/[a-z][a-z0-9_-]*$/;
+
+  let allDeclaredRoutes;
+  before(() => {
+    allDeclaredRoutes = loadAllDeclaredRoutes();
+  });
+
+  describe('top-level shape', () => {
+    it('exposes the hybrid-model keys', () => {
+      // Hybrid model dropped PRODUCTS_FACS_ADMIN_PERMISSIONS and
+      // PRODUCTS_FACS_STATE_LAYER_EXEMPT_PERMISSIONS — universal grants now
+      // flow through JWT.facs_permissions + state-layer org-scoped rows.
+      expect(routeFacsCapabilities).to.have.all.keys(
+        'INTERNAL_ROUTES',
+        'FACS_ONBOARDED_PRODUCTS',
+        'PRODUCTS_ROUTES',
+        'PRODUCTS_FACS_RESOURCE_PARAM_ALIASES',
+        'PRODUCTS_FACS_SECONDARY_RESOURCE',
+        'PRODUCTS_FACS_COMPOSITE_RESOURCE',
+        'FACS_NON_RESOURCE_PARAMS',
+      );
+    });
+
+    it('INTERNAL_ROUTES is an array', () => {
+      expect(routeFacsCapabilities.INTERNAL_ROUTES).to.be.an('array');
+    });
+
+    it('PRODUCTS_ROUTES is an object', () => {
+      expect(routeFacsCapabilities.PRODUCTS_ROUTES).to.be.an('object');
+    });
+  });
+
+  describe('PRODUCTS_FACS_COMPOSITE_RESOURCE.ASO (composite resolver config)', () => {
+    // The wrapper only invokes the composite resolver when compositeSpec.resourceType
+    // matches the resolved resource type; a wrong resourceType would silently skip the
+    // resolver and fail OPEN (unfiltered lists, un-type-scoped items). Pin the shape.
+    it('anchors ASO to site + the asoOpportunityComposite resolver + a single opportunity slot', () => {
+      const aso = routeFacsCapabilities.PRODUCTS_FACS_COMPOSITE_RESOURCE.ASO;
+      expect(aso).to.be.an('object');
+      expect(aso.resourceType).to.equal('site');
+      expect(aso.resolver).to.equal('asoOpportunityComposite');
+      expect(aso.compositeKeySlots).to.deep.equal(['opportunity']);
+    });
+  });
+
+  describe('ASO opportunity-derived GET route coverage (composite enforcement)', () => {
+    // Enforces the coupling that isOpportunityDerivedCollectionRoute() has no other
+    // guard for: EVERY ASO GET route that returns opportunity-derived data
+    // (opportunities, their fixes, or edge-deployed URLs) must be either
+    //   - item-scoped: carries :opportunityId, so the resolver's item branch
+    //     type-scopes it against that opportunity's own type; or
+    //   - a classified collection: matched by isOpportunityDerivedCollectionRoute,
+    //     so the resolver defers and the controller result-filters (D4).
+    // A new such route that is NEITHER falls to the resolver's grant-on-any branch
+    // and leaks cross-type data. This test catches that drift before release.
+    const OPP_DERIVED = /opportunit|\/fixes(\/|$)|\/edge-deployed-urls(\/|$)/;
+
+    it('classifies every ASO opportunity-derived GET route as item-scoped or a deferred collection', () => {
+      const derived = Object.keys(routeFacsCapabilities.PRODUCTS_ROUTES.ASO ?? {})
+        .filter((r) => r.startsWith('GET ') && OPP_DERIVED.test(r));
+      // Guard against the heuristic going stale (e.g. all such routes renamed).
+      expect(derived.length, 'no ASO opportunity-derived GET routes matched - heuristic stale?')
+        .to.be.greaterThan(0);
+      const uncovered = derived.filter(
+        (r) => !r.includes(':opportunityId') && !isOpportunityDerivedCollectionRoute(r),
+      );
+      expect(
+        uncovered,
+        'ASO opportunity-derived GET routes that are neither item-scoped nor a classified collection '
+          + '(they would grant-on-any and leak cross-type opportunity data - add them to '
+          + `isOpportunityDerivedCollectionRoute + wire the controller filter): ${uncovered.join(', ')}`,
+      ).to.deep.equal([]);
+    });
+
+    it('classifies every ASO POST /by-urls URL-lookup route as a deferred collection', () => {
+      // The GET heuristic above skips POST routes; the by-urls lookups return
+      // opportunity-derived data across ALL types too, so they MUST be classified
+      // (else they hit the resolver's grant-on-any branch and leak cross-type data).
+      const byUrls = Object.keys(routeFacsCapabilities.PRODUCTS_ROUTES.ASO ?? {})
+        .filter((r) => /^POST .*\/by-urls$/.test(r));
+      expect(byUrls.length, 'no ASO POST /by-urls routes matched - heuristic stale?')
+        .to.be.greaterThan(0);
+      const uncovered = byUrls.filter((r) => !isOpportunityDerivedCollectionRoute(r));
+      expect(
+        uncovered,
+        'ASO POST /by-urls routes not classified as deferred collections (they would grant-on-any '
+          + `and leak cross-type data - add them to isOpportunityDerivedCollectionRoute): ${uncovered.join(', ')}`,
+      ).to.deep.equal([]);
+    });
+  });
+
+  describe('FACS_ONBOARDED_PRODUCTS', () => {
+    it('is an array of unique uppercase product codes', () => {
+      const onboarded = routeFacsCapabilities.FACS_ONBOARDED_PRODUCTS;
+      expect(onboarded).to.be.an('array');
+      onboarded.forEach((product) => {
+        expect(product, `onboarded product '${product}'`).to.be.a('string');
+        expect(product, `onboarded product '${product}' must be uppercase`)
+          .to.equal(product.toUpperCase());
+      });
+      expect(new Set(onboarded).size, 'FACS_ONBOARDED_PRODUCTS has duplicate entries')
+        .to.equal(onboarded.length);
+    });
+
+    it('every onboarded product has a PRODUCTS_ROUTES entry', () => {
+      // A product cannot be enforced by facsWrapper without a route map, and the
+      // wrapper only bypasses *recognized* products, so the two lists must agree.
+      const productKeys = Object.keys(routeFacsCapabilities.PRODUCTS_ROUTES);
+      const orphans = routeFacsCapabilities.FACS_ONBOARDED_PRODUCTS
+        .filter((product) => !productKeys.includes(product));
+      expect(orphans, `onboarded products missing from PRODUCTS_ROUTES: ${orphans.join(', ')}`)
+        .to.deep.equal([]);
+    });
+
+    it('every product with a non-empty route map is onboarded', () => {
+      // Inverse guard: a product that declares FACS-governed routes but is NOT in
+      // FACS_ONBOARDED_PRODUCTS would have those routes silently bypass FACS (they
+      // look protected but the wrapper never enforces them) — the more dangerous
+      // failure mode. ACO is intentionally excluded: its map is still empty ({}).
+      const onboarded = routeFacsCapabilities.FACS_ONBOARDED_PRODUCTS;
+      const populated = Object.entries(routeFacsCapabilities.PRODUCTS_ROUTES)
+        .filter(([, routes]) => Object.keys(routes).length > 0)
+        .map(([product]) => product);
+      const unenforced = populated.filter((product) => !onboarded.includes(product));
+      expect(unenforced, `products with routes but not onboarded (routes silently bypass FACS): ${unenforced.join(', ')}`)
+        .to.deep.equal([]);
+    });
+  });
+
+  describe('INTERNAL_ROUTES', () => {
+    it('contains unique route strings', () => {
+      const arr = routeFacsCapabilities.INTERNAL_ROUTES;
+      expect(new Set(arr).size, 'INTERNAL_ROUTES has duplicate entries')
+        .to.equal(arr.length);
+    });
+
+    it('each entry follows the "METHOD /path" shape', () => {
+      routeFacsCapabilities.INTERNAL_ROUTES.forEach((route) => {
+        expect(route).to.match(METHOD_PATH_RE);
+      });
+    });
+
+    it('every entry exists in src/routes/index.js (no stale routes)', () => {
+      const stale = routeFacsCapabilities.INTERNAL_ROUTES
+        .filter((route) => !allDeclaredRoutes.has(route));
+      expect(stale, `stale INTERNAL_ROUTES not found in src/routes/index.js: ${stale.join(', ')}`)
+        .to.deep.equal([]);
+    });
+  });
+
+  describe('PRODUCTS_ROUTES', () => {
+    it('keys are uppercase product codes', () => {
+      Object.keys(routeFacsCapabilities.PRODUCTS_ROUTES).forEach((product) => {
+        expect(product, `product key '${product}' must be uppercase`)
+          .to.equal(product.toUpperCase());
+      });
+    });
+
+    it('declares the products LLMO, ASO, ACO', () => {
+      expect(routeFacsCapabilities.PRODUCTS_ROUTES).to.have.all.keys('LLMO', 'ASO', 'ACO');
+    });
+
+    it('each product value is an object (possibly empty)', () => {
+      Object.entries(routeFacsCapabilities.PRODUCTS_ROUTES).forEach(([product, subMap]) => {
+        expect(subMap, `${product} sub-map`).to.be.an('object');
+      });
+    });
+
+    it('each route key follows the "METHOD /path" shape', () => {
+      Object.entries(routeFacsCapabilities.PRODUCTS_ROUTES).forEach(([product, subMap]) => {
+        Object.keys(subMap).forEach((route) => {
+          expect(route, `${product} route '${route}'`).to.match(METHOD_PATH_RE);
+        });
+      });
+    });
+
+    it('each route value is a single "<product>/<capability>" string scoped to its product', () => {
+      Object.entries(routeFacsCapabilities.PRODUCTS_ROUTES).forEach(([product, subMap]) => {
+        Object.entries(subMap).forEach(([route, value]) => {
+          expect(value, `${product} ${route}`).to.be.a('string').and.match(CAPABILITY_RE);
+          const [prefix] = value.split('/');
+          expect(
+            prefix,
+            `capability '${value}' for ${product} ${route} must be prefixed with the product code`,
+          ).to.equal(product.toLowerCase());
+        });
+      });
+    });
+
+    it('the LLMO capability catalog does not reference the removed `can_view_all`', () => {
+      // Regression guard for the hybrid-model migration: `can_view_all` was
+      // collapsed into `can_view` (org-wide grant now arrives via an
+      // org-scoped state-layer row carrying granted_capabilities=['llmo/can_view']).
+      const llmoCaps = new Set(Object.values(routeFacsCapabilities.PRODUCTS_ROUTES.LLMO));
+      expect(llmoCaps.has('llmo/can_view_all'), 'llmo/can_view_all is removed in the hybrid model')
+        .to.be.false;
+    });
+
+    it('uses the plural `can_manage_users` capability (hybrid-model catalog)', () => {
+      // The previous revision used singular `can_manage_user`; the hybrid
+      // model renamed it. Guard the rename so it doesn't silently regress.
+      const llmoCaps = new Set(Object.values(routeFacsCapabilities.PRODUCTS_ROUTES.LLMO));
+      expect(llmoCaps.has('llmo/can_manage_user'), 'singular llmo/can_manage_user was renamed')
+        .to.be.false;
+    });
+
+    it('every product route exists in src/routes/index.js (no stale routes, modulo forward declarations)', () => {
+      Object.entries(routeFacsCapabilities.PRODUCTS_ROUTES).forEach(([product, subMap]) => {
+        const stale = Object.keys(subMap)
+          .filter((route) => !allDeclaredRoutes.has(route))
+          .filter((route) => !FORWARD_DECLARED_ROUTES.has(route));
+        expect(stale, `stale ${product} routes not found in src/routes/index.js: ${stale.join(', ')}`)
+          .to.deep.equal([]);
+      });
+    });
+  });
+
+  describe('invariant: (∪ PRODUCTS_ROUTES[*]) ⊎ INTERNAL_ROUTES = all routes', () => {
+    it('INTERNAL_ROUTES is disjoint from every product sub-map', () => {
+      const internalSet = new Set(routeFacsCapabilities.INTERNAL_ROUTES);
+      Object.entries(routeFacsCapabilities.PRODUCTS_ROUTES).forEach(([product, subMap]) => {
+        const overlap = Object.keys(subMap).filter((route) => internalSet.has(route));
+        expect(overlap, `${product} routes overlap with INTERNAL_ROUTES: ${overlap.join(', ')}`)
+          .to.deep.equal([]);
+      });
+    });
+
+    it('the union of all product sub-maps plus INTERNAL_ROUTES equals all declared routes', () => {
+      // Union-equality model: every declared route is owned by at least
+      // one product OR by INTERNAL_ROUTES (disjoint union); routes MAY
+      // appear under multiple products simultaneously (e.g. a site GET
+      // surfaces under both LLMO and ASO). We do NOT enforce
+      // pairwise-disjoint product maps — cross-product routes are
+      // expected.
+      const internalSet = new Set(routeFacsCapabilities.INTERNAL_ROUTES);
+      const unionOfProducts = new Set();
+      Object.values(routeFacsCapabilities.PRODUCTS_ROUTES).forEach((subMap) => {
+        Object.keys(subMap).forEach((route) => unionOfProducts.add(route));
+      });
+
+      // No gaps: every declared route is owned somewhere.
+      const covered = new Set([...unionOfProducts, ...internalSet]);
+      const missing = [...allDeclaredRoutes].filter((route) => !covered.has(route));
+      expect(
+        missing,
+        `routes declared in src/routes/index.js but not in any PRODUCTS_ROUTES sub-map or INTERNAL_ROUTES: ${missing.slice(0, 10).join(', ')}${missing.length > 10 ? '…' : ''}`,
+      ).to.deep.equal([]);
+
+      // No stale entries: every owned route exists in src/routes/index.js
+      // (modulo forward declarations).
+      const owned = [...unionOfProducts, ...internalSet];
+      const extraneous = owned
+        .filter((route) => !allDeclaredRoutes.has(route))
+        .filter((route) => !FORWARD_DECLARED_ROUTES.has(route));
+      expect(
+        extraneous,
+        `routes owned by PRODUCTS_ROUTES/INTERNAL_ROUTES but not declared in src/routes/index.js: ${extraneous.slice(0, 10).join(', ')}${extraneous.length > 10 ? '…' : ''}`,
+      ).to.deep.equal([]);
+    });
+  });
+
+  /**
+   * PRODUCTS_CAPABILITIES catalog — the single source of truth for which
+   * capability strings the codebase recognises per product. The
+   * `PRODUCTS_ROUTES` value side must be a subset of this catalog (a route
+   * cannot guard a capability the product doesn't recognise).
+   */
+  describe('PRODUCTS_CAPABILITIES catalog', () => {
+    let PRODUCTS_CAPABILITIES;
+    before(async () => {
+      ({ PRODUCTS_CAPABILITIES } = await import('../../src/routes/facs-capabilities.js'));
+    });
+
+    it('exposes a per-product catalog with `<product>/<capability>` entries', () => {
+      Object.entries(PRODUCTS_CAPABILITIES).forEach(([product, caps]) => {
+        expect(product, `product key '${product}' must be uppercase`).to.equal(product.toUpperCase());
+        expect(caps, `${product} catalog`).to.be.an('array').that.is.not.empty;
+        caps.forEach((cap) => {
+          expect(cap, `${product} capability '${cap}'`).to.be.a('string').and.match(CAPABILITY_RE);
+          const [prefix] = cap.split('/');
+          expect(prefix, `capability '${cap}' must be prefixed with the product code`)
+            .to.equal(product.toLowerCase());
+        });
+        expect(new Set(caps).size, `${product} catalog has duplicates`).to.equal(caps.length);
+      });
+    });
+
+    it('every PRODUCTS_ROUTES value belongs to its product\'s catalog', () => {
+      Object.entries(routeFacsCapabilities.PRODUCTS_ROUTES).forEach(([product, subMap]) => {
+        const catalog = new Set(PRODUCTS_CAPABILITIES[product] || []);
+        const unknown = [...new Set(Object.values(subMap))].filter((cap) => !catalog.has(cap));
+        expect(
+          unknown,
+          `${product} routes reference capabilities not in PRODUCTS_CAPABILITIES.${product}: ${unknown.join(', ')}`,
+        ).to.deep.equal([]);
+      });
+    });
+  });
+
+  /**
+   * Resource Identification — pins the structural contract for
+   * `PRODUCTS_FACS_RESOURCE_PARAM_ALIASES` and the exhaustive classification
+   * invariant against every `:param` in `src/routes/index.js` (see
+   * mac-state-layer.md §"Resource Identification").
+   */
+  describe('PRODUCTS_FACS_RESOURCE_PARAM_ALIASES', () => {
+    let allRouteParams;
+    before(() => {
+      const source = readFileSync(join(projectRoot, 'src/routes/index.js'), 'utf8');
+      allRouteParams = new Set();
+      // Extract `:param` segments from route patterns.
+      const re = /:([a-zA-Z_][a-zA-Z0-9_]*)/g;
+      for (const m of source.matchAll(re)) {
+        allRouteParams.add(m[1]);
+      }
+      // Include params from forward-declared routes too — they're real
+      // params that will surface in `src/routes/index.js` once H4 lands.
+      FORWARD_DECLARED_ROUTE_PARAMS.forEach((p) => allRouteParams.add(p));
+    });
+
+    function unionOfProductAliases() {
+      return new Set(
+        Object.values(routeFacsCapabilities.PRODUCTS_FACS_RESOURCE_PARAM_ALIASES)
+          .flatMap((perProductResources) => Object.values(perProductResources).flat()),
+      );
+    }
+
+    it('keys are uppercase product codes that exist in PRODUCTS_ROUTES', () => {
+      const productKeys = Object.keys(routeFacsCapabilities.PRODUCTS_ROUTES);
+      Object.keys(routeFacsCapabilities.PRODUCTS_FACS_RESOURCE_PARAM_ALIASES).forEach((p) => {
+        expect(p, `product '${p}' must be uppercase`).to.equal(p.toUpperCase());
+        expect(productKeys, `product '${p}' must also exist in PRODUCTS_ROUTES`).to.include(p);
+      });
+    });
+
+    it('each product value is an object', () => {
+      Object.values(routeFacsCapabilities.PRODUCTS_FACS_RESOURCE_PARAM_ALIASES).forEach((m) => {
+        expect(m).to.be.an('object');
+      });
+    });
+
+    it('each resource value is a non-empty array of strings', () => {
+      Object.entries(routeFacsCapabilities.PRODUCTS_FACS_RESOURCE_PARAM_ALIASES)
+        .forEach(([product, resourceMap]) => {
+          Object.entries(resourceMap).forEach(([resource, aliases]) => {
+            expect(aliases, `${product}.${resource} must be an array`).to.be.an('array');
+            aliases.forEach((alias) => {
+              expect(alias, `${product}.${resource} aliases must be strings`).to.be.a('string');
+            });
+          });
+        });
+    });
+
+    it('within each product, no alias appears under more than one resource', () => {
+      for (const [product, resourceMap] of Object.entries(
+        routeFacsCapabilities.PRODUCTS_FACS_RESOURCE_PARAM_ALIASES,
+      )) {
+        const seen = new Map();
+        for (const [resource, aliases] of Object.entries(resourceMap)) {
+          for (const alias of aliases) {
+            expect(
+              seen.has(alias),
+              `${product}: alias '${alias}' declared under both '${seen.get(alias)}' and '${resource}'`,
+            ).to.be.false;
+            seen.set(alias, resource);
+          }
+        }
+      }
+    });
+
+    // Guard against an invented resource KEY. The other tests validate the
+    // alias arrays (params) but never the resource key itself, so a typo or a
+    // parallel entity (e.g. LLMO: { website: ['siteId'] } instead of reusing
+    // `site`) would pass silently and be queried against a state layer that
+    // stores no rows under that resource_type. This allow-list is the set of
+    // resource types each product actually ReBAC-scopes; adding a genuinely new
+    // ReBAC entity is a deliberate act that must update this list too.
+    it('each product only declares resource keys from its allowed ReBAC set', () => {
+      const ALLOWED_RESOURCE_KEYS = {
+        LLMO: ['brand'],
+        ASO: ['site'],
+        ACO: [],
+      };
+      Object.entries(routeFacsCapabilities.PRODUCTS_FACS_RESOURCE_PARAM_ALIASES)
+        .forEach(([product, resourceMap]) => {
+          const allowed = ALLOWED_RESOURCE_KEYS[product];
+          expect(
+            allowed,
+            `no allowed ReBAC resource set defined for product '${product}' — `
+            + 'add it to ALLOWED_RESOURCE_KEYS in this test when a product gains ReBAC scope',
+          ).to.be.an('array');
+          const unexpected = Object.keys(resourceMap).filter((k) => !allowed.includes(k));
+          expect(
+            unexpected,
+            `${product} declares unexpected ReBAC resource key(s): ${unexpected.join(', ')}. `
+            + 'Reuse the existing entity key (LLMO → brand, ASO → site) instead of inventing one; '
+            + 'if this is a genuinely new ReBAC entity, add it to ALLOWED_RESOURCE_KEYS here too.',
+          ).to.deep.equal([]);
+        });
+    });
+
+    it('PRODUCTS_FACS_RESOURCE_PARAM_ALIASES and FACS_NON_RESOURCE_PARAMS are disjoint', () => {
+      const claimedByAnyProduct = unionOfProductAliases();
+      const nonResource = new Set(routeFacsCapabilities.FACS_NON_RESOURCE_PARAMS);
+      const overlap = [...claimedByAnyProduct].filter((p) => nonResource.has(p));
+      expect(
+        overlap,
+        `params claimed by a product AND in FACS_NON_RESOURCE_PARAMS (remove from the latter): ${overlap.join(', ')}`,
+      ).to.deep.equal([]);
+    });
+
+    it('every alias claimed by any product corresponds to a real :param in src/routes/index.js', () => {
+      const claimedByAnyProduct = unionOfProductAliases();
+      const stale = [...claimedByAnyProduct].filter((alias) => !allRouteParams.has(alias));
+      expect(
+        stale,
+        `stale aliases not found as :param in any route: ${stale.join(', ')}`,
+      ).to.deep.equal([]);
+    });
+
+    // Enforces the convention documented in CLAUDE.md ("Classifying route params
+    // when adding ANY endpoint"): every dynamic :param must be classified so
+    // facsWrapper can resolve or correctly ignore the ReBAC resource for a route.
+    // A new endpoint cannot merge until its param lands in exactly one bucket.
+    it('every :param in src/routes/index.js is classified (resource OR non-resource)', () => {
+      const claimedByAnyProduct = unionOfProductAliases();
+      const nonResource = new Set(routeFacsCapabilities.FACS_NON_RESOURCE_PARAMS);
+      const unclassified = [...allRouteParams].filter(
+        (p) => !claimedByAnyProduct.has(p) && !nonResource.has(p),
+      );
+      expect(
+        unclassified,
+        'Unclassified route param(s): '
+        + `${unclassified.join(', ')}. Reuse the existing entity alias in `
+        + 'PRODUCTS_FACS_RESOURCE_PARAM_ALIASES.<product>.<resource> if this param '
+        + 'identifies an existing ReBAC entity (brand → brandId, site → siteId); '
+        + 'otherwise add it to FACS_NON_RESOURCE_PARAMS. A new entity\'s identifier '
+        + 'defaults to FACS_NON_RESOURCE_PARAMS until ReBAC is implemented for it.',
+      ).to.deep.equal([]);
+    });
+
+    it('FACS_NON_RESOURCE_PARAMS does not contain stale entries', () => {
+      const nonResource = routeFacsCapabilities.FACS_NON_RESOURCE_PARAMS;
+      // Query parameters are also explicitly classified for facsWrapper. They
+      // never appear in route templates, so retain the known Serenity filters
+      // alongside dynamic path params.
+      const queryParams = new Set([
+        'failureCursor', 'failureLimit', 'tagFilterMode', 'tagPath',
+      ]);
+      const stale = nonResource.filter((p) => !allRouteParams.has(p) && !queryParams.has(p));
+      expect(
+        stale,
+        `FACS_NON_RESOURCE_PARAMS contains params not used in any route: ${stale.join(', ')}`,
+      ).to.deep.equal([]);
+    });
+  });
+
+  describe('isFacsRebacResource', () => {
+    it('LLMO ReBAC-scopes brand but not site (cross-product bypass for sites)', () => {
+      expect(isFacsRebacResource('LLMO', 'brand')).to.be.true;
+      expect(isFacsRebacResource('LLMO', 'site')).to.be.false;
+    });
+
+    it('ASO ReBAC-scopes site but not brand (cross-product bypass for brands)', () => {
+      expect(isFacsRebacResource('ASO', 'site')).to.be.true;
+      expect(isFacsRebacResource('ASO', 'brand')).to.be.false;
+    });
+
+    it('is case-insensitive on the product code', () => {
+      expect(isFacsRebacResource('llmo', 'brand')).to.be.true;
+      expect(isFacsRebacResource('aso', 'site')).to.be.true;
+    });
+
+    it('returns false for unknown products and nullish input', () => {
+      expect(isFacsRebacResource('ACO', 'site')).to.be.false;
+      expect(isFacsRebacResource('NOPE', 'site')).to.be.false;
+      expect(isFacsRebacResource(undefined, 'site')).to.be.false;
+      expect(isFacsRebacResource('LLMO', undefined)).to.be.false;
+    });
+  });
+});

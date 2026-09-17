@@ -24,7 +24,7 @@ import { initAuth, createAllTokens } from '../shared/auth.js';
 import { buildEnv } from '../env.js';
 import { startServer, stopServer } from '../server.js';
 import { createHttpClient } from '../shared/http-client.js';
-import { startPostgres, stopPostgres } from './setup.js';
+import { startContainers, stopContainers } from './setup.js';
 
 /** Shared state populated during beforeAll, consumed by test files. */
 export const ctx = {};
@@ -43,7 +43,7 @@ export const mochaHooks = {
     const { publicKeyB64 } = await initAuth();
     const tokens = await createAllTokens();
 
-    await startPostgres();
+    await startContainers();
 
     const env = buildEnv(publicKeyB64);
     const baseUrl = await startServer(env);
@@ -56,6 +56,6 @@ export const mochaHooks = {
   async afterAll() {
     this.timeout(HARNESS_HOOK_TIMEOUT_MS);
     await stopServer();
-    await stopPostgres();
+    await stopContainers();
   },
 };

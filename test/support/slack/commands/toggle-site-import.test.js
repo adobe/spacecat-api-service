@@ -389,7 +389,7 @@ describe('ToggleSiteImportCommand', () => {
       // Setup test environment with a CSV file
       slackContextMock.files = [{
         name: 'sites.csv',
-        url_private: 'https://mock-url',
+        url_private: 'https://files.slack.com/mock-url',
       }];
 
       // Call with only the enableImport parameter
@@ -438,7 +438,7 @@ describe('ToggleSiteImportCommand', () => {
     beforeEach(() => {
       slackContextMock.files = [{
         name: 'sites.csv',
-        url_private: 'https://mock-url',
+        url_private: 'https://files.slack.com/mock-url',
       }];
     });
 
@@ -457,7 +457,7 @@ describe('ToggleSiteImportCommand', () => {
 
       // File object should have url_private property (not string content)
       expect(fileArg).to.be.an('object');
-      expect(fileArg.url_private).to.equal('https://mock-url');
+      expect(fileArg.url_private).to.equal('https://files.slack.com/mock-url');
       expect(fileArg.name).to.equal('sites.csv');
 
       // Token should be passed
@@ -581,7 +581,7 @@ describe('ToggleSiteImportCommand', () => {
     beforeEach(() => {
       slackContextMock.files = [{
         name: 'sites.csv',
-        url_private: 'https://mock-url',
+        url_private: 'https://files.slack.com/mock-url',
       }];
     });
 

@@ -27,6 +27,8 @@ import { onboardSiteModal, startOnboarding } from './onboard-modal.js';
 import { preflightConfigModal } from './preflight-config-modal.js';
 import openPreflightConfig from './open-preflight-config.js';
 import { openSetImsOrgModal, setImsOrgModal } from './set-ims-org-modal.js';
+import movePlgSiteModal from './move-plg-site.js';
+import moveLlmoOrgModal from './move-llmo-org.js';
 import { openAddSiteModal, addSiteModal } from './add-site-modal.js';
 import {
   openEnsureEntitlementSiteModal,
@@ -55,6 +57,8 @@ const actions = {
   preflight_config_modal: preflightConfigModal,
   open_preflight_config: openPreflightConfig,
   open_set_ims_org_modal: openSetImsOrgModal,
+  open_move_plg_site_modal: movePlgSiteModal,
+  open_move_llmo_org_modal: moveLlmoOrgModal,
   open_add_site_modal: openAddSiteModal,
   add_entitlements_action: addEntitlementsAction,
   update_org_action: updateOrgAction,

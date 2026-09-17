@@ -15,10 +15,29 @@
  *
  * JOB_1: A completed preflight job referencing SITE_1.
  *
+ * SERENITY_CLASSIFY_JOB: a COMPLETED serenity-classify-prompts job owned by
+ * BRAND_1 — exercises GET .../serenity/prompts/jobs/{jobId} (serenity-docs#33
+ * Layer 1). Its metadata carries `brandId` (the ownership guard the poll
+ * endpoint enforces) plus a `promiseToken` the poll response must NOT leak.
+ *
  * Note: AsyncJob only exists in v3 (PostgreSQL) — no DynamoDB equivalent.
  *
  * Format: snake_case (v3 / PostgreSQL / PostgREST)
  */
+export const SERENITY_CLASSIFY_JOB_ID = 'eeee3333-3333-4333-a333-333333333333';
+
+// An IN_PROGRESS, lease-free classifyPrompts job used by the anti-replay lease
+// CAS integration test (test/it/shared/tests/lease-cas.js). It carries NO `lease`
+// sub-object in metadata, so the first atomic claim wins and the second (or a
+// concurrent) claim loses the compare-and-set. IN_PROGRESS is required: the CAS
+// guard only matches a still-running job.
+export const LEASE_CAS_JOB_ID = 'eeee5555-5555-4555-a555-555555555555';
+
+// A COMPLETED preflight job owned by SITE_3 (organization ORG_2 — the "denied" org
+// for the `user` persona). Used to assert that GET /preflight/jobs/{jobId} returns
+// 404 (no existence disclosure) for a caller who does not own the job's site.
+export const SITE_3_PREFLIGHT_JOB_ID = 'eeee4444-4444-4444-b444-444444444444';
+
 export const asyncJobs = [
   {
     id: 'eeee2222-2222-4222-a222-222222222222',
@@ -46,5 +65,60 @@ export const asyncJobs = [
     },
     started_at: '2025-01-20T10:00:00.000Z',
     ended_at: '2025-01-20T10:05:00.000Z',
+  },
+  {
+    id: SERENITY_CLASSIFY_JOB_ID,
+    status: 'COMPLETED',
+    result: {
+      created: [],
+      skipped: [],
+      failed: [],
+      published: true,
+      pendingClassificationCount: 0,
+      requeuedJobId: null,
+    },
+    metadata: {
+      mode: 'create',
+      authMode: 'subworkspace',
+      // BRAND_1_ID — the ownership guard on the poll endpoint compares this to the
+      // authorized brand and 404s a mismatch. Kept as a literal here so this seed
+      // file has no cross-import dependency on seed-ids.js.
+      brandId: 'ab111111-1111-4111-b111-111111111111',
+      jobType: 'serenity-classify-prompts',
+      // Must never appear in the poll response (secret-free contract).
+      promiseToken: { promise_token: 'do-not-leak' },
+    },
+    started_at: '2025-02-01T09:00:00.000Z',
+    ended_at: '2025-02-01T09:01:00.000Z',
+  },
+  {
+    id: LEASE_CAS_JOB_ID,
+    status: 'IN_PROGRESS',
+    metadata: {
+      jobType: 'classifyPrompts',
+      authMode: 'subworkspace',
+      tags: ['serenity-classify-prompts'],
+    },
+    started_at: '2025-03-01T09:00:00.000Z',
+  },
+  {
+    id: SITE_3_PREFLIGHT_JOB_ID,
+    status: 'COMPLETED',
+    result_location: 'https://results.example.com/preflight-003',
+    result_type: 'URL',
+    result: { summary: { totalIssues: 0, criticalIssues: 0 } },
+    metadata: {
+      payload: {
+        // SITE_3_ID — ORG_2, denied to the `user` persona. Literal to keep this seed
+        // file free of a cross-import dependency on seed-ids.js.
+        siteId: '55555555-5555-4555-9555-555555555555',
+        urls: ['https://site3-denied.example.com/page1'],
+        step: 'identify',
+      },
+      jobType: 'preflight',
+      tags: ['preflight'],
+    },
+    started_at: '2025-02-02T09:00:00.000Z',
+    ended_at: '2025-02-02T09:05:00.000Z',
   },
 ];

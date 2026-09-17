@@ -1,0 +1,1449 @@
+/*
+ * Copyright 2026 Adobe. All rights reserved.
+ * This file is licensed to you under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License. You may obtain a copy
+ * of the License at http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed under
+ * the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTATIONS
+ * OF ANY KIND, either express or implied. See the License for the specific language
+ * governing permissions and limitations under the License.
+ */
+
+// @ts-check
+
+/**
+ * Resolution of a project's dimension-root tag tree to upstream tag ids.
+ *
+ * Every tag write is id-based, and an id only exists once the tag does — so the
+ * proxy must resolve (and, for the fixed parts of the taxonomy, provision) the
+ * tree before it can attach anything to a prompt.
+ *
+ * Two upstream facts shape everything here, both verified against the live
+ * Semrush API:
+ *
+ *  - Creating a name that already exists under the same parent answers **500**.
+ *    Every create in this module is therefore resolve-before-create. Names are
+ *    unique per `(project, parent)`, not per project, so the resolve must be
+ *    scoped to the parent — a bare-name lookup across the whole tree would
+ *    conflate a sub-category `human` with the `origin` value `human`.
+ *  - Tag writes land in the project's DRAFT layer, and a default read serves the
+ *    LIVE view. Reads here go through {@link listProjectTagTree}, which passes
+ *    `draft: true`, so a tag this module just created is visible to the tag
+ *    resolution that follows it.
+ *
+ * Resolve-before-create is not atomic, so a concurrent writer can mint a name
+ * between the read and the create — including a second in-flight resolution
+ * inside this same request. {@link ensureChildren} therefore treats a rejected
+ * create as a possible lost race and re-reads before giving up, which is what
+ * makes every export here idempotent rather than merely usually-idempotent.
+ *
+ * The seam FAILS CLOSED. A name that is still unresolved after the create and
+ * the re-read is a 502, never a hole in the returned map: a caller that receives
+ * a map has every name it asked for, so no consumer can answer 2xx for a write
+ * that did not land.
+ */
+
+import { ErrorWithStatusCode } from '../utils.js';
+import { ERROR_CODES } from './errors.js';
+import {
+  cacheTagTreeSnapshot,
+  deleteCachedTagTreeSnapshotIfSame,
+  getCachedTagTreeSnapshot,
+  invalidateTagCacheForProject,
+  listProjectTagTree,
+} from './handlers/markets.js';
+import {
+  DIMENSION,
+  DIMENSION_PROVISION_ORDER,
+  CLOSED_DIMENSION_VALUES,
+  CLOSED_DIMENSIONS,
+  INTENT_ROOT_NAME,
+  rootNameOfDimension,
+  dimensionOfRootName,
+  displayNameOfValue,
+  valueSlugOfDisplayName,
+} from './prompt-tags.js';
+import { classifyTagCompatibility } from './tag-compatibility.js';
+import {
+  MAX_TREE_CONCURRENCY,
+  MAX_TREE_DURATION_MS,
+  MAX_TREE_NODES,
+  MAX_TREE_PARENT_READS,
+} from './tag-search-constants.js';
+
+/** @typedef {import('./rest-transport.js').SerenityTransport} SerenityTransport */
+/**
+ * @typedef {object} TagTreeSnapshotItem
+ * @property {string} id
+ * @property {string} name
+ * @property {string | null} parentId
+ * @property {number} childrenCount
+ * @property {number} promptsCount
+ * @property {string} rootName
+ * @property {string} rootId
+ * @property {number} depth
+ * @property {Array<{ id: string, name: string }>} fullPath
+ * @property {{ state: 'canonical' | 'readOnly', reason: string | null }} compatibility
+ */
+
+/**
+ * Where one tag sits in the dimension tree.
+ *
+ * @typedef {object} TagPosition
+ * @property {'root' | 'descendant' | 'unknown'} kind
+ * @property {string | null} parentId
+ * @property {string | null} rootName - the tag's DIMENSION: its own name when it
+ *   IS a root, else `path[0]`, in both cases folded to the dimension key
+ *   ({@link dimensionOfRootName}) so a caller compares it against `DIMENSION.*`
+ *   without knowing how upstream spells that root on this project.
+ * @property {string[]} ancestorIds - ids of the tag's ancestors, root FIRST and
+ *   the tag itself excluded. Empty for a root and for an unknown id.
+ */
+
+/**
+ * Ceiling on the LEVEL reads one tree walk may perform. The tree has no upstream
+ * depth or width limit, so an unresolvable id would otherwise cost one sequential
+ * read per node against Semrush's shared rate limit.
+ *
+ * A "read" here is one {@link listProjectTagTree} call — one level of one node.
+ * That call pages internally, so this caps the levels a walk visits, not the
+ * upstream HTTP calls it issues; a level wider than one page costs more than one
+ * call. Nothing caps a level's width on purpose: truncating a level would report
+ * a tag that exists as absent, which is a wrong answer rather than a slow one.
+ */
+export {
+  MAX_TREE_CONCURRENCY,
+  MAX_TREE_DURATION_MS,
+  MAX_TREE_NODES,
+  MAX_TREE_PARENT_READS,
+};
+// Backward-compatible name retained for existing callers/tests.
+export const MAX_TREE_READS = MAX_TREE_PARENT_READS;
+
+function treeReadError(message, code, details) {
+  const error = new ErrorWithStatusCode(message, 503);
+  error.code = code;
+  if (details) {
+    /** @type {any} */ (error).details = details;
+  }
+  return error;
+}
+
+/**
+ * The 503 `TAG_TREE_LIMIT_EXCEEDED` a traversal-duration budget breach always
+ * raises, shared by the synchronous {@link assertTraversalDeadline} check and
+ * the {@link raceAgainstDeadline}-based abort below so both paths produce the
+ * identical error shape regardless of which one actually fires first.
+ */
+function durationBudgetExceededError(maxDurationMs) {
+  return treeReadError(
+    'Unable to read the complete tag tree within the traversal time budget',
+    ERROR_CODES.TAG_TREE_LIMIT_EXCEEDED,
+    { budget: 'duration', maximum: maxDurationMs },
+  );
+}
+
+function assertTraversalDeadline(startedAt, maxDurationMs) {
+  if (Date.now() - startedAt >= maxDurationMs) {
+    throw durationBudgetExceededError(maxDurationMs);
+  }
+}
+
+/**
+ * Races `promise` against `signal`: if `signal` ABORTS before `promise`
+ * settles, the returned promise rejects immediately with `onAbort()`'s error
+ * — regardless of whether `promise` is still pending. This is the difference
+ * between a deadline that only gates the NEXT page request (the synchronous
+ * `onBeforePage`/`assertTraversalDeadline` checks) and one that also BOUNDS an
+ * already-in-flight request: a page fetch already sent to a sleeping/retrying
+ * shared client cannot be made to resolve early, but the traversal itself must
+ * still stop waiting on it once its time budget is spent.
+ *
+ * `signal` is ALSO threaded down into the raced call itself (see
+ * `listProjectTagTree`'s `paging.signal`), so the same deadline additionally
+ * asks the underlying `fetch` to abort the actual HTTP request — this
+ * wrapper's own rejection does not depend on that succeeding, since a mock
+ * transport or a client that ignores the signal would otherwise hang the
+ * traversal forever.
+ *
+ * @template T
+ * @param {Promise<T>} promise
+ * @param {AbortSignal} signal
+ * @param {() => Error} onAbort
+ * @returns {Promise<T>}
+ */
+function raceAgainstDeadline(promise, signal, onAbort) {
+  if (signal.aborted) {
+    return Promise.reject(onAbort());
+  }
+  return new Promise((resolve, reject) => {
+    const onAbortEvent = () => reject(onAbort());
+    signal.addEventListener('abort', onAbortEvent, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener('abort', onAbortEvent);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener('abort', onAbortEvent);
+        reject(error);
+      },
+    );
+  });
+}
+
+/**
+ * Bounds the total id count {@link collectSubtreeIds} forwards into a single
+ * upstream batch-delete call. This is independent of {@link MAX_TREE_READS}:
+ * a shallow-but-wide subtree (one category with thousands of direct leaf
+ * children) completes in a single read, well under the read cap, yet would
+ * otherwise produce a batch-delete payload with thousands of ids. Unlike the
+ * read cap's "truncating would be a wrong answer" concern, refusing an
+ * oversized DELETE with a clear error is the correct behavior, not a
+ * degraded one.
+ */
+const MAX_SUBTREE_DELETE_SIZE = 2000;
+
+/**
+ * Lists one level of the tree and indexes it by bare name. Uniqueness is per
+ * `(project, parent)`, so a name is unambiguous WITHIN a level.
+ *
+ * @param {SerenityTransport} transport
+ * @param {string} semrushWorkspaceId
+ * @param {string} projectId
+ * @param {string} parentId - '' for the root level.
+ * @param {object} [log] - logger.
+ * @returns {Promise<Map<string, string>>} bare name → tag id.
+ */
+export async function indexLevelByName(transport, semrushWorkspaceId, projectId, parentId, log) {
+  const { items } = await listProjectTagTree(
+    transport,
+    semrushWorkspaceId,
+    projectId,
+    parentId,
+    log,
+  );
+  const byName = new Map();
+  for (const t of items) {
+    // First writer wins: upstream forbids a duplicate (parent, name), so a second
+    // entry here would mean upstream drift. Keep the first and let it be visible.
+    if (t.name && !byName.has(t.name)) {
+      byName.set(t.name, t.id);
+    }
+  }
+  return byName;
+}
+
+/**
+ * Creates the missing names under one parent and returns their ids, merged with
+ * the ones that already existed. A single upstream call carries every name for
+ * one parent, so the batch never straddles two parents (the wire has exactly one
+ * `parent_id` per request).
+ *
+ * `createdNames` reports which of `wanted` this call actually minted, so a caller
+ * can tell a create apart from a resolve without a second read. It is empty when
+ * every name already existed, and it never names a tag this call did not create —
+ * a name another writer minted first, or one the upstream echoed but did not
+ * persist, is resolved, not claimed.
+ *
+ * ALIAS-TOLERANT (tag-display-names.md §5 phase 1): a wanted name resolves if
+ * the level carries that name itself OR any of its {@link aliasesOf} spellings
+ * (e.g. the pre-freeze slug beside the display name once the vocabulary
+ * changes) — only the WANTED (canonical) name is ever created. This is purely
+ * additive: a wanted name resolved via an alias is recorded under BOTH its own
+ * literal tree spelling (unchanged, from `indexLevelByName`) AND the canonical
+ * `wanted` spelling in the returned `byName`, so a caller indexing by either
+ * the literal name (anomaly detection, e.g. {@link ensureDimensionRoots}'s
+ * split-root guardrails) or the canonical name it asked for gets an answer.
+ * Under today's IDENTITY PLACEHOLDER maps every alias set is a singleton (the
+ * canonical name is its own only alias), so this is a no-op — `aliasesOf`
+ * defaults to "no aliases" for every existing caller that does not pass it.
+ *
+ * Fails closed: throws a 502 rather than returning a map missing a wanted name.
+ *
+ * @param {SerenityTransport} transport
+ * @param {string} semrushWorkspaceId
+ * @param {string} projectId
+ * @param {string} parentId - '' to create at the root level.
+ * @param {readonly string[]} wanted - bare (canonical) names that must exist
+ *   under `parentId`; only these are ever created.
+ * @param {object} [log] - logger.
+ * @param {(name: string) => readonly string[]} [aliasesOf] - additional
+ *   spellings that, if already present at this level, resolve a wanted name
+ *   without creating it. Defaults to "no aliases" — every pre-existing caller
+ *   is unaffected.
+ * @param {Map<string, string>} [initialExisting] - a level index already read
+ *   by the caller, reused to avoid a duplicate upstream read.
+ * @returns {Promise<{ byName: Map<string, string>, createdNames: string[] }>}
+ *   `byName` maps every wanted name (and any literal tree name it did not ask
+ *   for) to its tag id.
+ */
+export async function ensureChildren(
+  transport,
+  semrushWorkspaceId,
+  projectId,
+  parentId,
+  wanted,
+  log,
+  aliasesOf = () => [],
+  initialExisting = undefined,
+) {
+  const existing = initialExisting
+    ?? await indexLevelByName(transport, semrushWorkspaceId, projectId, parentId, log);
+  const missing = [];
+  for (const name of wanted) {
+    if (existing.has(name)) {
+      // Nothing to do — the exact wanted spelling is already there.
+    } else {
+      const alias = aliasesOf(name).find((a) => existing.has(a));
+      if (alias !== undefined) {
+        // Additive only: the alias's own literal key stays exactly as
+        // `indexLevelByName` found it; this adds the canonical spelling as a
+        // second key pointing at the same id.
+        existing.set(name, /** @type {string} */ (existing.get(alias)));
+      } else {
+        missing.push(name);
+      }
+    }
+  }
+  if (missing.length === 0) {
+    return { byName: existing, createdNames: [] };
+  }
+
+  let echoed;
+  try {
+    echoed = await transport.createProjectTags(
+      semrushWorkspaceId,
+      projectId,
+      missing,
+      parentId ? { parentId } : {},
+    );
+    invalidateTagCacheForProject(semrushWorkspaceId, projectId);
+  } catch (e) {
+    invalidateTagCacheForProject(semrushWorkspaceId, projectId);
+    // Upstream answers 500 on a duplicate (parent, name). Between our read and
+    // our create, a concurrent writer — possibly another resolution inside this
+    // same request — may have minted exactly the names we asked for. Re-read
+    // before deciding this is a failure. The batch is all-or-nothing upstream,
+    // so one collision also fails the names we were not racing on.
+    const reread = await indexLevelByName(transport, semrushWorkspaceId, projectId, parentId, log);
+    if (!missing.every((name) => reread.has(name))) {
+      throw e;
+    }
+    log?.info?.('ensureChildren: lost a create race; resolved the names a concurrent writer minted', {
+      semrushWorkspaceId, projectId, parentId, resolved: missing,
+    });
+    return { byName: reread, createdNames: [] };
+  }
+
+  // createProjectTags resolves to a LIST of the created nodes, in request order.
+  const nodes = Array.isArray(echoed) ? echoed : [];
+  if (!Array.isArray(echoed)
+    || nodes.length === 0
+    || nodes.some((node) => !(node && typeof node.id === 'string' && node.id))) {
+    throw new ErrorWithStatusCode('upstream created the tag but echoed no id', 502);
+  }
+  for (const node of nodes) {
+    if (node && typeof node.id === 'string' && node.id && typeof node.name === 'string') {
+      existing.set(node.name, node.id);
+    }
+  }
+  if (missing.every((name) => existing.has(name))) {
+    return { byName: existing, createdNames: missing };
+  }
+
+  // A node the upstream did not echo back leaves a hole. Re-read rather than hand
+  // back a map that silently omits a name the caller asked for.
+  log?.warn?.('ensureChildren: upstream create echoed fewer nodes than requested', {
+    semrushWorkspaceId,
+    projectId,
+    parentId,
+    unechoed: missing.filter((name) => !existing.has(name)),
+  });
+  const byName = await indexLevelByName(transport, semrushWorkspaceId, projectId, parentId, log);
+  const unresolved = missing.filter((name) => !byName.has(name));
+  if (unresolved.length > 0) {
+    // The create answered 2xx and the draft-layer re-read still does not see the
+    // name. Returning here would let a caller answer 2xx for a write that did not
+    // land, handing it an `undefined` tag id.
+    log?.error?.('ensureChildren: upstream accepted the create but did not persist it', {
+      semrushWorkspaceId,
+      projectId,
+      parentId,
+      unresolved,
+    });
+    throw new ErrorWithStatusCode(
+      `upstream did not persist the tag(s): ${unresolved.join(', ')}`,
+      502,
+    );
+  }
+  // Only the names the create echoed are ours to claim. A name that reappeared on
+  // the re-read was resolved, not minted here — another writer may have won it.
+  return {
+    byName,
+    createdNames: missing.filter((name) => existing.has(name)),
+  };
+}
+
+/**
+ * The pre-rename authorship root name. The rename is complete and this module no
+ * longer RESOLVES it (WP-O6 removed the tolerant fallback); it is retained only for
+ * the observability guardrail in {@link ensureDimensionRoots}, which warns when a
+ * project still carries it — a signal the data reshape has not reached that project.
+ *
+ * TEMPORARY — removal horizon: once the data reshape is confirmed complete across all
+ * live projects (this warning no longer fires anywhere), this constant and the
+ * guardrail re-read branch in {@link ensureDimensionRoots} are dead weight and should
+ * be removed together. Follow-up to the dimension-root program (post-WP-S2
+ * stabilization, LLMO-6280).
+ */
+const LEGACY_SOURCE_ROOT_NAME = 'source';
+
+/**
+ * The dimensions whose ROOT may carry a display rename (tag-display-names.md
+ * §1 item 4) — `category`, `type`, `source`. `intent` is excluded (its root is
+ * `$abv_tags$intent` forever, no display rename) and `origin` is excluded
+ * because its root name remains unchanged — both already have their OWN dedicated
+ * split-root guardrails above/below, so they are deliberately not folded into
+ * this generalized one.
+ */
+const DISPLAY_RENAMING_DIMENSIONS = [DIMENSION.CATEGORY, DIMENSION.TYPE, DIMENSION.SOURCE];
+
+/**
+ * The alias set {@link ensureChildren} checks for one of
+ * {@link DISPLAY_RENAMING_DIMENSIONS}'s CURRENT root-name spellings — the bare
+ * dimension key, so a project that still carries the pre-freeze slug root
+ * resolves under it rather than minting a second, empty root beside it
+ * (tag-display-names.md §5 phase 1). Under today's IDENTITY PLACEHOLDER
+ * ({@link rootNameOfDimension} returning the dimension key verbatim for these
+ * three) the alias coincides with the name itself, so this returns `[]` — no
+ * behavior change until the vocabulary freezes.
+ *
+ * @param {string} rootName - one of `DIMENSION_PROVISION_ORDER.map(rootNameOfDimension)`.
+ * @returns {string[]}
+ */
+function rootAliasesOf(rootName) {
+  const dimension = DIMENSION_PROVISION_ORDER.find((d) => rootNameOfDimension(d) === rootName);
+  const aliasable = /** @type {readonly string[]} */ (DISPLAY_RENAMING_DIMENSIONS);
+  if (!dimension || !aliasable.includes(dimension) || dimension === rootName) {
+    return [];
+  }
+  return [dimension];
+}
+
+/**
+ * The alias set {@link ensureChildren} checks for a SERVER-OWNED VALUE's
+ * current display form ({@link displayNameOfValue}) — the bare slug it was
+ * derived from, via {@link valueSlugOfDisplayName}, so a project that still
+ * carries the pre-freeze slug-named value resolves under it rather than
+ * minting a second, empty value beside it (tag-display-names.md §5 phase 1).
+ * Only `source`/`type` values can currently diverge from their slug (the
+ * closed `intent`/`origin` vocabularies never display-rename); for those,
+ * {@link valueSlugOfDisplayName} always returns `undefined`, so the alias set
+ * is empty and this is a no-op there too. Under today's IDENTITY PLACEHOLDER
+ * maps (`source`/`type`) the alias coincides with the display name itself, so
+ * this returns `[]` for every value until the vocabulary freezes.
+ *
+ * @param {string} dimension - a server-owned dimension.
+ * @returns {(displayName: string) => string[]}
+ */
+function valueAliasesOf(dimension) {
+  return (displayName) => {
+    const slug = valueSlugOfDisplayName(dimension, displayName);
+    return slug && slug !== displayName ? [slug] : [];
+  };
+}
+
+/**
+ * Resolves the registered dimension roots, creating any that a project is missing.
+ * Older projects predate this taxonomy entirely, so this is the seam that brings
+ * them forward on first touch.
+ *
+ * Each root is resolved-or-created by its UPSTREAM NAME ({@link rootNameOfDimension}),
+ * which is the dimension key for four of the five and `$abv_tags$intent` for `intent`.
+ * The returned map is keyed by DIMENSION, so a caller asks for the dimension it means
+ * and never has to know which spelling a given project carries.
+ *
+ * Two dimension roots were renamed, and BOTH are resolved strictly by their current
+ * name here — there is no fallback for either pre-rename spelling.
+ *
+ * The intent root is `$abv_tags$intent`; it was once bare `intent`. The `origin`
+ * authorship root was once `source` (origin-dimension.md).
+ *
+ * For both, deploy ordering is the invariant and it is enforced OUTSIDE this code: the
+ * data reshape reaches every live project before this resolver ships. Violate that
+ * ordering and the consequence is the same shape in both cases — a fresh root is minted
+ * EMPTY beside the populated pre-rename one, splitting the dimension across two roots
+ * and stranding every value already tagged under the old one. For `origin` those are the
+ * `ai`/`human` values; for `intent`, every prompt carrying an intent tag.
+ *
+ * This seam does not prevent or fail on that state — the deploy gate owns it — but it
+ * does WARN on it (below), because a gate that is a point-in-time sweep proves the state
+ * is empty today, not that it stays empty.
+ *
+ * @param {SerenityTransport} transport
+ * @param {string} semrushWorkspaceId
+ * @param {string} projectId
+ * @param {object} [log] - logger.
+ * @returns {Promise<Map<string, string>>} dimension → tag id, in provisioning order.
+ */
+export async function ensureDimensionRoots(transport, semrushWorkspaceId, projectId, log) {
+  const rootLevel = await indexLevelByName(transport, semrushWorkspaceId, projectId, '', log);
+  const caseVariantTagRoot = [...rootLevel.keys()]
+    .find((name) => name.toLowerCase() === DIMENSION.TAG && name !== DIMENSION.TAG);
+  if (!rootLevel.has(DIMENSION.TAG) && caseVariantTagRoot) {
+    const error = new ErrorWithStatusCode(
+      `The project has a case-variant "${caseVariantTagRoot}" root; refusing to create "tag"`,
+      409,
+    );
+    error.code = ERROR_CODES.INCOMPATIBLE_TAG_TAXONOMY;
+    /** @type {any} */ (error).details = {
+      reason: 'caseVariantRoot', path: [caseVariantTagRoot],
+    };
+    throw error;
+  }
+  const { byName, createdNames } = await ensureChildren(
+    transport,
+    semrushWorkspaceId,
+    projectId,
+    '',
+    DIMENSION_PROVISION_ORDER.map(rootNameOfDimension),
+    log,
+    rootAliasesOf,
+    rootLevel,
+  );
+
+  // Observability guardrail (no tolerance, no behavior change): freshly minting `origin`
+  // while a legacy `source` root still sits at this level means the data reshape may have
+  // missed this project (see the deploy-ordering note above) — surface it rather than
+  // orphan the `source` values silently. The re-read is on the rare origin-create path
+  // only, never the common all-roots-exist path, so steady state costs nothing.
+  // Exception: if `source` was also freshly minted in the same batch, it is the new
+  // producing-system root (WP-S2) — not a legacy authorship root — so no warning.
+  if (createdNames.includes(DIMENSION.ORIGIN) && !createdNames.includes(DIMENSION.SOURCE)) {
+    const level = await indexLevelByName(transport, semrushWorkspaceId, projectId, '', log);
+    if (level.has(LEGACY_SOURCE_ROOT_NAME)) {
+      log?.warn?.(
+        'ensureDimensionRoots: minted a fresh `origin` root while a legacy `source` root is '
+        + 'still present — the data reshape may have missed this project',
+        { semrushWorkspaceId, projectId },
+      );
+    }
+  }
+
+  // Same guardrail for the intent rename, and cheaper: `byName` already indexes every
+  // name at this level, so the pre-rename spelling can be checked without a re-read.
+  // A bare `intent` root beside `$abv_tags$intent` splits the dimension — the prompts
+  // tagged under the pre-rename root are stranded, and the unmarked root is visible in
+  // the customer-facing Brand Presence tag filter.
+  //
+  // Reported on state, not on the moment of minting. The split outlives the call that
+  // created it: once both roots exist, every later pass resolves the marked root by
+  // name and creates nothing, so a mint-only check would go quiet on exactly the
+  // projects that are still broken. Neither the rename (which refuses a project
+  // carrying both names) nor the reshape (which refuses the bare one) can resolve it,
+  // so it needs a human — and the only thing that surfaces it is this line.
+  if (byName.has(DIMENSION.INTENT)) {
+    log?.warn?.(
+      'ensureDimensionRoots: a pre-rename `intent` root is present beside '
+      + `\`${INTENT_ROOT_NAME}\` — the intent dimension is split on this project`,
+      { semrushWorkspaceId, projectId, event: 'intent-rename-split-root' },
+    );
+  }
+
+  // Generalized split-root guardrail (tag-display-names.md §3 step 4, §5 phase
+  // 1) — the value-level analog of the two guardrails above, for the THREE
+  // roots this spec display-renames. `ensureChildren`'s alias resolution
+  // (above) prefers whichever spelling the tree already has, so it can only
+  // ever surface ONE side of a genuine split; this is what surfaces the other.
+  // `byName` carries BOTH the dimension-key entry and the display-name entry
+  // whenever either was literally present on the tree (ensureChildren is
+  // additive, never destructive) — so two DIFFERENT ids under the same
+  // dimension means both spellings exist as distinct root tags.
+  // IDENTITY PLACEHOLDER today: `rootNameOfDimension(dimension) === dimension`
+  // for all three, so this loop body never runs until the vocabulary freezes.
+  for (const dimension of DISPLAY_RENAMING_DIMENSIONS) {
+    const displayName = rootNameOfDimension(dimension);
+    if (displayName !== dimension) {
+      const displayId = byName.get(displayName);
+      const slugId = byName.get(dimension);
+      if (displayId && slugId && displayId !== slugId) {
+        log?.warn?.(
+          `ensureDimensionRoots: both the slug root "${dimension}" and its display root `
+          + `"${displayName}" exist as distinct tags — the display-name migration may `
+          + 'have missed this project',
+          {
+            semrushWorkspaceId, projectId, dimension, event: 'display-rename-split-root',
+          },
+        );
+      }
+    }
+  }
+
+  // Return the roots keyed by DIMENSION, in canonical order.
+  const roots = new Map();
+  for (const dimension of DIMENSION_PROVISION_ORDER) {
+    roots.set(dimension, byName.get(rootNameOfDimension(dimension)));
+  }
+  return roots;
+}
+
+/**
+ * The id of one dimension root out of an {@link ensureDimensionRoots} result.
+ *
+ * `ensureChildren` fails closed, so a map it returned carries every name that was
+ * asked for. Used only for roots that are always resolved (the closed dimensions
+ * and `category`); the `source` root can be `undefined` on a mid-rename project,
+ * so callers that need it read `roots.get(DIMENSION.SOURCE)` directly instead.
+ *
+ * @param {Map<string, string | undefined>} roots - the resolved dimension → id map.
+ * @param {string} dimension - one of the always-resolved dimension root names.
+ * @returns {string}
+ */
+function rootIdOf(roots, dimension) {
+  return /** @type {string} */ (roots.get(dimension));
+}
+
+/**
+ * The id of a SERVER-OWNED dimension root, failing LOUD when it is unresolved.
+ *
+ * The only dimension whose root can come back `undefined` is `source` on a
+ * mid-rename project — {@link ensureDimensionRoots} deliberately leaves the
+ * `source` key unset while that project's `source` root still means authorship
+ * (WP-O6-gated). Without this guard an `undefined` root id flows into
+ * {@link ensureChildren}, whose `createProjectTags(missing, parentId ? {parentId}
+ * : {})` degrades to a ROOT-LEVEL create, silently minting a stranded value as a
+ * bogus new dimension root. The external deploy gate should keep this state out of
+ * production, but a gate bypass must fail visibly, not corrupt the tree — so refuse
+ * rather than proceed. A no-op for the always-provisioned dimensions.
+ *
+ * @param {Map<string, string | undefined>} roots - the resolved dimension → id map.
+ * @param {string} dimension - a server-owned dimension root name.
+ * @returns {string}
+ */
+function requireServerOwnedRootId(roots, dimension) {
+  const rootId = roots.get(dimension);
+  if (!rootId) {
+    throw new ErrorWithStatusCode(
+      `${dimension} dimension root not provisioned (source-dimension.md is WP-O6-gated); `
+      + 'refusing to create a stranded root-level tag',
+      502,
+    );
+  }
+  return rootId;
+}
+
+/**
+ * Locates every id in `tagIds` in the project's draft tag tree, in ONE walk, and
+ * reports where each sits: the DIMENSION it belongs to (the name of its root
+ * ancestor) and the ids of its ancestors, root-first.
+ *
+ * There is no upstream "get tag by id", so this walks the tree a level at a time:
+ * the roots first, then the children of every node that has any. Resolving a set
+ * in one traversal is what keeps a re-parent — which must place both the moved
+ * tag and its prospective parent — from paying for the tree twice, and it reads
+ * both positions from the SAME snapshot, so the ancestry proved for one cannot
+ * have moved under the other.
+ *
+ * A `visited` set makes an upstream parentage cycle terminate, and
+ * {@link MAX_TREE_READS} bounds the level reads. Nothing here caps a level's
+ * width: dropping the tail of a level would report an existing tag as absent,
+ * and callers turn `unknown` into a 404.
+ *
+ * @param {SerenityTransport} transport
+ * @param {string} semrushWorkspaceId
+ * @param {string} projectId
+ * @param {string[]} tagIds - the upstream ids to locate.
+ * @param {object} [log] - logger.
+ * @returns {Promise<Map<string, TagPosition>>} one entry per DISTINCT requested
+ *   id; an id absent from the tree maps to a `kind: 'unknown'` position.
+ */
+export async function findTagsInTree(transport, semrushWorkspaceId, projectId, tagIds, log) {
+  const wanted = new Set(tagIds);
+  /** @type {Map<string, TagPosition>} */
+  const found = new Map();
+  const roots = await listProjectTagTree(transport, semrushWorkspaceId, projectId, '', log);
+  for (const root of roots.items) {
+    if (wanted.has(root.id)) {
+      found.set(root.id, {
+        kind: 'root', parentId: null, rootName: dimensionOfRootName(root.name), ancestorIds: [],
+      });
+    }
+  }
+  const visited = new Set();
+  let reads = 1;
+  let frontier = roots.items
+    .filter((r) => r.childrenCount > 0)
+    .map((r) => ({ node: r, rootName: dimensionOfRootName(r.name), ancestorIds: [r.id] }));
+  while (frontier.length > 0 && found.size < wanted.size) {
+    const next = [];
+    for (const { node, rootName, ancestorIds } of frontier) {
+      if (!visited.has(node.id)) {
+        visited.add(node.id);
+        reads += 1;
+        if (reads > MAX_TREE_READS) {
+          const error = new ErrorWithStatusCode('Unable to read the complete tag tree', 503);
+          error.code = ERROR_CODES.TAG_TREE_READ_INCOMPLETE;
+          throw error;
+        }
+        // Sequential by design: stop as soon as every wanted id is placed rather
+        // than fanning out every node's children concurrently.
+        // eslint-disable-next-line no-await-in-loop
+        const children = await listProjectTagTree(
+          transport,
+          semrushWorkspaceId,
+          projectId,
+          node.id,
+          log,
+        );
+        for (const child of children.items) {
+          if (wanted.has(child.id)) {
+            found.set(child.id, {
+              kind: 'descendant',
+              parentId: child.parentId ?? node.id,
+              rootName: dimensionOfRootName(child.path?.[0]?.name ?? rootName),
+              ancestorIds,
+            });
+          }
+        }
+        if (found.size === wanted.size) {
+          return found;
+        }
+
+        next.push(...children.items
+          .filter((t) => t.childrenCount > 0)
+          .map((child) => ({ node: child, rootName, ancestorIds: [...ancestorIds, child.id] })));
+      }
+    }
+    frontier = next;
+  }
+  for (const id of wanted) {
+    if (!found.has(id)) {
+      found.set(id, {
+        kind: 'unknown', parentId: null, rootName: null, ancestorIds: [],
+      });
+    }
+  }
+  return found;
+}
+
+/**
+ * Reads the complete draft taxonomy once and derives stable path and
+ * compatibility metadata without modifying non-canonical Project Engine data.
+ *
+ * Resource budgets bound every caller, strict or not — they guard against a
+ * pathological tree regardless of who is reading it — but their configuration
+ * and compatibility impact differ:
+ *  - `maxParents` predates the `strict` split: the parent-expansion cap has
+ *    always bounded these walks. Only its error token changed with unbounded
+ *    nesting (`tagTreeReadIncomplete` -> `tagTreeLimitExceeded`, with a
+ *    `details.budget` discriminator).
+ *  - `maxNodes` and `maxDurationMs` are NEW, and deliberately apply to the
+ *    existing tolerant mutation/filter callers too: a tree that large or that
+ *    slow was already on course for a Lambda timeout, so a retryable 503
+ *    `tagTreeLimitExceeded` is the better outcome than an unbounded walk. The
+ *    cost is a behavior change on already-shipped POST/PATCH `/serenity/tags`
+ *    reads, which now fail closed at >`maxNodes` nodes or >`maxDurationMs`
+ *    instead of (slowly) succeeding.
+ *  - Tag search supplies environment-resolved overrides for all budgets,
+ *    including concurrency and pages per parent. Existing mutation/filter
+ *    callers intentionally omit those overrides and retain compiled defaults.
+ *
+ * `strict` gates only the NEW fail-closed data-integrity behavior added
+ * alongside unbounded nesting, and the request concurrency:
+ *  - non-strict (default): the prior tolerant behavior every existing
+ *    mutation/filter caller (via {@link readTagTreeSnapshot} with no
+ *    `rootName`) already relied on — a revisited tag id is skipped rather
+ *    than treated as a cycle, an upstream-supplied `path` is trusted over the
+ *    parent's own recorded path, and parent reads are issued one at a time
+ *    (`concurrency` defaults to 1).
+ *  - strict (tag search only): ambiguous/case-variant `tag` roots, a
+ *    repeated tag id, a `parentId` that disagrees with the read parent, and a
+ *    supplied `path` that disagrees with the parent's own path all fail
+ *    closed with `TAG_TREE_DATA_INTEGRITY`, and parent reads fan out up to
+ *    {@link MAX_TREE_CONCURRENCY} at once. Search needs both: it is the one
+ *    reader that must never silently return an incomplete or inconsistent
+ *    result, and its cacheless full-tree read is the one that benefits from
+ *    concurrent pagination.
+ *
+ * @param {SerenityTransport} transport
+ * @param {string} semrushWorkspaceId
+ * @param {string} projectId
+ * @param {object} [log]
+ * @param {object} [options]
+ * @param {string} [options.rootName]
+ * @param {number} [options.maxParents]
+ * @param {number} [options.maxNodes]
+ * @param {number} [options.concurrency]
+ * @param {number} [options.maxDurationMs]
+ * @param {number} [options.maxPagesPerParent]
+ * @param {boolean} [options.strict=false]
+ * @returns {Promise<{
+ *   items: TagTreeSnapshotItem[],
+ *   byId: Map<string, TagTreeSnapshotItem>,
+ * }>}
+ */
+export async function loadTagTreeSnapshot(
+  transport,
+  semrushWorkspaceId,
+  projectId,
+  log,
+  {
+    rootName,
+    maxParents = MAX_TREE_READS,
+    maxNodes = MAX_TREE_NODES,
+    concurrency,
+    maxDurationMs = MAX_TREE_DURATION_MS,
+    maxPagesPerParent,
+    strict = false,
+  } = {},
+) {
+  const effectiveConcurrency = concurrency ?? (strict ? MAX_TREE_CONCURRENCY : 1);
+  const startedAt = Date.now();
+  // A NUMBER >= 0 is required by AbortSignal.timeout; every caller here passes
+  // one (the constant default or a test override), so this is not re-validated.
+  const deadline = AbortSignal.timeout(maxDurationMs);
+  const onDeadlineAborted = () => durationBudgetExceededError(maxDurationMs);
+  const onBeforePage = () => assertTraversalDeadline(startedAt, maxDurationMs);
+  const roots = await raceAgainstDeadline(
+    listProjectTagTree(
+      transport,
+      semrushWorkspaceId,
+      projectId,
+      '',
+      log,
+      undefined,
+      { onBeforePage, signal: deadline, maxPages: maxPagesPerParent },
+    ),
+    deadline,
+    onDeadlineAborted,
+  );
+  assertTraversalDeadline(startedAt, maxDurationMs);
+  let selectedRoots = roots.items;
+  if (strict) {
+    const canonicalTagRoots = roots.items.filter((root) => root.name === DIMENSION.TAG);
+    const caseVariantRoot = roots.items.find((root) => root.name.toLowerCase() === DIMENSION.TAG
+      && root.name !== DIMENSION.TAG);
+    if (canonicalTagRoots.length > 1) {
+      throw treeReadError(
+        'Unable to establish a consistent tag tree',
+        ERROR_CODES.TAG_TREE_DATA_INTEGRITY,
+        { reason: 'ambiguousRoot', rootName: DIMENSION.TAG },
+      );
+    }
+    if (caseVariantRoot && (rootName === DIMENSION.TAG || canonicalTagRoots.length > 0)) {
+      throw treeReadError(
+        'Unable to establish a consistent tag tree',
+        ERROR_CODES.TAG_TREE_DATA_INTEGRITY,
+        { reason: 'caseVariantRoot', rootName: caseVariantRoot.name },
+      );
+    }
+  }
+  if (rootName !== undefined) {
+    selectedRoots = roots.items.filter((root) => dimensionOfRootName(root.name) === rootName);
+    if (strict && selectedRoots.length > 1) {
+      throw treeReadError(
+        'Unable to establish a consistent tag tree',
+        ERROR_CODES.TAG_TREE_DATA_INTEGRITY,
+        { reason: 'ambiguousRoot', rootName },
+      );
+    }
+  }
+  const nodes = selectedRoots.map((root) => ({
+    ...root,
+    rootName: root.name,
+    rootId: root.id,
+    depth: 1,
+    fullPath: [{ id: root.id, name: root.name }],
+  }));
+  const seenIds = new Set(nodes.map((node) => node.id));
+  if (nodes.length > maxNodes) {
+    throw treeReadError(
+      'Unable to read the complete tag tree within the node budget',
+      ERROR_CODES.TAG_TREE_LIMIT_EXCEEDED,
+      { budget: 'nodes', maximum: maxNodes },
+    );
+  }
+  let frontier = nodes.filter((node) => node.childrenCount > 0);
+  let parentReads = 0;
+  while (frontier.length > 0) {
+    const next = [];
+    for (let offset = 0; offset < frontier.length; offset += effectiveConcurrency) {
+      assertTraversalDeadline(startedAt, maxDurationMs);
+      const parents = frontier.slice(offset, offset + effectiveConcurrency);
+      if (parentReads + parents.length > maxParents) {
+        throw treeReadError(
+          'Unable to read the complete tag tree within the parent expansion budget',
+          ERROR_CODES.TAG_TREE_LIMIT_EXCEEDED,
+          { budget: 'parents', maximum: maxParents },
+        );
+      }
+      parentReads += parents.length;
+      // eslint-disable-next-line no-await-in-loop
+      const levels = await raceAgainstDeadline(
+        Promise.all(parents.map(async (parent) => ({
+          parent,
+          children: await listProjectTagTree(
+            transport,
+            semrushWorkspaceId,
+            projectId,
+            parent.id,
+            log,
+            undefined,
+            { onBeforePage, signal: deadline, maxPages: maxPagesPerParent },
+          ),
+        }))),
+        deadline,
+        onDeadlineAborted,
+      );
+      assertTraversalDeadline(startedAt, maxDurationMs);
+      for (const { parent, children } of levels) {
+        for (const child of children.items) {
+          if (seenIds.has(child.id)) {
+            if (strict) {
+              throw treeReadError(
+                'Unable to establish a consistent tag tree',
+                ERROR_CODES.TAG_TREE_DATA_INTEGRITY,
+                { reason: 'repeatedTagId', tagId: child.id },
+              );
+            }
+            // Legacy tolerant behavior: a revisited id is skipped rather than
+            // expanded again — it does not newly break a caller that already
+            // lived with occasional upstream drift.
+            // eslint-disable-next-line no-continue
+            continue;
+          }
+          const suppliedPath = Array.isArray(child.path) && child.path.length > 0
+            ? child.path
+            : null;
+          if (strict) {
+            if (child.parentId && child.parentId !== parent.id) {
+              throw treeReadError(
+                'Unable to establish a consistent tag tree',
+                ERROR_CODES.TAG_TREE_DATA_INTEGRITY,
+                { reason: 'parentMismatch', tagId: child.id },
+              );
+            }
+            if (suppliedPath
+              && (suppliedPath.length !== parent.fullPath.length
+                || suppliedPath.some((part, index) => (
+                  part.id !== parent.fullPath[index]?.id
+                  || part.name !== parent.fullPath[index]?.name
+                )))) {
+              throw treeReadError(
+                'Unable to establish a consistent tag tree',
+                ERROR_CODES.TAG_TREE_DATA_INTEGRITY,
+                { reason: 'pathMismatch', tagId: child.id },
+              );
+            }
+          }
+          // Non-strict trusts an upstream-supplied path over the parent's own
+          // recorded path (the pre-existing tolerant behavior); strict always
+          // derives the path from the parent it was just read under, since
+          // that agreement is exactly what strict has already verified above.
+          const fullPath = strict || !suppliedPath
+            ? [...parent.fullPath, { id: child.id, name: child.name }]
+            : [...suppliedPath, { id: child.id, name: child.name }];
+          const node = {
+            ...child,
+            parentId: child.parentId ?? parent.id,
+            rootName: strict ? parent.rootName : (fullPath[0]?.name ?? parent.rootName),
+            rootId: strict ? parent.rootId : (fullPath[0]?.id ?? parent.rootId),
+            depth: fullPath.length,
+            fullPath,
+          };
+          seenIds.add(node.id);
+          nodes.push(node);
+          if (nodes.length > maxNodes) {
+            throw treeReadError(
+              'Unable to read the complete tag tree within the node budget',
+              ERROR_CODES.TAG_TREE_LIMIT_EXCEEDED,
+              { budget: 'nodes', maximum: maxNodes },
+            );
+          }
+          if (node.childrenCount > 0) {
+            next.push(node);
+          }
+        }
+      }
+    }
+    frontier = next;
+  }
+
+  const items = classifyTagCompatibility(nodes);
+  return {
+    items,
+    byId: new Map(items.map((item) => [item.id, item])),
+  };
+}
+
+/**
+ * Reads the complete draft taxonomy, reusing a short-lived project-keyed
+ * in-flight/completed snapshot when safe. Mutation handlers invalidate the
+ * project entry. Safety-critical worker drift validation passes
+ * `forceRefresh: true`, which bypasses and replaces any cached snapshot.
+ *
+ * @param {SerenityTransport} transport
+ * @param {string} semrushWorkspaceId
+ * @param {string} projectId
+ * @param {object} [log]
+ * @param {object} [options]
+ * @param {boolean} [options.forceRefresh=false]
+ * @param {boolean} [options.cacheResult=true]
+ * @param {string} [options.rootName]
+ * @param {boolean} [options.strict=false] - see {@link loadTagTreeSnapshot}.
+ *   Tag search is the only caller that passes `strict: true`; every other
+ *   (mutation/filter) caller keeps the prior tolerant, serial behavior.
+ * @param {object} [options.budgets] - optional traversal budget overrides
+ *   (`maxParents`/`maxNodes`/`maxDurationMs`/`concurrency`/
+ *   `maxPagesPerParent`). Tag search supplies runtime environment values via
+ *   {@link import('./tag-search-constants.js').resolveTagTreeBudgets}; legacy
+ *   mutation/filter callers omit this object and retain compiled defaults.
+ * @returns {Promise<{
+ *   items: TagTreeSnapshotItem[],
+ *   byId: Map<string, TagTreeSnapshotItem>,
+ * }>}
+ */
+export async function readTagTreeSnapshot(
+  transport,
+  semrushWorkspaceId,
+  projectId,
+  log,
+  {
+    forceRefresh = false, cacheResult = true, rootName, strict = false, budgets,
+  } = {},
+) {
+  if (!forceRefresh && rootName === undefined) {
+    const cached = getCachedTagTreeSnapshot(semrushWorkspaceId, projectId);
+    if (cached) {
+      return /** @type {ReturnType<typeof loadTagTreeSnapshot>} */ (cached);
+    }
+  }
+  const pending = loadTagTreeSnapshot(
+    transport,
+    semrushWorkspaceId,
+    projectId,
+    log,
+    { ...(budgets ?? {}), rootName, strict },
+  );
+  if (cacheResult && rootName === undefined) {
+    cacheTagTreeSnapshot(semrushWorkspaceId, projectId, pending);
+  }
+  try {
+    return await pending;
+  } catch (error) {
+    if (cacheResult && rootName === undefined) {
+      deleteCachedTagTreeSnapshotIfSame(semrushWorkspaceId, projectId, pending);
+    }
+    throw error;
+  }
+}
+
+export function incompatibleTaxonomyError(items) {
+  const error = new ErrorWithStatusCode(
+    'The requested tag belongs to an incompatible read-only taxonomy branch',
+    409,
+  );
+  error.code = ERROR_CODES.INCOMPATIBLE_TAG_TAXONOMY;
+  /** @type {any} */ (error).details = {
+    tags: items.map((item) => ({
+      id: item.id,
+      path: item.fullPath?.map((part) => part.name) ?? [],
+      reason: item.compatibility?.reason ?? 'ambiguousPath',
+    })),
+  };
+  return error;
+}
+
+/**
+ * Locates one tag. Thin wrapper over {@link findTagsInTree}; see it for the walk.
+ * Private on purpose: a caller that already knows both ids it needs should place
+ * them in a single walk rather than call this twice.
+ *
+ * @param {SerenityTransport} transport
+ * @param {string} semrushWorkspaceId
+ * @param {string} projectId
+ * @param {string} tagId - the upstream id to locate.
+ * @param {object} [log] - logger.
+ * @returns {Promise<TagPosition>} `rootName` is the tag's dimension: its own name
+ *   when it IS a root, else `path[0]`, folded to the dimension key either way
+ *   ({@link dimensionOfRootName}).
+ */
+async function findTagInTree(transport, semrushWorkspaceId, projectId, tagId, log) {
+  const found = await findTagsInTree(transport, semrushWorkspaceId, projectId, [tagId], log);
+  return /** @type {TagPosition} */ (found.get(tagId));
+}
+
+/**
+ * Collects `tagId` plus every id in its subtree, by walking the draft tree
+ * level by level from that node (category-delete.md §4.2). A delete deletes
+ * the whole subtree, composed HERE rather than relied upon upstream: the
+ * batch-delete operation is not known to cascade (and, per the mock's own
+ * documented behavior, does not), so a caller that only sent the target id
+ * would strand its children as unreachable, prompt-less orphans.
+ *
+ * Composing the id set this way is independent of whatever upstream turns out
+ * to do with a parent-with-children delete: if upstream also cascades, the
+ * extra descendant ids are already-deleted members of the same batch: a
+ * harmless no-op, not an error (batch delete is documented idempotent per id).
+ *
+ * This is a point-in-time snapshot, not a lock: a tag created under `tagId`
+ * between this read and the caller's subsequent batch-delete call is not in
+ * the returned set and will not be deleted, stranding it as an orphan under a
+ * now-gone parent. Same class of risk as the cascade uncertainty above
+ * (category-delete.md §6 gate G1), not a new one — accepted for the same
+ * reason: there is no upstream lock primitive to hold instead.
+ *
+ * @param {SerenityTransport} transport
+ * @param {string} semrushWorkspaceId
+ * @param {string} projectId
+ * @param {string} tagId - the subtree's root id (included in the result).
+ * @param {object} [log] - logger.
+ * @returns {Promise<string[]>} `tagId` followed by every descendant id, in
+ *   level order.
+ */
+export async function collectSubtreeIds(transport, semrushWorkspaceId, projectId, tagId, log) {
+  const ids = [tagId];
+  let frontier = [tagId];
+  let reads = 0;
+  while (frontier.length > 0) {
+    const next = [];
+    for (const nodeId of frontier) {
+      reads += 1;
+      if (reads > MAX_TREE_READS) {
+        const error = new ErrorWithStatusCode('Unable to read the complete tag subtree', 503);
+        error.code = ERROR_CODES.TAG_TREE_READ_INCOMPLETE;
+        throw error;
+      }
+      // Sequential by design — see findTagsInTree for the same rationale.
+      // eslint-disable-next-line no-await-in-loop
+      const { items } = await listProjectTagTree(
+        transport,
+        semrushWorkspaceId,
+        projectId,
+        nodeId,
+        log,
+      );
+      for (const child of items) {
+        ids.push(child.id);
+        if (ids.length > MAX_SUBTREE_DELETE_SIZE) {
+          const error = new ErrorWithStatusCode('Unable to read the complete tag subtree', 503);
+          error.code = ERROR_CODES.TAG_TREE_READ_INCOMPLETE;
+          throw error;
+        }
+        if (child.childrenCount > 0) {
+          next.push(child.id);
+        }
+      }
+    }
+    frontier = next;
+  }
+  return ids;
+}
+
+/**
+ * Throws unless `parent` is the `dimension` root itself or one of its
+ * descendants, and — when a tag is being MOVED under it — unless `parent` sits
+ * outside that tag's own subtree.
+ *
+ * A tag's dimension is its root ancestor, so an unchecked `parentId` is the one
+ * edge that can move a tag into a dimension its caller never named — filing a
+ * customer-authored value under `intent`, where the fixed vocabulary is supposed
+ * to be the only content. Membership must be tested by ANCESTRY, not by comparing
+ * against the three closed root ids: a parent nested under a closed root is one
+ * level deeper and would pass that test.
+ *
+ * The subtree check is the same argument one edge further in. Upstream stores a
+ * parent pointer, not a tree, so it will happily accept `A.parent = B` when `B`
+ * already descends from `A`. Nothing then references `A` or `B` from a root, and
+ * because every walk here starts AT the roots, both become permanently
+ * unreachable: `findTagsInTree` reports them `unknown`, every later PATCH 404s,
+ * and no request can undo the edge. The `visited` set makes such a cycle
+ * survivable on read; refusing it on write is what keeps it from existing.
+ *
+ * @param {string} dimension - the dimension the new/edited tag belongs to.
+ * @param {TagPosition} parent - the resolved position of the caller's `parentId`.
+ * @param {string} [movingTagId] - the tag being re-parented; omitted on a create,
+ *   where nothing exists yet to be a parent's ancestor.
+ * @returns {void}
+ */
+export function assertParentPlacement(dimension, parent, movingTagId) {
+  if (parent.kind === 'unknown') {
+    throw new ErrorWithStatusCode('parentId does not resolve to a tag on this market', 400);
+  }
+  if (parent.rootName !== dimension) {
+    throw new ErrorWithStatusCode(
+      `parentId must be the "${dimension}" dimension root or one of its descendants`,
+      400,
+    );
+  }
+  if (movingTagId && parent.ancestorIds.includes(movingTagId)) {
+    throw new ErrorWithStatusCode('parentId must not be a descendant of the tag', 400);
+  }
+}
+
+/**
+ * Resolves `parentId` and asserts it may parent a tag of `dimension`. Used by the
+ * CREATE paths, where the tag does not exist yet; a re-parent instead resolves
+ * the target and the parent together via {@link findTagsInTree} and calls
+ * {@link assertParentPlacement} directly.
+ *
+ * @param {SerenityTransport} transport
+ * @param {string} semrushWorkspaceId
+ * @param {string} projectId
+ * @param {string} dimension - the dimension the new tag belongs to.
+ * @param {string} parentId - the caller-supplied parent id.
+ * @param {object} [log] - logger.
+ * @returns {Promise<void>}
+ */
+export async function assertParentWithinDimension(
+  transport,
+  semrushWorkspaceId,
+  projectId,
+  dimension,
+  parentId,
+  log,
+) {
+  const parent = await findTagInTree(transport, semrushWorkspaceId, projectId, parentId, log);
+  assertParentPlacement(dimension, parent);
+}
+
+/**
+ * Resolves (provisioning as needed) the fixed taxonomy: the roots plus every
+ * closed dimension's child vocabulary. The open `category` and `source` roots are
+ * created but left empty — a `category`'s children are customer content, and a
+ * `source`'s children are minted on first use (it has no enum to pre-provision).
+ *
+ * @param {SerenityTransport} transport
+ * @param {string} semrushWorkspaceId
+ * @param {string} projectId
+ * @param {object} [log] - logger.
+ * @returns {Promise<{
+ *   roots: Map<string, string | undefined>,
+ *   values: Map<string, Map<string, string>>,
+ * }>} `roots` maps a dimension to its root's id (the `source` key is `undefined` on
+ *   a mid-rename project — see {@link ensureDimensionRoots}); `values` maps a closed
+ *   dimension name to that dimension's bare value → id map.
+ */
+export async function provisionDimensionTree(transport, semrushWorkspaceId, projectId, log) {
+  const roots = await ensureDimensionRoots(transport, semrushWorkspaceId, projectId, log);
+  // The three closed dimensions hang off different parents and their vocabularies
+  // are disjoint, so nothing orders these against each other.
+  const resolved = await Promise.all(CLOSED_DIMENSIONS.map((dimension) => ensureChildren(
+    transport,
+    semrushWorkspaceId,
+    projectId,
+    rootIdOf(roots, dimension),
+    CLOSED_DIMENSION_VALUES[/** @type {keyof CLOSED_DIMENSION_VALUES} */ (dimension)],
+    log,
+  )));
+  const values = new Map(
+    CLOSED_DIMENSIONS.map((dimension, i) => [dimension, resolved[i].byName]),
+  );
+  return { roots, values };
+}
+
+/**
+ * Resolves one SERVER-OWNED value to its upstream id, creating it (and its root)
+ * only if absent. Idempotent: many independent callers legitimately need the id
+ * of a small, project-wide-shared value.
+ *
+ * This is the resolve-or-create primitive (source-dimension.md §1 item 4). It is
+ * vocabulary-agnostic on purpose — the caller enforces a CLOSED dimension's enum
+ * BEFORE calling (the create-tag handler's `parseCreateTagBody`), and an OPEN
+ * server-owned dimension (`source`) has no enum to check. Lifting the enum check
+ * to the caller is exactly what generalizes this from the former `ensureClosedValue`
+ * to every server-owned dimension without changing its resolve-or-create body:
+ * `ensureChildren` reads the level, creates the missing name, and on an upstream
+ * failure re-reads and adopts the id a concurrent writer minted, so a duplicate
+ * `(parent, name)` — reported upstream as an indistinguishable 500 — is absorbed
+ * rather than surfaced.
+ *
+ * @param {SerenityTransport} transport
+ * @param {string} semrushWorkspaceId
+ * @param {string} projectId
+ * @param {string} dimension - a server-owned dimension (`intent` / `origin` /
+ *   `type` / `source`).
+ * @param {string} value - the bare value to resolve under that dimension's root.
+ * @param {object} [log] - logger.
+ * @returns {Promise<{ id: string, rootId: string, created: boolean }>} `created`
+ *   is true only when THIS call minted the value. Both ids are always resolved —
+ *   {@link ensureChildren} throws rather than leave a hole.
+ */
+export async function ensureServerOwnedValue(
+  transport,
+  semrushWorkspaceId,
+  projectId,
+  dimension,
+  value,
+  log,
+) {
+  const roots = await ensureDimensionRoots(transport, semrushWorkspaceId, projectId, log);
+  const rootId = requireServerOwnedRootId(roots, dimension);
+  // Resolve/create by the value's CURRENT display form (identity today — see
+  // {@link displayNameOfValue}), tolerating the bare slug as an alias
+  // (tag-display-names.md §5 phase 1).
+  const displayName = displayNameOfValue(dimension, value);
+  const { byName, createdNames } = await ensureChildren(
+    transport,
+    semrushWorkspaceId,
+    projectId,
+    rootId,
+    [displayName],
+    log,
+    valueAliasesOf(dimension),
+  );
+  return {
+    id: /** @type {string} */ (byName.get(displayName)),
+    rootId,
+    created: createdNames.includes(displayName),
+  };
+}
+
+/**
+ * Resolves the id-based injection of a server-computed value into a prompt write,
+ * for any SERVER-OWNED dimension (`type`, `origin`, `intent`, `source`). Returns the wanted value's
+ * id plus EVERY id under that dimension's root, so the caller can strip any
+ * caller-supplied tag id beneath the SAME root before injecting the resolved one.
+ *
+ * The strip set is every id under the dimension's root, NOT a name match: a tag's
+ * dimension is its root ancestor, so a customer category legitimately named
+ * `branded` or `ai` (the collision the model spec's fixture proves survivable) is
+ * NOT in this set and is left untouched. {@link ensureDimensionRoots} resolves
+ * `DIMENSION.ORIGIN` to the project's `origin` root (the authorship rename is
+ * complete), creating it on a project that predates the taxonomy.
+ *
+ * @param {SerenityTransport} transport
+ * @param {string} semrushWorkspaceId
+ * @param {string} projectId
+ * @param {string} dimension - a SERVER-OWNED dimension (`type` / `origin` / `intent` / `source`).
+ * @param {string} wantValue - the bare value to inject (in the dimension's fixed
+ *   vocabulary for the closed dims; resolved-or-created on demand for the open `source`).
+ * @param {object} [log] - logger.
+ * @returns {Promise<{ computedId: string, valueTagIds: string[] }>} `computedId` is
+ *   always resolved — {@link ensureChildren} throws rather than leave a hole, so a
+ *   prompt can never be written with the server-computed tag missing. `valueTagIds`
+ *   is every id under the dimension's root (the strip set).
+ */
+export async function resolveServerOwnedValueInjection(
+  transport,
+  semrushWorkspaceId,
+  projectId,
+  dimension,
+  wantValue,
+  log,
+) {
+  const roots = await ensureDimensionRoots(transport, semrushWorkspaceId, projectId, log);
+  const rootId = requireServerOwnedRootId(roots, dimension);
+  // Same display-form resolve-or-create as ensureServerOwnedValue, above.
+  const displayName = displayNameOfValue(dimension, wantValue);
+  const { byName } = await ensureChildren(
+    transport,
+    semrushWorkspaceId,
+    projectId,
+    rootId,
+    [displayName],
+    log,
+    valueAliasesOf(dimension),
+  );
+  return {
+    computedId: /** @type {string} */ (byName.get(displayName)),
+    valueTagIds: [...byName.values()],
+  };
+}
+
+/**
+ * Resolves the id-based injection of a server-computed `type` value into a
+ * prompt write. Thin wrapper over {@link resolveServerOwnedValueInjection} preserving
+ * the `type`-specific return key. Returns the wanted value's id plus EVERY id
+ * under the `type` root, so the caller can strip any caller-supplied `type` tag
+ * id (the client must never set the value itself).
+ *
+ * @param {SerenityTransport} transport
+ * @param {string} semrushWorkspaceId
+ * @param {string} projectId
+ * @param {string} wantValue - the computed bare `type` value (`branded` / `non-branded`).
+ * @param {object} [log] - logger.
+ * @returns {Promise<{ computedId: string, typeTagIds: string[] }>} `computedId` is
+ *   always resolved — {@link ensureChildren} throws rather than leave a hole, so a
+ *   prompt can never be written with the server-computed `type` tag missing.
+ */
+export async function resolveTypeValueInjection(
+  transport,
+  semrushWorkspaceId,
+  projectId,
+  wantValue,
+  log,
+) {
+  const { computedId, valueTagIds } = await resolveServerOwnedValueInjection(
+    transport,
+    semrushWorkspaceId,
+    projectId,
+    DIMENSION.TYPE,
+    wantValue,
+    log,
+  );
+  return { computedId, typeTagIds: valueTagIds };
+}
+
+/**
+ * Resolves the id-based injection of a server-computed `intent` value into a
+ * prompt write (serenity-docs#32). The exact structural analog of
+ * {@link resolveTypeValueInjection} for the `intent` closed dimension: returns
+ * the wanted value's id plus EVERY id under the `intent` root, so the caller can
+ * strip any caller-supplied `intent` tag id (the client must never set the value
+ * itself — it is server-classified).
+ *
+ * @param {SerenityTransport} transport
+ * @param {string} semrushWorkspaceId
+ * @param {string} projectId
+ * @param {string|null} wantValue - the computed bare `intent` value (e.g. `Task`),
+ *   or `null` (serenity-docs#33) when classification produced no usable value —
+ *   in that case NOTHING is created under the `intent` root and `computedId` is
+ *   `null`, so the caller strips any existing intent tag without replacing it.
+ * @param {object} [log] - logger.
+ * @returns {Promise<{ computedId: string|null, intentTagIds: string[] }>} `computedId`
+ *   is always resolved to a real id — {@link ensureChildren} throws rather than
+ *   leave a hole — UNLESS `wantValue` is `null`, in which case it is `null` by
+ *   design (see above).
+ */
+export async function resolveIntentValueInjection(
+  transport,
+  semrushWorkspaceId,
+  projectId,
+  wantValue,
+  log,
+) {
+  // serenity-docs#33 "no terminal Informational default": `wantValue === null`
+  // means classification produced no usable value (LLM failure/timeout/exhausted
+  // retries). Unlike the normal path, this must NOT mint anything under the
+  // `intent` root — it only needs the existing children ids (the strip set) so
+  // the caller can remove any prior intent tag without writing a replacement.
+  // `ensureChildren([])` never creates anything (its `missing` list is empty),
+  // so this reads the root's existing children exactly like the create path
+  // does before deciding what (if anything) is missing.
+  if (wantValue === null) {
+    const roots = await ensureDimensionRoots(transport, semrushWorkspaceId, projectId, log);
+    const rootId = rootIdOf(roots, DIMENSION.INTENT);
+    const { byName } = await ensureChildren(
+      transport,
+      semrushWorkspaceId,
+      projectId,
+      rootId,
+      [],
+      log,
+    );
+    return { computedId: null, intentTagIds: [...byName.values()] };
+  }
+
+  const { computedId, valueTagIds } = await resolveServerOwnedValueInjection(
+    transport,
+    semrushWorkspaceId,
+    projectId,
+    DIMENSION.INTENT,
+    wantValue,
+    log,
+  );
+  return { computedId, intentTagIds: valueTagIds };
+}

@@ -23,7 +23,7 @@ brands-for-organization:
       '500':
         $ref: './responses.yaml#/500'
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
 brand-guidelines-by-site-id:
   parameters:
     - $ref: './parameters.yaml#/siteId'

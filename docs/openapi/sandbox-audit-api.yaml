@@ -12,7 +12,7 @@ sandbox-audit:
       all enabled audits will be triggered. Rate limiting is applied to prevent excessive audit runs.
     operationId: triggerSandboxAudit
     security:
-      - ims_key: [ ]
+      - session_token: [ ]
     responses:
       '200':
         description: Audits triggered successfully

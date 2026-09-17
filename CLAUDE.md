@@ -17,6 +17,9 @@ npm run test-postdeploy    # Run post-deployment tests
 npm run test-e2e           # Run end-to-end tests (30s timeout)
 npm run lint               # Run ESLint
 npm run lint:fix           # Auto-fix linting issues
+npm run type-check         # Both tiers below; blocking gate in CI and pre-commit
+npm run type-check:base    # Opt-in tsc --checkJs over // @ts-check files (serenity)
+npm run type-check:strict  # noImplicitAny over the strict file list (see tsconfig.strict.json)
 ```
 
 ### Single Test Execution
@@ -32,6 +35,11 @@ npx mocha --require test/it/postgres/harness.js --timeout 30000 'test/it/postgre
 
 # Single IT test file
 npx mocha --require test/it/postgres/harness.js --timeout 30000 test/it/postgres/sites.test.js
+
+# Mock-backed suites (e.g. serenity, which drives the Semrush vendor mock
+# containers over real HTTPS — not in-process stubs, no live Semrush) are slower
+# than the pure-DB suites — run them with --timeout 60000:
+npx mocha --require test/it/postgres/harness.js --timeout 60000 test/it/postgres/serenity.test.js
 ```
 
 ### Documentation
@@ -41,6 +49,8 @@ npm run docs:build        # Build docs from OpenAPI specs
 npm run docs:lint         # Validate OpenAPI specs
 npm run docs:serve        # Preview docs locally
 ```
+
+**`docs/index.html` non-determinism:** `docs:build` regenerates this file's styled-components CSS as inline hashed class names, and the hash assignment order is not stable across Redocly CLI/Node versions — an environment other than the canonical CI toolchain can produce a diff of tens of thousands of lines that is pure hash/markup churn, not a content change (verify by diffing for the actual OpenAPI content you touched, e.g. `grep` for the field/path name in old vs new). Don't commit a hash-noise diff from a non-canonical environment: either regenerate on the canonical CI toolchain, or note the exception in the PR description (spec files are the source of truth and are what reviewers should verify) and leave `docs/index.html` as committed on `main`.
 
 ### Deployment
 ```bash
@@ -80,18 +90,21 @@ Request → AWS Lambda → Middleware Stack → Route Matcher → Controller →
 ```
 
 **Middleware Stack** (in order, defined in `src/index.js`):
-1. `authWrapper` - Authentication (JWT, IMS, API Keys, Scoped API Keys)
-2. `logWrapper` - Structured logging
-3. `dataAccess` - Data access layer (`@adobe/spacecat-shared-data-access`)
-4. `bodyData` - Request body parsing
-5. `multipartFormData` - File upload handling
-6. `enrichPathInfo` - Path parameter extraction
-7. `sqs` - AWS SQS client
-8. `s3ClientWrapper` - AWS S3 client
-9. `imsClientWrapper` - Adobe IMS client
-10. `elevatedSlackClientWrapper` - Slack client
-11. `secrets` - AWS Secrets Manager
-12. `helixStatus` - Health checks
+1. `s2sAuthWrapper` - S2S JWT bearer tokens; passes non-S2S through to `authWrapper`
+2. `authWrapper` - Authentication (JWT, IMS, API Keys, Scoped API Keys)
+3. `logWrapper` - Structured logging
+4. `dataAccess` - Data access layer (`@adobe/spacecat-shared-data-access`)
+5. `bodyData` - Request body parsing
+6. `multipartFormData` - File upload handling
+7. `slackSignatureWrapper` - Slack request-signature verification for `/slack/events` (VULN-39365). Declared immediately before `enrichPathInfo` so it *runs* immediately after it (last `.with()` = outermost = runs first), which puts it after `pathInfo` is populated but before the body is consumed; it reads the body via `request.clone()`
+8. `enrichPathInfo` - Path parameter extraction
+9. `sqs` - AWS SQS client
+10. `s3ClientWrapper` - AWS S3 client
+11. `imsClientWrapper` - Adobe IMS client
+12. `elevatedSlackClientWrapper` - Slack client
+13. `secrets` - AWS Secrets Manager
+14. `helixStatus` - Health checks
+15. `facsWrapper` - FACS/ReBAC customer-authorization enforcement for FACS-governed routes (innermost wrapper — attached first in the `wrap(...).with(...)` chain, so it runs last, immediately before the controller; configured with `routeFacsCapabilities` + `secondaryResolvers`; see Access Control → FACS-native authorization)
 
 All dependencies are injected into `context` and available throughout the request lifecycle.
 
@@ -230,9 +243,17 @@ if (denied) {
 
 Capability constants live in `src/routes/capability-constants.js`. Both the route map (`required-capabilities.js`) and the controller must reference the **same constant** — the `capability-constants drift coverage` test enforces this. See `docs/s2s/READALL_CAPABILITY_DESIGN.md` for the full two-layer design.
 
+**FACS-native authorization (state-layer endpoints — exception to the above):** The `/state/access-mappings`, `/product/capabilities`, `/user/capabilities`, and `/organizations/:id/permission/audit-logs` endpoints (`src/controllers/state-access-mappings.js`) do **not** use `AccessControlUtil`. They implement the hybrid MAC/FACS permission model directly: authorization is evaluated from the JWT's `facs_permissions` (read via `authInfo.getFacsPermissions()`) **unioned** with state-layer `granted_capabilities` rows in `facs_access_mappings`. A caller is an org-wide FACS manager if the JWT carries `<product>/can_manage_users`; otherwise they are a resource-scoped state-layer manager whose authority is the set of resources where they hold a state `can_manage_users` binding (`resolveManageAuthority`). This is deliberate — these endpoints govern the ReBAC bindings themselves, so they predate/sit beneath the entitlement model `AccessControlUtil` checks. `facsWrapper` (from `@adobe/spacecat-shared-http-utils`) is attached as the innermost wrapper in `src/index.js` and fronts these routes using the `routeFacsCapabilities` map in `src/routes/facs-capabilities.js` (per-product LaunchDarkly flag-gated, default-off in prod, so non-enrolled orgs bypass). The state-layer management endpoints additionally remain restricted to `AWS_ENV === 'dev'` (a `devOnly` blocker in the controller; handlers 404 elsewhere) until they graduate to production — the controller's own `can_manage_users` / `can_view` gating is the permanent authorization layer beneath the wrapper.
+
+**Classifying route params when adding ANY endpoint (required):** Every dynamic `:param` in `src/routes/index.js` must be classified in `src/routes/facs-capabilities.js` so `facsWrapper` can resolve (or correctly ignore) the ReBAC resource for a route. The `routeFacsCapabilities` test suite (`test/routes/facs-capabilities.test.js`) **fails the build** if a param is unclassified, claimed by two buckets, or stale. When you add a route:
+
+- **Param identifies an existing ReBAC entity** (a brand or a site) → reuse the existing alias in `PRODUCTS_FACS_RESOURCE_PARAM_ALIASES` (`LLMO.brand → ['brandId']`, `ASO.site → ['siteId']`). Do **not** invent a new alias key for the same entity — add the param name to the existing entity's array.
+- **Param is anything else** (a new entity not yet under ReBAC, a sub-resource id, a filter/format/pagination value, an org/project id) → add the identifier to `FACS_NON_RESOURCE_PARAMS`. **New entities default here:** a brand-new entity's identifier goes into `FACS_NON_RESOURCE_PARAMS` until ReBAC is actually implemented for it — only then does it graduate to a product's `PRODUCTS_FACS_RESOURCE_PARAM_ALIASES` entry.
+- A param must never appear in both maps (the disjointness test enforces this).
+
 **Authentication precedence** (checked in order):
 1. JWT with scopes
-2. Adobe IMS
+2. Route-scoped IMS (`ApiKeyImsHandler`) — `/tools/api-keys/*` only, for IaaS-only orgs that cannot mint a JWT session token. The global direct-IMS-token handler has been removed; all other routes require a JWT session token.
 3. Scoped API Key (fine-grained permissions)
 4. Route-Scoped Legacy API Key (`POST /event/fulfillment` and `POST /slack/channels/invite-by-user-id` only — frozen list, SITES-34224)
 
@@ -262,7 +283,7 @@ return accepted('Audit queued successfully');
 
 **Files**:
 - `src/controllers/slack.js` - Main controller
-- `src/support/slack/commands/` - Command handlers (36 commands)
+- `src/support/slack/commands/` - Command handlers
 - `src/support/slack/actions/` - Action handlers (17 actions)
 
 Architecture:
@@ -298,7 +319,7 @@ Agents in `src/agents/` use `@langchain/langgraph` for workflow orchestration.
 2. **Specification Sync**: Keep OpenAPI specs and implementation in sync
    - Run `npm run docs:lint` after modifying specs
    - Run `npm run docs:build` before completing implementation
-3. **Routing Consistency**: Add routes to BOTH `src/index.js` and `src/routes/index.js`
+3. **Routing Consistency**: Add routes to `src/routes/index.js`. `src/index.js` only wires each domain's controller into context (e.g. `SerenityController(context, log, context.env)`) — it does not list individual routes, so it needs a change only when adding a new controller/pattern, not for a new route on an existing one.
 4. **Access Control**: Always use `AccessControlUtil` for tenant data
 5. **DTO Usage**: Transform all responses through DTOs
 6. **HTTP Helpers**: Use shared helpers from `@adobe/spacecat-shared-http-utils` (`ok`, `badRequest`, `notFound`, `forbidden`, `accepted`, etc.)
@@ -410,6 +431,14 @@ describe('Sites Controller', () => {
 });
 ```
 
+**Build every fake inside `beforeEach`, on a per-test sandbox** — never at module scope. A fake created at module scope is registered on sinon's *default* sandbox, and `sinon.restore()` in **any** other spec file empties that sandbox's fake collection. From then on `sinon.reset()` silently stops clearing the fake and its call history accumulates across the tests in your file, so an assertion like `getCalls().find(...)` starts reading an earlier test's call. Cleanup in your own `afterEach` does not protect you — the fake is created in the wrong place, not cleaned up in the wrong place.
+
+`mocha --parallel` (what `npm test` and CI run) gives each spec file its own process, so no other file's `sinon.restore()` can reach it and the whole failure mode is invisible. It appears only in serial runs — including the scoped single-file and single-directory runs under **Single Test Execution** above.
+
+A fake declared directly in a `describe` body is shared the same way, because mocha evaluates suite callbacks during collection, before any test runs. Assertions that scan call history — `getCalls().find(...)`, `calledOnce` — are the ones that break under sharing.
+
+A `no-restricted-syntax` rule in `eslint.config.js` fails the build on `sinon.stub/spy/fake/mock/createStubInstance/useFakeTimers()` evaluated at module load in `test/**/*.js`, in both the `sinon.stub()` and bare `stub()` call shapes. It catches the module-scope form only. The `describe`-body form is long-established style in this suite and is not enforced; nor can a syntactic rule see a fake built by a helper that is itself *called* at module load. Build fakes in `beforeEach` and none of these distinctions arise.
+
 **Tools**:
 - **Mocha**: Test runner
 - **Chai**: Assertions (`expect`, `chai-as-promised`)
@@ -439,10 +468,26 @@ shared/tests/sites.js → postgres/sites.test.js (uses Docker PostgreSQL + Postg
 
 - **Behavior changes must include unit tests** - mark as Critical if missing
 - **New or modified endpoints must include integration tests** in `test/it/` — add shared test logic in `shared/tests/`, seed data in `postgres/seed-data/`, and a wiring file in `postgres/`
+- **New or modified endpoints should have e2e coverage reviewed** — triage against `.claude/skills/implement-e2e-tests/SKILL.md`; not every change needs a new e2e scenario, only what unit/IT can't prove
 - Mock external dependencies (databases, HTTP calls, queues) in unit tests
 - Test access control paths (authorized, forbidden, admin-only)
 - Test DTO transformations
 - Test error handling and validation
+
+### No raw NUL bytes in tracked source
+
+**Write `\0`, never a literal U+0000 byte.** `test/no-nul-bytes.test.js` scans every
+tracked regular blob and fails on a raw NUL, because a file containing one is
+classified as binary by whole-file scanners — `grep -r`, recursive `rg`, `file` — which
+then skip it. The skip is silent: a search still returns hits from other files, so an
+incomplete result set reads as complete, and it is easy to conclude a symbol has no
+definition, no other callers, or no test coverage in a file that was never read.
+
+Git does not surface this, which is why nothing in review or CI reacted to it before.
+Git sniffs only the first 8000 bytes for a NUL, so a byte past that window leaves
+`git grep` and `git diff` behaving normally — and renders the byte as whitespace in a
+diff, so it looks like an ordinary space. The guard test is that missing signal, and it
+covers every tracked file type, not just JS.
 
 ## Configuration Hierarchy
 
@@ -492,12 +537,13 @@ Most complex domain:
 ### Slack Commands
 **Location**: `src/support/slack/commands/`
 
-36 commands for operations:
+Commands for operations (see `src/support/slack/commands.js` for the full, current list):
 - Site management: `/add-site`, `/update-site`, `/remove-site`
 - Audit operations: `/run-audit`, `/run-audit-for-all-sites`
 - Organization setup: `/add-slack-channel`, `/configure-slack`
 - Debugging: `/site-info`, `/audit-info`
-- LLMO: `/brand-profile`, `/llmo-onboard`
+- LLMO: `/brand-profile`, `/llmo-onboard`, `enable-brand-claims`, `disable-brand-claims`
+- Geo-experiments: `/trigger-impact-measurement`, `/check-impact-measurement`, `/get-experiment`
 
 ## Common Utilities
 
@@ -542,6 +588,7 @@ return internalServerError('Internal error occurred');
 2. Add/update schemas in `docs/openapi/schemas.yaml`
 3. Run `npm run docs:lint` to validate
 4. Add route to `src/routes/index.js`
+   - If the route has a dynamic `:param`, classify it in `src/routes/facs-capabilities.js`: reuse an existing entry in `PRODUCTS_FACS_RESOURCE_PARAM_ALIASES` for an existing ReBAC entity (brand/site), or add the identifier to `FACS_NON_RESOURCE_PARAMS` otherwise (new entities default here until ReBAC exists for them). The `routeFacsCapabilities` test fails the build if a param is left unclassified — see the FACS-native authorization note under Access Control.
 5. Add route handler invocation in `src/index.js` (if new pattern)
 6. Implement controller method
 7. Add DTO if needed
@@ -556,6 +603,7 @@ return internalServerError('Internal error occurred');
 11. Run `npm run docs:build` to generate documentation
 12. Run `npm test` to verify unit tests pass
 13. Run IT suites to verify integration tests pass (see Integration Tests commands above)
+14. Review/update e2e coverage in `test/e2e/` per the `implement-e2e-tests` skill's triage — skip if unit + IT already fully cover the new behavior
 
 ### Adding a Slack Command
 
@@ -617,6 +665,8 @@ For this repo:
 - Verify stubs are restored in `afterEach`
 - Use `esmock` for ES module mocking
 - Check test fixtures match current schema
+
+**A test that passes alone and fails in a serial run** (or passes under `npm test` and fails under `npx mocha <dir>/*.test.js`): look for a fake built at module scope rather than in `beforeEach`. Its call history survives across the tests in the file once another spec calls `sinon.restore()` — see the sandbox rules under **Standard Test Pattern**. The reverse pairing, green in serial and red in parallel, is a different problem: cross-file order dependence or a shared external resource.
 
 ### Debugging
 

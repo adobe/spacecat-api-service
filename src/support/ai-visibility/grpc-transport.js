@@ -23,6 +23,10 @@ import {
 } from '@quazar/ai-seo-ts/ai-cr/service_pb.js';
 import { Sources as VoSources } from '@quazar/ai-seo-ts/ai-vo/service_pb.js';
 import { Relations } from '@quazar/ai-seo-ts/ai-pr/service_pb.js';
+import {
+  resolveSemrushCredential,
+  getCachedToken,
+} from './semrush-credential-resolver.js';
 
 const DEFAULT_SCOPES = 'ai-seo.meta ai-seo.topics ai-seo.prompts ai-seo.sources ai-seo.brand-metrics ai-seo.relations ai-seo.competitors-metrics ai-seo.competitor';
 
@@ -75,24 +79,49 @@ function createAuthInterceptor(env) {
   };
 }
 
-let cachedClients = null;
+/**
+ * Feature flag: resolve the Semrush credential per brand instead of using the single
+ * process-wide shared client_credentials machine credential. DEFAULT OFF -- when off,
+ * behavior is byte-identical to the historical shared-singleton path.
+ */
+const PER_BRAND_AUTH_FLAG = 'AI_VISIBILITY_PER_BRAND_AUTH_ENABLED';
+
+function isPerBrandAuthEnabled(env) {
+  const v = env?.[PER_BRAND_AUTH_FLAG];
+  return v === true || v === 'true' || v === '1';
+}
 
 /**
- * Lazy-init gRPC transport + all service clients.
- * Reuses a singleton per process so multiple requests share the same HTTP/2 connection pool.
+ * Cache key for the shared (resolver-returned-null) credential under flag-on.
+ * Resolved credential keys are namespaced ({@link credentialPoolKey}) so a
+ * provider-supplied key can never collide with this sentinel.
  */
-export function getGrpcClients(env) {
-  if (cachedClients) {
-    return cachedClients;
-  }
+const SHARED_CREDENTIAL_KEY = '__shared__';
 
+/** Namespace a resolved credential key so it can't collide with the shared sentinel. */
+function credentialPoolKey(credentialKey) {
+  return `credential:${credentialKey}`;
+}
+
+/** Default upper bound on distinct per-credential transports held at once. */
+const DEFAULT_MAX_CLIENTS_CACHE_SIZE = 100;
+
+/** Mutable so tests can exercise eviction without building 100 transports. */
+let maxClientsCacheSize = DEFAULT_MAX_CLIENTS_CACHE_SIZE;
+
+/**
+ * Build the gRPC transport + all service clients around a single auth interceptor.
+ * The transport options are identical across the shared and per-credential paths;
+ * only the interceptor differs.
+ */
+function buildClients(interceptor) {
   const transport = createGrpcTransport({
     baseUrl: GRPC_BASE_URL,
     httpVersion: '2',
-    interceptors: [createAuthInterceptor(env)],
+    interceptors: [interceptor],
   });
 
-  cachedClients = {
+  return {
     brandClient: createClient(BrandService, transport),
     topicClient: createClient(TopicService, transport),
     promptClient: createClient(PromptService, transport),
@@ -103,13 +132,89 @@ export function getGrpcClients(env) {
     voSourcesClient: createClient(VoSources, transport),
     prRelationsClient: createClient(Relations, transport),
   };
+}
 
-  return cachedClients;
+/**
+ * Auth interceptor for the per-credential path. When a credential descriptor is
+ * resolved, tokens are minted through its `getAuthToken` and cached per credential
+ * key with a TTL. When no credential is resolved (`credential == null`) it falls back
+ * to the shared client_credentials token -- identical to {@link createAuthInterceptor}.
+ */
+function createCredentialInterceptor(env, credential) {
+  return (next) => async (req) => {
+    const token = credential
+      ? await getCachedToken(credential.key, () => credential.getAuthToken(env))
+      : await getAccessToken(env);
+    req.header.set('authorization', `Bearer ${token}`);
+    return next(req);
+  };
+}
+
+let cachedClients = null;
+
+/** key -> clients, used only on the per-brand (flag-on) path. */
+const perCredentialClients = new Map();
+
+/**
+ * Lazy-init gRPC transport + all service clients.
+ *
+ * Flag OFF (default): reuses a singleton per process so multiple requests share the
+ * same HTTP/2 connection pool, authenticating with the shared client_credentials
+ * machine credential via {@link createAuthInterceptor}.
+ *
+ * Flag ON: resolves the credential for `brand` via the auth seam and keys a bounded
+ * pool of transports per credential. Because no provider is configured by default,
+ * the resolver returns `null` and this still falls back to the shared credential --
+ * i.e. flag-on is inert until PR-3b injects a real provider.
+ *
+ * @param {object} env - request environment (secrets, config, feature flags).
+ * @param {unknown} [brand] - brand/org scope (only consulted when the flag is on).
+ */
+export function getGrpcClients(env, brand) {
+  if (!isPerBrandAuthEnabled(env)) {
+    if (cachedClients) {
+      return cachedClients;
+    }
+    cachedClients = buildClients(createAuthInterceptor(env));
+    return cachedClients;
+  }
+
+  const credential = resolveSemrushCredential(brand, env);
+  const key = credential
+    ? credentialPoolKey(credential.key)
+    : SHARED_CREDENTIAL_KEY;
+
+  const existing = perCredentialClients.get(key);
+  if (existing) {
+    return existing;
+  }
+
+  // Bound the pool: evict the oldest (FIFO by build time) transport when at capacity.
+  while (perCredentialClients.size >= maxClientsCacheSize) {
+    const oldestKey = perCredentialClients.keys().next().value;
+    perCredentialClients.delete(oldestKey);
+  }
+
+  const clients = buildClients(createCredentialInterceptor(env, credential));
+  perCredentialClients.set(key, clients);
+  return clients;
 }
 
 /** @visibleForTesting */
 export function resetGrpcClients() {
   cachedClients = null;
+  perCredentialClients.clear();
+  maxClientsCacheSize = DEFAULT_MAX_CLIENTS_CACHE_SIZE;
+}
+
+/** @visibleForTesting */
+export function setClientPoolMaxSize(n) {
+  maxClientsCacheSize = n;
+}
+
+/** @visibleForTesting */
+export function getClientPoolSize() {
+  return perCredentialClients.size;
 }
 
 export { getAccessToken, createAuthInterceptor };

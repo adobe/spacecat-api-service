@@ -7,13 +7,50 @@ permissions:
   pull-requests: write
 
 on:
+  # `push:` stays unfiltered (all branches): the `type-check` push-fallback,
+  # `semver-check`, and the reusable workflow's `branch-deploy` job (auto-deploy of
+  # feature branches to the `dev-branches` env, which fires on push only) all run
+  # on non-main branch pushes.
   push:
   pull_request:
-    types: [opened, synchronize, ready_for_review, reopened, edited]
+    # `edited` removed: a PR title/body edit fired the full reusable CI (~23
+    # billable job-min, ~5 org runner slots) only to re-check the title. Title
+    # re-validation on edit now lives in the lightweight pr-title.yaml workflow.
+    types: [opened, synchronize, ready_for_review, reopened]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy the serenity job runner worker to'
+        required: true
+        type: choice
+        options: [dev, stage, prod]
+        default: dev
 
 jobs:
+  # The reusable CI runs on both `push` and `pull_request`, so for an open PR its
+  # `build` + `it-postgres` would run twice per commit (the concurrency group keys
+  # on `github.ref`, which differs between the two events, so they don't cancel
+  # each other). `dedup-pr-runs: true` makes the shared service-ci workflow skip
+  # the redundant `pull_request` copy of that heavy path for a same-repo PR: the
+  # branch's `push` run covers the same head SHA and reports the required
+  # `ci / build` + `ci / it-postgres`, so the `pull_request` copies come back
+  # `skipped` and branch protection is satisfied by the push run.
+  #
+  # The `push` run is NEVER the one skipped, so `branch-deploy` (push-only,
+  # auto-deploys feature branches to `dev-branches`) is preserved. Skipping the
+  # push run instead is exactly what this repo's #3235 did — silently disabling
+  # branch-deploy — which the shared dedup is designed to avoid. Fork PRs still
+  # run the heavy path on `pull_request` (they have no base-repo push twin). See
+  # mysticat-ci `.github/actions/ci-context/README.md`.
+  #
+  # The caller-side DRAFT-PR skip is kept and composes with the above: a draft PR
+  # skips the whole `pull_request` `ci` job (the `push` run still covers the
+  # required checks and runs branch-deploy), and `ready_for_review` re-triggers
+  # the `pull_request` run — where the shared dedup then skips only build +
+  # it-postgres.
   ci:
-    uses: adobe/mysticat-ci/.github/workflows/service-ci.yaml@v2
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    uses: adobe/mysticat-ci/.github/workflows/service-ci.yaml@v3
     with:
       service-name: api-service
       validate-pr-title: true
@@ -21,4 +58,265 @@ jobs:
       it-postgres: true
       vpc-enabled: true
       bundle-build: true
+      dedup-pr-runs: true
     secrets: inherit
+
+  # Opt-in TypeScript type-checking (checkJs + JSDoc, no .ts source) over the
+  # `// @ts-check`-annotated files (currently src/support/serenity/**). Blocking.
+  # The reusable service-ci workflow has no type-check seam yet, so this runs as
+  # a self-contained job here. See docs/decisions/005-opt-in-type-checking.md.
+  #
+  # Also runs on `push` (adobe/spacecat-api-service#3199): the reusable
+  # service-ci workflow's own concurrency group (mysticat-ci service-ci.yaml,
+  # keyed on ${{ github.workflow }}-${{ github.ref }} with cancel-in-progress
+  # on non-main refs) can cancel a PR's `pull_request`-triggered run of this
+  # job, leaving its head commit with no completed run. The `push` run is a
+  # fallback, skipped when no open PR exists yet for the branch (nothing to
+  # protect on `main` or a pre-PR branch). If the PR-existence lookup itself
+  # fails, it runs anyway rather than skip -- this is a required blocking
+  # check, and defaulting an inconclusive lookup to "skip" risks reproducing
+  # the exact bug being fixed.
+  #
+  # No concurrency group on this job: the push and pull_request runs are meant
+  # to complete independently (that's the whole fix), so nothing here should
+  # cancel either one.
+  type-check:
+    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref != 'refs/heads/main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Check for open PR (push only)
+        id: pr-check
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF_NAME: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          PR_COUNT=$(gh pr list --head "$REF_NAME" --state open --repo "$REPO" \
+            --json number --jq 'length') || true
+          # Match strictly-numeric output, not just non-empty: unexpected stdout
+          # ahead of a `gh` failure (e.g. a CLI notice) would otherwise slip past
+          # a bare `-z` check and skip the warning below.
+          if [[ "$PR_COUNT" =~ ^[0-9]+$ ]]; then
+            if [ "$PR_COUNT" = "0" ]; then
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              echo "::notice::No open PR found for the current branch — skipping type-check on this push"
+            else
+              echo "skip=false" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Could not determine whether an open PR exists for the current branch (gh pr list failed, see log above) — running type-check anyway rather than risk skipping the only completed run for this commit"
+          fi
+
+      # steps.pr-check.outputs.skip is an empty string (not 'false') on pull_request
+      # events, since the step above doesn't run there -- the '!= true' checks below
+      # rely on that negative match; do not refactor them to '== false'.
+      - name: Check out
+        if: steps.pr-check.outputs.skip != 'true'
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Setup Node & NPM
+        if: steps.pr-check.outputs.skip != 'true'
+        uses: adobe/mysticat-ci/.github/actions/setup-node-npm@v1
+        env:
+          MYSTICAT_DATA_SERVICE_REPO_READ_TOKEN: ${{ secrets.MYSTICAT_DATA_SERVICE_REPO_READ_TOKEN }}
+
+      - name: Type-check
+        if: steps.pr-check.outputs.skip != 'true'
+        run: npm run type-check
+
+  # serenity-job-runner WORKER Lambda deploy (adobe/serenity-docs#186). Rationale
+  # and design: PR #3191.
+  #
+  # A SECOND Lambda per service (distinct `hedy --entryFile`, deployed as
+  # spacecat-services--serenity-job-runner) that the reusable service-ci workflow
+  # can't deploy. Two triggers:
+  #   1. push to `main` -> auto-deploy to PROD (the only env with the ESM wired
+  #      up — create_serenity_job_runner_esms is prod-only; stage never sets it,
+  #      so a stage-deployed worker is functionally inert, nothing ever invokes
+  #      it). Stops the worker drifting behind the api-service Lambda —
+  #      previously it was manual-dispatch ONLY, so a change merged to the worker
+  #      handler (e.g. PR #3138) shipped to api-service but left the worker stale
+  #      with no signal until a job failed.
+  #   2. workflow_dispatch -> manual single-env deploy (dev, stage, or prod) for
+  #      ad-hoc verification; stage is not part of the automatic push path.
+  #
+  # Deploys on every successful `main`-push `ci` run (service-ci.yaml@v3 exposes no
+  # `released` output to gate on) WHOSE diff actually touches the worker's own
+  # bundle — see the "Check worker paths changed" step below. A push that
+  # doesn't touch that bundle skips the deploy steps entirely: over-deploying
+  # unrelated changes (docs, controllers, unrelated tests, ...) costs a ~15min
+  # job for zero effect, since the worker's code hasn't moved.
+  #
+  # !!! DEPLOY != ROLLOUT !!!  This keeps the worker *code* current; it enables the
+  # feature for NO ONE. Rollout stays gated by the `create_serenity_job_runner_esms`
+  # ESM (Terraform) AND the UI's per-org DB flag. Runs under CI's
+  # spacecat-role-github-actions (personal creds lack the needed iam:PassRole).
+  deploy-worker:
+    if: >-
+      (github.event_name == 'workflow_dispatch' &&
+        (inputs.environment == 'dev' || github.ref == 'refs/heads/main')) ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [ci]
+    strategy:
+      # Both push and workflow_dispatch resolve to a single-element matrix now
+      # (push -> prod only), so fail-fast/max-parallel are no-ops here — kept
+      # only so a future multi-env push list stays ordered/serialized by default.
+      fail-fast: true
+      max-parallel: 1
+      matrix:
+        environment: ${{ fromJSON(github.event_name == 'push' && '["prod"]' || format('["{0}"]', inputs.environment)) }}
+    concurrency:
+      # Serializes same-env deploys (e.g. a push deploy overlapping a manual
+      # workflow_dispatch to the same environment) without blocking other envs.
+      group: deploy-worker-${{ matrix.environment }}
+      cancel-in-progress: false
+    environment: ${{ matrix.environment == 'dev' && 'dev-branches' || matrix.environment }}
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check out
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          # `github.event.before` needs history beyond the pushed commit itself
+          # to diff against — a shallow (default depth-1) checkout would only
+          # ever see the tip commit and make every push look like it changed
+          # everything.
+          fetch-depth: 0
+
+      # push-only: workflow_dispatch is an explicit, single-env, human-requested
+      # deploy and always runs regardless of what changed.
+      #
+      # Paths are deliberately broader than just the worker's own directory:
+      # `src/serenity-prompt-classification/index.js` imports from
+      # `src/support/serenity/**`, `src/support/data-access.js` and
+      # `src/support/sqs.js` (and hedy bundles the whole dependency tree), plus
+      # `package.json`/`package-lock.json` for third-party deps — a change
+      # confined to `src/support/**` or a dependency bump can change the
+      # deployed bundle just as much as a change under the worker's own
+      # directory. This intentionally over-deploys (e.g. an unrelated
+      # `src/support/` file the worker doesn't import) rather than risk
+      # under-deploying a real behavioural change to the worker.
+      - name: Check worker paths changed
+        if: github.event_name == 'push'
+        id: paths-check
+        run: |
+          set -euo pipefail
+          BEFORE_SHA="${{ github.event.before }}"
+          # A branch's first push (or a force-push GitHub can't diff) reports
+          # an all-zero `before` SHA -- treat that as "changed" (deploy) rather
+          # than silently skip with nothing safe to diff against.
+          if [[ "$BEFORE_SHA" =~ ^0+$ ]] || ! git cat-file -e "$BEFORE_SHA" 2>/dev/null; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::No usable previous commit to diff against — deploying worker to be safe"
+            exit 0
+          fi
+          CHANGED_FILES=$(git diff --name-only "$BEFORE_SHA" "${{ github.sha }}")
+          if echo "$CHANGED_FILES" | grep -qE '^(src/serenity-prompt-classification/|src/serenity-market-probe/|src/support/|package\.json$|package-lock\.json$)'; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No changes under the worker/probe bundled paths — skipping second-Lambda deploys for this push"
+          fi
+
+      # steps.paths-check.outputs.changed is an empty string (not 'false') on
+      # workflow_dispatch, since the step above doesn't run there -- the
+      # '!= false' checks below rely on that negative match.
+      - name: Setup Node & NPM
+        if: steps.paths-check.outputs.changed != 'false'
+        uses: adobe/mysticat-ci/.github/actions/setup-node-npm@v1
+        env:
+          MYSTICAT_DATA_SERVICE_REPO_READ_TOKEN: ${{ secrets.MYSTICAT_DATA_SERVICE_REPO_READ_TOKEN }}
+
+      - name: Configure AWS
+        if: steps.paths-check.outputs.changed != 'false'
+        uses: adobe/mysticat-ci/.github/actions/configure-aws@v1
+        with:
+          # Explicit per-env branches (no fall-through-to-prod default): an
+          # unrecognised env yields an empty account id -> an invalid role ARN
+          # that fails `configure-aws`, rather than silently assuming prod.
+          aws_role_to_assume: ${{ format('arn:aws:iam::{0}:role/spacecat-role-github-actions',
+            (matrix.environment == 'dev' && secrets.AWS_ACCOUNT_ID_DEV)
+            || (matrix.environment == 'stage' && secrets.AWS_ACCOUNT_ID_STAGE)
+            || (matrix.environment == 'prod' && secrets.AWS_ACCOUNT_ID_PROD)) }}
+
+      - name: Deploy worker
+        # dev -> deploy-dev:worker, stage -> deploy-stage:worker,
+        # prod -> deploy:worker (see package.json scripts).
+        #
+        # DEDICATED EXECUTION ROLE (#787) — PROD ONLY: only deploy:worker (prod) pins
+        # the worker Lambda's execution role to spacecat-role-serenity-market-worker,
+        # via a per-invocation `--aws-role!important` override. deploy-stage:worker and
+        # deploy-dev:worker carry NO override, so stage + dev fall back to the shared
+        # spacecat-role-lambda-generic (the pkgConf hlx.awsRole!important the main
+        # api-service Lambda and the serenity-market-probe also use). The `!important`
+        # suffix on the prod override is required: a plain `--aws-role` is silently
+        # clobbered by the pkgConf hlx.awsRole!important. ${env.AWS_ACCOUNT_ID} in that
+        # ARN resolves from the AWS_ACCOUNT_ID env below (the prod account).
+        #
+        # WHY PROD-ONLY: infra #798 wires the dedicated role's DRS cross-account-invoke
+        # + SSM readiness-read GRANTS in prod only; dev + stage keep those grants on the
+        # generic role (coherent with DRS #3240, which scopes dev's reciprocal invoke
+        # policy to the generic role). #798 does create the role and grant iam:PassRole
+        # in ALL envs, so a stage/dev worker pinned to the dedicated role would deploy
+        # cleanly but then fail FUNCTIONALLY at runtime (that role lacks the invoke/
+        # readiness grants there) — hence stage + dev stay on generic.
+        #
+        # DEPLOY DEPENDENCY (prod): the deploy identity (spacecat-role-github-actions,
+        # assumed by configure-aws above) needs iam:PassRole on
+        # spacecat-role-serenity-market-worker, and that role must exist with the
+        # worker's full permission set, or hedy's UpdateFunctionConfiguration /
+        # CreateFunction fails. Both are provisioned by #798 as scoped IaC — the
+        # PassRole grant is inline on spacecat-role-github-actions, limited to this role
+        # and iam:PassedToService=lambda.amazonaws.com. Ordering rule: #798 is applied
+        # before this deploy runs. On merge-to-main the worker auto-deploys to PROD only
+        # (the matrix is ["prod"] on push); stage + dev worker deploys are manual
+        # workflow_dispatch, and both now use the generic role.
+        if: steps.paths-check.outputs.changed != 'false'
+        run: npm run ${{ (matrix.environment == 'dev' && 'deploy-dev:worker') || (matrix.environment == 'stage' && 'deploy-stage:worker') || (matrix.environment == 'prod' && 'deploy:worker') }}
+        env:
+          AWS_REGION: us-east-1
+          # hedy resolves --aws-region from this HLX_-prefixed env var, not
+          # AWS_REGION/AWS_DEFAULT_REGION (those only configure the AWS SDK
+          # client) - the reusable service-ci workflow sets this at its own
+          # workflow level, which this repo-local job doesn't inherit.
+          HLX_AWS_REGION: us-east-1
+          AWS_ACCOUNT_ID: ${{ (matrix.environment == 'dev' && secrets.AWS_ACCOUNT_ID_DEV) || (matrix.environment == 'stage' && secrets.AWS_ACCOUNT_ID_STAGE) || (matrix.environment == 'prod' && secrets.AWS_ACCOUNT_ID_PROD) }}
+          VPC_SUBNET_1: ${{ secrets.VPC_SUBNET_1 }}
+          VPC_SUBNET_2: ${{ secrets.VPC_SUBNET_2 }}
+          VPC_SG_ID: ${{ secrets.VPC_SG_ID }}
+
+      # serenity-market-probe scheduled Lambda (issue #786, task #7). A THIRD
+      # api-service Lambda (distinct `hedy --entryFile`, deployed as
+      # spacecat-services--serenity-market-probe) that emits the StuckInProgressJobs
+      # (PAGED) + NeedsReauthBacklog metrics the infra alarms in
+      # spacecat-infrastructure modules/serenity_market_worker/alarms.tf read. It
+      # shares the worker's bundled paths (src/support/**, package.json), so the
+      # same paths-check gate and matrix drive it — keeping it in lockstep with the
+      # worker rather than drifting behind api-service. DEPLOY != ROLLOUT: rollout is
+      # gated by the infra EventBridge schedule (per env, `enabled`), and the probe
+      # Lambda must be deploy-assigned before that EventBridge target ARN resolves.
+      - name: Deploy probe
+        # dev -> deploy-dev:probe, stage -> deploy-stage:probe,
+        # prod -> deploy:probe (see package.json scripts).
+        if: steps.paths-check.outputs.changed != 'false'
+        run: npm run ${{ (matrix.environment == 'dev' && 'deploy-dev:probe') || (matrix.environment == 'stage' && 'deploy-stage:probe') || (matrix.environment == 'prod' && 'deploy:probe') }}
+        env:
+          AWS_REGION: us-east-1
+          HLX_AWS_REGION: us-east-1
+          AWS_ACCOUNT_ID: ${{ (matrix.environment == 'dev' && secrets.AWS_ACCOUNT_ID_DEV) || (matrix.environment == 'stage' && secrets.AWS_ACCOUNT_ID_STAGE) || (matrix.environment == 'prod' && secrets.AWS_ACCOUNT_ID_PROD) }}
+          VPC_SUBNET_1: ${{ secrets.VPC_SUBNET_1 }}
+          VPC_SUBNET_2: ${{ secrets.VPC_SUBNET_2 }}
+          VPC_SG_ID: ${{ secrets.VPC_SG_ID }}

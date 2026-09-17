@@ -23,6 +23,7 @@ import {
   createAgenticTrafficByStatusHandler,
   createAgenticTrafficByUserAgentHandler,
   createAgenticTrafficByUrlHandler,
+  createAgenticTrafficHitsByUrlsHandler,
   createAgenticTrafficFilterDimensionsHandler,
   createAgenticTrafficWeeksHandler,
   createAgenticTrafficUrlBrandPresenceHandler,
@@ -180,25 +181,26 @@ function makeExportContext(overrides = {}) {
   });
 }
 
-// Resolves with the same shape as the real getSiteAndValidateAccess so that
-// withAgenticTrafficAuth forwards { site, organization } to handlerFn as siteContext.
-const stubbedValidateAccess = sinon.stub().resolves({
-  site: { getOrganizationId: () => 'org-1' },
-  organization: { getId: () => 'org-1' },
-});
+let sandbox;
+let stubbedValidateAccess;
+
+// Fresh sandbox per test, so neither call history nor a per-test behaviour
+// override can reach the next test. `stubbedValidateAccess` resolves with the
+// same shape as the real getSiteAndValidateAccess, so withAgenticTrafficAuth
+// forwards { site, organization } to handlerFn as siteContext.
+function setUpAuthStubs() {
+  sandbox = sinon.createSandbox();
+  stubbedValidateAccess = sandbox.stub().resolves({
+    site: { getOrganizationId: () => 'org-1' },
+    organization: { getId: () => 'org-1' },
+  });
+}
 
 describe('llmo-agentic-traffic', () => {
-  const sandbox = sinon.createSandbox();
+  beforeEach(setUpAuthStubs);
 
   afterEach(() => {
     sandbox.restore();
-    // reset() clears call history AND any per-test behaviour overrides;
-    // then re-apply the default so subsequent tests get the site context.
-    stubbedValidateAccess.reset();
-    stubbedValidateAccess.resolves({
-      site: { getOrganizationId: () => 'org-1' },
-      organization: { getId: () => 'org-1' },
-    });
   });
 
   // ── Shared: PostgREST availability ──────────────────────────────────────────
@@ -288,7 +290,13 @@ describe('llmo-agentic-traffic', () => {
       ['perplexity', 'Perplexity'],
       ['gemini', 'Gemini'],
       ['google', 'Google'],
+      ['google-ai-mode', 'Google AI Mode'],
+      ['copilot', 'Copilot'],
       ['amazon', 'Amazon'],
+      ['parallel', 'Parallel.ai'],
+      ['manus', 'Manus'],
+      ['keenable', 'Keenable.ai'],
+      ['meta-ai', 'Meta'],
       ['all', null],
       [undefined, null],
       ['unknown-code', null],
@@ -304,6 +312,82 @@ describe('llmo-agentic-traffic', () => {
           p_platform: expected,
         });
       });
+    });
+
+    it('omits p_platforms entirely for a single platform (byte-identical path)', async () => {
+      const client = createMockClient({ rpc_agentic_traffic_kpis: { data: [], error: null } });
+      const ctx = makeContext({ client, data: { startDate: '2026-01-01', endDate: '2026-01-28', platform: 'chatgpt' } });
+      await createAgenticTrafficKpisHandler(stubbedValidateAccess)(ctx);
+      const params = client.rpc.getCall(0).args[1];
+      expect(params.p_platform).to.equal('ChatGPT');
+      expect(params).to.not.have.property('p_platforms');
+    });
+  });
+
+  describe('platform multi-select (Serenity)', () => {
+    it('maps a comma list to p_platforms and nulls the scalar p_platform', async () => {
+      const client = createMockClient({ rpc_agentic_traffic_kpis: { data: [], error: null } });
+      const ctx = makeContext({ client, data: { startDate: '2026-01-01', endDate: '2026-01-28', platform: 'chatgpt,meta-ai' } });
+      await createAgenticTrafficKpisHandler(stubbedValidateAccess)(ctx);
+      expect(client.rpc).to.have.been.calledWithMatch('rpc_agentic_traffic_kpis', {
+        p_platform: null,
+        p_platforms: ['ChatGPT', 'Meta'],
+      });
+    });
+
+    it('dedupes within a multi list (chatgpt+openai→ChatGPT, +gemini → 2 distinct, stays multi)', async () => {
+      const client = createMockClient({ rpc_agentic_traffic_kpis: { data: [], error: null } });
+      const ctx = makeContext({ client, data: { startDate: '2026-01-01', endDate: '2026-01-28', platform: 'chatgpt,openai,gemini' } });
+      await createAgenticTrafficKpisHandler(stubbedValidateAccess)(ctx);
+      expect(client.rpc.getCall(0).args[1].p_platforms).to.deep.equal(['ChatGPT', 'Gemini']);
+    });
+
+    it('collapses a ≤1-platform list back to the single path (byte-identical)', async () => {
+      // Trailing comma, self-dup, and unknown-heavy list all reduce to one real platform,
+      // which must behave exactly like `platform=chatgpt`: scalar p_platform, no p_platforms.
+      await Promise.all(['chatgpt,', 'chatgpt,chatgpt', 'chatgpt,bogus'].map(async (platform) => {
+        const client = createMockClient({ rpc_agentic_traffic_kpis: { data: [], error: null } });
+        const ctx = makeContext({ client, data: { startDate: '2026-01-01', endDate: '2026-01-28', platform } });
+        await createAgenticTrafficKpisHandler(stubbedValidateAccess)(ctx);
+        const params = client.rpc.getCall(0).args[1];
+        expect(params.p_platform, platform).to.equal('ChatGPT');
+        expect(params, platform).to.not.have.property('p_platforms');
+      }));
+    });
+
+    it('does not resolve a prototype key to a Function (Object.hasOwn guard)', async () => {
+      const client = createMockClient({ rpc_agentic_traffic_kpis: { data: [], error: null } });
+      const ctx = makeContext({ client, data: { startDate: '2026-01-01', endDate: '2026-01-28', platform: 'toString' } });
+      await createAgenticTrafficKpisHandler(stubbedValidateAccess)(ctx);
+      const params = client.rpc.getCall(0).args[1];
+      expect(params.p_platform).to.equal(null);
+      expect(params).to.not.have.property('p_platforms');
+    });
+
+    it("treats 'all' within a list as no platform filter", async () => {
+      const client = createMockClient({ rpc_agentic_traffic_kpis: { data: [], error: null } });
+      const ctx = makeContext({ client, data: { startDate: '2026-01-01', endDate: '2026-01-28', platform: 'all,chatgpt' } });
+      await createAgenticTrafficKpisHandler(stubbedValidateAccess)(ctx);
+      const params = client.rpc.getCall(0).args[1];
+      expect(params.p_platform).to.equal(null);
+      expect(params).to.not.have.property('p_platforms');
+    });
+
+    it('drops an unknown token but keeps a ≥2 valid subset (still multi)', async () => {
+      // Silent-drop convention (not 400); ≥2 valid remain so it stays a multi request.
+      const client = createMockClient({ rpc_agentic_traffic_kpis: { data: [], error: null } });
+      const ctx = makeContext({ client, data: { startDate: '2026-01-01', endDate: '2026-01-28', platform: 'chatgpt,gemini,bogus' } });
+      await createAgenticTrafficKpisHandler(stubbedValidateAccess)(ctx);
+      expect(client.rpc.getCall(0).args[1].p_platforms).to.deep.equal(['ChatGPT', 'Gemini']);
+    });
+
+    it('drops a fully-unknown multi list to no platform filter (all platforms)', async () => {
+      const client = createMockClient({ rpc_agentic_traffic_kpis: { data: [], error: null } });
+      const ctx = makeContext({ client, data: { startDate: '2026-01-01', endDate: '2026-01-28', platform: 'bogus,nope' } });
+      await createAgenticTrafficKpisHandler(stubbedValidateAccess)(ctx);
+      const params = client.rpc.getCall(0).args[1];
+      expect(params.p_platform).to.equal(null);
+      expect(params).to.not.have.property('p_platforms');
     });
   });
 
@@ -1458,6 +1542,29 @@ describe('llmo-agentic-traffic', () => {
       expect(message.data.requestedBy).to.equal('user@example.com');
     });
 
+    it('forwards a multi-select platform list in the export payload', async () => {
+      const ctx = makeExportContext({ data: { platform: 'chatgpt,gemini' } });
+      const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
+      await handler(ctx);
+      const { filters } = ctx.sqs.sendMessage.firstCall.args[1].data;
+      expect(filters.platform).to.equal(null);
+      expect(filters.platforms).to.deep.equal(['ChatGPT', 'Gemini']);
+    });
+
+    it('single platform omits platforms and hashes identically to a trailing-comma variant', async () => {
+      const handler = createAgenticTrafficUrlsExportHandler(stubbedValidateAccess);
+      const ctxSingle = makeExportContext({ data: { platform: 'chatgpt' } });
+      const idSingle = (await (await handler(ctxSingle)).json()).exportId;
+      const { filters } = ctxSingle.sqs.sendMessage.firstCall.args[1].data;
+      expect(filters.platform).to.equal('ChatGPT');
+      expect(filters).to.not.have.property('platforms');
+      // Collapse (#1): a 1-element list must produce the SAME export hash as the scalar,
+      // so it lands on the same S3 key / RPC shape rather than forking the export.
+      const ctxComma = makeExportContext({ data: { platform: 'chatgpt,' } });
+      const idComma = (await (await handler(ctxComma)).json()).exportId;
+      expect(idComma).to.equal(idSingle);
+    });
+
     it('does not queue another job while an export is already processing', async () => {
       const ctx = makeExportContext();
       ctx.s3.s3Client.send = stubS3({ metadata: { status: 'processing' } });
@@ -1805,7 +1912,7 @@ describe('llmo-agentic-traffic', () => {
           data: [{
             categories: ['Electronics', 'Fashion'],
             agent_types: ['Chatbots', 'Research'],
-            platforms: ['ChatGPT', 'Perplexity'],
+            platforms: ['ChatGPT', 'Meta', 'Perplexity'],
             content_types: ['article', 'product'],
             user_agents: ['ClaudeBot', 'GPTBot', 'PerplexityBot'],
           }],
@@ -1819,7 +1926,7 @@ describe('llmo-agentic-traffic', () => {
       const body = await res.json();
       expect(body.categories).to.deep.equal(['Electronics', 'Fashion']);
       expect(body.agentTypes).to.deep.equal(['Chatbots', 'Research']);
-      expect(body.platforms).to.deep.equal(['ChatGPT', 'Perplexity']);
+      expect(body.platforms).to.deep.equal(['ChatGPT', 'Meta', 'Perplexity']);
       expect(body.contentTypes).to.deep.equal(['article', 'product']);
       expect(body.userAgents).to.deep.equal(['ClaudeBot', 'GPTBot', 'PerplexityBot']);
     });
@@ -2132,6 +2239,52 @@ describe('llmo-agentic-traffic', () => {
       const res = await handler(ctx);
       expect(res.status).to.equal(500);
     });
+
+    it('never forwards p_models — this PG RPC is single-model (Serenity reads Semrush)', async () => {
+      // rpc_brand_presence_url_detail has no p_models param (descoped, LLMO-7553).
+      // A multi-select still nulls the scalar p_model; it must NOT attach p_models.
+      const client = createMockClient({
+        [RPC]: {
+          data: {
+            totalCitations: 0, totalMentions: 0, uniquePrompts: 0, weeklyTrends: [], prompts: [],
+          },
+          error: null,
+        },
+      });
+      const ctx = makeContext({
+        client,
+        data: {
+          startDate: '2026-01-01', endDate: '2026-01-28', url: 'https://example.com/page', platform: 'chatgpt,gemini',
+        },
+      });
+      const handler = createAgenticTrafficUrlBrandPresenceHandler(stubbedValidateAccess);
+      await handler(ctx);
+      const rpcArgs = client.rpc.firstCall.args[1];
+      expect(rpcArgs.p_model).to.equal(null);
+      expect(rpcArgs).to.not.have.property('p_models');
+    });
+
+    it('omits p_models entirely for a single platform (byte-identical path)', async () => {
+      const client = createMockClient({
+        [RPC]: {
+          data: {
+            totalCitations: 0, totalMentions: 0, uniquePrompts: 0, weeklyTrends: [], prompts: [],
+          },
+          error: null,
+        },
+      });
+      const ctx = makeContext({
+        client,
+        data: {
+          startDate: '2026-01-01', endDate: '2026-01-28', url: 'https://example.com/page', platform: 'chatgpt',
+        },
+      });
+      const handler = createAgenticTrafficUrlBrandPresenceHandler(stubbedValidateAccess);
+      await handler(ctx);
+      const rpcArgs = client.rpc.firstCall.args[1];
+      expect(rpcArgs.p_model).to.equal('ChatGPT');
+      expect(rpcArgs).to.not.have.property('p_models');
+    });
   });
 
   // ── Has Data ───────────────────────────────────────────────────────────────
@@ -2183,5 +2336,335 @@ describe('llmo-agentic-traffic', () => {
       expect(chain.eq).to.have.been.calledWith('site_id', SITE_ID);
       expect(chain.limit).to.have.been.calledWith(1);
     });
+  });
+
+  describe('hits-by-urls handler', () => {
+    const urlsBody = [
+      { host: 'www.example.com', urlPath: '/a' },
+      { host: 'www.example.com', urlPath: '/b' },
+    ];
+
+    it('maps urls to p_urls and returns mapped rows', async () => {
+      const client = createMockClient({
+        rpc_agentic_hits_for_urls: {
+          data: [{
+            url: 'https://www.example.com/a',
+            host: 'www.example.com',
+            url_path: '/a',
+            total_hits: 42,
+            hits_trend: [{ week_start: '2026-01-05', value: 42 }],
+          }],
+          error: null,
+        },
+      });
+      const ctx = makeContext({
+        client,
+        data: {
+          startDate: '2026-01-01',
+          endDate: '2026-01-28',
+          urls: urlsBody,
+          agentTypes: ['Chatbots', 'Research'],
+        },
+      });
+
+      const handler = createAgenticTrafficHitsByUrlsHandler(stubbedValidateAccess);
+      const res = await handler(ctx);
+
+      expect(client.rpc).to.have.been.calledWithMatch('rpc_agentic_hits_for_urls', {
+        p_site_id: SITE_ID,
+        p_start_date: '2026-01-01',
+        p_end_date: '2026-01-28',
+        p_urls: [
+          { host: 'www.example.com', url_path: '/a' },
+          { host: 'www.example.com', url_path: '/b' },
+        ],
+        p_agent_types: ['Chatbots', 'Research'],
+      });
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.rows).to.deep.equal([{
+        host: 'www.example.com',
+        urlPath: '/a',
+        totalHits: 42,
+        hitsTrend: [{ weekStart: '2026-01-05', value: 42 }],
+      }]);
+    });
+
+    it('drops entries missing host or path and accepts snake_case url_path', async () => {
+      const client = createMockClient({
+        rpc_agentic_hits_for_urls: { data: [], error: null },
+      });
+      const ctx = makeContext({
+        client,
+        data: {
+          urls: [
+            { host: 'www.example.com', url_path: '/snake' },
+            { urlPath: '/no-host' },
+            { host: 'www.example.com' },
+          ],
+        },
+      });
+
+      await createAgenticTrafficHitsByUrlsHandler(stubbedValidateAccess)(ctx);
+      expect(client.rpc).to.have.been.calledWithMatch('rpc_agentic_hits_for_urls', {
+        p_urls: [{ host: 'www.example.com', url_path: '/snake' }],
+      });
+    });
+
+    it('returns 400 when urls is not an array', async () => {
+      const ctx = makeContext({ data: { urls: 'nope' } });
+      const res = await createAgenticTrafficHitsByUrlsHandler(stubbedValidateAccess)(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 400 when more than 2000 urls are requested', async () => {
+      const urls = Array.from({ length: 2001 }, (_, i) => ({ host: 'h', urlPath: `/p/${i}` }));
+      const ctx = makeContext({ data: { urls } });
+      const res = await createAgenticTrafficHitsByUrlsHandler(stubbedValidateAccess)(ctx);
+      expect(res.status).to.equal(400);
+    });
+
+    it('short-circuits to an empty result without calling the RPC', async () => {
+      const client = createMockClient();
+      const ctx = makeContext({ client, data: { urls: [{ urlPath: '/no-host' }] } });
+      const res = await createAgenticTrafficHitsByUrlsHandler(stubbedValidateAccess)(ctx);
+      expect(res.status).to.equal(200);
+      expect(await res.json()).to.deep.equal({ rows: [] });
+      expect(client.rpc).to.not.have.been.called;
+    });
+
+    it('returns 500 when the RPC errors', async () => {
+      const client = createMockClient({
+        rpc_agentic_hits_for_urls: { data: null, error: { message: 'boom' } },
+      });
+      const ctx = makeContext({ client, data: { urls: urlsBody } });
+      const res = await createAgenticTrafficHitsByUrlsHandler(stubbedValidateAccess)(ctx);
+      expect(res.status).to.equal(500);
+    });
+
+    it('accepts exactly the 2000-entry cap (inclusive boundary)', async () => {
+      const client = createMockClient({
+        rpc_agentic_hits_for_urls: { data: [], error: null },
+      });
+      const urls = Array.from({ length: 2000 }, (_, i) => ({ host: 'h', urlPath: `/p/${i}` }));
+      const ctx = makeContext({ client, data: { urls } });
+      const res = await createAgenticTrafficHitsByUrlsHandler(stubbedValidateAccess)(ctx);
+      expect(res.status).to.equal(200);
+      expect(client.rpc).to.have.been.calledWith('rpc_agentic_hits_for_urls');
+    });
+
+    it('coerces null total_hits and a non-array hits_trend to safe defaults', async () => {
+      const client = createMockClient({
+        rpc_agentic_hits_for_urls: {
+          data: [
+            {
+              url: 'u', host: 'h', url_path: '/p', total_hits: null, hits_trend: null,
+            },
+            {
+              url: 'u2', host: 'h', url_path: '/q', total_hits: 5, hits_trend: [{ week_start: '2026-01-05' }],
+            },
+          ],
+          error: null,
+        },
+      });
+      const ctx = makeContext({ client, data: { urls: urlsBody } });
+      const res = await createAgenticTrafficHitsByUrlsHandler(stubbedValidateAccess)(ctx);
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.rows[0].totalHits).to.equal(0);
+      expect(body.rows[0].hitsTrend).to.deep.equal([]);
+      // missing point.value coerces to 0
+      expect(body.rows[1].hitsTrend).to.deep.equal([{ weekStart: '2026-01-05', value: 0 }]);
+    });
+
+    it('forwards p_platforms for a multi-select platform list and nulls the scalar p_platform', async () => {
+      const client = createMockClient({
+        rpc_agentic_hits_for_urls: { data: [], error: null },
+      });
+      const ctx = makeContext({
+        client,
+        data: {
+          startDate: '2026-01-01', endDate: '2026-01-28', urls: urlsBody, platform: 'chatgpt,gemini',
+        },
+      });
+      await createAgenticTrafficHitsByUrlsHandler(stubbedValidateAccess)(ctx);
+      const rpcArgs = client.rpc.firstCall.args[1];
+      expect(rpcArgs.p_platform).to.equal(null);
+      expect(rpcArgs.p_platforms).to.deep.equal(['ChatGPT', 'Gemini']);
+    });
+
+    it('omits p_platforms entirely for a single platform (byte-identical path)', async () => {
+      const client = createMockClient({
+        rpc_agentic_hits_for_urls: { data: [], error: null },
+      });
+      const ctx = makeContext({
+        client,
+        data: {
+          startDate: '2026-01-01', endDate: '2026-01-28', urls: urlsBody, platform: 'chatgpt',
+        },
+      });
+      await createAgenticTrafficHitsByUrlsHandler(stubbedValidateAccess)(ctx);
+      const rpcArgs = client.rpc.firstCall.args[1];
+      expect(rpcArgs.p_platform).to.equal('ChatGPT');
+      expect(rpcArgs).to.not.have.property('p_platforms');
+    });
+  });
+});
+
+describe('llmo-agentic-traffic — rotation (demo sites)', () => {
+  // Configured demo site (agentic + referral) — demoStrategy. See ROTATION_CONFIG.
+  const ROTATION_SITE_ID = '66b55446-4cc3-46f1-9cd4-9eb57601b3f1';
+  const CANNED_START = '2026-06-08'; // canned block = Jun 8–Jul 5 2026 (w24–27)
+  const CANNED_END = '2026-07-05';
+  // Freeze now=2026-07-06 (Monday) → phase 0, P0 = anchor ⇒ window = block [Jun 8, Jul 5].
+  const FULL = { startDate: '2026-06-08', endDate: '2026-07-05' };
+  // A rich row carrying every field the various handlers map.
+  const ROW = {
+    total_hits: 10,
+    success_rate: 0.5,
+    avg_ttfb_ms: 100,
+    avg_citability_score: 0.4,
+    period_start: '2026-06-10', // for kpis-trend relabel
+
+    region: 'US',
+    category_name: 'Coffee',
+    page_type: 'article',
+    http_status: 200,
+    agent_type: 'Chatbots',
+    unique_agents: 2,
+    unique_agent_names: ['GPTBot'],
+    host: 'frescopa.coffee',
+    url_path: '/coffee',
+    total_count: 1,
+    top_agent: 'GPTBot',
+    response_codes: [200],
+    hits_trend: [{ week_start: '2026-06-10', value: 3 }],
+  };
+
+  let clock;
+  beforeEach(() => {
+    setUpAuthStubs();
+    clock = sandbox.useFakeTimers({ now: Date.UTC(2026, 6, 6), toFake: ['Date'] });
+  });
+  afterEach(() => {
+    sandbox.restore();
+  });
+
+  const assertCannedDates = (client) => {
+    expect(client.rpc).to.have.been.called;
+    client.rpc.getCalls().forEach((call) => {
+      expect(call.args[1].p_start_date >= CANNED_START).to.equal(true);
+      expect(call.args[1].p_end_date <= CANNED_END).to.equal(true);
+    });
+  };
+
+  it('weeks: synthesises the rolling window without querying frozen min/max', async () => {
+    const client = createMockClient();
+    const ctx = makeContext({ client, params: { siteId: ROTATION_SITE_ID }, data: FULL });
+    const res = await createAgenticTrafficWeeksHandler(stubbedValidateAccess)(ctx);
+    expect(res.status).to.equal(200);
+    expect((await res.json()).weeks).to.have.length(4);
+    expect(client.from).to.not.have.been.called; // no min/max query on rotation path
+  });
+
+  // Each rotated endpoint rewrites the inbound range into the frozen canned block.
+  const ROTATED = [
+    ['kpis', createAgenticTrafficKpisHandler, 'rpc_agentic_traffic_kpis'],
+    ['kpis-trend', createAgenticTrafficKpisTrendHandler, 'rpc_agentic_traffic_kpis_trend'],
+    ['by-region', createAgenticTrafficByRegionHandler, 'rpc_agentic_traffic_by_region'],
+    ['by-category', createAgenticTrafficByCategoryHandler, 'rpc_agentic_traffic_by_category'],
+    ['by-page-type', createAgenticTrafficByPageTypeHandler, 'rpc_agentic_traffic_by_page_type'],
+    ['by-status', createAgenticTrafficByStatusHandler, 'rpc_agentic_traffic_by_status'],
+    ['by-user-agent', createAgenticTrafficByUserAgentHandler, 'rpc_agentic_traffic_by_user_agent'],
+    ['by-url', createAgenticTrafficByUrlHandler, 'rpc_agentic_traffic_by_url'],
+    ['filter-dimensions', createAgenticTrafficFilterDimensionsHandler, 'rpc_agentic_traffic_distinct_filters'],
+    ['movers', createAgenticTrafficMoversHandler, 'rpc_agentic_traffic_movers'],
+  ];
+  ROTATED.forEach(([name, factory, rpc]) => {
+    it(`${name}: rewrites the inbound range into the canned block`, async () => {
+      const client = createMockClient({ [rpc]: { data: [ROW], error: null } });
+      const ctx = makeContext({ client, params: { siteId: ROTATION_SITE_ID }, data: FULL });
+      const res = await factory(stubbedValidateAccess)(ctx);
+      expect(res.status).to.equal(200);
+      assertCannedDates(client);
+    });
+  });
+
+  it('hits-by-urls (POST): rotates the canned block for the requested URLs', async () => {
+    const client = createMockClient({ rpc_agentic_hits_for_urls: { data: [ROW], error: null } });
+    const ctx = makeContext({
+      client,
+      params: { siteId: ROTATION_SITE_ID },
+      data: { ...FULL, urls: [{ host: 'frescopa.coffee', urlPath: '/coffee' }] },
+    });
+    const res = await createAgenticTrafficHitsByUrlsHandler(stubbedValidateAccess)(ctx);
+    expect(res.status).to.equal(200);
+    assertCannedDates(client);
+  });
+
+  it('kpis-trend: relabels canned trend dates into the current window', async () => {
+    const client = createMockClient({
+      rpc_agentic_traffic_kpis_trend: {
+        data: [{ period_start: '2026-06-10', total_hits: 7, success_rate: 0.5 }],
+        error: null,
+      },
+    });
+    const ctx = makeContext({ client, params: { siteId: ROTATION_SITE_ID }, data: FULL });
+    const res = await createAgenticTrafficKpisTrendHandler(stubbedValidateAccess)(ctx);
+    const body = await res.json();
+    // phase 0 (P0 = anchor) ⇒ identity: canned 2026-06-10 stays 2026-06-10.
+    expect(body[0].periodStart).to.equal('2026-06-10');
+  });
+
+  it('by-region: combines 2 canned segments on a wrap-spanning sub-range', async () => {
+    // now=2026-07-13 (phase 1) ⇒ P0=Jun 15, window Jun 15–Jul 12. The last two slots
+    // (j2,j3 = Jun 29–Jul 12) map to frozen weeks {3,0} → 2 non-contiguous segments.
+    clock.restore();
+    clock = sandbox.useFakeTimers({ now: Date.UTC(2026, 6, 13), toFake: ['Date'] });
+    const client = createMockClient({
+      rpc_agentic_traffic_by_region: { data: [{ region: 'US', total_hits: 10 }], error: null },
+    });
+    const ctx = makeContext({
+      client,
+      params: { siteId: ROTATION_SITE_ID },
+      data: { startDate: '2026-06-29', endDate: '2026-07-12' },
+    });
+    const res = await createAgenticTrafficByRegionHandler(stubbedValidateAccess)(ctx);
+    expect(client.rpc).to.have.been.calledTwice; // 2 canned segments
+    const body = await res.json();
+    expect(body[0]).to.deep.equal({ region: 'US', totalHits: 20 }); // 10 + 10 summed
+  });
+
+  it('returns empty without an RPC call when the range is before the window', async () => {
+    const client = createMockClient({ rpc_agentic_traffic_kpis: { data: [ROW], error: null } });
+    const ctx = makeContext({
+      client,
+      params: { siteId: ROTATION_SITE_ID },
+      data: { startDate: '2026-01-01', endDate: '2026-01-07' },
+    });
+    const res = await createAgenticTrafficKpisHandler(stubbedValidateAccess)(ctx);
+    expect(res.status).to.equal(200);
+    expect((await res.json()).totalHits).to.equal(0);
+    expect(client.rpc).to.not.have.been.called; // clamped to empty → no round-trip
+  });
+
+  it('surfaces an RPC error from the rotated path as 500', async () => {
+    const client = createMockClient({
+      rpc_agentic_traffic_kpis: { data: null, error: { message: 'boom' } },
+    });
+    const ctx = makeContext({ client, params: { siteId: ROTATION_SITE_ID }, data: FULL });
+    const res = await createAgenticTrafficKpisHandler(stubbedValidateAccess)(ctx);
+    expect(res.status).to.equal(500);
+  });
+
+  it('non-rotation site: passes the requested range through unchanged', async () => {
+    const client = createMockClient({
+      rpc_agentic_traffic_kpis: { data: [{ total_hits: 1 }], error: null },
+    });
+    const ctx = makeContext({ client }); // default SITE_ID (not a demo site)
+    await createAgenticTrafficKpisHandler(stubbedValidateAccess)(ctx);
+    expect(client.rpc).to.have.been.calledOnce;
+    expect(client.rpc.firstCall.args[1].p_start_date).to.equal('2026-01-01');
+    expect(client.rpc.firstCall.args[1].p_end_date).to.equal('2026-01-28');
   });
 });

@@ -131,6 +131,10 @@ function GetSiteAuditsCommand(context) {
 
 📊 *Summary:* ${enabledCount} enabled, ${disabledCount} disabled (${totalCount} total audit types)
 
+:information_source: *Note:* These lists describe *scheduled* audit runs.
+You can still run any audit one-off — even if it is not in the *Enabled Audits* list — via:
+\`run audit ${site.getBaseURL()} <auditType>\`
+
 ${formatAuditStatus(enabledAudits, disabledAudits)}
   `,
       }];

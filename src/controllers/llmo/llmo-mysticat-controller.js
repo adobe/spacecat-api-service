@@ -34,6 +34,7 @@ import {
   createUrlInspectorCitedDomainsHandler,
   createUrlInspectorDomainUrlsHandler,
   createUrlInspectorUrlPromptsHandler,
+  createUrlInspectorPromptsByUrlHandler,
   createUrlInspectorFilterDimensionsHandler,
 } from './llmo-url-inspector.js';
 import {
@@ -49,6 +50,7 @@ import {
   createAgenticTrafficByStatusHandler,
   createAgenticTrafficByUserAgentHandler,
   createAgenticTrafficByUrlHandler,
+  createAgenticTrafficHitsByUrlsHandler,
   createAgenticTrafficFilterDimensionsHandler,
   createAgenticTrafficWeeksHandler,
   createAgenticTrafficMoversHandler,
@@ -89,7 +91,25 @@ function LlmoMysticatController(ctx) {
     if (!organization) {
       throw new Error(`Organization not found: ${spaceCatId}`);
     }
-    if (!await hasLlmoOrganizationAccess(organization)) {
+    const granted = await hasLlmoOrganizationAccess(organization);
+    const isS2SConsumer = AccessControlUtil.isS2SConsumer(context);
+    if (isS2SConsumer) {
+      // Audit trail for S2S reads (mirrors elements.js's authorizeOrgAccess): every
+      // successful or denied Layer 2 pass by an S2S consumer is logged with clientId,
+      // consumerId, the org, and requestId - there is no other observation point for
+      // this route family, since getOrgAndValidateAccess is the sole org-access gate.
+      const { log } = context;
+      const requestId = context?.invocation?.id || 'unknown';
+      const route = `${context?.pathInfo?.method || 'GET'} ${context?.pathInfo?.suffix || 'llmo-mysticat-route'}`;
+      const clientId = context?.s2sConsumer?.getClientId?.() || 'n/a';
+      const consumerId = context?.s2sConsumer?.getId?.() || 'n/a';
+      if (granted) {
+        log?.info(`[s2s] ${route} granted clientId=${clientId} consumerId=${consumerId} organizationId=${spaceCatId} requestId=${requestId}`);
+      } else {
+        log?.info(`[acl] Denied ${route} - reason=no-org-access clientId=${clientId} consumerId=${consumerId} requestId=${requestId}`);
+      }
+    }
+    if (!granted) {
       throw new Error('Only users belonging to the organization can view brand presence data');
     }
     return { organization };
@@ -155,6 +175,9 @@ function LlmoMysticatController(ctx) {
   const getUrlInspectorUrlPrompts = createUrlInspectorUrlPromptsHandler(
     getOrgAndValidateAccess,
   );
+  const getUrlInspectorPromptsByUrl = createUrlInspectorPromptsByUrlHandler(
+    getOrgAndValidateAccess,
+  );
   const getUrlInspectorFilterDimensions = createUrlInspectorFilterDimensionsHandler(
     getOrgAndValidateAccess,
   );
@@ -197,6 +220,9 @@ function LlmoMysticatController(ctx) {
     getSiteAndValidateAccess,
   );
   const getAgenticTrafficByUrl = createAgenticTrafficByUrlHandler(getSiteAndValidateAccess);
+  const getAgenticTrafficHitsByUrls = createAgenticTrafficHitsByUrlsHandler(
+    getSiteAndValidateAccess,
+  );
   const getAgenticTrafficFilterDimensions = createAgenticTrafficFilterDimensionsHandler(
     getSiteAndValidateAccess,
   );
@@ -257,6 +283,7 @@ function LlmoMysticatController(ctx) {
     getUrlInspectorCitedDomains,
     getUrlInspectorDomainUrls,
     getUrlInspectorUrlPrompts,
+    getUrlInspectorPromptsByUrl,
     getUrlInspectorFilterDimensions,
     getRegions,
     getAgenticTrafficGlobal,
@@ -269,6 +296,7 @@ function LlmoMysticatController(ctx) {
     getAgenticTrafficByStatus,
     getAgenticTrafficByUserAgent,
     getAgenticTrafficByUrl,
+    getAgenticTrafficHitsByUrls,
     getAgenticTrafficFilterDimensions,
     getAgenticTrafficWeeks,
     getAgenticTrafficMovers,

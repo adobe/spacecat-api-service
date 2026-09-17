@@ -14,16 +14,20 @@ import { Site as SiteModel } from '@adobe/spacecat-shared-data-access';
 import { hasText } from '@adobe/spacecat-shared-utils';
 import { cleanupPlgSiteSuggestionsAndFixes } from '../plg-onboarding-cleanup.js';
 import { updateRumConfig } from '../../../support/rum-config-service.js';
+import { sanitizeUrlForReason } from '../../../support/url-safety.js';
 import { hasActiveSuggestions } from './displacement.js';
 import {
-  AEM_CS_AUTHOR_URL_PATTERN, EDS_HOST_PATTERN, isSafeDomain, isValidDomain, prepareDomain,
+  AEM_CS_AUTHOR_URL_PATTERN, AEM_CS_PUBLISH_HOST_PATTERN, EDS_HOST_PATTERN,
+  isSafeDomain, isValidDomain, prepareDomain,
 } from './validation.js';
 import {
   getReviewerIdentity, isFromAsoUI, isInternalOrg, isInternalOrgDemoSite,
 } from './internal-org.js';
 import {
+  AUTHENTICATED_SITE,
   DOMAIN_ALREADY_ASSIGNED,
   DOMAIN_ALREADY_ONBOARDED_IN_ORG,
+  NON_PROD_DOMAIN,
   persistAndNotify,
   postPlgOnboardingNotification,
 } from './notifications.js';
@@ -35,7 +39,7 @@ import {
   revokePreviousAsoEnrollmentsForOrg,
 } from './entitlement.js';
 import { updateLaunchDarklyFlags } from './launchdarkly.js';
-import { createOrFindProject, enrollPlgConfigHandlers } from './site-setup.js';
+import { createOrFindProject, enrollPlgConfigHandlers, reparentSiteProjectToOrg } from './site-setup.js';
 import { STATUSES, REVIEW_DECISIONS } from './constants.js';
 
 const PLG_PROFILE_KEY = 'aso_plg';
@@ -314,7 +318,7 @@ async function handlePreonboardedFastPath({
   onboarding, domain, imsOrgId,
 }, context) {
   const {
-    createOrFindOrganization, dataAccess, env, log,
+    createOrFindOrganization, enableImports, loadProfileConfig, Config, dataAccess, env, log,
   } = context;
   const { Site, Organization } = dataAccess;
 
@@ -376,9 +380,38 @@ async function handlePreonboardedFastPath({
       log.info(`Reassigned preonboarded site ${site.getId()} from internal org to customer org ${customerOrgId}`);
     }
 
+    // Re-parent the preonboarding project (created under an internal/demo org) into
+    // the customer org so the site doesn't show as "Unassigned" in the Studio UI.
+    // No-op when the project already lives in the target org. Best-effort: a cosmetic
+    // re-parent must not fail onboarding. Only persists the site on a projectId change.
+    try {
+      if (await reparentSiteProjectToOrg(site, customerOrgId, context)) {
+        await site.save();
+      }
+    } catch (error) {
+      log.warn(`Failed to re-parent project for preonboarded site ${site.getId()}: ${error.message}`);
+    }
+
+    // Enable the aso_plg profile imports (e.g. top-pages) so their scheduled refreshes run.
+    // The full onboarding path does this via enableImports; the fast path previously skipped it,
+    // leaving preonboarded sites without the imports that feed audits like scrape-top-pages.
+    // Best-effort: like enrollPlgConfigHandlers below, this is supplementary — a failure here
+    // must not abort onboarding (a missing import is recoverable via backfill / next attempt).
+    try {
+      const profile = loadProfileConfig(PLG_PROFILE_KEY);
+      const siteConfig = site.getConfig();
+      const importDefs = Object.keys(profile.imports || {}).map((type) => ({ type }));
+      await enableImports(siteConfig, importDefs, log);
+      site.setConfig(Config.toDynamoItem(siteConfig));
+      await site.save();
+    } catch (importError) {
+      log.warn(`Failed to enable imports for site ${site.getId()}: ${importError.message}`);
+    }
+
     const { entitlement } = await ensureAsoEntitlement(site, organization, context);
     await revokePreviousAsoEnrollmentsForOrg(site, organization, entitlement, context);
     await updateLaunchDarklyFlags(site, organization, context);
+    await enrollPlgConfigHandlers(site, context);
 
     const steps = { ...(onboarding.getSteps() || {}), entitlementCreated: true };
     if (needsOrgReassignment) {
@@ -421,6 +454,27 @@ async function handlePreonboardedFastPath({
  * @param {object} context - The request context
  * @returns {Promise<object>} PlgOnboarding record
  */
+const NON_PROD_LABEL_PATTERN = /(?:^|-)(qa|stage|staging|dev|development|author|publish)(\d+)?(?:-|$)/i;
+const HLX_DELIVERY_PATTERN = /\.(aem\.live|aem\.page|hlx\.live|hlx\.page)$/i;
+
+/**
+ * Returns true if the domain is a non-production domain. Two checks:
+ * 1. Any non-TLD label matches a non-prod keyword (qa, stage, dev, author, publish, etc.)
+ *    including hyphenated/numbered variants. TLD is excluded to avoid false-positives on
+ *    legitimate gTLDs like .dev.
+ * 2. The domain is an hlx/AEM delivery URL (*.aem.live, *.aem.page, *.hlx.live, *.hlx.page).
+ */
+function isNonProdDomain(domain) {
+  const hostPart = domain.split('/')[0];
+  if (HLX_DELIVERY_PATTERN.test(hostPart)) {
+    return true;
+  }
+  const labels = hostPart.split('.');
+  // Exclude the TLD (last label) — .dev is a valid production gTLD
+  const subdomainLabels = labels.slice(0, -1);
+  return subdomainLabels.some((label) => NON_PROD_LABEL_PATTERN.test(label));
+}
+
 export async function performAsoPlgOnboarding({
   domain: rawDomain, imsOrgId, presetDeliveryType, presetAuthorUrl, presetProgramId,
 }, context) {
@@ -431,6 +485,7 @@ export async function performAsoPlgOnboarding({
     RUMAPIClient,
     composeBaseURL,
     detectBotBlocker,
+    detectAuthWall,
     detectLocale,
     resolveCanonicalUrl,
     createOrFindOrganization,
@@ -497,6 +552,14 @@ export async function performAsoPlgOnboarding({
   onboarding.setUpdatedBy(callerIdentity);
   if (isFromAsoUI(context)) {
     onboarding.setCreatedBy(callerIdentity);
+  }
+
+  if (!onboarding.getSteps()?.nonProdCheckBypassed && isNonProdDomain(domain)) {
+    log.info(`Domain ${domain} ${NON_PROD_DOMAIN}`);
+    onboarding.setStatus(STATUSES.WAITLISTED);
+    onboarding.setWaitlistReason(`Domain ${domain} ${NON_PROD_DOMAIN}`);
+    await persistAndNotify(onboarding, context);
+    return onboarding;
   }
 
   const terminalFromGuard = await handleExistingOnboardedDomain({
@@ -623,6 +686,30 @@ export async function performAsoPlgOnboarding({
       return onboarding;
     }
 
+    // Step 4b: Authenticated-site check — ASO cannot audit login/SSO-gated sites and there is
+    // no remediation the customer can apply, so reject them outright (rather than waitlisting
+    // for a review that could only uphold the rejection) before any site/entitlement is
+    // provisioned.
+    const authWall = await detectAuthWall({ baseUrl: baseURL, log });
+    if (authWall.authenticated) {
+      log.info(`Domain ${domain} appears to require authentication (signal: ${authWall.signal}), rejecting`);
+      // finalUrl is host-validated (public) but its path/query/fragment are caller-controlled;
+      // reduce it before it is persisted and forwarded to Slack (mrkdwn) to avoid injection.
+      const safeFinalUrl = authWall.finalUrl ? sanitizeUrlForReason(authWall.finalUrl) : '';
+      let rejectionReason = `Domain ${domain} ${AUTHENTICATED_SITE} (detected: ${authWall.signal}`;
+      rejectionReason += safeFinalUrl ? `, resolved to ${safeFinalUrl}).` : ').';
+      onboarding.setStatus(STATUSES.REJECTED);
+      onboarding.setWaitlistReason(rejectionReason);
+      onboarding.setSiteId(site?.getId() || null);
+      onboarding.setSteps(steps);
+      await persistAndNotify(onboarding, context);
+      return onboarding;
+    }
+    // Informational audit-trail breadcrumb (persisted on the onboarding record like the
+    // other `steps.*` flags): records that the auth-wall probe ran and the front door was
+    // public. Not read back in the flow; kept for post-hoc diagnosis of onboarding runs.
+    steps.authWallChecked = true;
+
     // Step 5: Create site if new
     if (!site) {
       const deliveryType = cachedDeliveryType ?? await findDeliveryType(baseURL);
@@ -636,43 +723,6 @@ export async function performAsoPlgOnboarding({
     }
     onboarding.setSiteId(site.getId());
     steps.siteResolved = true;
-
-    // Step 5a: Alert when detected delivery type differs from the stored one.
-    // Skip for newly created sites — delivery type was just set from findDeliveryType in Step 5.
-    // We alert instead of auto-correcting because findDeliveryType is not 100% reliable.
-    if (!presetDeliveryType && !steps.siteCreated) {
-      const existingDeliveryType = site.getDeliveryType();
-      let detectedDeliveryType;
-      try {
-        detectedDeliveryType = await findDeliveryType(baseURL);
-      } catch (e) {
-        log.warn(`Failed to detect delivery type for ${baseURL}: ${e.message}`);
-      }
-      if (
-        detectedDeliveryType
-        && detectedDeliveryType !== SiteModel.DELIVERY_TYPES.OTHER
-        && detectedDeliveryType !== existingDeliveryType
-      ) {
-        log.warn(`Delivery type mismatch for site ${site.getId()} (${baseURL}): stored=${existingDeliveryType} detected=${detectedDeliveryType}`);
-        const channelId = env.SLACK_PLG_ONBOARDING_CHANNEL_ID;
-        const token = env.SLACK_BOT_TOKEN;
-        /* c8 ignore next */
-        if (channelId && token) {
-          const message = ':warning: *PLG Onboarding — Delivery Type Mismatch*\n\n'
-            + `• *Site ID:* \`${site.getId()}\`\n`
-            + `• *Domain:* \`${baseURL}\`\n`
-            + `• *Org ID:* \`${organizationId}\`\n`
-            + `• *Org:* ${organization.getName()} (\`${imsOrgId}\`)\n`
-            + `• *Stored delivery type:* \`${existingDeliveryType}\`\n`
-            + `• *Detected delivery type:* \`${detectedDeliveryType}\``;
-          try {
-            await context.postSlackMessage(channelId, message, token);
-          } catch (err) {
-            log.error(`Failed to post delivery type mismatch alert: ${err.message}`);
-          }
-        }
-      }
-    }
 
     // Step 5b: Resolve canonical URL early so the RUM lookup uses the correct hostname
     const siteConfig = site.getConfig();
@@ -729,6 +779,60 @@ export async function performAsoPlgOnboarding({
       }
     }
 
+    // Step 5f: Alert if delivery type still mismatches after all auto-correction steps.
+    // Skip for newly created sites and preset-delivery-type flows — no prior type to compare.
+    // Detection order: rumHost (EDS pattern → AEM_EDGE, CS publish pattern → AEM_CS),
+    // falling back to findDeliveryType(baseURL) only when rumHost is absent or unrecognised.
+    if (!presetDeliveryType && !steps.siteCreated) {
+      let detectedDeliveryType;
+      if (rumHost) {
+        if (rumHost.match(EDS_HOST_PATTERN)) {
+          detectedDeliveryType = SiteModel.DELIVERY_TYPES.AEM_EDGE;
+        } else if (rumHost.match(AEM_CS_PUBLISH_HOST_PATTERN)) {
+          detectedDeliveryType = SiteModel.DELIVERY_TYPES.AEM_CS;
+        }
+      }
+      if (!detectedDeliveryType) {
+        try {
+          detectedDeliveryType = await findDeliveryType(baseURL);
+        } catch (e) {
+          log.warn(`Failed to detect delivery type for ${baseURL}: ${e.message}`);
+        }
+      }
+      const currentDeliveryType = site.getDeliveryType();
+      if (
+        detectedDeliveryType
+        && detectedDeliveryType !== SiteModel.DELIVERY_TYPES.OTHER
+        && detectedDeliveryType !== currentDeliveryType
+      ) {
+        if (currentDeliveryType === SiteModel.DELIVERY_TYPES.OTHER) {
+          // Stored type was a placeholder ("other") and detection found a confident
+          // signal — safe to auto-correct without a human review step.
+          log.info(`Auto-correcting delivery type for site ${site.getId()} (${baseURL}): stored=${currentDeliveryType} detected=${detectedDeliveryType}`);
+          site.setDeliveryType(detectedDeliveryType);
+        } else {
+          log.warn(`Delivery type mismatch for site ${site.getId()} (${baseURL}): stored=${currentDeliveryType} detected=${detectedDeliveryType}`);
+          const channelId = env.SLACK_PLG_ONBOARDING_CHANNEL_ID;
+          const token = env.SLACK_BOT_TOKEN;
+          /* c8 ignore next */
+          if (channelId && token) {
+            const message = ':warning: *PLG Onboarding — Delivery Type Mismatch*\n\n'
+              + `• *Site ID:* \`${site.getId()}\`\n`
+              + `• *Domain:* \`${baseURL}\`\n`
+              + `• *Org ID:* \`${organizationId}\`\n`
+              + `• *Org:* ${organization.getName()} (\`${imsOrgId}\`)\n`
+              + `• *Stored delivery type:* \`${currentDeliveryType}\`\n`
+              + `• *Detected delivery type:* \`${detectedDeliveryType}\``;
+            try {
+              await context.postSlackMessage(channelId, message, token);
+            } catch (err) {
+              log.error(`Failed to post delivery type mismatch alert: ${err.message}`);
+            }
+          }
+        }
+      }
+    }
+
     // Step 6: Update configs
     const importDefs = Object.keys(profile.imports || {}).map((type) => ({ type }));
     await enableImports(siteConfig, importDefs, log);
@@ -753,8 +857,12 @@ export async function performAsoPlgOnboarding({
       }
     }
 
-    const project = await createOrFindProject(baseURL, organizationId, context);
+    // Only create/link a project when the site has none. A site that already
+    // carries a project (typically a preonboarding project stranded in an
+    // internal/demo org) is re-parented into the customer org after org
+    // reassignment below (Step 9), so creating one here would orphan it.
     if (!site.getProjectId()) {
+      const project = await createOrFindProject(baseURL, organizationId, context);
       site.setProjectId(project.getId());
     }
 
@@ -799,6 +907,19 @@ export async function performAsoPlgOnboarding({
       site = await reassignSiteOrganization(site, organizationId);
       onboarding.setOrganizationId(organizationId);
       steps.siteOrgReassigned = true;
+    }
+
+    // Re-parent the site's project into the resolved customer org so it doesn't
+    // render as "Unassigned" in the org-scoped Studio UI. No-op when the project
+    // already lives in the target org. Best-effort like the other post-reassignment
+    // enrichment steps — a cosmetic re-parent must not fail an otherwise-good
+    // onboarding. Only persists the site when the split branch changed its projectId.
+    try {
+      if (await reparentSiteProjectToOrg(site, organizationId, context)) {
+        await site.save();
+      }
+    } catch (error) {
+      log.warn(`Failed to re-parent project for site ${site.getId()}: ${error.message}`);
     }
 
     // Step 10: Add ASO entitlement, revoke any previous ASO enrollments for this org, update FF.

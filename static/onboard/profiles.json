@@ -27,12 +27,7 @@
 			"alt-text": {},
 			"cwv": {},
 			"broken-backlinks": {},
-			"broken-backlinks-auto-suggest": {},
-			"broken-backlinks-auto-fix": {},
-			"alt-text-auto-fix": {},
-			"alt-text-auto-suggest-mystique": {},
-			"cwv-auto-fix": {},
-			"cwv-auto-suggest": {}
+			"alt-text-auto-suggest-mystique": {}
 		},
 		"imports": {
 			"organic-traffic": {},
@@ -53,9 +48,6 @@
 			"sitemap": {},
 			"cwv": {},
 			"alt-text": {},
-			"broken-backlinks-auto-suggest": {},
-			"meta-tags-auto-suggest": {},
-			"broken-internal-links-auto-suggest": {},
 			"forms-opportunities": {}
 		},
 		"imports": {
@@ -81,19 +73,11 @@
 			"redirect-chains": {},
 			"cwv": {},
 			"alt-text": {},
-			"broken-backlinks-auto-suggest": {},
-			"meta-tags-auto-suggest": {},
-			"broken-internal-links-auto-suggest": {},
-			"broken-backlinks-auto-fix": {},
-			"meta-tags-auto-fix": {},
-			"product-metatags-auto-fix": {},
-			"broken-internal-links-auto-fix": {},
 			"forms-opportunities": {},
 			"accessibility": {},
 			"hreflang": {},
 			"canonical": {},
-			"security-vulnerabilities": {},
-			"security-vulnerabilities-auto-suggest": {}
+			"security-vulnerabilities": {}
 		},
 		"imports": {
 			"organic-traffic" : {},
@@ -119,22 +103,14 @@
 			"redirect-chains": {},
 			"cwv": {},
 			"alt-text": {},
-			"broken-backlinks-auto-suggest": {},
-			"meta-tags-auto-suggest": {},
-			"broken-internal-links-auto-suggest": {},
-			"broken-backlinks-auto-fix": {},
-			"meta-tags-auto-fix": {},
-			"broken-internal-links-auto-fix": {},
 			"forms-opportunities": {},
 			"accessibility": {},
 			"hreflang": {},
 			"security-vulnerabilities": {},
-			"security-vulnerabilities-auto-suggest": {},
 			"structured-data": {},
 			"sitemap": {},
-			"toc": {},
-			"wikipedia-analysis": {},
-			"money-pages": {}
+			"money-pages": {},
+			"cwv-trends-audit": {}
 		},
 		"imports": {
 			"organic-traffic" : {},
@@ -143,6 +119,8 @@
 			"all-traffic": {},
             "traffic-analysis": {},
 			"user-engagement": {},
+			"cwv-trends-onboard": {},
+			"cwv-trends-daily": {},
 			"cwv-weekly": {},
 			"ahref-paid-pages": {}
 		},

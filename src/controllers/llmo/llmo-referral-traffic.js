@@ -16,6 +16,18 @@ import {
 import { cachedOk } from '../../support/cached-response.js';
 import { generateIsoWeekRange, getWeekDateRange } from './llmo-brand-presence.js';
 import { checkDateRange } from './traffic-date-range.js';
+import {
+  rotationContext,
+  shouldRotate,
+  rotatingPostgrest,
+  computeWindow,
+} from './traffic-rotation.js';
+
+// Read-time rotation of the two frozen demo sites' referral data lives entirely
+// in the wrapped PostgREST client injected by withReferralTrafficAuth; handlers
+// call client.rpc(...) unaware of rotation. The one exception is /weeks, whose
+// window is a pure function of now() (not a client fetch) — it still reads this.
+const rotationCtx = (siteId) => rotationContext(siteId, 'referral');
 
 /**
  * Site-scoped referral traffic handler factories.
@@ -77,6 +89,56 @@ const PLATFORM_CODE_TO_DB = {
   mistral: 'mistral',
 };
 
+// A comma in the `platform` param signals a multi-select (Serenity). Returns the
+// trimmed non-empty tokens, or null when the value is a single value / absent —
+// which keeps the single-platform path byte-identical to before.
+function splitPlatformList(raw) {
+  if (typeof raw !== 'string' || !raw.includes(',')) {
+    return null;
+  }
+  return raw.split(',').map((t) => t.trim()).filter(Boolean);
+}
+
+// Prototype-safe UI-code → DB-value lookup: a raw like `toString`/`constructor` must not
+// resolve to an inherited Object.prototype member (which would leak a Function into the
+// RPC param). Own-property check only.
+function toDbPlatform(code) {
+  return Object.hasOwn(PLATFORM_CODE_TO_DB, code) ? PLATFORM_CODE_TO_DB[code] : null;
+}
+
+// Resolves the `platform` param into exactly one of two shapes:
+//   single  → { platform: <db value|null>, platforms: null }   (unchanged, fail-open)
+//   multi   → { platform: null, platforms: <db values[]|null> } (comma list; 'all' → no filter)
+// Unknown codes are silently dropped (matches the project-wide whitelist-filter
+// convention: silent-drop rather than 400 — see #2290). A result of 0 or 1 real tokens
+// collapses to the SINGLE path, so a trailing/bare comma, a dup, or an unknown-heavy list
+// (`openai,` / `openai,openai` / `openai,bogus`) stays byte-identical to `openai` — scalar
+// `p_platform`, not `p_platforms`. The scalar and array RPC params AND-intersect, so a real
+// multi selection nulls the scalar.
+function parsePlatforms(raw) {
+  const tokens = splitPlatformList(raw);
+  if (!tokens) {
+    return { platform: toDbPlatform(raw), platforms: null };
+  }
+  // An explicit 'all' anywhere in the list means "no platform filter".
+  if (tokens.includes('all')) {
+    return { platform: null, platforms: null };
+  }
+  const mapped = [...new Set(tokens.map(toDbPlatform).filter(Boolean))];
+  if (mapped.length >= 2) {
+    return { platform: null, platforms: mapped };
+  }
+  // 0 → fail-open (no filter); 1 → single path (byte-identical to a scalar request).
+  return { platform: mapped[0] ?? null, platforms: null };
+}
+
+// Spread into every referral RPC param set. Only present for a real multi-select, so a
+// single-platform request omits it entirely (byte-identical, and works against a
+// pre-migration RPC signature).
+function buildPlatformRpcParam(parsed) {
+  return parsed.platforms ? { p_platforms: parsed.platforms } : {};
+}
+
 function defaultDateRange() {
   const end = new Date();
   const start = new Date();
@@ -85,6 +147,46 @@ function defaultDateRange() {
     startDate: start.toISOString().slice(0, 10),
     endDate: end.toISOString().slice(0, 10),
   };
+}
+
+// Upper bound for a url-path-prefix filter value; longer input is treated as no
+// filter (defense-in-depth, mirrored by `maxLength` on the OpenAPI parameter).
+const MAX_URL_PATH_PREFIX_LENGTH = 512;
+
+/**
+ * Normalize the optional url-path-prefix filter (LLMO-7315).
+ *
+ * A prefix scopes a domain's referral data to a sub-path (e.g. '/knicks').
+ * Empty string, '/', or absent means NO filter (unchanged behavior).
+ * Otherwise the value is trimmed, forced to start with '/', and has all
+ * trailing '/' stripped so '/knicks', '/knicks/' and '/knicks///' resolve
+ * identically. A value that is only slashes (e.g. '/' or '//') collapses to
+ * empty and means "no filter".
+ *
+ * A repeated query param (parsed into an array) is ignored (treated as no
+ * filter) rather than coerced into a nonsense comma-joined value.
+ *
+ * @param {string|null|undefined} raw - Raw query value.
+ * @returns {string|null} Normalized prefix, or null when no filter applies.
+ */
+function normalizeUrlPathPrefix(raw) {
+  if (raw == null || Array.isArray(raw)) {
+    return null;
+  }
+  let prefix = String(raw).trim().replace(/\/+$/, '');
+  if (prefix === '') {
+    return null;
+  }
+  if (!prefix.startsWith('/')) {
+    prefix = `/${prefix}`;
+  }
+  // Defense-in-depth: ignore absurdly long values (not an injection risk — the value
+  // is only ever a bound RPC/PostgREST param — but caps memory abuse). A real path
+  // prefix is short; anything over the cap is treated as no filter.
+  if (prefix.length > MAX_URL_PATH_PREFIX_LENGTH) {
+    return null;
+  }
+  return prefix;
 }
 
 /**
@@ -96,14 +198,25 @@ function parseParams(context) {
   const defaults = defaultDateRange();
   const rawSource = q.source;
   const source = VALID_SOURCES.has(rawSource) ? rawSource : DEFAULT_SOURCE;
+  const { platform, platforms } = parsePlatforms(q.platform);
+  // Keep the silent-drop observable: a comma list that matched no known platform
+  // (and isn't the explicit 'all') falls open to all platforms — log it.
+  if (typeof q.platform === 'string' && q.platform.includes(',') && !platform && !platforms
+    && !q.platform.split(',').some((t) => t.trim() === 'all')) {
+    context.log?.debug?.(`referral-traffic: platform list "${q.platform}" matched no known platforms — no platform filter applied`);
+  }
   return {
     source,
     startDate: q.startDate || q.start_date || defaults.startDate,
     endDate: q.endDate || q.end_date || defaults.endDate,
-    platform: PLATFORM_CODE_TO_DB[q.platform] ?? null,
+    platform,
+    // Additive multi-select inclusion list (Serenity). null → single/absent.
+    platforms,
     region: q.region || null,
     pageIntent: q.pageIntent || q.page_intent || null,
     deviceType: q.deviceType || q.device_type || q.device || null,
+    category: q.categoryName || q.category_name || null,
+    urlPathPrefix: normalizeUrlPathPrefix(q.urlPathPrefix || q.url_path_prefix || null),
   };
 }
 
@@ -120,6 +233,12 @@ function commonRpcParams(siteId, parsed) {
     p_region: parsed.region,
     p_device: parsed.deviceType,
     p_page_intent: parsed.pageIntent,
+    p_category_name: parsed.category,
+    // LLMO-7315: optional url-path-prefix scope; null = no filter (unchanged).
+    p_url_path_prefix: parsed.urlPathPrefix,
+    // Additive multi-select platform inclusion list; only present for a real
+    // multi-select, so single/all/legacy requests stay byte-identical.
+    ...buildPlatformRpcParam(parsed),
   };
 }
 
@@ -161,7 +280,12 @@ async function withReferralTrafficAuth(
     return internalServerError('Access validation failed');
   }
 
-  return handlerFn(context, Site.postgrestService, siteId);
+  // Demo sites read through a rotating client (frozen data → rolling window);
+  // every other site gets the real client unchanged (zero behavior change).
+  const client = shouldRotate(siteId, 'referral')
+    ? rotatingPostgrest(Site.postgrestService, siteId, 'referral')
+    : Site.postgrestService;
+  return handlerFn(context, client, siteId);
 }
 
 // ============================================================================
@@ -189,6 +313,8 @@ export function createReferralTrafficFilterDimensionsHandler(getSiteAndValidateA
           p_source: parsed.source,
           p_start_date: parsed.startDate,
           p_end_date: parsed.endDate,
+          // LLMO-7315: optional url-path-prefix scope; null = no filter.
+          p_url_path_prefix: parsed.urlPathPrefix,
         });
 
         if (error) {
@@ -204,6 +330,7 @@ export function createReferralTrafficFilterDimensionsHandler(getSiteAndValidateA
           devices: row?.devices ?? [],
           pageIntents: row?.page_intents ?? [],
           availableSources: row?.available_sources ?? [],
+          categories: row?.categories ?? [],
         });
       },
     );
@@ -229,10 +356,8 @@ export function createReferralTrafficKpisHandler(getSiteAndValidateAccess) {
       'kpis',
       async (ctx, client, siteId) => {
         const parsed = parseParams(ctx);
-        const { data, error } = await client.rpc(
-          'rpc_referral_traffic_kpis',
-          commonRpcParams(siteId, parsed),
-        );
+        const rpcParams = commonRpcParams(siteId, parsed);
+        const { data, error } = await client.rpc('rpc_referral_traffic_kpis', rpcParams);
 
         if (error) {
           ctx.log.error(`Referral traffic kpis PostgREST error: ${error.message}`);
@@ -271,9 +396,10 @@ export function createReferralTrafficTrendHandler(getSiteAndValidateAccess) {
       'trend',
       async (ctx, client, siteId) => {
         const parsed = parseParams(ctx);
+        const rpcParams = commonRpcParams(siteId, parsed);
         const { data, error } = await client.rpc(
           'rpc_referral_traffic_trend',
-          commonRpcParams(siteId, parsed),
+          rpcParams,
         );
 
         if (error) {
@@ -322,10 +448,8 @@ export function createReferralTrafficByPlatformHandler(getSiteAndValidateAccess)
       'by-platform',
       async (ctx, client, siteId) => {
         const parsed = parseParams(ctx);
-        const { data, error } = await client.rpc(
-          'rpc_referral_traffic_by_platform',
-          commonRpcParams(siteId, parsed),
-        );
+        const rpcParams = commonRpcParams(siteId, parsed);
+        const { data, error } = await client.rpc('rpc_referral_traffic_by_platform', rpcParams);
 
         if (error) {
           ctx.log.error(`Referral traffic by-platform PostgREST error: ${error.message}`);
@@ -370,10 +494,8 @@ export function createReferralTrafficByDeviceHandler(getSiteAndValidateAccess) {
       'by-device',
       async (ctx, client, siteId) => {
         const parsed = parseParams(ctx);
-        const { data, error } = await client.rpc(
-          'rpc_referral_traffic_by_device',
-          commonRpcParams(siteId, parsed),
-        );
+        const rpcParams = commonRpcParams(siteId, parsed);
+        const { data, error } = await client.rpc('rpc_referral_traffic_by_device', rpcParams);
 
         if (error) {
           ctx.log.error(`Referral traffic by-device PostgREST error: ${error.message}`);
@@ -410,10 +532,8 @@ export function createReferralTrafficByRegionHandler(getSiteAndValidateAccess) {
       'by-region',
       async (ctx, client, siteId) => {
         const parsed = parseParams(ctx);
-        const { data, error } = await client.rpc(
-          'rpc_referral_traffic_by_region',
-          commonRpcParams(siteId, parsed),
-        );
+        const rpcParams = commonRpcParams(siteId, parsed);
+        const { data, error } = await client.rpc('rpc_referral_traffic_by_region', rpcParams);
 
         if (error) {
           ctx.log.error(`Referral traffic by-region PostgREST error: ${error.message}`);
@@ -450,10 +570,8 @@ export function createReferralTrafficByPageIntentHandler(getSiteAndValidateAcces
       'by-page-intent',
       async (ctx, client, siteId) => {
         const parsed = parseParams(ctx);
-        const { data, error } = await client.rpc(
-          'rpc_referral_traffic_by_page_intent',
-          commonRpcParams(siteId, parsed),
-        );
+        const rpcParams = commonRpcParams(siteId, parsed);
+        const { data, error } = await client.rpc('rpc_referral_traffic_by_page_intent', rpcParams);
 
         if (error) {
           ctx.log.error(`Referral traffic by-page-intent PostgREST error: ${error.message}`);
@@ -511,14 +629,15 @@ export function createReferralTrafficByUrlHandler(getSiteAndValidateAccess) {
         const rawSortOrder = (q.sortOrder || q.sort_order || 'desc').toLowerCase();
         const sortOrder = VALID_SORT_ORDERS.has(rawSortOrder) ? rawSortOrder : 'desc';
 
-        const { data, error } = await client.rpc('rpc_referral_traffic_by_url', {
+        const rpcParams = {
           ...commonRpcParams(siteId, parsed),
           p_url_search: urlPathSearch,
           p_limit: limit,
           p_offset: pageOffset,
           p_sort_by: sortBy,
           p_sort_order: sortOrder,
-        });
+        };
+        const { data, error } = await client.rpc('rpc_referral_traffic_by_url', rpcParams);
 
         if (error) {
           ctx.log.error(`Referral traffic by-url PostgREST error: ${error.message}`);
@@ -576,6 +695,32 @@ export function createReferralTrafficWeeksHandler(getSiteAndValidateAccess) {
         const rawSource = q.source;
         const source = VALID_SOURCES.has(rawSource) ? rawSource : DEFAULT_SOURCE;
         const tableName = SOURCE_TO_TABLE[source];
+
+        // LLMO-7315: /weeks is intentionally NOT url-path-prefix scoped. The week
+        // picker reflects the domain's data availability; the dashboard scopes it
+        // to a sub-path by querying the domain-root siteId (which owns the ingested
+        // rows), so a plain site_id read is correct here and avoids per-source
+        // PostgREST filter-string escaping.
+        const rot = rotationCtx(siteId);
+        if (rot.rotate) {
+          // Rotation: the window is a pure function of now(); we only need to
+          // know whether THIS source has any canned rows. One existence check
+          // (not the two-query min/max), then synthesize — mirrors the agentic
+          // /weeks early-return while preserving per-source emptiness.
+          const { data, error } = await client
+            .from(tableName)
+            .select('traffic_date')
+            .eq('site_id', siteId)
+            .limit(1);
+          if (error) {
+            ctx.log.error(`Referral traffic weeks existence PostgREST error: ${error.message}`);
+            return internalServerError('Failed to fetch referral traffic date range');
+          }
+          if ((data || []).length === 0) {
+            return ok({ weeks: [] });
+          }
+          return ok({ weeks: computeWindow(rot.now).weeks });
+        }
 
         const [minResult, maxResult] = await Promise.all([
           client
@@ -672,8 +817,14 @@ export function createReferralTrafficUrlTrendHandler(getSiteAndValidateAccess) {
 
         const parsed = parseParams(ctx);
 
+        // LLMO-7315: rpc_referral_traffic_url_trend does an EXACT url_path match and is
+        // intentionally NOT given p_url_path_prefix. PostgREST resolves an RPC by its
+        // exact argument-name set, so passing an unknown p_url_path_prefix key would
+        // fail to match the function (PGRST202). Omit it via destructuring so the
+        // exclusion is visible at the call site.
+        const { p_url_path_prefix: _, ...urlTrendParams } = commonRpcParams(siteId, parsed);
         const { data, error } = await client.rpc('rpc_referral_traffic_url_trend', {
-          ...commonRpcParams(siteId, parsed),
+          ...urlTrendParams,
           p_url_path: urlPath,
         });
 
@@ -712,11 +863,8 @@ export function createReferralTrafficBusinessImpactHandler(getSiteAndValidateAcc
         }
         const source = rawSource != null ? rawSource : DEFAULT_BUSINESS_IMPACT_SOURCE;
         const parsed = { ...parseParams(ctx), source };
-
-        const { data, error } = await client.rpc(
-          'rpc_referral_traffic_business_impact',
-          commonRpcParams(siteId, parsed),
-        );
+        const rpcParams = commonRpcParams(siteId, parsed);
+        const { data, error } = await client.rpc('rpc_referral_traffic_business_impact', rpcParams);
 
         if (error) {
           ctx.log.error(`Referral traffic business-impact PostgREST error: ${error.message}`);
@@ -746,32 +894,40 @@ export function createReferralTrafficBusinessImpactHandler(getSiteAndValidateAcc
 }
 
 /**
- * Traffic Insights sources — the only tables that feed the Traffic Insights tab.
- * Business Impact (adobe_analytics, ga4) has its own DRS provider check and is
- * intentionally excluded here.
+ * All referral sources probed by has-data, in resolution-priority order.
  *
- * Order matters: optel is listed first because it is the preferred source.
- * The has-data response preserves this order in availableSources so callers
- * can pick the first entry as the active source (optel wins over cdn).
+ * Business Impact sources (adobe_analytics, cja, ga4) rank ABOVE the Traffic
+ * Insights sources (cdn, optel): a site connected to an analytics provider
+ * should resolve to it first. The has-data response preserves this order in
+ * availableSources so callers pick the first entry as the active source.
+ *
+ * NOTE: this list is intentionally broader than the Traffic Insights tab
+ * (optel/cdn). Consumers that only care about Traffic Insights must filter
+ * availableSources down to those two sources themselves.
  */
-const TRAFFIC_INSIGHTS_SOURCES = ['optel', 'cdn'];
-const TRAFFIC_INSIGHTS_TABLES = TRAFFIC_INSIGHTS_SOURCES.map((s) => SOURCE_TO_TABLE[s]);
+export const REFERRAL_HAS_DATA_SOURCES = ['adobe_analytics', 'cja', 'ga4', 'cdn', 'optel'];
+export const REFERRAL_HAS_DATA_TABLES = REFERRAL_HAS_DATA_SOURCES.map((s) => SOURCE_TO_TABLE[s]);
+// ~60 weeks; UI can only query the last 52 weeks, so this hides no visible data
+// while letting Postgres prune old traffic_date-RANGE referral traffic partitions.
+const HAS_DATA_LOOKBACK_DAYS = 420;
 
 /**
  * GET /sites/:siteId/referral-traffic/has-data
  *
- * Fast existence check for Traffic Insights data (optel and cdn).
- * Business Impact sources (adobe_analytics, ga4) are gated separately via DRS.
+ * Fast existence check across ALL referral sources (adobe_analytics, cja, ga4,
+ * cdn, optel).
  *
  * Response:
- *   { hasData: boolean, availableSources: Array<'optel'|'cdn'> }
+ *   { hasData: boolean,
+ *     availableSources: Array<'adobe_analytics'|'cja'|'ga4'|'cdn'|'optel'>,
+ *     activeSource: 'adobe_analytics'|'cja'|'ga4'|'cdn'|'optel'|null }
  *
- * availableSources lists whichever of optel/cdn has at least one row, in
- * priority order (optel first). Callers should use the first entry as the
- * active source so they naturally prefer optel over cdn.
- * hasData is true iff availableSources is non-empty.
+ * availableSources lists whichever sources have at least one row for the site,
+ * in resolution-priority order (adobe_analytics > cja > ga4 > cdn > optel).
+ * activeSource mirrors the first entry. hasData is true iff
+ * availableSources is non-empty.
  *
- * Both tables are checked in parallel with limit(1) — no RPC required.
+ * All source tables are checked in parallel with limit(1) — no RPC required.
  * Fails closed: if any query errors, returns 500 rather than a partial result.
  */
 export function createReferralTrafficHasDataHandler(getSiteAndValidateAccess) {
@@ -783,8 +939,20 @@ export function createReferralTrafficHasDataHandler(getSiteAndValidateAccess) {
       async (ctx, client, siteId) => {
         let results;
         try {
+          const lookback = new Date(Date.now() - HAS_DATA_LOOKBACK_DAYS * 86400000)
+            .toISOString()
+            .slice(0, 10);
+          // LLMO-7315: has-data is deliberately NOT scoped by urlPathPrefix. The
+          // UI calls has-data on the domain-ROOT siteId (no prefix) so a sub-path
+          // view inherits the domain's "configured" verdict; keying this probe on
+          // site_id only keeps that inheritance intact.
           results = await Promise.all(
-            TRAFFIC_INSIGHTS_TABLES.map((table) => client.from(table).select('traffic_date').eq('site_id', siteId).limit(1)),
+            REFERRAL_HAS_DATA_TABLES.map((table) => client
+              .from(table)
+              .select('traffic_date')
+              .eq('site_id', siteId)
+              .gte('traffic_date', lookback)
+              .limit(1)),
           );
         } catch (err) {
           ctx.log.error(`Referral traffic has-data PostgREST error: ${err.message} (siteId=${siteId})`);
@@ -793,15 +961,20 @@ export function createReferralTrafficHasDataHandler(getSiteAndValidateAccess) {
 
         for (const [i, result] of results.entries()) {
           if (result.error) {
-            ctx.log.error(`Referral traffic has-data ${TRAFFIC_INSIGHTS_TABLES[i]} PostgREST error: ${result.error.message} (siteId=${siteId})`);
+            ctx.log.error(`Referral traffic has-data ${REFERRAL_HAS_DATA_TABLES[i]} PostgREST error: ${result.error.message} (siteId=${siteId})`);
             return internalServerError('Failed to check referral traffic data');
           }
         }
 
-        const availableSources = TRAFFIC_INSIGHTS_SOURCES.filter(
+        const availableSources = REFERRAL_HAS_DATA_SOURCES.filter(
           (_, i) => (results[i].data || []).length > 0,
         );
-        return cachedOk({ hasData: availableSources.length > 0, availableSources });
+        const activeSource = availableSources[0] ?? null;
+        return cachedOk({
+          hasData: availableSources.length > 0,
+          availableSources,
+          activeSource,
+        });
       },
     );
   };

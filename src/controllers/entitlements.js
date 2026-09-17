@@ -25,12 +25,56 @@ import {
 
 import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
 import TierClient from '@adobe/spacecat-shared-tier-client';
+import DrsClient from '@adobe/spacecat-shared-drs-client';
 
 import { EntitlementDto } from '../dto/entitlement.js';
+import { SiteEnrollmentDto } from '../dto/site-enrollment.js';
 import AccessControlUtil from '../support/access-control-util.js';
+import { ensurePromptSuggestionSchedules } from '../support/prompt-suggestion-schedules.js';
+import { CAP_ENTITLEMENT_CREATE } from '../routes/capability-constants.js';
 
 const VALID_PRODUCT_CODES = new Set(Object.values(EntitlementModel.PRODUCT_CODES));
 const FREE_TRIAL_TIER = EntitlementModel.TIERS.FREE_TRIAL;
+const PAID_TIER = EntitlementModel.TIERS.PAID;
+const LLMO_PRODUCT_CODE = EntitlementModel.PRODUCT_CODES.LLMO;
+
+/**
+ * Best-effort reaction to a trial→paid LLMO transition: (re)provisions the site's
+ * recurring DRS prompt-suggestion schedules. Never throws — the entitlement
+ * operation must succeed regardless of this side-effect (mirrors the best-effort
+ * schedule registration on the onboarding path). The dedicated endpoint
+ * (`POST /sites/:siteId/prompt-suggestion-schedules`) is the reusable equivalent;
+ * this inlines the same shared helper so an admin tier flip is not silently
+ * missed while the fulfillment-worker call + reconciler are still follow-ups.
+ *
+ * @param {object} context - Request context (for DrsClient + log).
+ * @param {string} siteId - Site UUID.
+ * @param {object} log - Logger.
+ * @returns {Promise<void>}
+ */
+async function reactToLlmoTrialToPaid(context, siteId, log) {
+  try {
+    const drsClient = DrsClient.createFrom(context);
+    if (!drsClient.isConfigured()) {
+      log.debug(`[prompt-suggestion-schedules] DRS not configured, skipping trial→paid reaction for site ${siteId}`);
+      return;
+    }
+    const { results, allSucceeded } = await ensurePromptSuggestionSchedules({
+      drsClient,
+      siteId,
+      isPaying: true,
+      log,
+    });
+    const summary = results.map((r) => `${r.providerId}:${r.status}`).join(',');
+    if (allSucceeded) {
+      log.info(`[prompt-suggestion-schedules] trial→paid provisioned recurring schedules site_id=${siteId} results=${summary}`);
+    } else {
+      log.error(`[prompt-suggestion-schedules] trial→paid: one or more pipelines failed site_id=${siteId} results=${summary}`);
+    }
+  } catch (e) {
+    log.error(`[prompt-suggestion-schedules] trial→paid reaction failed for site ${siteId}: ${e.message}`);
+  }
+}
 
 /**
  * Entitlements controller. Provides methods to read entitlements by organization.
@@ -48,9 +92,40 @@ function EntitlementsController(ctx) {
     throw new Error('Data access required');
   }
 
-  const { Entitlement, Organization } = dataAccess;
+  const { Entitlement, Organization, Site } = dataAccess;
 
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
+
+  /**
+   * Whether the caller may create/ensure entitlements: a full admin (bypass, no DB hit),
+   * or an S2S consumer holding `entitlement:create` (enforced upstream by `s2sAuthWrapper`,
+   * re-checked here at Layer 2 via a fresh DB fetch). The S2S decision is audit-logged once
+   * — this provisions billable state. SITES-50526.
+   * @param {object} log - Request logger.
+   * @returns {Promise<boolean>}
+   */
+  const hasEntitlementCreateAccess = async (log) => {
+    if (accessControlUtil.hasAdminAccess()) {
+      return true;
+    }
+    const {
+      allowed, reason, clientId, consumerId,
+    } = await accessControlUtil.hasS2SCapability(CAP_ENTITLEMENT_CREATE);
+    log.info(`[s2s] entitlement:create ${allowed ? 'granted' : 'denied'} clientId=${clientId || 'n/a'} consumerId=${consumerId || 'n/a'} reason=${reason}`);
+    return allowed;
+  };
+
+  /**
+   * Resolves the acting identity for audit-trail logging. For most auth paths
+   * `profile.email` carries the IMS user GUID (see access-control-util.js);
+   * falls back to the profile name and finally to 'system' when unauthenticated.
+   * @param {object} context - Context of the request.
+   * @returns {string} The acting identity.
+   */
+  const getActor = (context) => {
+    const profile = context.attributes?.authInfo?.getProfile?.();
+    return profile?.email || profile?.name || 'system';
+  };
 
   /**
    * Gets entitlements by organization ID.
@@ -92,8 +167,8 @@ function EntitlementsController(ctx) {
    * @returns {Promise<Response>} Created entitlement response.
    */
   const createEntitlement = async (context) => {
-    if (!accessControlUtil.hasAdminAccess()) {
-      return forbidden('Only admins can create entitlements');
+    if (!await hasEntitlementCreateAccess(context.log)) {
+      return forbidden('Insufficient permissions to create entitlements');
     }
     const { organizationId } = context.params;
     const {
@@ -127,9 +202,155 @@ function EntitlementsController(ctx) {
     }
   };
 
+  /**
+   * Ensures an entitlement (org-level) and a site enrollment exist for the given
+   * site and product. Mirrors the Slack `ensure entitlement site` command: if the
+   * site's organization has no entitlement for the product, one is created with
+   * default free-trial quotas; then the site enrollment linking the site to that
+   * entitlement is created. The operation is idempotent — repeating the call
+   * returns the same entitlement + enrollment without duplicating rows.
+   *
+   * Admin-or-S2S: full admins pass, as do S2S consumers holding `entitlement:create`
+   * (see {@link hasEntitlementCreateAccess}). Matches the parallel
+   * `POST /organizations/:organizationId/entitlements` contract (SITES-50526).
+   *
+   * Distinct from `POST /sites/:siteId/site-enrollments`
+   * (SiteEnrollmentsController.createPlgEnrollment), which is a narrower,
+   * ASO-only, summit-PLG-gated path that refuses to create the org entitlement
+   * when missing. This endpoint is the general-purpose Slack equivalent: any
+   * supported product, creates the entitlement when missing, no PLG handler
+   * gate.
+   *
+   * @param {object} context - Context of the request.
+   * @returns {Promise<Response>} Created entitlement + site enrollment response.
+   */
+  const createSiteEntitlement = async (context) => {
+    if (!await hasEntitlementCreateAccess(context.log)) {
+      return forbidden('Insufficient permissions to ensure entitlements for a site');
+    }
+    const { siteId } = context.params;
+    const {
+      productCode,
+      tier = FREE_TRIAL_TIER,
+    } = context.data || {};
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+    if (typeof productCode !== 'string' || !VALID_PRODUCT_CODES.has(productCode)) {
+      return badRequest(`Invalid product code. Must be one of: ${[...VALID_PRODUCT_CODES].join(', ')}`);
+    }
+    if (typeof tier !== 'string' || !Object.values(EntitlementModel.TIERS).includes(tier)) {
+      return badRequest(`Invalid tier. Must be one of: ${Object.values(EntitlementModel.TIERS).join(', ')}`);
+    }
+    try {
+      const site = await Site.findById(siteId);
+      if (!site) {
+        return notFound('Site not found');
+      }
+      // TierClient.createForSite resolves the site's owning organization and
+      // returns a client bound to (site, organization, productCode). Its
+      // .createEntitlement(tier) is the same idempotent path the Slack command
+      // uses: creates the org entitlement if missing, then the site enrollment;
+      // updates a non-PAID tier if the request asks for a different one;
+      // returns existing rows on repeat calls.
+      const tierClient = await TierClient.createForSite(
+        context,
+        site,
+        productCode,
+      );
+      // Read the prior tier BEFORE the create so we can detect a trial→paid
+      // transition without changing the shared createEntitlement return shape
+      // (mirrors resolveProvisioningTier in support/tier-provisioning.js).
+      const existing = await tierClient.checkValidEntitlement();
+      const prevTier = existing.entitlement?.getTier?.() ?? null;
+
+      const { entitlement, siteEnrollment } = await tierClient.createEntitlement(tier);
+
+      // LLMO trial→paid: (re)provision recurring prompt-suggestion schedules.
+      // Best-effort — never fails the entitlement op.
+      const resultTier = entitlement?.getTier?.();
+      if (productCode === LLMO_PRODUCT_CODE
+        && prevTier !== PAID_TIER
+        && resultTier === PAID_TIER) {
+        await reactToLlmoTrialToPaid(context, siteId, context.log);
+      }
+
+      return created({
+        entitlement: EntitlementDto.toJSON(entitlement),
+        siteEnrollment: SiteEnrollmentDto.toJSON(siteEnrollment),
+      });
+    } catch (e) {
+      context.log.error(`Error ensuring entitlement for site ${siteId}: ${e.message}`);
+      return internalServerError('Failed to ensure entitlement for site');
+    }
+  };
+
+  /**
+   * Updates the tier of an existing entitlement for an organization.
+   *
+   * Unlike `createEntitlement`, this does NOT go through `TierClient`. It fetches
+   * the existing entitlement entity for (organization, productCode), validates the
+   * requested tier from the payload, sets it directly on the entity, and saves.
+   *
+   * S2S-admin-only (`hasS2SAdminAccess()`) — regular IMS/JWT admins are not
+   * allowed. Not exposed to S2S capability consumers either (listed in
+   * `INTERNAL_ROUTES`). Emits an audit-trail log line recording who performed
+   * the change and for which IMS org.
+   *
+   * @param {object} context - Context of the request.
+   * @returns {Promise<Response>} Updated entitlement response.
+   */
+  const patchEntitlement = async (context) => {
+    if (!accessControlUtil.hasS2SAdminAccess()) {
+      return forbidden('Unauthorized');
+    }
+    const { organizationId } = context.params;
+    const { productCode, tier } = context.data || {};
+
+    if (!isValidUUID(organizationId)) {
+      return badRequest('Organization ID required');
+    }
+    if (typeof productCode !== 'string' || !VALID_PRODUCT_CODES.has(productCode)) {
+      return badRequest(`Invalid product code. Must be one of: ${[...VALID_PRODUCT_CODES].join(', ')}`);
+    }
+    if (typeof tier !== 'string' || !Object.values(EntitlementModel.TIERS).includes(tier)) {
+      return badRequest(`Invalid tier. Must be one of: ${Object.values(EntitlementModel.TIERS).join(', ')}`);
+    }
+
+    try {
+      const organization = await Organization.findById(organizationId);
+      if (!organization) {
+        return notFound('Organization not found');
+      }
+
+      const entitlements = await Entitlement.allByOrganizationId(organizationId);
+      const entitlement = entitlements.find((e) => e.getProductCode() === productCode);
+      if (!entitlement) {
+        return notFound(`No ${productCode} entitlement found for organization ${organizationId}`);
+      }
+
+      const actor = getActor(context);
+      const imsOrgId = organization.getImsOrgId?.();
+      const previousTier = entitlement.getTier();
+
+      entitlement.setTier(tier);
+      entitlement.setUpdatedBy(actor);
+      await entitlement.save();
+
+      context.log.info(`[entitlement-tier-update] entitlement=${entitlement.getId()} productCode=${productCode} organizationId=${organizationId} imsOrgId=${imsOrgId} tier ${previousTier} -> ${tier} by actor=${actor}`);
+
+      return ok(EntitlementDto.toJSON(entitlement));
+    } catch (e) {
+      context.log.error(`Error updating entitlement for organization ${organizationId}: ${e.message}`);
+      return internalServerError('Failed to update entitlement');
+    }
+  };
+
   return {
     getByOrganizationID,
     createEntitlement,
+    createSiteEntitlement,
+    patchEntitlement,
   };
 }
 

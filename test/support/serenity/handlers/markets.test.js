@@ -19,13 +19,17 @@ import {
   handleListMarkets,
   handleGetMarket,
   handleCreateMarket,
+  defaultMarketName,
   handleDeleteMarket,
   handleListTags,
   handleListModels,
   handleUpdateModels,
+  listLanguageCatalog,
+  resolveLanguageId,
   resolveLocation,
   clearLanguageCache,
   clearTagCache,
+  listProjectTagTree,
 } from '../../../../src/support/serenity/handlers/markets.js';
 import { SerenityTransportError } from '../../../../src/support/serenity/rest-transport.js';
 import { ErrorWithStatusCode } from '../../../../src/support/utils.js';
@@ -36,8 +40,13 @@ use(sinonChai);
 const BRAND = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
 const WORKSPACE = 'workspace-1';
 
+// Shared across the create-market tests below (MysticatBot review, LLMO-7421):
+// a single flagged own-brand benchmark, satisfying the pre-publish invariant
+// without each test re-declaring the same listBenchmarks resolve value.
+const FLAGGED_BENCHMARKS = { aio_benchmarks: [{ id: 'bm-1', main_brand: true }] };
+
 function makeProject({
-  semrushProjectId, geoTargetId, languageCode, remove,
+  semrushProjectId, geoTargetId, languageCode, remove, siteId = null,
 }) {
   return {
     getSemrushProjectId: () => semrushProjectId,
@@ -45,6 +54,7 @@ function makeProject({
     getLanguageCode: () => languageCode,
     getCreatedAt: () => '2026-05-28T10:00:00Z',
     getUpdatedAt: () => '2026-05-28T10:00:00Z',
+    getSiteId: () => siteId,
     remove: remove || sinon.stub().resolves(),
   };
 }
@@ -55,6 +65,11 @@ function makeDataAccess(projects) {
       allByBrandId: sinon.stub().resolves(projects),
       findBySlice: sinon.stub(),
       create: sinon.stub(),
+    },
+    // Site data-access — used by the siteId → domain derivation on the flat
+    // create path (LLMO-6405 Phase 2). Individual tests configure findById.
+    Site: {
+      findById: sinon.stub(),
     },
   };
 }
@@ -109,6 +124,7 @@ describe('handlers/markets.js — handleListMarkets', () => {
       languageCode: 'en',
       createdAt: '2026-05-28T10:00:00Z',
       updatedAt: '2026-05-28T10:00:00Z',
+      siteId: null,
     });
     expect(result.items[0]).not.to.have.property('semrushProjectId');
     expect(result.items[0]).not.to.have.property('semrushLocationId');
@@ -129,6 +145,20 @@ describe('handlers/markets.js — handleListMarkets', () => {
     const result = await handleListMarkets(transport, dataAccess, BRAND, WORKSPACE);
     expect(result.items).to.have.lengthOf(1);
   });
+
+  it('surfaces each market siteId from the mapping rows (LLMO-6405)', async () => {
+    const rows = [
+      makeProject({
+        semrushProjectId: 'p-us', geoTargetId: 2840, languageCode: 'en', siteId: 'site-us',
+      }),
+      makeProject({
+        semrushProjectId: 'p-de', geoTargetId: 2276, languageCode: 'de', siteId: null,
+      }),
+    ];
+    const dataAccess = makeDataAccess(rows);
+    const result = await handleListMarkets({}, dataAccess, BRAND, WORKSPACE);
+    expect(result.items.map((m) => m.siteId)).to.deep.equal(['site-us', null]);
+  });
 });
 
 describe('handlers/markets.js — handleCreateMarket', () => {
@@ -140,6 +170,19 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     const result = await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {}, fakeLog());
     expect(result.status).to.equal(400);
     expect(result.body.error).to.equal('invalidRequest');
+  });
+
+  it('400s on a siteId that is not a UUID', async () => {
+    // Flat mode records the value straight onto a uuid column, so a malformed one
+    // has to be rejected here rather than at the write.
+    const transport = {};
+    const dataAccess = makeDataAccess([]);
+    const result = await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
+      market: 'US', languageCode: 'en', brandDomain: 'adobe.com', siteId: 'not-a-uuid', brandNames: ['Adobe'],
+    }, fakeLog());
+    expect(result.status).to.equal(400);
+    expect(result.body.error).to.equal('invalidRequest');
+    expect(result.body.message).to.match(/siteId must be a valid UUID/);
   });
 
   it('400s on unknown market', async () => {
@@ -170,8 +213,10 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     dataAccess.BrandSemrushProject.findBySlice.resolves(null);
     dataAccess.BrandSemrushProject.create.resolves();
     const transport = {
-      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English', code: 'en' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-new' }),
+      listBenchmarks: sinon.stub().resolves(FLAGGED_BENCHMARKS),
+      updateProject: sinon.stub().resolves(),
       publishProject: sinon.stub().resolves(),
     };
 
@@ -217,6 +262,332 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     expect(upstreamBody.brand_names).to.deep.equal(['Adobe']);
   });
 
+  it('PATCHes settings.ai.primary_url from body.primaryUrl before publishing (#348)', async () => {
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(null);
+    dataAccess.BrandSemrushProject.create.resolves();
+    const transport = {
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English', code: 'en' }] }),
+      createProject: sinon.stub().resolves({ id: 'proj-new' }),
+      listBenchmarks: sinon.stub().resolves(FLAGGED_BENCHMARKS),
+      updateProject: sinon.stub().resolves(),
+      publishProject: sinon.stub().resolves(),
+    };
+
+    const result = await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
+      market: 'US',
+      languageCode: 'en',
+      brandDomain: 'nba.com',
+      primaryUrl: 'https://www.nba.com/kings/',
+      brandNames: ['NBA'],
+    }, fakeLog());
+
+    expect(result.status).to.equal(201);
+    expect(transport.updateProject).to.have.been.calledOnceWith(WORKSPACE, 'proj-new', {
+      type: 'ai',
+      primary_url: 'www.nba.com/kings',
+    });
+    // set before publish so it's part of the published version
+    expect(transport.updateProject).to.have.been.calledBefore(transport.publishProject);
+  });
+
+  it('falls back to brandDomain for primary_url when body.primaryUrl is absent (#348)', async () => {
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(null);
+    dataAccess.BrandSemrushProject.create.resolves();
+    const transport = {
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English', code: 'en' }] }),
+      createProject: sinon.stub().resolves({ id: 'proj-new' }),
+      listBenchmarks: sinon.stub().resolves(FLAGGED_BENCHMARKS),
+      updateProject: sinon.stub().resolves(),
+      publishProject: sinon.stub().resolves(),
+    };
+
+    const result = await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
+      market: 'US',
+      languageCode: 'en',
+      brandDomain: 'adobe.com',
+      brandNames: ['Adobe'],
+    }, fakeLog());
+
+    expect(result.status).to.equal(201);
+    expect(transport.updateProject).to.have.been.calledOnceWith(WORKSPACE, 'proj-new', {
+      type: 'ai',
+      primary_url: 'adobe.com',
+    });
+  });
+
+  it('a failed primary_url PATCH is best-effort — market still publishes 201 (#348)', async () => {
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(null);
+    dataAccess.BrandSemrushProject.create.resolves();
+    const transport = {
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English', code: 'en' }] }),
+      createProject: sinon.stub().resolves({ id: 'proj-new' }),
+      listBenchmarks: sinon.stub().resolves(FLAGGED_BENCHMARKS),
+      updateProject: sinon.stub().rejects(new Error('patch boom')),
+      publishProject: sinon.stub().resolves(),
+    };
+    const log = fakeLog();
+
+    const result = await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
+      market: 'US',
+      languageCode: 'en',
+      brandDomain: 'adobe.com',
+      brandNames: ['Adobe'],
+    }, log);
+
+    expect(result.status).to.equal(201);
+    expect(transport.publishProject).to.have.been.calledOnce;
+    expect(log.warn).to.have.been.called;
+  });
+
+  it('derives brandDomain from a supplied siteId when brandDomain is absent (LLMO-6405)', async () => {
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(null);
+    dataAccess.BrandSemrushProject.create.resolves();
+    dataAccess.Site.findById.resolves({ getBaseURL: () => 'https://acme.com/path' });
+    const transport = {
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English', code: 'en' }] }),
+      createProject: sinon.stub().resolves({ id: 'proj-new' }),
+      listBenchmarks: sinon.stub().resolves(FLAGGED_BENCHMARKS),
+      updateProject: sinon.stub().resolves(),
+      publishProject: sinon.stub().resolves(),
+    };
+
+    const result = await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
+      market: 'US', languageCode: 'en', siteId: '00000000-0000-4000-8000-000000000042', brandNames: ['Adobe'],
+    }, fakeLog());
+
+    expect(result.status).to.equal(201);
+    expect(dataAccess.Site.findById).to.have.been.calledOnceWith('00000000-0000-4000-8000-000000000042');
+    // The Semrush project domain is the hostname resolved from the site base_url.
+    expect(transport.createProject.firstCall.args[1].domain).to.equal('acme.com');
+  });
+
+  it('records the market\'s own Site on the mapping row when the caller names one', async () => {
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(null);
+    dataAccess.BrandSemrushProject.create.resolves();
+    dataAccess.Site.findById.resolves({ getBaseURL: () => 'https://kisqali.de' });
+    const transport = {
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-de', name: 'German', code: 'de' }] }),
+      createProject: sinon.stub().resolves({ id: 'proj-de' }),
+      listBenchmarks: sinon.stub().resolves(FLAGGED_BENCHMARKS),
+      updateProject: sinon.stub().resolves(),
+      publishProject: sinon.stub().resolves(),
+    };
+
+    await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
+      market: 'DE', languageCode: 'de', siteId: '00000000-0000-4000-8000-0000000000de', brandNames: ['Kisqali'],
+    }, fakeLog());
+
+    // site_id is the PER-MARKET source of truth for the url a project tracks
+    // (serenity-docs#356). It is the identity this project was just provisioned
+    // against, so recording it here is what stops the market resolving to its
+    // brand's anchor by fallback later.
+    expect(dataAccess.BrandSemrushProject.create).to.have.been.calledOnceWithExactly({
+      brandId: BRAND,
+      semrushProjectId: 'proj-de',
+      geoTargetId: 2276,
+      languageCode: 'de',
+      siteId: '00000000-0000-4000-8000-0000000000de',
+    });
+  });
+
+  it('records no Site when the market was created from a bare brandDomain', async () => {
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(null);
+    dataAccess.BrandSemrushProject.create.resolves();
+    const transport = {
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English', code: 'en' }] }),
+      createProject: sinon.stub().resolves({ id: 'proj-new' }),
+      listBenchmarks: sinon.stub().resolves(FLAGGED_BENCHMARKS),
+      updateProject: sinon.stub().resolves(),
+      publishProject: sinon.stub().resolves(),
+    };
+
+    await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
+      market: 'US', languageCode: 'en', brandDomain: 'adobe.com', brandNames: ['Adobe'],
+    }, fakeLog());
+
+    // Flat mode resolves no Site from a raw domain, and inventing the brand's
+    // anchor here would assert a per-market fact nobody stated.
+    const created = dataAccess.BrandSemrushProject.create.firstCall.args[0];
+    expect(created).to.not.have.property('siteId');
+  });
+
+  it('PATCHes the tracked url with the site path the domain cannot carry', async () => {
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(null);
+    dataAccess.BrandSemrushProject.create.resolves();
+    dataAccess.Site.findById.resolves({ getBaseURL: () => 'https://nba.com/kings' });
+    const transport = {
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English', code: 'en' }] }),
+      createProject: sinon.stub().resolves({ id: 'proj-new' }),
+      listBenchmarks: sinon.stub().resolves(FLAGGED_BENCHMARKS),
+      updateProject: sinon.stub().resolves(),
+      publishProject: sinon.stub().resolves(),
+    };
+
+    const result = await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
+      market: 'US', languageCode: 'en', siteId: '00000000-0000-4000-8000-000000000042', brandNames: ['Kings'],
+    }, fakeLog());
+
+    expect(result.status).to.equal(201);
+    // `domain` is the bare host (a path there is a hard 400 upstream) and the
+    // tracked url carries the path. Both come from the ONE Site read.
+    expect(transport.createProject.firstCall.args[1].domain).to.equal('nba.com');
+    expect(transport.updateProject.firstCall.args[2]).to.deep.equal({
+      type: 'ai', primary_url: 'nba.com/kings',
+    });
+    expect(dataAccess.Site.findById).to.have.been.calledOnce;
+  });
+
+  it('tracks the bare host when the caller supplies a brandDomain', async () => {
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(null);
+    dataAccess.BrandSemrushProject.create.resolves();
+    const transport = {
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English', code: 'en' }] }),
+      createProject: sinon.stub().resolves({ id: 'proj-new' }),
+      listBenchmarks: sinon.stub().resolves(FLAGGED_BENCHMARKS),
+      updateProject: sinon.stub().resolves(),
+      publishProject: sinon.stub().resolves(),
+    };
+
+    const result = await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
+      market: 'US', languageCode: 'en', brandDomain: 'adobe.com', brandNames: ['Adobe'],
+    }, fakeLog());
+
+    expect(result.status).to.equal(201);
+    // A brandDomain is a bare domain by contract, so its identity is just its host —
+    // domain and tracked url agree, which is what an apex brand should look like.
+    expect(transport.updateProject.firstCall.args[2]).to.deep.equal({
+      type: 'ai', primary_url: 'adobe.com',
+    });
+  });
+
+  it('a failed primary_url PATCH keeps the market — it publishes on its apex', async () => {
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(null);
+    dataAccess.BrandSemrushProject.create.resolves();
+    dataAccess.Site.findById.resolves({ getBaseURL: () => 'https://nba.com/kings' });
+    const transport = {
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English', code: 'en' }] }),
+      createProject: sinon.stub().resolves({ id: 'proj-orphan-patch' }),
+      listBenchmarks: sinon.stub().resolves(FLAGGED_BENCHMARKS),
+      updateProject: sinon.stub().rejects(new Error('upstream 503')),
+      publishProject: sinon.stub().resolves(),
+      deleteProject: sinon.stub().resolves(),
+    };
+    const log = fakeLog();
+
+    const result = await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
+      market: 'US', languageCode: 'en', siteId: '00000000-0000-4000-8000-000000000042', brandNames: ['Kings'],
+    }, log);
+
+    // The subpath identity was derived from the Site and attempted...
+    expect(transport.updateProject).to.have.been.calledOnceWith(
+      WORKSPACE,
+      'proj-orphan-patch',
+      { type: 'ai', primary_url: 'nba.com/kings' },
+    );
+    // ...and its failure does not cost the customer the market. It goes live on
+    // `nba.com`, which is where every market sat before this change, and the
+    // data-service reconcile repairs the tracked url in place.
+    expect(result.status).to.equal(201);
+    expect(transport.publishProject).to.have.been.calledOnce;
+    expect(transport.deleteProject).to.not.have.been.called;
+    expect(log.warn).to.have.been.called;
+  });
+
+  it('resolves the supplied siteId\'s domain over a conflicting brandDomain (siteId authoritative)', async () => {
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(null);
+    dataAccess.BrandSemrushProject.create.resolves();
+    dataAccess.Site.findById.resolves({ getBaseURL: () => 'https://nba.com/kings' });
+    const transport = {
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English', code: 'en' }] }),
+      createProject: sinon.stub().resolves({ id: 'proj-new' }),
+      listBenchmarks: sinon.stub().resolves(FLAGGED_BENCHMARKS),
+      updateProject: sinon.stub().resolves(),
+      publishProject: sinon.stub().resolves(),
+    };
+
+    const result = await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
+      market: 'US', languageCode: 'en', brandDomain: 'adobe.com', siteId: '00000000-0000-4000-8000-000000000042', brandNames: ['Adobe'],
+    }, fakeLog());
+
+    expect(result.status).to.equal(201);
+    // The siteId resolves, so it wins: the Site IS read, and its domain — not
+    // the literal 'adobe.com' also supplied — is what the project is created
+    // against.
+    expect(dataAccess.Site.findById).to.have.been.calledOnce;
+    expect(transport.createProject.firstCall.args[1].domain).to.equal('nba.com');
+    expect(transport.updateProject.firstCall.args[2]).to.deep.equal({
+      type: 'ai', primary_url: 'nba.com/kings',
+    });
+  });
+
+  it('logs market-created telemetry with the resolved brandDomain/primaryUrl', async () => {
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(null);
+    dataAccess.BrandSemrushProject.create.resolves();
+    const transport = {
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English', code: 'en' }] }),
+      createProject: sinon.stub().resolves({ id: 'proj-new' }),
+      listBenchmarks: sinon.stub().resolves(FLAGGED_BENCHMARKS),
+      updateProject: sinon.stub().resolves(),
+      publishProject: sinon.stub().resolves(),
+    };
+    const log = fakeLog();
+
+    const result = await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
+      market: 'US', languageCode: 'en', brandDomain: 'adobe.com', brandNames: ['Adobe'],
+    }, log);
+
+    expect(result.status).to.equal(201);
+    expect(log.info).to.have.been.calledWithMatch(/serenity create-market: market created/);
+    // The fields are the entire point of this event — a regression that logs the
+    // wrong resolved identity must fail here, not just a missing log call.
+    expect(log.info.firstCall.args[1]).to.include({
+      brandId: BRAND,
+      brandDomain: 'adobe.com',
+      primaryUrl: 'adobe.com',
+      semrushWorkspaceId: WORKSPACE,
+      semrushProjectId: 'proj-new',
+      siteId: null,
+      generatePrompts: false,
+    });
+  });
+
+  it('400s when a supplied siteId does not resolve to a site domain', async () => {
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(null);
+    dataAccess.Site.findById.resolves(null); // unknown site
+    const transport = {
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English', code: 'en' }] }),
+    };
+
+    const result = await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
+      market: 'US', languageCode: 'en', siteId: '00000000-0000-4000-8000-00000000dead', brandNames: ['Adobe'],
+    }, fakeLog());
+
+    expect(result.status).to.equal(400);
+    expect(result.body.error).to.equal('invalidRequest');
+  });
+
+  it('400s (validation) when neither brandDomain nor siteId is supplied', async () => {
+    const dataAccess = makeDataAccess([]);
+    const result = await handleCreateMarket({}, dataAccess, BRAND, WORKSPACE, {
+      market: 'US', languageCode: 'en', brandNames: ['Adobe'],
+    }, fakeLog());
+    expect(result.status).to.equal(400);
+    expect(result.body.error).to.equal('invalidRequest');
+    expect(result.body.message).to.match(/brandDomain or siteId/);
+  });
+
   // Branch coverage: validateCreateBody has a "name provided but invalid"
   // check that's distinct from "name omitted" (omitted is fine; provided as
   // an empty string is a 400).
@@ -244,7 +615,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     dataAccess.BrandSemrushProject.findBySlice.resolves(null);
     const transport = {
       // English not in catalog → resolveLanguageId returns null
-      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-de', name: 'German' }] }),
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-de', name: 'German', code: 'de' }] }),
     };
 
     const result = await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
@@ -255,14 +626,14 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     expect(result.body.error).to.equal('unknownLanguage');
   });
 
-  // Branch coverage: ICU DisplayNames returns the input verbatim for unknown
-  // tags. The handler guards against that and returns null from
-  // isoToEnglishName, which surfaces as 400 unknownLanguage.
-  it('400s when the language tag is not a real language (ICU returns it unchanged)', async () => {
+  // Branch coverage: a syntactically valid but unresolvable code (not a key in
+  // the catalog's byCode map) surfaces as 400 unknownLanguage — no fallback
+  // heuristic catches it (LLMO-7420: exact code match only).
+  it('400s when the language code is not in the Semrush catalog', async () => {
     const dataAccess = makeDataAccess([]);
     dataAccess.BrandSemrushProject.findBySlice.resolves(null);
     const transport = {
-      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English', code: 'en' }] }),
     };
     clearLanguageCache();
 
@@ -300,7 +671,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     const dataAccess = makeDataAccess([]);
     dataAccess.BrandSemrushProject.findBySlice.resolves(null);
     const transport = {
-      // Items exist but the {name, id} contract is broken — no `name` field.
+      // Items exist but the {code, id} contract is broken — no `code` field.
       listLanguages: sinon.stub().resolves({ items: [{ unexpected: 'shape' }] }),
     };
     const log = fakeLog();
@@ -312,7 +683,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
 
     expect(result.status).to.equal(400);
     expect(log.warn).to.have.been.calledWithMatch(
-      'resolveLanguageId: language catalog returned no usable names — upstream field shape may have changed',
+      'resolveLanguageId: language catalog returned no usable codes — upstream field shape may have changed',
       sinon.match.object,
     );
   });
@@ -357,8 +728,10 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     dataAccess.BrandSemrushProject.findBySlice.resolves(null);
     dataAccess.BrandSemrushProject.create.resolves();
     const transport = {
-      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English', code: 'en' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-orphan-1' }),
+      listBenchmarks: sinon.stub().resolves(FLAGGED_BENCHMARKS),
+      updateProject: sinon.stub().resolves(),
       publishProject: sinon.stub().rejects(new Error('upstream 503')),
       deleteProject: sinon.stub().resolves(),
     };
@@ -372,7 +745,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     // Best-effort cleanup of the upstream project that failed to publish.
     expect(transport.deleteProject).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-orphan-1');
     expect(log.error).to.have.been.calledWithMatch(
-      'handleCreateMarket: publish failed; upstream project cleaned up',
+      'handleCreateMarket: provisioning failed; upstream project cleaned up',
       sinon.match({
         semrushProjectId: 'proj-orphan-1',
         geoTargetId: 2840,
@@ -390,8 +763,10 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     const dataAccess = makeDataAccess([]);
     dataAccess.BrandSemrushProject.findBySlice.resolves(null);
     const transport = {
-      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English', code: 'en' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-orphan-3' }),
+      listBenchmarks: sinon.stub().resolves(FLAGGED_BENCHMARKS),
+      updateProject: sinon.stub().resolves(),
       publishProject: sinon.stub().rejects(new Error('upstream 503')),
       deleteProject: sinon.stub().rejects(new Error('cleanup network glitch')),
     };
@@ -406,7 +781,7 @@ describe('handlers/markets.js — handleCreateMarket', () => {
       sinon.match({ semrushProjectId: 'proj-orphan-3' }),
     );
     expect(log.error).to.have.been.calledWithMatch(
-      'handleCreateMarket: orphaned upstream project after publish failure',
+      'handleCreateMarket: orphaned upstream project after provisioning failure',
       sinon.match({ cleanedUp: false }),
     );
   });
@@ -421,8 +796,10 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     dataAccess.BrandSemrushProject.findBySlice.resolves(null);
     dataAccess.BrandSemrushProject.create.rejects(new Error('duplicate key value violates unique constraint'));
     const transport = {
-      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English', code: 'en' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-orphan-2' }),
+      listBenchmarks: sinon.stub().resolves(FLAGGED_BENCHMARKS),
+      updateProject: sinon.stub().resolves(),
       publishProject: sinon.stub().resolves(),
     };
     const log = fakeLog();
@@ -446,8 +823,10 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     const dataAccess = makeDataAccess([]);
     dataAccess.BrandSemrushProject.findBySlice.resolves(null);
     const transport = {
-      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English', code: 'en' }] }),
       createProject: sinon.stub().resolves({}), // missing id
+      listBenchmarks: sinon.stub().resolves(FLAGGED_BENCHMARKS),
+      updateProject: sinon.stub().resolves(),
       publishProject: sinon.stub(),
     };
 
@@ -460,26 +839,76 @@ describe('handlers/markets.js — handleCreateMarket', () => {
     expect(transport.publishProject).to.have.callCount(0);
   });
 
-  it('defaults the upstream display name to "<brandDisplayName>-<6hex>" when omitted', async () => {
+  it('defaults the upstream display name to "<REGION>-<languageCode>" when omitted', async () => {
     const dataAccess = makeDataAccess([]);
     dataAccess.BrandSemrushProject.findBySlice.resolves(null);
     dataAccess.BrandSemrushProject.create.resolves();
     const transport = {
-      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-de', name: 'German', code: 'de' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-x' }),
+      listBenchmarks: sinon.stub().resolves(FLAGGED_BENCHMARKS),
+      updateProject: sinon.stub().resolves(),
       publishProject: sinon.stub().resolves(),
     };
 
+    // Mixed-case market + language: the default name normalizes both, so the
+    // result matches the migration's `{REGION}-{language}` convention exactly.
     await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
-      market: 'US',
-      languageCode: 'en',
+      market: 'ch',
+      languageCode: 'DE',
       brandDomain: 'adobe.com',
       brandNames: ['Adobe'],
       brandDisplayName: 'Adobe',
     }, fakeLog());
 
     const [, body] = transport.createProject.firstCall.args;
-    expect(body.name).to.match(/^Adobe-[0-9a-f]{6}$/);
+    expect(body.name).to.equal('CH-de');
+  });
+
+  it('honors an explicit name over the market default', async () => {
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(null);
+    dataAccess.BrandSemrushProject.create.resolves();
+    const transport = {
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English', code: 'en' }] }),
+      createProject: sinon.stub().resolves({ id: 'proj-x' }),
+      listBenchmarks: sinon.stub().resolves(FLAGGED_BENCHMARKS),
+      updateProject: sinon.stub().resolves(),
+      publishProject: sinon.stub().resolves(),
+    };
+
+    await handleCreateMarket(transport, dataAccess, BRAND, WORKSPACE, {
+      name: 'US East',
+      market: 'US',
+      languageCode: 'en',
+      brandDomain: 'adobe.com',
+      brandNames: ['Adobe'],
+    }, fakeLog());
+
+    const [, body] = transport.createProject.firstCall.args;
+    expect(body.name).to.equal('US East');
+  });
+});
+
+describe('handlers/markets.js — defaultMarketName', () => {
+  it('formats "<REGION>-<language>", matching the migration convention', () => {
+    expect(defaultMarketName('us', 'en')).to.equal('US-en');
+    expect(defaultMarketName('CH', 'DE')).to.equal('CH-de');
+  });
+
+  it('keeps a regional language subtag so same-language variants stay distinct', () => {
+    expect(defaultMarketName('br', 'pt-br')).to.equal('BR-pt-br');
+  });
+
+  // The name reaches the customer in the Semrush navigation, so a half-formed
+  // `-en` / `US-` must never be produced. Unreachable through either create
+  // handler (both 400 first) — this pins the exported contract for any future
+  // caller that skips that validation.
+  it('throws rather than naming a market from a missing market or language', () => {
+    expect(() => defaultMarketName(null, 'en')).to.throw(ErrorWithStatusCode)
+      .with.property('status', 400);
+    expect(() => defaultMarketName('us', '')).to.throw(ErrorWithStatusCode)
+      .with.property('status', 400);
   });
 });
 
@@ -499,8 +928,10 @@ describe('handlers/markets.js — language-catalog cache (Important #8)', () => 
     dataAccess.BrandSemrushProject.findBySlice.resolves(null);
     dataAccess.BrandSemrushProject.create.resolves();
     const transport = {
-      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English', code: 'en' }] }),
       createProject: sinon.stub().resolves({ id: 'proj-1' }),
+      updateProject: sinon.stub().resolves(),
+      listBenchmarks: sinon.stub().resolves(FLAGGED_BENCHMARKS),
       publishProject: sinon.stub().resolves(),
     };
 
@@ -528,8 +959,10 @@ describe('handlers/markets.js — language-catalog cache (Important #8)', () => 
       dataAccess.BrandSemrushProject.findBySlice.resolves(null);
       dataAccess.BrandSemrushProject.create.resolves();
       const transport = {
-        listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English' }] }),
+        listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English', code: 'en' }] }),
         createProject: sinon.stub().resolves({ id: 'proj-1' }),
+        updateProject: sinon.stub().resolves(),
+        listBenchmarks: sinon.stub().resolves(FLAGGED_BENCHMARKS),
         publishProject: sinon.stub().resolves(),
       };
 
@@ -622,6 +1055,23 @@ describe('handlers/markets.js — handleDeleteMarket', () => {
     expect(result.status).to.equal(204);
     expect(transport.deleteProject).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en');
     expect(remove).to.have.been.calledOnce;
+  });
+
+  it('returns the deleted market siteId (LLMO-6405 R12) and null for a missing slice', async () => {
+    const row = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en', siteId: 'site-77',
+    });
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(row);
+    const transport = { deleteProject: sinon.stub().resolves() };
+
+    const linked = await handleDeleteMarket(transport, dataAccess, BRAND, WORKSPACE, 2840, 'en', fakeLog());
+    expect(linked).to.deep.equal({ status: 204, deletedSiteId: 'site-77' });
+
+    // Missing slice → idempotent 204 with no site to clean up.
+    dataAccess.BrandSemrushProject.findBySlice.resolves(null);
+    const missing = await handleDeleteMarket(transport, dataAccess, BRAND, WORKSPACE, 2840, 'en', fakeLog());
+    expect(missing).to.deep.equal({ status: 204, deletedSiteId: null });
   });
 
   it('treats upstream 404 as already-gone success', async () => {
@@ -737,7 +1187,19 @@ describe('handlers/markets.js — handleGetMarket', () => {
       semrushProjectId: 'proj-us-en',
       createdAt: '2026-05-28T10:00:00Z',
       updatedAt: '2026-05-28T10:00:00Z',
+      siteId: null,
     });
+  });
+
+  it('surfaces the market siteId when the mapping row is linked (LLMO-6405)', async () => {
+    const row = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en', siteId: 'site-77',
+    });
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(row);
+
+    const result = await handleGetMarket(dataAccess, BRAND, 2840, 'en');
+    expect(result.siteId).to.equal('site-77');
   });
 });
 
@@ -795,7 +1257,7 @@ describe('handlers/markets.js — handleListTags / handleListModels', () => {
       geoTargetId: 2840, languageCode: 'en',
     }, fakeLog());
 
-    expect(result).to.deep.equal({ items: [] });
+    expect(result).to.deep.equal({ items: [], complete: true });
     expect(transport.listPromptsByTags).to.have.callCount(2);
   });
 
@@ -849,12 +1311,12 @@ describe('handlers/markets.js — handleListTags / handleListModels', () => {
     expect(transport.listPromptsByTags).to.have.callCount(1);
   });
 
-  // Regression guard for the truncation warn log: when every one of the 50
+  // Regression guard for fail-closed reads: when every one of the 50
   // pages we read comes back full (200 items), there's at least one more page
   // upstream we never saw and the tag set is incomplete. We surface this to
   // operators via a `warn` log so the symptom (missing tag in the UI) is
   // diagnosable from log search.
-  it('listTags emits a warn log when the pagination ceiling is hit with full pages', async () => {
+  it('listTags returns a partial result when the pagination ceiling is hit with full pages', async () => {
     const project = makeProject({
       semrushProjectId: 'proj-big', geoTargetId: 2840, languageCode: 'en',
     });
@@ -870,13 +1332,14 @@ describe('handlers/markets.js — handleListTags / handleListModels', () => {
     };
     const log = fakeLog();
 
-    await handleListTags(transport, dataAccess, BRAND, WORKSPACE, {
+    const result = await handleListTags(transport, dataAccess, BRAND, WORKSPACE, {
       geoTargetId: 2840, languageCode: 'en',
     }, log);
 
+    expect(result.complete).to.equal(false);
     expect(transport.listPromptsByTags).to.have.callCount(50);
     expect(log.warn).to.have.been.calledWithMatch(
-      'handleListTags: tag pagination ceiling reached, tag set is truncated',
+      'handleListTags: tag pagination ceiling reached',
       sinon.match({
         projectId: 'proj-big',
         pagesWalked: 50,
@@ -885,100 +1348,357 @@ describe('handlers/markets.js — handleListTags / handleListModels', () => {
     );
   });
 
-  it('listModels (catalog mode) calls listGlobalAiModels and returns items', async () => {
+  // Nested-tree read: when the request carries a `parentId` query param, the
+  // handler drills the standalone /aio/tags tree via listProjectTags(draft:true)
+  // instead of the prompt-derived aggregation, surfacing childrenCount/path.
+  it('listTags (parentId=\'\') returns roots with childrenCount from the standalone tree', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-tree', geoTargetId: 2840, languageCode: 'en',
+    });
     const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(project);
     const transport = {
-      listGlobalAiModels: sinon.stub().resolves({
-        items: [
-          {
-            id: 'cat-gpt-4o', key: 'chatgpt', name: 'ChatGPT', icon: null,
-          },
-          {
-            id: 'cat-claude', key: 'claude', name: 'Claude', icon: null,
-          },
-        ],
+      listPromptsByTags: sinon.stub(),
+      listProjectTags: sinon.stub().resolves({
+        page: 1,
+        total: 1,
+        items: [{
+          id: 'root-1', name: 'category:Footwear', parent_id: null, children_count: 2, path: null,
+        }],
       }),
     };
+
+    const result = await handleListTags(transport, dataAccess, BRAND, WORKSPACE, {
+      geoTargetId: 2840, languageCode: 'en', parentId: '',
+    }, fakeLog());
+
+    expect(result.items).to.deep.equal([{
+      id: 'root-1',
+      name: 'category:Footwear',
+      parentId: null,
+      childrenCount: 2,
+      promptsCount: 0,
+      path: null,
+      compatibility: { state: 'readOnly', reason: 'separatorInName' },
+    }]);
+    // Tree read, not the prompt-derived path.
+    expect(transport.listPromptsByTags).to.not.have.been.called;
+    expect(transport.listProjectTags).to.have.been.calledOnceWithExactly(
+      WORKSPACE,
+      'proj-tree',
+      {
+        parentId: '', page: 1, limit: 100, draft: true,
+      },
+    );
+  });
+
+  it('listTags (parentId=<id>) returns that parent\'s children with a path breadcrumb', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-tree', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(project);
+    const transport = {
+      listPromptsByTags: sinon.stub(),
+      listProjectTags: sinon.stub().resolves({
+        page: 1,
+        total: 1,
+        items: [{
+          id: 'child-1',
+          name: 'category:Sneakers',
+          parent_id: 'root-1',
+          children_count: 0,
+          path: [{ id: 'root-1', name: 'category:Footwear' }],
+        }],
+      }),
+    };
+
+    const result = await handleListTags(transport, dataAccess, BRAND, WORKSPACE, {
+      geoTargetId: 2840, languageCode: 'en', parentId: 'root-1',
+    }, fakeLog());
+
+    expect(result.items).to.deep.equal([{
+      id: 'child-1',
+      name: 'category:Sneakers',
+      parentId: 'root-1',
+      childrenCount: 0,
+      promptsCount: 0,
+      path: [{ id: 'root-1', name: 'category:Footwear' }],
+      compatibility: { state: 'readOnly', reason: 'separatorInName' },
+    }]);
+    expect(transport.listProjectTags.firstCall.args[2]).to.include({ parentId: 'root-1', draft: true });
+  });
+
+  it('listTags (TREE read) maps a non-zero upstream prompts_count through as promptsCount', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-tree', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(project);
+    const transport = {
+      listPromptsByTags: sinon.stub(),
+      listProjectTags: sinon.stub().resolves({
+        page: 1,
+        total: 1,
+        items: [{
+          id: 'child-1',
+          name: 'category:Sneakers',
+          parent_id: 'root-1',
+          children_count: 0,
+          prompts_count: 7,
+          path: [{ id: 'root-1', name: 'category:Footwear' }],
+        }],
+      }),
+    };
+
+    const result = await handleListTags(transport, dataAccess, BRAND, WORKSPACE, {
+      geoTargetId: 2840, languageCode: 'en', parentId: 'root-1',
+    }, fakeLog());
+
+    expect(result.items).to.deep.equal([{
+      id: 'child-1',
+      name: 'category:Sneakers',
+      parentId: 'root-1',
+      childrenCount: 0,
+      promptsCount: 7,
+      path: [{ id: 'root-1', name: 'category:Footwear' }],
+      compatibility: { state: 'readOnly', reason: 'separatorInName' },
+    }]);
+  });
+
+  it('listTags 400s a parentId query over the length ceiling (MysticatBot review, PR 2737)', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-tree', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(project);
+    const transport = { listPromptsByTags: sinon.stub(), listProjectTags: sinon.stub() };
+
+    await expect(handleListTags(transport, dataAccess, BRAND, WORKSPACE, {
+      geoTargetId: 2840, languageCode: 'en', parentId: 'x'.repeat(201),
+    }, fakeLog())).to.be.rejected.then((err) => expect(err.status).to.equal(400));
+    expect(transport.listProjectTags).to.not.have.been.called;
+  });
+
+  it('listTags 400s a parentId query containing a control character (MysticatBot review, PR 2737)', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-tree', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(project);
+    const transport = { listPromptsByTags: sinon.stub(), listProjectTags: sinon.stub() };
+
+    await expect(handleListTags(transport, dataAccess, BRAND, WORKSPACE, {
+      geoTargetId: 2840, languageCode: 'en', parentId: `root-${String.fromCharCode(7)}`,
+    }, fakeLog())).to.be.rejected.then((err) => expect(err.status).to.equal(400));
+    expect(transport.listProjectTags).to.not.have.been.called;
+  });
+
+  it('listProjectTagTree fails closed when pagination repeats without progress', async () => {
+    const fullPage = Array.from({ length: 100 }, (_, i) => ({
+      id: `tag-${i}`, name: `Tag ${i}`, parent_id: null, children_count: 0,
+    }));
+    const listProjectTags = sinon.stub().resolves({ page: 1, total: 5000, items: fullPage });
+    const log = fakeLog();
+
+    await expect(listProjectTagTree(
+      { listProjectTags },
+      WORKSPACE,
+      'proj-tree',
+      '',
+      log,
+    )).to.be.rejected.then((error) => {
+      expect(error.status).to.equal(503);
+      expect(error.code).to.equal('tagTreeReadIncomplete');
+    });
+
+    expect(listProjectTags.callCount).to.equal(2);
+    expect(log.warn).to.have.been.calledOnceWith(
+      'listProjectTagTree: incomplete tag level',
+      sinon.match({
+        semrushWorkspaceId: WORKSPACE,
+        projectId: 'proj-tree',
+        parentId: '',
+        page: 2,
+        reason: 'unexpectedPage',
+      }),
+    );
+  });
+
+  it('listProjectTagTree invokes onBeforePage before every page of the accumulate loop, '
+    + 'stopping further pages once it throws', async () => {
+    const fullPage = (page) => Array.from({ length: 100 }, (_, i) => ({
+      id: `tag-p${page}-${i}`, name: `Tag ${page}-${i}`, parent_id: null, children_count: 0,
+    }));
+    const listProjectTags = sinon.stub().callsFake((_workspace, _project, options) => (
+      Promise.resolve({ page: options.page, total: 500, items: fullPage(options.page) })
+    ));
+    let calls = 0;
+    const onBeforePage = sinon.stub().callsFake(() => {
+      calls += 1;
+      if (calls === 3) {
+        throw new Error('deadline exceeded');
+      }
+    });
+
+    await expect(listProjectTagTree(
+      { listProjectTags },
+      WORKSPACE,
+      'proj-tree',
+      '',
+      fakeLog(),
+      undefined,
+      { onBeforePage },
+    )).to.be.rejectedWith('deadline exceeded');
+
+    // onBeforePage fired for pages 1 and 2 (both allowed to proceed) and for the
+    // would-be page 3, where it threw — so only 2 actual upstream page requests
+    // went out, never a 3rd.
+    expect(onBeforePage.callCount).to.equal(3);
+    expect(listProjectTags.callCount).to.equal(2);
+  });
+
+  it('listProjectTagTree invokes onBeforePage once before the explicit single-page request', async () => {
+    const listProjectTags = sinon.stub().resolves({
+      page: 1,
+      total: 1,
+      items: [{
+        id: 'tag-1', name: 'Tag 1', parent_id: null, children_count: 0,
+      }],
+    });
+    const onBeforePage = sinon.stub();
+
+    const result = await listProjectTagTree(
+      { listProjectTags },
+      WORKSPACE,
+      'proj-tree',
+      '',
+      fakeLog(),
+      undefined,
+      {
+        explicit: true, page: 1, limit: 10, onBeforePage,
+      },
+    );
+
+    expect(result.items).to.have.length(1);
+    expect(onBeforePage).to.have.been.calledOnce;
+    expect(listProjectTags).to.have.been.calledOnce;
+  });
+
+  it('listProjectTagTree reports a caller-supplied page budget as limit exhaustion', async () => {
+    const fullPage = (page) => Array.from({ length: 100 }, (_, i) => ({
+      id: `tag-p${page}-${i}`, name: `Tag ${page}-${i}`, parent_id: null, children_count: 0,
+    }));
+    const listProjectTags = sinon.stub().callsFake((_workspace, _project, options) => (
+      Promise.resolve({ page: options.page, total: 300, items: fullPage(options.page) })
+    ));
+
+    await expect(listProjectTagTree(
+      { listProjectTags },
+      WORKSPACE,
+      'proj-tree',
+      '',
+      fakeLog(),
+      undefined,
+      { maxPages: 2 },
+    )).to.be.rejected.then((error) => {
+      expect(error.status).to.equal(503);
+      expect(error.code).to.equal('tagTreeLimitExceeded');
+      expect(error.details).to.deep.equal({ budget: 'pages', maximum: 2 });
+    });
+
+    expect(listProjectTags.callCount).to.equal(2);
+  });
+
+  it('listModels (no market) unions the models enabled across all the brand\'s projects', async () => {
+    const dataAccess = makeDataAccess([
+      makeProject({ semrushProjectId: 'proj-a', geoTargetId: 2840, languageCode: 'en' }),
+      makeProject({ semrushProjectId: 'proj-b', geoTargetId: 2250, languageCode: 'fr' }),
+    ]);
+    const listAiModels = sinon.stub();
+    listAiModels.withArgs(WORKSPACE, 'proj-a').resolves({
+      items: [{
+        model: {
+          id: 'm-1', key: 'chatgpt', name: 'ChatGPT', icon: null,
+        },
+      }],
+    });
+    listAiModels.withArgs(WORKSPACE, 'proj-b').resolves({
+      items: [{
+        model: {
+          id: 'm-2', key: 'claude', name: 'Claude', icon: null,
+        },
+      }],
+    });
+    const transport = { listAiModels };
     const result = await handleListModels(transport, dataAccess, BRAND, WORKSPACE, {});
     expect(result.items).to.have.lengthOf(2);
-    expect(result.items[0].id).to.equal('cat-gpt-4o');
-    expect(transport.listGlobalAiModels).to.have.callCount(1);
+    expect(result.items.map((m) => m.key)).to.have.members(['chatgpt', 'claude']);
+    expect(dataAccess.BrandSemrushProject.allByBrandId).to.have.been.calledOnceWith(BRAND);
   });
 
-  it('listModels (catalog mode) paginates when page 1 is full (100 items)', async () => {
-    const dataAccess = makeDataAccess([]);
-    const page1 = Array.from({ length: 100 }, (_, i) => ({
-      id: `cat-${i}`, key: `model-${i}`, name: null, icon: null,
-    }));
-    const stub = sinon.stub();
-    stub.onFirstCall().resolves({ items: page1 });
-    stub.onSecondCall().resolves({ items: [] });
-    const transport = { listGlobalAiModels: stub };
-    const result = await handleListModels(transport, dataAccess, BRAND, WORKSPACE, {});
-    expect(result.items).to.have.lengthOf(100);
-    expect(stub).to.have.callCount(2);
-  });
-
-  it('listModels (catalog mode) stops at MAX_AI_MODELS_PAGES (5) when upstream always returns full pages', async () => {
-    const dataAccess = makeDataAccess([]);
-    const fullPage = Array.from({ length: 100 }, (_, i) => ({
-      id: `cat-${i}`, key: `model-${i}`, name: null, icon: null,
-    }));
-    // Always return a full page — the ceiling guard must terminate the loop.
-    const stub = sinon.stub().resolves({ items: fullPage });
-    const transport = { listGlobalAiModels: stub };
-    const result = await handleListModels(transport, dataAccess, BRAND, WORKSPACE, {});
-    expect(stub).to.have.callCount(5);
-    expect(result.items).to.have.lengthOf(500);
-  });
-
-  it('listModels (catalog mode) also normalises wrapped assignment items from workspace endpoint', async () => {
-    const dataAccess = makeDataAccess([]);
-    const transport = {
-      listGlobalAiModels: sinon.stub().resolves({
-        items: [
-          {
-            id: 'assign-1',
-            model: {
-              id: 'cat-gpt', key: 'chatgpt', name: 'ChatGPT', icon: null,
-            },
-          },
-        ],
-      }),
+  it('listModels (no market) dedups a model enabled on more than one project', async () => {
+    const dataAccess = makeDataAccess([
+      makeProject({ semrushProjectId: 'proj-a', geoTargetId: 2840, languageCode: 'en' }),
+      makeProject({ semrushProjectId: 'proj-b', geoTargetId: 2250, languageCode: 'fr' }),
+    ]);
+    const shared = {
+      model: {
+        id: 'm-1', key: 'chatgpt', name: 'ChatGPT', icon: null,
+      },
     };
+    const listAiModels = sinon.stub();
+    listAiModels.withArgs(WORKSPACE, 'proj-a').resolves({ items: [shared] });
+    listAiModels.withArgs(WORKSPACE, 'proj-b').resolves({
+      items: [shared, {
+        model: {
+          id: 'm-2', key: 'claude', name: 'Claude', icon: null,
+        },
+      }],
+    });
+    const transport = { listAiModels };
     const result = await handleListModels(transport, dataAccess, BRAND, WORKSPACE, {});
-    expect(result.items).to.have.lengthOf(1);
-    expect(result.items[0].id).to.equal('cat-gpt');
+    expect(result.items).to.have.lengthOf(2);
+    expect(result.items.map((m) => m.key)).to.have.members(['chatgpt', 'claude']);
   });
 
-  it('listModels (catalog mode) returns empty when workspace endpoint responds 404/405', async () => {
+  it('listModels (no market) returns empty (never the global catalog) when the brand has no projects', async () => {
     const dataAccess = makeDataAccess([]);
-    const transport404 = {
-      listGlobalAiModels: sinon.stub().rejects(new SerenityTransportError(404, 'not found')),
-    };
-    const result404 = await handleListModels(transport404, dataAccess, BRAND, WORKSPACE, {});
-    expect(result404).to.deep.equal({ items: [] });
-
-    const transport405 = {
-      listGlobalAiModels: sinon.stub().rejects(new SerenityTransportError(405, 'not allowed')),
-    };
-    const result405 = await handleListModels(transport405, dataAccess, BRAND, WORKSPACE, {});
-    expect(result405).to.deep.equal({ items: [] });
+    const transport = { listAiModels: sinon.stub() };
+    const result = await handleListModels(transport, dataAccess, BRAND, WORKSPACE, {});
+    expect(result).to.deep.equal({ items: [] });
+    expect(transport.listAiModels).to.have.callCount(0);
   });
 
-  it('listModels (catalog mode) propagates auth errors (401/403) from workspace endpoint', async () => {
-    const dataAccess = makeDataAccess([]);
+  it('listModels (no market) propagates auth errors (401/403) from a per-project fetch', async () => {
+    const dataAccess = makeDataAccess([
+      makeProject({ semrushProjectId: 'proj-a', geoTargetId: 2840, languageCode: 'en' }),
+    ]);
     const transport401 = {
-      listGlobalAiModels: sinon.stub().rejects(new SerenityTransportError(401, 'unauthorized')),
+      listAiModels: sinon.stub().rejects(new SerenityTransportError(401, 'unauthorized')),
     };
     await expect(handleListModels(transport401, dataAccess, BRAND, WORKSPACE, {}))
       .to.be.rejectedWith(SerenityTransportError);
+  });
 
-    const transport403 = {
-      listGlobalAiModels: sinon.stub().rejects(new SerenityTransportError(403, 'forbidden')),
-    };
-    await expect(handleListModels(transport403, dataAccess, BRAND, WORKSPACE, {}))
-      .to.be.rejectedWith(SerenityTransportError);
+  it('listModels (no market) tolerates a 404 from a stale project and unions the rest', async () => {
+    const dataAccess = makeDataAccess([
+      makeProject({ semrushProjectId: 'proj-a', geoTargetId: 2840, languageCode: 'en' }),
+      makeProject({ semrushProjectId: 'proj-stale', geoTargetId: 2250, languageCode: 'fr' }),
+    ]);
+    const listAiModels = sinon.stub();
+    listAiModels.withArgs(WORKSPACE, 'proj-a').resolves({
+      items: [{
+        model: {
+          id: 'm-1', key: 'chatgpt', name: 'ChatGPT', icon: null,
+        },
+      }],
+    });
+    listAiModels.withArgs(WORKSPACE, 'proj-stale')
+      .rejects(new SerenityTransportError(404, 'not found'));
+    const transport = { listAiModels };
+    const result = await handleListModels(transport, dataAccess, BRAND, WORKSPACE, {});
+    expect(result.items.map((m) => m.key)).to.deep.equal(['chatgpt']);
   });
 
   it('listModels 400s when only one of geoTargetId/languageCode is provided', async () => {
@@ -1117,6 +1837,9 @@ describe('handlers/markets.js — handleUpdateModels', () => {
       listAiModels: sinon.stub().resolves({ items: currentItems }),
       addAiModel: sinon.stub().resolves(addResult),
       deleteAiModelsByIds: sinon.stub().resolves(deleteResult),
+      // The model sync publishes after a real change so the new set goes live.
+      updateProject: sinon.stub().resolves(),
+      publishProject: sinon.stub().resolves(),
     };
   }
 
@@ -1192,6 +1915,37 @@ describe('handlers/markets.js — handleUpdateModels', () => {
     expect(transport.deleteAiModelsByIds).not.to.have.been.called;
     expect(result.items).to.have.length(1);
     expect(result.items[0].id).to.equal('cat-gpt');
+  });
+
+  // LLMO-5492 — deferred publish: with { publish: false } the model-set diff is
+  // still applied upstream, but publishProject is NOT called, so finalize can
+  // batch a single populate-then-publish across prompts + models.
+  it('applies the model diff but does NOT publish when { publish: false }', async () => {
+    const project = makeProject({ semrushProjectId: 'proj-1', geoTargetId: 2840, languageCode: 'en' });
+    const da = makeDataAccess([]);
+    da.BrandSemrushProject.findBySlice.resolves(project);
+    const transport = makeTransport({ currentItems: [] });
+    transport.listAiModels.onSecondCall().resolves({
+      items: [{
+        id: 'assign-1',
+        model: {
+          id: 'cat-gpt', key: 'chatgpt', name: 'ChatGPT', icon: null,
+        },
+      }],
+    });
+
+    await handleUpdateModels(
+      transport,
+      da,
+      BRAND,
+      WORKSPACE,
+      { geoTargetId: 2840, languageCode: 'en', modelIds: ['cat-gpt'] },
+      fakeLog(),
+      { publish: false },
+    );
+
+    expect(transport.addAiModel).to.have.been.calledOnceWith(WORKSPACE, 'proj-1', 'cat-gpt');
+    expect(transport.publishProject).to.not.have.been.called;
   });
 
   it('removes models absent from the desired set', async () => {
@@ -1287,8 +2041,109 @@ describe('handlers/markets.js — handleUpdateModels', () => {
     expect(transport.addAiModel).not.to.have.been.called;
     // Short-circuit: only one upstream list call (the initial fetch; no second refresh)
     expect(transport.listAiModels).to.have.callCount(1);
+    // No change → no publish (publishing is only needed when the set actually moved).
+    expect(transport.publishProject).not.to.have.been.called;
     expect(result.items).to.have.length(1);
     expect(result.items[0].id).to.equal('cat-gpt');
+  });
+
+  it('publishes the project after a model-set change so it goes live', async () => {
+    const project = makeProject({ semrushProjectId: 'proj-1', geoTargetId: 2840, languageCode: 'en' });
+    const da = makeDataAccess([]);
+    da.BrandSemrushProject.findBySlice.resolves(project);
+    const transport = makeTransport({ currentItems: [] });
+    transport.listAiModels.onSecondCall().resolves({
+      items: [{
+        id: 'assign-1',
+        model: {
+          id: 'cat-gpt', key: 'chatgpt', name: 'ChatGPT', icon: null,
+        },
+      }],
+    });
+
+    await handleUpdateModels(
+      transport,
+      da,
+      BRAND,
+      WORKSPACE,
+      { geoTargetId: 2840, languageCode: 'en', modelIds: ['cat-gpt'] },
+      fakeLog(),
+    );
+
+    expect(transport.publishProject).to.have.been.calledOnceWith(WORKSPACE, 'proj-1');
+  });
+
+  // Guard for issue #2687 item 1: the standalone PUT /serenity/models path must
+  // ALWAYS republish a real model-set change to the live layer — the only
+  // `publish: false` caller is brand-create (which batches its own publish). The
+  // handler signature exposes no publish-control option, so a caller cannot turn
+  // republish off. This test pins that contract: a `publish`/`publishMode` field
+  // smuggled into the request body is IGNORED and the project still publishes.
+  it('always republishes on a model-set change — body publish flags cannot suppress it', async () => {
+    const project = makeProject({ semrushProjectId: 'proj-1', geoTargetId: 2840, languageCode: 'en' });
+    const da = makeDataAccess([]);
+    da.BrandSemrushProject.findBySlice.resolves(project);
+    const transport = makeTransport({ currentItems: [] });
+    transport.listAiModels.onSecondCall().resolves({
+      items: [{
+        id: 'assign-1',
+        model: {
+          id: 'cat-gpt', key: 'chatgpt', name: 'ChatGPT', icon: null,
+        },
+      }],
+    });
+
+    await handleUpdateModels(
+      transport,
+      da,
+      BRAND,
+      WORKSPACE,
+      {
+        geoTargetId: 2840,
+        languageCode: 'en',
+        modelIds: ['cat-gpt'],
+        // Hostile extras: neither must reach syncModelsForProject's publish gate.
+        publish: false,
+        publishMode: 'skip',
+      },
+      fakeLog(),
+    );
+
+    expect(transport.publishProject).to.have.been.calledOnceWith(WORKSPACE, 'proj-1');
+  });
+
+  // aenascut review, PR #2889: syncModelsForProject's publish 405→409 classification (shared by
+  // handleUpdateModels and handleUpdateModelsSubworkspace) had no direct test — prompts.test.js
+  // covers the analogous create/publish paths, this is the model-update path's equivalent.
+  it('throws a 409 quotaExceeded ErrorWithStatusCode when the model-set-change publish 405s as a disguised quota rejection', async () => {
+    const project = makeProject({ semrushProjectId: 'proj-1', geoTargetId: 2840, languageCode: 'en' });
+    const da = makeDataAccess([]);
+    da.BrandSemrushProject.findBySlice.resolves(project);
+    const transport = makeTransport({ currentItems: [] });
+    transport.listAiModels.onSecondCall().resolves({
+      items: [{
+        id: 'assign-1',
+        model: {
+          id: 'cat-gpt', key: 'chatgpt', name: 'ChatGPT', icon: null,
+        },
+      }],
+    });
+    transport.publishProject = sinon.stub().rejects(
+      new SerenityTransportError(405, 'publish failed: 405', '<html>405 Not Allowed</html>'),
+    );
+
+    const p = handleUpdateModels(
+      transport,
+      da,
+      BRAND,
+      WORKSPACE,
+      { geoTargetId: 2840, languageCode: 'en', modelIds: ['cat-gpt'] },
+      fakeLog(),
+    );
+    await expect(p).to.be.rejectedWith(ErrorWithStatusCode);
+    const e = await p.catch((x) => x);
+    expect(e.status).to.equal(409);
+    expect(e.code).to.equal('quotaExceeded');
   });
 
   it('propagates transport errors from deleteAiModelsByIds', async () => {
@@ -1458,5 +2313,213 @@ describe('handlers/markets.js — handleUpdateModels', () => {
     expect(transport.deleteAiModelsByIds).not.to.have.been.called;
     expect(result.items).to.have.length(1);
     expect(result.items[0].id).to.equal('cat-a');
+  });
+});
+
+describe('resolveLanguageId', () => {
+  beforeEach(() => {
+    clearLanguageCache();
+  });
+
+  // Regression test for the LLMO-7309 root cause: the old English-name-matching
+  // approach collapsed zh-Hans/zh-Hant to the same "Chinese" name and could not
+  // disambiguate them. Direct code resolution must keep them distinct.
+  it('resolves zh-Hans, zh-Hant, and fil — the LLMO-7309 motivating regression scenarios', async () => {
+    const transport = {
+      listLanguages: sinon.stub().resolves({
+        items: [
+          { id: 'lang-zh-s', name: 'Chinese Simplified', code: 'zh-Hans' },
+          { id: 'lang-zh-t', name: 'Chinese Traditional', code: 'zh-Hant' },
+          { id: 'lang-fil', name: 'Filipino', code: 'fil' },
+        ],
+      }),
+    };
+    expect(await resolveLanguageId(transport, 'zh-hans')).to.equal('lang-zh-s');
+    expect(await resolveLanguageId(transport, 'zh-hant')).to.equal('lang-zh-t');
+    expect(await resolveLanguageId(transport, 'fil')).to.equal('lang-fil');
+    // The bare primary subtag must NOT resolve when only script-qualified entries exist —
+    // proves there is no `.split('-')[0]`-style fallback lurking anywhere in this path.
+    expect(await resolveLanguageId(transport, 'zh')).to.equal(null);
+  });
+
+  it('returns null for a code not present in the catalog (no name-matching fallback)', async () => {
+    const transport = {
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'lang-en', name: 'English', code: 'en' }] }),
+    };
+    expect(await resolveLanguageId(transport, 'xx')).to.equal(null);
+  });
+
+  it('returns null for a null/empty languageCode without ever calling the transport (early-return guard)', async () => {
+    const transport = { listLanguages: sinon.stub().resolves({ items: [] }) };
+    expect(await resolveLanguageId(transport, null)).to.equal(null);
+    expect(await resolveLanguageId(transport, '')).to.equal(null);
+    expect(transport.listLanguages).to.not.have.been.called;
+  });
+});
+
+describe('listLanguageCatalog', () => {
+  it('returns the Semrush language catalog, name-sorted, dropping nameless/codeless rows', async () => {
+    const transport = {
+      listLanguages: sinon.stub().resolves({
+        items: [
+          { id: 'l-fr', name: 'French', code: 'fr' },
+          { id: 'l-en', name: 'English', code: 'en' },
+          { id: 'l-bad' }, // no name/code → dropped
+          { id: 'l-nocode', name: 'NoCode' }, // no code → dropped
+        ],
+      }),
+    };
+    const result = await listLanguageCatalog(transport);
+    expect(result.items).to.deep.equal([
+      { id: 'l-en', name: 'English', code: 'en' },
+      { id: 'l-fr', name: 'French', code: 'fr' },
+    ]);
+  });
+
+  it('warns when entries are dropped for missing code', async () => {
+    const transport = {
+      listLanguages: sinon.stub().resolves({
+        items: [
+          { id: 'l-en', name: 'English', code: 'en' },
+          { id: 'l-nocode', name: 'NoCode' }, // no code → dropped, should warn
+        ],
+      }),
+    };
+    const log = fakeLog();
+    await listLanguageCatalog(transport, log);
+    expect(log.warn).to.have.been.calledWithMatch(
+      'listLanguageCatalog: dropped entries missing code or id — upstream field shape may have changed',
+      { droppedCount: 1 },
+    );
+  });
+
+  it('does not warn when no entries are dropped', async () => {
+    const transport = {
+      listLanguages: sinon.stub().resolves({ items: [{ id: 'l-en', name: 'English', code: 'en' }] }),
+    };
+    const log = fakeLog();
+    await listLanguageCatalog(transport, log);
+    expect(log.warn).to.not.have.been.called;
+  });
+
+  it('tolerates a 404/405 catalog by returning an empty list', async () => {
+    const transport = {
+      listLanguages: sinon.stub().rejects(new SerenityTransportError(404, 'gone')),
+    };
+    expect(await listLanguageCatalog(transport)).to.deep.equal({ items: [] });
+  });
+
+  it('propagates a non-404/405 catalog error', async () => {
+    const transport = {
+      listLanguages: sinon.stub().rejects(new SerenityTransportError(500, 'boom')),
+    };
+    await expect(listLanguageCatalog(transport)).to.be.rejectedWith('boom');
+  });
+});
+
+describe('handlers/markets.js — defensive branch coverage', () => {
+  beforeEach(() => {
+    clearLanguageCache();
+    clearTagCache();
+  });
+
+  // Line 615: `...(logCtx || {})` — the `|| {}` else branch fires when logCtx
+  // is undefined. listTagsForProject reaches this only when the truncation
+  // ceiling is hit AND logCtx was not supplied.
+  it('listTagsForProject returns partial data when logCtx is undefined and the read is incomplete', async () => {
+    // Re-import so we can call listTagsForProject directly with logCtx omitted.
+    const { listTagsForProject: ltp, clearTagCache: ctc } = await import(
+      '../../../../src/support/serenity/handlers/markets.js'
+    );
+    ctc();
+    // Return a full page (200 items) on every call so the loop hits TAG_PAGE_LIMIT
+    // (50) without short-circuiting. This is the only path that reaches the
+    // `...(logCtx || {})` spread in the truncation warn.
+    const fullPage = Array.from({ length: 200 }, (_, i) => ({
+      id: `p${i}`, name: `q${i}`, tags: [`tag-${i}`],
+    }));
+    const transport = {
+      listPromptsByTags: sinon.stub().resolves({ items: fullPage }),
+    };
+    const log = fakeLog();
+    // Call without logCtx (fourth arg omitted → undefined).
+    const result = await ltp(
+      transport,
+      WORKSPACE,
+      'proj-test',
+      undefined,
+      log,
+    );
+    expect(result.complete).to.equal(false);
+    // The warn fired; no logCtx keys in the spread means the warn object
+    // only has the five built-in keys (semrushWorkspaceId, projectId, …).
+    expect(log.warn).to.have.been.calledOnce;
+  });
+
+  // listLanguageCatalog drops any entry with a blank or missing `id` entirely —
+  // it never maps id to null and keeps the row, since such an entry could never
+  // resolve at createProject time (see the `resolvable` filter in the handler).
+  it('listLanguageCatalog drops entries with a missing or blank id — they can never resolve', async () => {
+    const transport = {
+      listLanguages: sinon.stub().resolves({
+        items: [
+          { name: 'English', code: 'en' }, // no id at all → dropped
+          { id: '', name: 'French', code: 'fr' }, // blank id — hasText('') is false → dropped
+          { id: 'l-de', name: 'German', code: 'de' }, // normal
+        ],
+      }),
+    };
+    const result = await listLanguageCatalog(transport);
+    expect(result.items).to.deep.equal([{ id: 'l-de', name: 'German', code: 'de' }]);
+  });
+
+  it('warns when entries are dropped for missing id (not just missing code)', async () => {
+    const transport = {
+      listLanguages: sinon.stub().resolves({
+        items: [
+          { id: 'l-en', name: 'English', code: 'en' },
+          { name: 'French', code: 'fr' }, // no id → dropped, should warn
+        ],
+      }),
+    };
+    const log = fakeLog();
+    await listLanguageCatalog(transport, log);
+    expect(log.warn).to.have.been.calledWithMatch(
+      'listLanguageCatalog: dropped entries missing code or id — upstream field shape may have changed',
+      { droppedCount: 1 },
+    );
+  });
+
+  // Line 871: `const ctx = logCtx || {}` in syncModelsForProject — the `|| {}`
+  // else branch fires when logCtx is undefined. handleUpdateModels always passes
+  // a logCtx object, so we call syncModelsForProject directly to omit it.
+  it('syncModelsForProject uses empty ctx when logCtx is undefined (no spread error)', async () => {
+    const { syncModelsForProject: smp, clearTagCache: ctc } = await import(
+      '../../../../src/support/serenity/handlers/markets.js'
+    );
+    ctc();
+    // Need to trigger a real change (toAdd/toRemove non-empty) so the log
+    // paths that spread `...ctx` are reached.
+    const transport = {
+      listAiModels: sinon.stub()
+        .onFirstCall().resolves({ items: [] })
+        .onSecondCall()
+        .resolves({
+          items: [{
+            id: 'assign-1',
+            model: { id: 'cat-x', key: 'key-x', name: null },
+          }],
+        }),
+      addAiModel: sinon.stub().resolves({}),
+      updateProject: sinon.stub().resolves(),
+      publishProject: sinon.stub().resolves(),
+    };
+    const log = fakeLog();
+    // logCtx omitted (undefined) — the `logCtx || {}` branch fires.
+    const result = await smp(transport, WORKSPACE, 'proj-1', ['cat-x'], undefined, log);
+    expect(result.items).to.have.length(1);
+    expect(result.items[0].id).to.equal('cat-x');
+    // info log fires with `...ctx` spread; no TypeError means || {} worked.
+    expect(log.info).to.have.been.calledWithMatch('handleUpdateModels: sync complete');
   });
 });

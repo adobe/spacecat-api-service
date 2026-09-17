@@ -1,0 +1,265 @@
+/*
+ * Copyright 2026 Adobe. All rights reserved.
+ * This file is licensed to you under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License. You may obtain a copy
+ * of the License at http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed under
+ * the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTATIONS
+ * OF ANY KIND, either express or implied. See the License for the specific language
+ * governing permissions and limitations under the License.
+ */
+
+export const DEFAULT_ELEMENT_MODEL = 'search-gpt';
+
+/**
+ * Semrush's Elements API tag encoding: `prefix__value`, with `__` also used for
+ * `parent__child` nesting within the value. A tag's wire form is its `__`-joined
+ * PATH, so the leading segment is the name of its ROOT tag — which is why renaming
+ * a dimension root renames every one of its tags on this surface.
+ *
+ * This replaced an earlier `prefix:value` encoding (colon-delimited, `Parent__Child`
+ * nesting only within the value). The cutover was a one-time, atomic migration on
+ * Semrush's side — all workspaces/customers moved to `__` together, so there is no
+ * dual-format transition period and nothing parses both encodings.
+ */
+export const SEP = '__';
+
+/**
+ * Sentinel platform/model value meaning "all platforms" — no single-model filter.
+ * Mirrors the UI's `PLATFORM_CODES.All` ('all'), the same "no filter" convention the
+ * category/region dimensions already use. Elements that support it OMIT the `CBF_model`
+ * filter for this value, returning the deduped cross-model union.
+ */
+export const ALL_PLATFORMS = 'all';
+
+/**
+ * True when `value` is the {@link ALL_PLATFORMS} sentinel (case-insensitive, whitespace
+ * trimmed — matching the sibling `'all'`-sentinel helpers `SKIP_VALUES` in
+ * `llmo-brand-presence.js` and `normalizeEngineFromQuery`). Callers MUST check this
+ * BEFORE {@link resolveElementModel}, which would otherwise coerce `'all'` to
+ * {@link DEFAULT_ELEMENT_MODEL} (it is not a valid Semrush model).
+ *
+ * @param {string} [value] - Raw value from the `model` or `platform` query param.
+ * @returns {boolean}
+ */
+export function isAllPlatforms(value) {
+  return typeof value === 'string' && value.trim().toLowerCase() === ALL_PLATFORMS;
+}
+
+/**
+ * True when a `model`/`platform` value carries the {@link ALL_PLATFORMS} sentinel as ANY
+ * member of a comma-separated subset (e.g. `all`, `all,openai`, `openai,all`). Superset of
+ * {@link isAllPlatforms}: `'all'` anywhere in the list means "all models", so a caller that
+ * supports an all-models omit path treats the whole request as all-models rather than
+ * silently degrading the `all` token to {@link DEFAULT_ELEMENT_MODEL} and OR-ing it with the
+ * real members. Mirrors the agentic `parsePlatforms` convention (`tokens.includes('all')`
+ * short-circuits to no filter). LLMO-7553.
+ *
+ * @param {string} [value] - Raw `model`/`platform` value, optionally comma-separated.
+ * @returns {boolean}
+ */
+export function containsAllModelsToken(value) {
+  if (typeof value !== 'string') {
+    return false;
+  }
+  return value.split(',').some((token) => isAllPlatforms(token));
+}
+
+/**
+ * True when a brand-presence model/platform filter should aggregate across ALL of the
+ * brand's models rather than scope to a single one — i.e. the value is ABSENT (empty /
+ * non-string) OR the explicit {@link ALL_PLATFORMS} sentinel. When true, the affected
+ * brand-presence element payloads OMIT the `CBF_model` filter, so Semrush returns the
+ * deduped cross-model aggregate across whatever models produced data (the brand's enabled
+ * models) — LLMO-7093.
+ *
+ * Distinct from {@link isAllPlatforms}, which matches ONLY the literal `'all'` string: this
+ * ALSO treats the absent value as "all models". The Serenity "All Platforms" UI omits the
+ * `platform` query param entirely (project-elmo-ui#2888), so for these endpoints "no
+ * platform" means "all platforms" — NOT the {@link DEFAULT_ELEMENT_MODEL} single-model
+ * default that {@link resolveElementModel} would otherwise apply. (The `url-prompts`
+ * endpoint deliberately keeps the `absent → default model` behaviour and uses the plain
+ * {@link isAllPlatforms} check instead; only the brand-presence family opts into
+ * `absent → aggregate`.)
+ *
+ * @param {string} [value] - Raw value from the `model` or `platform` query param.
+ * @returns {boolean}
+ */
+export function isAllModelsFilter(value) {
+  return typeof value !== 'string' || value.trim().length === 0 || isAllPlatforms(value);
+}
+
+export const ELEMENT_MODELS = Object.freeze([
+  'google-ai-mode',
+  'grok-3',
+  'google-ai-overview',
+  'microsoft-copilot',
+  'open-evidence',
+  'gemini-2.5-flash',
+  'claude-sonnet-4',
+  'gpt-5',
+  'deepseek',
+  'search-gpt',
+  'perplexity',
+  'chatgpt-paid',
+]);
+
+/**
+ * Maps the UI's platform filter codes (project-elmo-ui `PLATFORM_CODES`) to the
+ * Semrush Elements model names in {@link ELEMENT_MODELS}. Vivek/UI confirmed the UI
+ * keeps sending its existing platform values, so the translation lives here on the
+ * SpaceCat side.
+ *
+ * Only entries whose names DIFFER are listed. Codes that are already identical to a
+ * Semrush model (`google-ai-overview`, `google-ai-mode`, `perplexity`, `deepseek`)
+ * and any Semrush-only model with no UI counterpart (`open-evidence`) need no
+ * entry — {@link resolveElementModel} passes them through unchanged.
+ */
+export const PLATFORM_TO_ELEMENT_MODEL = Object.freeze({
+  copilot: 'microsoft-copilot',
+  gemini: 'gemini-2.5-flash',
+  openai: 'chatgpt-paid',
+  chatgpt: 'search-gpt',
+  grok: 'grok-3',
+  anthropic: 'claude-sonnet-4',
+});
+
+/**
+ * Resolves a requested platform/model value to a valid Semrush Elements model.
+ * Applies the UI→Semrush translation first, then respects any value that is already
+ * a valid Semrush model, and finally falls back to {@link DEFAULT_ELEMENT_MODEL}.
+ *
+ * @param {string} [value] - Raw value from the `model` or `platform` query param.
+ * @returns {string} A member of {@link ELEMENT_MODELS}.
+ */
+/* c8 ignore start -- LLMO-6011 POC endpoint; unit tests intentionally deferred */
+export function resolveElementModel(value) {
+  const mapped = PLATFORM_TO_ELEMENT_MODEL[value] ?? value;
+  return ELEMENT_MODELS.includes(mapped) ? mapped : DEFAULT_ELEMENT_MODEL;
+}
+/* c8 ignore stop */
+
+/**
+ * Multi-model variant of {@link resolveElementModel}. Resolves a `model`/`platform`
+ * query value that MAY be a comma-separated subset list into an array of valid Semrush
+ * Elements models (LLMO-7553).
+ *
+ *  - A single value (no comma) → a 1-element array `[resolveElementModel(value)]`. This
+ *    is the BACKWARD-COMPATIBLE case: paired with {@link buildModelOrFilter} it yields
+ *    the exact one-member `CBF_model` OR the single-model path produced before subset
+ *    multi-model support.
+ *  - A comma value (e.g. `openai,gemini`) → split, trim, drop blanks, resolve each via
+ *    {@link resolveElementModel}, then dedupe (order-preserving). Duplicate entries and
+ *    distinct UI codes that resolve to the same Semrush model collapse to one member.
+ *
+ * Like {@link resolveElementModel} it does NOT understand the `'all'` sentinel — a caller
+ * that supports "all models" MUST check {@link isAllPlatforms}/{@link isAllModelsFilter}
+ * first, exactly as before (an `'all'` value here resolves to a 1-element
+ * `[DEFAULT_ELEMENT_MODEL]`, matching {@link resolveElementModel}). Always returns at
+ * least one member, so callers never emit an empty `CBF_model` OR.
+ *
+ * @param {string} [value] - Raw `model`/`platform` value, optionally comma-separated.
+ * @returns {string[]} Non-empty array of {@link ELEMENT_MODELS} members.
+ */
+export function resolveElementModels(value) {
+  const split = typeof value === 'string' && value.includes(',')
+    ? value.split(',').map((v) => v.trim()).filter((v) => v.length > 0)
+    : [value];
+  // A comma value that trims to nothing (e.g. `","`) falls back to the raw value so the
+  // resolve step still produces DEFAULT_ELEMENT_MODEL rather than an empty array.
+  const parts = split.length > 0 ? split : [value];
+  return [...new Set(parts.map((p) => resolveElementModel(p)))];
+}
+
+/**
+ * Builds the single-model `CBF_model` advanced filter for a brand-presence element, or
+ * returns `null` when the request is an all-models aggregate ({@link isAllModelsFilter} —
+ * param absent or the `'all'` sentinel), so the caller simply omits the filter and Semrush
+ * aggregates across every model the brand has data for (LLMO-7093). Centralises the
+ * `absent/'all' → omit, else resolve-and-scope` branch shared by the brand-presence family
+ * (stats, kpi-headlines, market-tracking-trends, sentiment-overview).
+ *
+ * ⚠️ Two DIFFERENT "absent platform" semantics coexist on this surface — pick deliberately:
+ *
+ *  - `buildModelFilter` (this one): absent/`'all'` → `null`, so the filter is OMITTED and
+ *    the result is an all-model aggregate. Use for the brand-presence family (stats,
+ *    kpi-headlines, market-tracking-trends, sentiment-overview) — the surfaces whose UI
+ *    exposes a real "All Platforms" option.
+ *  - {@link resolveElementModel}: absent/unrecognized → {@link DEFAULT_ELEMENT_MODEL}
+ *    (`search-gpt`). Use for url-prompts, topics, cited-domains, owned-urls and
+ *    url-inspector — surfaces with no "All Platforms" option, where falling back to a
+ *    single default model is the intended contract.
+ *
+ * The distinction is enforced only by which helper a definition file calls, so switching a
+ * caller from one to the other silently changes that endpoint's aggregation semantics.
+ *
+ * @param {string} [requestedModel] - Raw model/platform value (callers pass `model || platform`).
+ * @param {object} [opts]
+ * @param {boolean} [opts.wrap=true] - Wrap the `eq` in a one-member `or` block (the shape most
+ *   elements use); pass `false` for the bare-`eq` elements (stats mentions/citations).
+ * @returns {object|null} The `CBF_model` filter node, or `null` for the aggregate case.
+ */
+export function buildModelFilter(requestedModel, { wrap = true } = {}) {
+  if (isAllModelsFilter(requestedModel)) {
+    return null;
+  }
+  const eq = { op: 'eq', val: resolveElementModel(requestedModel), col: 'CBF_model' };
+  return wrap ? { op: 'or', filters: [eq] } : eq;
+}
+
+/**
+ * Builds an N-member `CBF_model` OR filter from an array of resolved Semrush models
+ * (see {@link resolveElementModels}), for the subset multi-model surfaces (LLMO-7553).
+ *
+ * A 1-element array yields the identical one-member
+ * `{ op: 'or', filters: [{ op: 'eq', val, col: 'CBF_model' }] }` the single-model wrap
+ * path (`resolveElementModel` + manual `or` wrap) produced before subset multi-model
+ * support — the backward-compatibility guarantee. ≥2 models emit one `eq` per model under
+ * the same `or`; Semrush dedupes such an OR server-side, so no caller-side dedup is needed.
+ *
+ * ⚠️ Only for the "single-or-subset, no all-models" surfaces (url-prompts, owned-urls). Do
+ * NOT use for the brand-presence family (stats, kpi-headlines, market-tracking-trends,
+ * sentiment-overview) — those need {@link buildModelFilter}, whose absent/`'all'` → `null`
+ * (omit) all-models aggregate semantics this helper does not have. `models` MUST be
+ * non-empty — {@link resolveElementModels} guarantees that (always ≥1 member), so an
+ * all-models request is handled by OMITTING this filter at the call site, never by passing
+ * `[]` here (an empty `or` would emit `{op:'or',filters:[]}`, which Semrush rejects).
+ *
+ * @param {string[]} models - Resolved Semrush model names (non-empty; see above).
+ * @returns {{op: 'or', filters: object[]}} The `CBF_model` OR node.
+ */
+export function buildModelOrFilter(models) {
+  return {
+    op: 'or',
+    filters: models.map((m) => ({ op: 'eq', val: m, col: 'CBF_model' })),
+  };
+}
+
+/**
+ * Builds the `filters.advanced` fragment of an Elements payload, OMITTING the key entirely
+ * when there is nothing to filter on. Spread into the `filters` object by the caller.
+ *
+ * Semrush REJECTS an empty AND block: `advanced: { op: 'and', filters: [] }` returns
+ * HTTP 422 `{"message":"request could not be processed"}` — it does NOT treat it as the
+ * vacuously-true "match all". Dropping the key instead returns the unfiltered result.
+ *
+ * Verified live 2026-09-02 (brand "Asian Paints", sub-workspace c8feffff-6e58-41db-b804-
+ * 5652033dd292, 2026-08-04→2026-09-02) against all three elements that can reach the
+ * empty case — SENTIMENT (f4153af8), TRENDS_MV (b5281393) and MARKET_CITATIONS_TREND
+ * (2e5a6f4e): empty AND → 422 on every one, key omitted → 200 on every one. The 422 is
+ * caused by the empty AND itself, not by a missing required filter — an `advanced` block
+ * carrying only `CBF_model` (no `CBF_project`) returns 200.
+ *
+ * This case is reachable in production: the Overview-SR sentiment card requests
+ * "all platforms" with no region and no category, which leaves every optional filter
+ * unset (LLMO-7093).
+ *
+ * @param {object[]} [filters] - Advanced filter nodes; empty/absent → `{}`.
+ * @returns {{ advanced?: object }} Fragment to spread into `filters`.
+ */
+export function buildAdvancedFilters(filters) {
+  return Array.isArray(filters) && filters.length > 0
+    ? { advanced: { op: 'and', filters } }
+    : {};
+}

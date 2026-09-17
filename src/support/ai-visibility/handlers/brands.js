@@ -15,6 +15,7 @@
 import { ConnectError, Code } from '@connectrpc/connect';
 import { BRAND_TOPICS_ORDER_BY_ENUM } from '@quazar/ai-seo-ts/v2/topic/enums_pb.js';
 import { PROMPTS_REQUEST_ORDER_BY_ENUM } from '@quazar/ai-seo-ts/v2/prompt/enums_pb.js';
+import { ORDER_DIRECTION_ENUM } from '@quazar/ai-seo-ts/common/types_pb.js';
 import {
   SOURCES_REQUEST_ORDER_BY_ENUM,
   DOMAINS_REQUEST_ORDER_BY_ENUM,
@@ -23,6 +24,7 @@ import {
 import {
   num,
   brandTarget,
+  resolveSearchType,
   parseLimitOffset,
   resolveCountry,
   resolveCountryForCitedSources,
@@ -93,6 +95,49 @@ function buildByDateEntry(year, month, slice) {
     ownedSources: num(agg?.ownedSources),
     visibilityByEngine,
   };
+}
+
+// Per-endpoint documented `sortBy` allow-lists (see OpenAPI ai-visibility-api.yaml).
+// cited-pages sorts via SOURCES_REQUEST_ORDER_BY_ENUM; cited-sources and
+// source-opportunities both sort via DOMAINS_REQUEST_ORDER_BY_ENUM (which carries
+// extra 6–8 members those endpoints do not document).
+const CITED_PAGES_SORT_KEYS = ['URL', 'PROMPTS_COUNT'];
+const DOMAINS_SORT_KEYS = ['DOMAIN', 'MENTIONS', 'SOURCES_COUNT', 'PROMPTS_COUNT', 'ORGANIC_TRAFFIC'];
+
+/**
+ * Resolves gRPC list ordering from `sortBy`/`sortDirection` query params.
+ * `sortBy` is matched against `allowedKeys` (the per-endpoint set of documented
+ * order-by member names, e.g. `PROMPTS_COUNT`, `URL`, `DOMAIN`); unknown,
+ * undocumented, or `UNSPECIFIED` values fall back to `defaultBy`. `direction`
+ * is only set when the caller supplies `sortDirection`; when it is omitted the
+ * returned order carries no `direction` field so the backend applies its own
+ * default ordering — preserving the exact pre-sort wire behavior for callers
+ * that never send the param (an explicitly-forced default would silently flip
+ * their order if the backend default were not DESC). Returns an `order` object
+ * (`{ by }`, plus `direction` when a `sortDirection` was provided).
+ */
+function resolveGrpcSortOrder(sp, orderByEnum, defaultBy, allowedKeys) {
+  // Unlike `resolveFtsSort` in topics.js (which 400s on an unrecognized sort value),
+  // this deliberately falls back to the default — matched by the OpenAPI docs
+  // ("Unknown values fall back to the default"). Keep it lenient; don't "fix" it to throw.
+  // `sortBy` is matched case-insensitively (enum member names are uppercase).
+  // `allowedKeys` is an explicit per-endpoint allow-list so that enum members the
+  // endpoint does NOT document (e.g. the DOMAINS enum's 6–8 members not in the
+  // cited-sources/source-opportunities OpenAPI set) fall back to the default rather
+  // than reaching the backend — and so a future ai-seo-ts regeneration can't silently
+  // widen the accepted set.
+  const byKey = sp.get('sortBy')?.trim()?.toUpperCase();
+  const mappedBy = (byKey && allowedKeys.includes(byKey)) ? orderByEnum[byKey] : undefined;
+  const by = (typeof mappedBy === 'number' && mappedBy > 0) ? mappedBy : defaultBy;
+  // Only attach `direction` when the caller actually sent `sortDirection`. Omitting it
+  // otherwise leaves the backend's own default ordering intact (pre-sort behavior). An
+  // unrecognized value still falls back to DESC — the caller opted into a direction.
+  const dirKey = sp.get('sortDirection')?.trim()?.toUpperCase();
+  if (!dirKey) { return { by }; }
+  const mappedDir = ORDER_DIRECTION_ENUM[dirKey];
+  const direction = (typeof mappedDir === 'number' && mappedDir > 0)
+    ? mappedDir : ORDER_DIRECTION_ENUM.DESC;
+  return { by, direction };
 }
 
 export function mapStatsByLLM(data, dateRange) {
@@ -188,7 +233,9 @@ function mapSourceDomainRowToCitedSource(d) {
 
 export async function citedPagesOwnedCountFromStatsByLlmForMonth(country, target, monthYm, llmEnum, clients) {
   const dateRange = statsByLLMDateRange(monthYm.year, monthYm.month, 1);
-  const raw = await clients.brandClient.statsByLLM({ country, target, dateRange });
+  const raw = await clients.brandClient.statsByLLM({
+    country, target, searchType: resolveSearchType(target.domain), dateRange,
+  });
   const mapped = mapStatsByLLM(raw, dateRange);
   const cp = mapped.citedPages;
   if (!cp || typeof cp !== 'object') { return null; }
@@ -244,13 +291,14 @@ function dedupeRawBrandPromptsForOpportunities(prompts) {
 
 async function fetchBrandPromptsPagesForOpportunities(country, domain, llm, maxPages, orderBy, clients) {
   const target = brandTarget(domain);
+  const searchType = resolveSearchType(domain);
   const order = { by: orderBy };
   async function pullPage(page, acc) {
     if (page >= maxPages) {
       return acc;
     }
     const raw = await clients.promptClient.prompts({
-      country, llm, target, order, range: { limit: 100, offset: page * 100 },
+      country, llm, target, searchType, order, range: { limit: 100, offset: page * 100 },
     }).catch(() => ({ prompts: [] }));
     const chunk = raw.prompts || [];
     const next = [...acc, ...chunk];
@@ -287,9 +335,12 @@ export async function handleBrandStats(sp, clients) {
   const endM = endMonth ? endMonth.month : now.getUTCMonth() + 1;
   const windowMonths = Math.min(Math.max(Number(sp.get('windowMonths')) || 4, 1), 6);
   const dateRange = statsByLLMDateRange(endYear, endM, windowMonths);
+  const searchType = resolveSearchType(domain);
   const statsSettled = await Promise.allSettled([
-    clients.brandClient.statsByLLM({ country, target, dateRange }),
-    clients.brandClient.statsByCountry({ target, llm: LLM_ENUM.ALL }),
+    clients.brandClient.statsByLLM({
+      country, target, searchType, dateRange,
+    }),
+    clients.brandClient.statsByCountry({ target, searchType, llm: LLM_ENUM.ALL }),
   ]);
   if (statsSettled[0].status !== 'fulfilled') {
     throw statsSettled[0].reason;
@@ -313,11 +364,16 @@ export async function handleBrandTopics(sp, clients) {
   const country = resolveCountry(sp);
   const { limit, offset } = parseLimitOffset(sp);
   const llm = engineToLlm(sp.get('engine')?.trim() || '');
+  const searchType = resolveSearchType(domain);
   const body = {
-    country, target: brandTarget(domain), order: { by: BRAND_TOPICS_ORDER_BY_ENUM.VISIBILITY }, range: { limit, offset },
+    country,
+    target: brandTarget(domain),
+    searchType,
+    order: { by: BRAND_TOPICS_ORDER_BY_ENUM.VISIBILITY },
+    range: { limit, offset },
   };
   if (llm) { body.llm = llm; }
-  const totalsBody = { country, target: brandTarget(domain) };
+  const totalsBody = { country, target: brandTarget(domain), searchType };
   if (llm) { totalsBody.llm = llm; }
   const topicsSettled = await Promise.allSettled([
     clients.topicClient.brandTopics(body),
@@ -359,14 +415,17 @@ export async function handleBrandPrompts(sp, clients) {
   }
   const { dimensionFilterQl } = topicFilter;
   const target = brandTarget(domain);
+  const searchType = resolveSearchType(domain);
   const order = { by: PROMPTS_REQUEST_ORDER_BY_ENUM.TOPIC_VOLUME };
 
   if (llmSingle) {
     const body = {
-      country, llm: llmSingle, target, range: { limit, offset }, order,
+      country, llm: llmSingle, target, searchType, range: { limit, offset }, order,
     };
     if (dimensionFilterQl) { body.dimensionFilterQl = dimensionFilterQl; }
-    const totalsReq = { country, llm: llmSingle, target };
+    const totalsReq = {
+      country, llm: llmSingle, target, searchType,
+    };
     if (dimensionFilterQl) { totalsReq.dimensionFilterQl = dimensionFilterQl; }
     const promptsPair = await Promise.allSettled([
       clients.promptClient.promptsTotals(totalsReq),
@@ -392,10 +451,10 @@ export async function handleBrandPrompts(sp, clients) {
 
   const perLlmFetch = Math.min(100, offset + limit);
   const baseList = {
-    country, target, order, range: { limit: perLlmFetch, offset: 0 },
+    country, target, searchType, order, range: { limit: perLlmFetch, offset: 0 },
   };
   if (dimensionFilterQl) { baseList.dimensionFilterQl = dimensionFilterQl; }
-  const baseTotals = { country, target };
+  const baseTotals = { country, target, searchType };
   if (dimensionFilterQl) { baseTotals.dimensionFilterQl = dimensionFilterQl; }
 
   const [totalsResults, listResults] = await Promise.all([
@@ -438,13 +497,17 @@ export async function handleBrandCitedPages(sp, clients) {
   const { limit, offset } = parseLimitOffset(sp);
   const llmEnum = optionalLlmFromQuery(sp) ?? LLM_ENUM.ALL;
   const target = brandTarget(domain);
-  const order = { by: SOURCES_REQUEST_ORDER_BY_ENUM.PROMPTS_COUNT };
+  const searchType = resolveSearchType(domain);
+  const order = resolveGrpcSortOrder(sp, SOURCES_REQUEST_ORDER_BY_ENUM, SOURCES_REQUEST_ORDER_BY_ENUM.PROMPTS_COUNT, CITED_PAGES_SORT_KEYS);
   const monthYm = parseMonthYM(sp);
   const monthRaw = sp.get('month')?.trim();
   const listReq = {
-    country, llm: llmEnum, target, category: SOURCE_CATEGORY_ENUM.OWNED_BY_TARGET, order, range: { limit, offset },
+    country, llm: llmEnum, target, searchType, category: SOURCE_CATEGORY_ENUM.OWNED_BY_TARGET, order, range: { limit, offset },
   };
   if (monthYm && monthRaw) { listReq.targetDate = monthRaw; }
+  // Note: sourcesTotals (SourcesTotalsRequest) does not carry search_type in the
+  // SDK, so the totals fallback stays domain-scoped; the primary total path is
+  // citedPagesOwnedCountFromStatsByLlmForMonth, which is subdomain-scoped above.
   const totalsReq = { country, llm: llmEnum, target };
 
   async function fetchSourcesListBody() {
@@ -560,9 +623,14 @@ export async function handleBrandTopBrands(sp, clients) {
   if (!domain) { return { status: 400, body: { error: 'missing_domain', message: 'domain is required' } }; }
   const country = resolveCountry(sp);
   const { limit, offset } = parseLimitOffset(sp);
+  const topBrandsSortBy = sp.get('sortBy')?.trim()?.toUpperCase() === 'NAME' ? 'NAME' : 'MENTIONS';
+  const topBrandsSortAsc = sp.get('sortDirection')?.trim()?.toUpperCase() === 'ASC';
   const llmSingle = optionalLlmFromQuery(sp);
-  const minForSlice = offset + limit + 1;
-  const fetchN = offset === 0 ? 1000 : Math.min(1000, minForSlice);
+  // There is no dedicated count call on the brand gRPC client for top-brands, so the
+  // returned `total` is the size of what we fetch. Always fetch the full set (1000 cap)
+  // regardless of offset/sort so `total` is stable across pages — a page-dependent window
+  // makes the pager's page-count shift as the user pages forward.
+  const fetchN = 1000;
   const brandDomain = domain.replace(/^www\./, '').toLowerCase();
   const listArgs = { country, brandDomain, limit: fetchN };
 
@@ -587,16 +655,17 @@ export async function handleBrandTopBrands(sp, clients) {
     const name = topBrandsByDomainEntryName(b);
     const mentions = topBrandsByDomainEntryCount(b);
     return {
-      domain: slugHostFromBrandName(name),
       name,
       mentions,
-      visibility: Math.min(95, Math.round(Math.log10(mentions + 10) * 28)),
-      citedPages: Math.min(500, Math.round(mentions / 200)),
       ...(sliceCountry ? { country: sliceCountry } : {}),
     };
   }).sort((a, b) => {
-    const d = b.mentions - a.mentions;
-    return d !== 0 ? d : a.name.localeCompare(b.name);
+    if (topBrandsSortBy === 'NAME') {
+      const c = a.name.localeCompare(b.name, 'en');
+      return topBrandsSortAsc ? c : -c;
+    }
+    const d = topBrandsSortAsc ? (a.mentions - b.mentions) : (b.mentions - a.mentions);
+    return d !== 0 ? d : a.name.localeCompare(b.name, 'en');
   });
   const total = dataFull.length;
   const page = dataFull.slice(offset, offset + limit);
@@ -616,7 +685,7 @@ export async function handleBrandCitedSources(sp, clients) {
   const llmEnum = optionalLlmFromQuery(sp) ?? LLM_ENUM.ALL;
   const target = brandTarget(domain);
   const listReq = {
-    country, llm: llmEnum, target, order: { by: DOMAINS_REQUEST_ORDER_BY_ENUM.PROMPTS_COUNT }, range: { limit, offset },
+    country, llm: llmEnum, target, order: resolveGrpcSortOrder(sp, DOMAINS_REQUEST_ORDER_BY_ENUM, DOMAINS_REQUEST_ORDER_BY_ENUM.PROMPTS_COUNT, DOMAINS_SORT_KEYS), range: { limit, offset },
   };
   const totalsReq = { country, llm: llmEnum, target };
 
@@ -690,18 +759,20 @@ export async function handleBrandSourceOpportunities(sp, clients) {
   }
 
   const rangeLimit = Math.min(Math.max(1, limit), GAP_SOURCE_DOMAINS_MAX_RANGE_LIMIT);
+  const searchType = resolveSearchType(domain);
   const listBody = {
     country,
     llm,
     target: brandTarget(domain),
+    searchType,
     competitors,
     kind: kinds,
-    order: { by: DOMAINS_REQUEST_ORDER_BY_ENUM.ORGANIC_TRAFFIC },
+    order: resolveGrpcSortOrder(sp, DOMAINS_REQUEST_ORDER_BY_ENUM, DOMAINS_REQUEST_ORDER_BY_ENUM.ORGANIC_TRAFFIC, DOMAINS_SORT_KEYS),
     range: { limit: rangeLimit, offset },
   };
   if (snapshotDate) { listBody.date = snapshotDate; }
   const totalsBody = {
-    country, llm, target: brandTarget(domain), competitors,
+    country, llm, target: brandTarget(domain), searchType, competitors,
   };
   if (snapshotDate) { totalsBody.date = snapshotDate; }
 
@@ -759,7 +830,7 @@ export async function handleBrandSourceOpportunities(sp, clients) {
 export async function handleBrandCompetitors(sp, clients) {
   const domain = sp.get('domain')?.trim();
   if (!domain) { return { status: 400, body: { error: 'missing_domain', message: 'domain is required' } }; }
-  const body = { target: brandTarget(domain) };
+  const body = { target: brandTarget(domain), searchType: resolveSearchType(domain) };
   const countRaw = sp.get('count');
   if (countRaw != null && String(countRaw).trim() !== '') {
     const c = Math.min(20, Math.max(1, num(countRaw)));

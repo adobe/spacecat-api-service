@@ -11,16 +11,14 @@
  */
 
 import {
-  hasText, isNonEmptyObject, isValidUUID, isValidUrl, isNonEmptyArray, DELIVERY_TYPES,
+  hasText, isNonEmptyObject, isValidUUID, isValidUrl, isNonEmptyArray,
 } from '@adobe/spacecat-shared-utils';
 import {
-  badRequest, internalServerError, notFound, ok, accepted, createResponse,
+  badRequest, internalServerError, ok, accepted,
 } from '@adobe/spacecat-shared-http-utils';
 import { AsyncJob } from '@adobe/spacecat-shared-data-access';
-import { retrievePageAuthentication } from '@adobe/spacecat-shared-ims-client';
-import AccessControlUtil from '../support/access-control-util.js';
-import { PreflightDto } from '../dto/preflight.js';
 import { ErrorWithStatusCode } from '../support/utils.js';
+import { loadJobScopedToCaller } from '../support/async-job-access.js';
 import { getHeader } from '../support/http-headers.js';
 import {
   MISSING_X_PROMISE_TOKEN_MESSAGE,
@@ -31,6 +29,83 @@ import {
 
 export const AUDIT_STEP_IDENTIFY = 'identify';
 export const AUDIT_STEP_SUGGEST = 'suggest';
+
+/**
+ * The ONLY `metadata.payload` fields the preflight job-status DTO exposes — exactly
+ * what the ASO preflight MFE reads. The reader projects these explicitly rather than
+ * returning the verbatim `metadata.payload`, so a future/sensitive field on `payload`
+ * can never leak (the SEC-5 defence one level deeper). Adding a field the MFE needs is
+ * a one-line change here, and the unit test imports this same constant so its
+ * allowlist assertion can never drift from the projection.
+ */
+export const PREFLIGHT_PAYLOAD_ALLOWLIST = Object.freeze([
+  'step', 'reason', 'errorCode', 'siteId', 'urls',
+]);
+
+const ACCESSIBILITY_AUDIT_NAME = 'accessibility';
+
+/**
+ * Counts the number of issues for a single preflight audit. Three counting modes:
+ *  - accessibility: sum of the integer `occurrences` across opportunities
+ *    (each opportunity is an issue "type" with N occurrences).
+ *  - opportunities whose `issue` is an array (e.g. links): sum of the issue-array
+ *    lengths (each entry is one issue).
+ *  - all others: one issue per opportunity that has a truthy `issue` (exactly one
+ *    issue per opportunity).
+ * @param {Object} audit - A PreflightAudit: { name, type, opportunities }
+ * @returns {number} Total issue count for the audit
+ */
+export function countIssuesForAudit(audit) {
+  const opportunities = Array.isArray(audit?.opportunities) ? audit.opportunities : [];
+  if (audit?.name === ACCESSIBILITY_AUDIT_NAME) {
+    return opportunities.reduce((sum, opp) => sum + (opp?.occurrences ?? 0), 0);
+  }
+  return opportunities.reduce((count, opp) => {
+    if (Array.isArray(opp?.issue)) {
+      return count + opp.issue.length;
+    }
+    if (opp?.issue) {
+      return count + 1;
+    }
+    return count;
+  }, 0);
+}
+
+/**
+ * Process identifier tagged onto the preflight outcome logs so a single log
+ * line tells you which surface emitted it.
+ *  - PREFLIGHT_PROCESS_AUDW → audit-worker path: POST/GET /preflight/jobs (SQS)
+ */
+export const PREFLIGHT_PROCESS_AUDW = 'audw';
+
+/**
+ * Emits the server-side observability log for a terminal AsyncJob when preflight is
+ * polled, from the getPreflightJobStatusAndResult (audit-worker path) poll handler.
+ * @param {Object} log - The logger instance
+ * @param {string} processName - PREFLIGHT_PROCESS_AUDW
+ * @param {Object} job - The AsyncJob entity (its getId() is the logged jobId)
+ */
+export function logPreflightOutcome(log, processName, job) {
+  const jobId = job.getId();
+  const status = job.getStatus();
+  const result = job.getResult();
+  if (status === AsyncJob.Status.COMPLETED && isNonEmptyArray(result)) {
+    const summary = result.map((r) => ({
+      pageUrl: r?.pageUrl,
+      step: r?.step,
+      audits: (Array.isArray(r?.audits) ? r.audits : []).map((a) => ({
+        name: a?.name,
+        type: a?.type,
+        opportunities: Array.isArray(a?.opportunities) ? a.opportunities.length : 0,
+        issues: countIssuesForAudit(a),
+      })),
+    }));
+    log.info(`[Preflight] Run complete. jobId=${jobId} process=${processName} status=${status} results=${JSON.stringify(summary)}`);
+  } else if (status === AsyncJob.Status.FAILED) {
+    const err = job.getError();
+    log.warn(`[Preflight] Run failed. jobId=${jobId} process=${processName} status=${status} errorCode=${err?.code ?? 'none'} errorMessage=${err?.message ?? 'none'}`);
+  }
+}
 
 /**
  * Creates a preflight controller instance
@@ -61,8 +136,6 @@ function PreflightController(ctx, log, env) {
   if (!isNonEmptyObject(env)) {
     throw new Error('Environment object required');
   }
-
-  const accessControlUtil = AccessControlUtil.fromContext(ctx);
 
   /**
    * Validates the request data for preflight job creation
@@ -271,14 +344,39 @@ function PreflightController(ctx, log, env) {
     }
 
     try {
-      const job = await dataAccess.AsyncJob.findById(jobId);
+      // Scope the read to the caller: preflight-only jobType filter + ownership of
+      // the job's site. Without this, any caller with any job UUID could read
+      // another tenant's job (IDOR), including token-bearing job types.
+      const { job, error: accessError } = await loadJobScopedToCaller(ctx, {
+        jobId,
+        allowedJobTypes: ['preflight'],
+        resolveOwnerSiteId: (j) => j.getMetadata()?.payload?.siteId,
+      });
 
-      if (!job) {
-        log.error(`Job with ID ${jobId} not found`);
-        return notFound(`Job with ID ${jobId} not found`);
+      if (accessError) {
+        return accessError;
       }
 
-      log.debug(`getPreflightJobStatusAndResult returning job: ${JSON.stringify(job)}`);
+      // Never log the full job record — a token-bearing job's metadata could leak
+      // into logs and survive any response-level scoping.
+      log.debug(`getPreflightJobStatusAndResult jobId=${jobId} status=${job.getStatus()}`);
+
+      // Emit the terminal-state observability log (shared with the Mystique path).
+      logPreflightOutcome(log, PREFLIGHT_PROCESS_AUDW, job);
+
+      // Preflight-shaped metadata allowlist. Projects an explicit field allowlist
+      // ({@link PREFLIGHT_PAYLOAD_ALLOWLIST}: jobType/tags plus the allowlisted
+      // payload fields) rather than returning the verbatim `metadata.payload` —
+      // returning the whole payload would reintroduce the SEC-5 leak one level
+      // deeper if payload ever grew a sensitive field. Metadata is guaranteed
+      // present: loadJobScopedToCaller admitted this job by its metadata.jobType.
+      // `payload` may be absent on a malformed record — guard it.
+      const metadata = job.getMetadata();
+      const payload = metadata.payload ?? {};
+      const projectedPayload = PREFLIGHT_PAYLOAD_ALLOWLIST.reduce((acc, key) => {
+        acc[key] = payload[key];
+        return acc;
+      }, {});
 
       return ok({
         jobId: job.getId(),
@@ -292,7 +390,11 @@ function PreflightController(ctx, log, env) {
         resultType: job.getResultType(),
         result: job.getResult(),
         error: job.getError(),
-        metadata: job.getMetadata(),
+        metadata: {
+          jobType: metadata.jobType,
+          tags: metadata.tags,
+          payload: projectedPayload,
+        },
       });
     } catch (error) {
       log.error(`Failed to get preflight job status: ${error.message}`);
@@ -300,328 +402,9 @@ function PreflightController(ctx, log, env) {
     }
   };
 
-  function preflightError(errorCode, message, status) {
-    return createResponse({ errorCode, message }, status);
-  }
-
-  /**
-   * Calls Mysticat's POST /v1/preflight/analyze and returns once the request is accepted.
-   * Mysticat processes the analysis asynchronously and writes results directly to the AsyncJob
-   * identified by scanId.
-   * @param {string} mysticatBaseUrl - The base URL of the Mystique service (MYSTIQUE_API_BASE_URL).
-   * @param {string} scanId - The AsyncJob ID used as the scan identifier for write-back.
-   * @param {string} siteId - The site ID.
-   * @param {string} url - The page URL to analyze.
-   * @param {string} [authorizationHeader] - Optional auth header forwarded to Mysticat.
-   */
-  async function callMysticatAnalyze(
-    mysticatBaseUrl,
-    scanId,
-    siteId,
-    url,
-    authorizationHeader,
-  ) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15000);
-    let response;
-    try {
-      response = await fetch(`${mysticatBaseUrl}/v1/preflight/analyze`, {
-        method: 'POST',
-        signal: controller.signal,
-        headers: {
-          'Content-Type': 'application/json',
-          ...(hasText(authorizationHeader) && { Authorization: authorizationHeader }),
-        },
-        body: JSON.stringify({
-          site_id: siteId,
-          url,
-          scan_id: scanId,
-          persist: true,
-        }),
-      });
-    } finally {
-      clearTimeout(timeout);
-    }
-
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(`Mysticat returned ${response.status}: ${text}`);
-    }
-  }
-
-  /**
-   * Creates a new preflight for a site-scoped URL.
-   * siteId comes from the path; url from the request body.
-   * For promise-based authoring types (CS, CS_CW, AMS) that require authentication, the
-   * promise token must be sent on the `x-promise-token` header (from POST /auth/v2/promise).
-   * @param {Object} context - The request context
-   * @returns {Promise<Object>} 202 Accepted with preflight summary and Location header
-   */
-  const createPreflight = async (context) => {
-    const siteId = context.params?.siteId;
-    const { data } = context;
-
-    if (!isNonEmptyObject(data) || !hasText(data.url) || !isValidUrl(data.url)) {
-      return preflightError('PREFLIGHT_INVALID_REQUEST', 'url is missing or not a valid URI', 400);
-    }
-
-    // mystiqueUrl override (SITES-46216): in non-prod, allow the caller to
-    // point this request at a specific Mysticat host instead of the
-    // env-configured one. Same shape as the legacy /preflight/beta/jobs
-    // override (PR #2140, hardened in 746138e4), restored here after the
-    // SITES-44686 redesign dropped it. Guards:
-    //   1. AWS_ENV !== 'prod' — dead code in prod regardless of body content
-    //   2. Valid URL parse
-    //   3. Hostname suffix-match against *.adobe.io — broader than the
-    //      original *.stage.cloud.adobe.io because corp-only Ethos hosts
-    //      proved unreachable from public Lambda networking, and m-dev.adobe.io
-    //      is the current publicly-reachable canonical dev host
-    //   4. Tenancy boundary unchanged — caller must still pass hasAccess(site)
-    const isDevForOverride = env.AWS_ENV !== 'prod';
-    const useMystiqueUrlOverride = isDevForOverride && hasText(data.mystiqueUrl);
-    if (useMystiqueUrlOverride) {
-      if (!isValidUrl(data.mystiqueUrl)) {
-        return preflightError('PREFLIGHT_INVALID_REQUEST', 'mystiqueUrl must be a valid URL', 400);
-      }
-      const parsedOverride = new URL(data.mystiqueUrl);
-      if (parsedOverride.protocol !== 'https:') {
-        return preflightError('PREFLIGHT_INVALID_REQUEST', 'mystiqueUrl must use https://', 400);
-      }
-      if (!/\.adobe\.io$/.test(parsedOverride.hostname)) {
-        return preflightError('PREFLIGHT_INVALID_REQUEST', 'mystiqueUrl must point at an *.adobe.io host', 400);
-      }
-      log.info(`Using caller-supplied mystiqueUrl override: ${data.mystiqueUrl}`);
-    }
-
-    const mysticatBaseUrl = useMystiqueUrlOverride
-      ? data.mystiqueUrl
-      : env.MYSTIQUE_API_BASE_URL;
-
-    if (!hasText(mysticatBaseUrl)) {
-      return preflightError('PREFLIGHT_INTERNAL_ERROR', 'Analyze service not configured', 500);
-    }
-
-    const { url } = data;
-    const { protocol, hostname } = new URL(url);
-    const previewBaseURL = `${protocol}//${hostname}`;
-
-    let site;
-    try {
-      site = await dataAccess.Site.findById(siteId);
-    } catch (e) {
-      log.error(`Failed to find site ${siteId}: ${e.message}`);
-      return preflightError('PREFLIGHT_INTERNAL_ERROR', 'Internal error', 500);
-    }
-
-    if (!site) {
-      return preflightError('PREFLIGHT_SITE_NOT_FOUND', 'Site not found', 404);
-    }
-
-    if (!await accessControlUtil.hasAccess(site)) {
-      return preflightError('PREFLIGHT_ACCESS_DENIED', 'Access denied', 403);
-    }
-
-    // Validate the URL belongs to this site
-    let siteByUrl;
-    try {
-      siteByUrl = await dataAccess.Site.findByPreviewURL(previewBaseURL);
-    } catch (e) {
-      log.error(`findByPreviewURL failed for ${previewBaseURL}: ${e.message}`);
-      return preflightError('PREFLIGHT_INTERNAL_ERROR', 'Internal error', 500);
-    }
-    if (!siteByUrl || siteByUrl.getId() !== siteId) {
-      return preflightError('PREFLIGHT_INVALID_REQUEST', 'URL does not belong to this site', 400);
-    }
-
-    // Eligibility is Mysticat's decision — see SITES-46202 + ADR-002.
-
-    // Resolve page authentication if required.
-    // checkEnableAuthentication does a bare HEAD fetch against the customer
-    // URL; DNS failure / connection refused / TLS error throws. Treat any
-    // throw as "auth not required" (false) so an unreachable customer URL
-    // returns a structured 502 from the downstream Mysticat call rather
-    // than an unstructured 500 here that would break the errorCode contract.
-    let enableAuthentication;
-    try {
-      enableAuthentication = await checkEnableAuthentication(previewBaseURL);
-    } catch (e) {
-      log.warn(`checkEnableAuthentication failed for ${previewBaseURL}: ${e.message}`);
-      enableAuthentication = false;
-    }
-    let authorizationHeader;
-    if (enableAuthentication) {
-      let promiseTokenObj;
-      try {
-        promiseTokenObj = await resolvePromiseToken(site, context);
-      } catch (e) {
-        log.error(`Failed to get promise token: ${e.message}`);
-        if (e instanceof ErrorWithStatusCode) {
-          return preflightError('PREFLIGHT_INVALID_REQUEST', e.message, 400);
-        }
-        return preflightError('PREFLIGHT_INTERNAL_ERROR', 'Error getting promise token', 500);
-      }
-      try {
-        const authOptions = promiseTokenObj ? { promiseToken: promiseTokenObj } : {};
-        const accessToken = await retrievePageAuthentication(site, context, authOptions);
-        const isBearer = site.getDeliveryType() === DELIVERY_TYPES.AEM_CS && !!promiseTokenObj;
-        authorizationHeader = `${isBearer ? 'Bearer' : 'token'} ${accessToken}`;
-      } catch (e) {
-        log.error(`Failed to retrieve page authentication: ${e.message}`);
-        return preflightError('PREFLIGHT_INTERNAL_ERROR', 'Error retrieving page authentication', 500);
-      }
-    }
-
-    // Build createdBy from the authenticated IMS profile
-    const profile = context.attributes?.authInfo?.getProfile?.();
-    const displayName = [profile?.first_name, profile?.last_name].filter(Boolean).join(' ')
-      || profile?.name
-      || profile?.email
-      || 'unknown';
-    const createdBy = { email: profile?.email || 'unknown', displayName };
-
-    // Create AsyncJob first (execution primitive), then the Preflight domain record
-    let asyncJob;
-    try {
-      asyncJob = await dataAccess.AsyncJob.create({
-        status: AsyncJob.Status.IN_PROGRESS,
-        metadata: {
-          payload: { siteId, url },
-          jobType: 'preflight',
-          tags: ['preflight'],
-        },
-      });
-    } catch (e) {
-      log.error(`Failed to create AsyncJob: ${e.message}`);
-      return preflightError('PREFLIGHT_INTERNAL_ERROR', 'Failed to create async job', 500);
-    }
-
-    let preflight;
-    try {
-      preflight = await dataAccess.Preflight.create({
-        siteId,
-        asyncJobId: asyncJob.getId(),
-        url,
-        status: AsyncJob.Status.IN_PROGRESS,
-        createdBy,
-        startedAt: new Date().toISOString(),
-      });
-    } catch (e) {
-      log.error(`Failed to create Preflight: ${e.message}`);
-      await asyncJob.remove().catch((re) => log.warn(`Failed to roll back AsyncJob ${asyncJob.getId()}: ${re.message}`));
-      return preflightError('PREFLIGHT_INTERNAL_ERROR', 'Failed to create preflight record', 500);
-    }
-
-    try {
-      await callMysticatAnalyze(
-        mysticatBaseUrl,
-        asyncJob.getId(),
-        siteId,
-        url,
-        authorizationHeader,
-      );
-    } catch (mysticatError) {
-      log.error(`Mysticat analyze failed for preflight ${preflight.getId()}: ${mysticatError.message}`);
-      preflight.setStatus(AsyncJob.Status.FAILED);
-      // Stored error message mirrors the external 502 response — the raw
-      // upstream body could carry internal hostnames / stack traces and is
-      // exposed via GET /sites/:siteId/preflights/:preflightId. Full detail
-      // is in the log.error above for ops visibility.
-      preflight.setError({ code: 'MYSTICAT_ERROR', message: 'Upstream analyze service failed' });
-      preflight.setEndedAt(new Date().toISOString());
-      await preflight.save().catch((e) => log.warn(`Failed to persist FAILED state on preflight ${preflight.getId()}: ${e.message}`));
-      asyncJob.setStatus(AsyncJob.Status.FAILED);
-      await asyncJob.save().catch((e) => log.warn(`Failed to persist FAILED state on AsyncJob ${asyncJob.getId()}: ${e.message}`));
-      return preflightError('PREFLIGHT_UPSTREAM_ERROR', 'Upstream analyze service failed', 502);
-    }
-
-    const isDev = env.AWS_ENV === 'dev';
-    const locationUrl = `https://spacecat.experiencecloud.live/api/${isDev ? 'ci' : 'v1'}`
-      + `/sites/${siteId}/preflights/${preflight.getId()}`;
-
-    return createResponse(PreflightDto.toJSON(preflight), 202, { Location: locationUrl });
-  };
-
-  /**
-   * Returns all preflights for a site, optionally filtered by URL.
-   * @param {Object} context - The request context
-   * @returns {Promise<Object>} 200 OK with array of preflights
-   */
-  const getAllPreflights = async (context) => {
-    const siteId = context.params?.siteId;
-    const rawQueryString = context.invocation?.event?.rawQueryString;
-    const urlFilter = new URLSearchParams(rawQueryString ?? '').get('url') ?? undefined;
-
-    let site;
-    try {
-      site = await dataAccess.Site.findById(siteId);
-    } catch (e) {
-      log.error(`Failed to find site ${siteId}: ${e.message}`);
-      return preflightError('PREFLIGHT_INTERNAL_ERROR', 'Internal error', 500);
-    }
-
-    if (!site) {
-      return preflightError('PREFLIGHT_SITE_NOT_FOUND', 'Site not found', 404);
-    }
-
-    if (!await accessControlUtil.hasAccess(site)) {
-      return preflightError('PREFLIGHT_ACCESS_DENIED', 'Access denied', 403);
-    }
-
-    try {
-      const preflights = await dataAccess.Preflight.allBySiteIdAndUrl(siteId, urlFilter);
-      return ok(preflights.map(PreflightDto.toJSON));
-    } catch (e) {
-      log.error(`Failed to fetch preflights for site ${siteId}: ${e.message}`);
-      return preflightError('PREFLIGHT_INTERNAL_ERROR', 'Failed to fetch preflights', 500);
-    }
-  };
-
-  /**
-   * Returns a single preflight by ID, verifying it belongs to the path's siteId.
-   * @param {Object} context - The request context
-   * @returns {Promise<Object>} 200 OK with full preflight detail
-   */
-  const getPreflightById = async (context) => {
-    const siteId = context.params?.siteId;
-    const preflightId = context.params?.preflightId;
-
-    let site;
-    try {
-      site = await dataAccess.Site.findById(siteId);
-    } catch (e) {
-      log.error(`Failed to find site ${siteId}: ${e.message}`);
-      return preflightError('PREFLIGHT_INTERNAL_ERROR', 'Internal error', 500);
-    }
-
-    if (!site) {
-      return preflightError('PREFLIGHT_SITE_NOT_FOUND', 'Site not found', 404);
-    }
-
-    if (!await accessControlUtil.hasAccess(site)) {
-      return preflightError('PREFLIGHT_ACCESS_DENIED', 'Access denied', 403);
-    }
-
-    try {
-      const preflight = await dataAccess.Preflight.findById(preflightId);
-
-      // Treat a siteId mismatch identically to not found — no cross-site probing
-      if (!preflight || preflight.getSiteId() !== siteId) {
-        return preflightError('PREFLIGHT_NOT_FOUND', `Preflight with ID ${preflightId} not found`, 404);
-      }
-
-      return ok(PreflightDto.toDetailJSON(preflight));
-    } catch (e) {
-      log.error(`Failed to fetch preflight ${preflightId}: ${e.message}`);
-      return preflightError('PREFLIGHT_INTERNAL_ERROR', 'Failed to fetch preflight', 500);
-    }
-  };
-
   return {
     createPreflightJob,
     getPreflightJobStatusAndResult,
-    createPreflight,
-    getAllPreflights,
-    getPreflightById,
   };
 }
 

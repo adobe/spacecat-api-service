@@ -1,0 +1,373 @@
+/*
+ * Copyright 2026 Adobe. All rights reserved.
+ * This file is licensed to you under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License. You may obtain a copy
+ * of the License at http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed under
+ * the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTATIONS
+ * OF ANY KIND, either express or implied. See the License for the specific language
+ * governing permissions and limitations under the License.
+ */
+
+// @ts-check
+
+import * as helixWrapPkg from '@adobe/helix-shared-wrap';
+import { helixStatus } from '@adobe/helix-status';
+import vaultSecrets from '@adobe/spacecat-shared-vault-secrets';
+import { sqsEventAdapter, logWrapper, hasText } from '@adobe/spacecat-shared-utils';
+import * as imsClientPkg from '@adobe/spacecat-shared-ims-client';
+import { ok } from '@adobe/spacecat-shared-http-utils';
+
+import dataAccess from '../support/data-access.js';
+import sqs from '../support/sqs.js';
+import {
+  exchangeAndPersistPromiseToken,
+  invalidateJobPromiseToken,
+  isRetryableJobError,
+  NeedsReauthError,
+} from '../support/serenity/async-job-runner.js';
+import {
+  claimJobLease,
+  clearJobLease,
+  newLeaseToken,
+} from '../support/serenity/job-lease.js';
+import {
+  classifyPromptsHandler,
+  CLASSIFY_PROMPTS_JOB_TYPE,
+} from '../support/serenity/handlers/classify-prompts-job.js';
+import {
+  bulkTagsHandler,
+  BULK_TAGS_JOB_TYPE,
+} from '../support/serenity/handlers/bulk-tags-job.js';
+import {
+  semrushMarketGenerationHandler,
+  SEMRUSH_MARKET_GENERATION_JOB_TYPE,
+} from '../support/serenity/handlers/semrush-market-generation-job.js';
+import {
+  isRateLimited,
+  isSemrushTransportError,
+} from '../support/serenity/errors.js';
+
+// `wrap`'s runtime default export and `imsClientWrapper`'s runtime named export
+// both exist (`@adobe/helix-shared-wrap/src/wrap.js`,
+// `@adobe/spacecat-shared-ims-client/src/index.js`), but their `.d.ts` files
+// don't declare them the same way (`wrap` only as a named export; no
+// `imsClientWrapper` declaration at all) — the same upstream declaration-gap
+// class as `ImsPromiseClient` in `async-job-runner.js`. Reach both through a
+// namespace import rather than widening anything shared.
+const { default: wrap } = /** @type {{ default: (fn: Function) => { with: Function } }} */ (
+  /** @type {unknown} */ (helixWrapPkg)
+);
+const { imsClientWrapper } = /** @type {{ imsClientWrapper: Function }} */ (
+  /** @type {unknown} */ (imsClientPkg)
+);
+
+// This worker is a second Lambda built from the api-service repo, and it needs the exact
+// same Vault secrets the synchronous serenity path already loads (IMS_PROMISE_SEMRUSH_*,
+// SEMRUSH_PROJECTS_BASE_URL, Postgres, AUTOFIX_CRYPT_*). Rather than provision a separate
+// AppRole + bootstrap secret for this function's own name (`serenity-job-runner`), reuse
+// api-service's existing Vault setup: `@adobe/spacecat-shared-vault-secrets` derives its
+// AWS Secrets Manager bootstrap path and its Vault data path from the function name by
+// default, but both are overridable. We point them at `api-service` so no vault_policies
+// change is needed — the Lambda role already reads `/mysticat/bootstrap/*` via a wildcard,
+// and api-service's env-scoped AppRole already grants read on `dx_mysticat/data/{env}/api-service`.
+//
+// AWS_ENV is a deploy-time Lambda env var (set per environment in the worker deploy scripts).
+// A wrong env fails closed rather than reading another environment's secrets: api-service's
+// AppRole is scoped to a single env, so requesting a different env's path is denied. We read
+// ONLY AWS_ENV (not the generic ENV, which CI runners and container runtimes set routinely and
+// would be an unsafe input to a Vault-path decision), and throw on absence rather than defaulting
+// to a working-looking path — so a misconfigured deploy surfaces this message in the cold-start
+// log instead of an opaque Vault 403.
+const VAULT_SERVICE = 'api-service';
+
+/**
+ * vaultSecrets options that make this worker reuse api-service's Vault identity (bootstrap
+ * secret + env-scoped data path) instead of a dedicated AppRole for its own function name.
+ * Exported for unit testing only — not a public contract.
+ */
+export const vaultOpts = {
+  bootstrapPath: `/mysticat/bootstrap/${VAULT_SERVICE}`,
+  name: (/** @type {{ env?: Record<string, string> }} */ ctx) => {
+    const env = ctx.env?.AWS_ENV;
+    if (!env) {
+      throw new Error('[serenity-job-runner] AWS_ENV must be set (see the worker deploy scripts) to resolve the Vault secrets path');
+    }
+    return `${env}/${VAULT_SERVICE}`;
+  },
+};
+
+/**
+ * SQS-triggered entry point for the deferred user-context Semrush job runner
+ * (serenity-docs#186). Deployed as a distinct Lambda function from the
+ * API-Gateway-triggered `src/index.js` (see `package.json`'s `build:worker`/
+ * `deploy:worker` scripts) — same repo, same `src/support/serenity/*`
+ * modules, but a separate `hedy --entryFile` build so it can be wired to an
+ * SQS event source (Terraform-managed, not part of this build) instead of
+ * API Gateway.
+ *
+ * This file owns only the runner mechanics (job-type dispatch, exchange-
+ * first-and-persist promise-token handling, terminal-state invalidation).
+ * Per-consumer job logic — serenity-docs#33's prompt intent classification
+ * (classify -> create-with-tags -> publish) — lives in
+ * `../support/serenity/handlers/classify-prompts-job.js` and is registered
+ * below.
+ *
+ * A deferred-exchange handler receives a null token and exchanges it itself.
+ * @type {Record<string, (context: object, job: object,
+ *   accessToken: any) => Promise<object>>}
+ */
+const HANDLERS = {
+  [CLASSIFY_PROMPTS_JOB_TYPE]: classifyPromptsHandler,
+  [BULK_TAGS_JOB_TYPE]: bulkTagsHandler,
+  [SEMRUSH_MARKET_GENERATION_JOB_TYPE]: semrushMarketGenerationHandler,
+};
+
+/**
+ * Job types that MUST hold an atomic per-job lease before processing (Gap 4 — a
+ * security control against promise-token replay + double-write to Semrush under
+ * SQS at-least-once delivery). A delivery that cannot win the lease is dropped;
+ * a delivery that cannot even attempt the claim (no PostgREST client / query
+ * error) fails closed and is redelivered rather than processed unguarded.
+ */
+const LEASE_REQUIRED_JOB_TYPES = new Set([SEMRUSH_MARKET_GENERATION_JOB_TYPE]);
+
+/**
+ * Job types whose write-scoped access token is exchanged INSIDE the handler,
+ * AFTER a downstream call (DRS generation) returns — not by the runner up front.
+ * The runner passes these handlers a null access token; the handler owns the
+ * exchange. (The runner still invalidates the token on terminal state.)
+ */
+const DEFERRED_EXCHANGE_JOB_TYPES = new Set([SEMRUSH_MARKET_GENERATION_JOB_TYPE]);
+
+const TRANSIENT_NETWORK_ERROR_CODES = new Set([
+  'EAI_AGAIN',
+  'ECONNREFUSED',
+  'ECONNRESET',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+  'ENOTFOUND',
+  'EPIPE',
+  'ETIMEDOUT',
+  'UND_ERR_BODY_TIMEOUT',
+  'UND_ERR_CONNECT_TIMEOUT',
+  'UND_ERR_HEADERS_TIMEOUT',
+  'UND_ERR_SOCKET',
+]);
+const TRANSIENT_NETWORK_ERROR_NAMES = new Set(['AbortError', 'TimeoutError']);
+
+/**
+ * Recognises only explicit network/timeout signals, including a fetch TypeError
+ * whose cause carries the actual socket code. Plain TypeError/RangeError and
+ * arbitrary application errors deliberately do not match.
+ *
+ * @param {unknown} error
+ * @returns {boolean}
+ */
+function isTransientNetworkError(error) {
+  let current = error;
+  const seen = new Set();
+  for (let depth = 0; depth < 4 && current && typeof current === 'object'; depth += 1) {
+    if (seen.has(current)) {
+      return false;
+    }
+    seen.add(current);
+    const candidate = /** @type {{ code?: unknown, name?: unknown, cause?: unknown }} */ (
+      current
+    );
+    if (isRateLimited(current)) {
+      return true;
+    }
+    if (isSemrushTransportError(current)) {
+      const { status } = current;
+      if (typeof status === 'number' && Number.isInteger(status) && status >= 500) {
+        return true;
+      }
+    }
+    const code = typeof candidate.code === 'string' ? candidate.code : '';
+    const name = typeof candidate.name === 'string' ? candidate.name : '';
+    if (TRANSIENT_NETWORK_ERROR_CODES.has(code) || TRANSIENT_NETWORK_ERROR_NAMES.has(name)) {
+      return true;
+    }
+    current = candidate.cause;
+  }
+  return false;
+}
+
+/**
+ * Public retryability is intentionally narrower than "not a 4xx": only typed
+ * upstream 5xx/rate-limit failures and known transport/network failures qualify.
+ *
+ * @param {unknown} error
+ * @returns {boolean}
+ */
+function isRetryableFailure(error) {
+  if (isRateLimited(error)) {
+    return true;
+  }
+  if (isSemrushTransportError(error)) {
+    const { status } = error;
+    return typeof status === 'number' && Number.isInteger(status)
+      ? status >= 500
+      : isTransientNetworkError(error);
+  }
+  return isTransientNetworkError(error);
+}
+
+/**
+ * @param {object} message - the SQS message body (already JSON-parsed by
+ *   `sqsEventAdapter`), carrying only `{ jobId, type }` — no promise token,
+ *   per the runner's DLQ-redrive-safety design.
+ * @param {object} context
+ */
+export async function run(message, context) {
+  const { log, dataAccess: da } = context;
+  const { jobId, type } = message ?? {};
+
+  const job = await da.AsyncJob.findById(jobId);
+  if (!job) {
+    log.error(`[serenity-job-runner] Job ${jobId} not found; dropping message`);
+    return ok();
+  }
+
+  // SQS is at-least-once delivery: a redelivery of a message whose first
+  // delivery already reached a terminal state must not re-exchange the
+  // (already-consumed) promise token — that exchange would fail and
+  // overwrite a COMPLETED job's status with FAILED.
+  if (job.getStatus() !== 'IN_PROGRESS') {
+    log.info(`[serenity-job-runner] Job ${jobId} already in terminal state ${job.getStatus()}; dropping duplicate delivery`);
+    return ok();
+  }
+
+  // Dispatch on the STORED jobType, never the message `type` (worker dispatch
+  // integrity): the record is authoritative, and a message whose `type`
+  // contradicts it is poisoned/spoofed and must not steer the job onto a
+  // different handler. Reject the mismatched message; the job record is
+  // untouched and a correctly-typed redelivery still runs.
+  const storedJobType = job.getMetadata?.()?.jobType;
+  if (hasText(type) && hasText(storedJobType) && type !== storedJobType) {
+    log.error(`[serenity-job-runner] Message type '${type}' does not match stored jobType '${storedJobType}' for job ${jobId}; dropping mismatched message`);
+    return ok();
+  }
+
+  const handler = HANDLERS[storedJobType];
+  if (!handler) {
+    log.warn(`[serenity-job-runner] No handler registered for job type: ${storedJobType}`);
+    job.setStatus('FAILED');
+    job.setError({
+      code: 'UNKNOWN_JOB_TYPE',
+      message: `No handler for job type: ${storedJobType}`,
+      retryable: false,
+    });
+    await invalidateJobPromiseToken(context, job);
+    await job.save();
+    return ok();
+  }
+
+  // Atomic per-job lease (Gap 4) for lease-required job types — a security
+  // control: exactly one concurrent delivery may process a token-bearing write
+  // job. A claim-query failure fails closed (throw → SQS redelivers) rather than
+  // process unguarded; a lost claim drops the duplicate.
+  const leaseToken = LEASE_REQUIRED_JOB_TYPES.has(storedJobType) ? newLeaseToken() : null;
+  if (leaseToken) {
+    let won;
+    try {
+      won = await claimJobLease(context, job, { leaseToken });
+    } catch (error) {
+      log.warn(`[serenity-job-runner] Job ${jobId} lease claim errored; leaving for redelivery: ${error.message}`);
+      throw error;
+    }
+    if (!won) {
+      log.info(`[serenity-job-runner] Job ${jobId} lease held by another delivery; dropping duplicate`);
+      return ok();
+    }
+  }
+
+  // Token exchange: default "exchange first" (every exchange resets the promise
+  // token's TTL). Deferred for job types that must exchange AFTER a downstream
+  // call (e.g. the DRS generation invoke) — those handlers exchange themselves.
+  let accessToken = null;
+  if (!DEFERRED_EXCHANGE_JOB_TYPES.has(storedJobType)) {
+    try {
+      accessToken = await exchangeAndPersistPromiseToken(context, job);
+    } catch (error) {
+      if (error instanceof NeedsReauthError) {
+        log.warn(`[serenity-job-runner] Job ${jobId} needs re-authentication: ${error.message}`);
+        job.setStatus('FAILED');
+        job.setError({ code: error.code, message: error.message, retryable: false });
+        if (leaseToken) {
+          clearJobLease(job);
+        }
+        await job.save();
+        return ok();
+      }
+      // Release the lease on a rethrown (retryable) exchange failure so the
+      // redelivery can re-claim; the job stays IN_PROGRESS. A failed release is
+      // logged (not swallowed silently): the stale lease then blocks redelivery
+      // until its ~930s TTL, which on-call needs to be able to see.
+      if (leaseToken) {
+        clearJobLease(job);
+        await job.save().catch((saveError) => {
+          log.warn(`[serenity-job-runner] Job ${jobId} failed to release lease after exchange error: ${saveError.message}`);
+        });
+      }
+      throw error;
+    }
+  }
+
+  let tokenOwnershipTransferred = false;
+  try {
+    const result = await handler(context, job, accessToken);
+    job.setStatus('COMPLETED');
+    job.setResult(result ?? null);
+    // A handler that self-requeues (e.g. classify-prompts-job.js's
+    // `requeuePending`) forwards this job's CURRENT promise token onto the new
+    // job's metadata, rather than minting a fresh one — the worker has no HTTP
+    // context to mint from. Revocation is by identity, so invalidating here
+    // would also kill the requeued job's copy before it ever runs.
+    tokenOwnershipTransferred = Boolean(result?.requeuedJobId);
+  } catch (error) {
+    if (isRetryableJobError(error)) {
+      log.warn(`[serenity-job-runner] Job ${jobId} remains IN_PROGRESS for SQS retry: ${error.message}`);
+      // Release the lease so the redelivery can re-claim and resume from the
+      // handler's own checkpoints; keep the token (retained for retry). A failed
+      // release is logged, not swallowed — the stale lease blocks redelivery until
+      // its ~930s TTL.
+      if (leaseToken) {
+        clearJobLease(job);
+        await job.save().catch((saveError) => {
+          log.warn(`[serenity-job-runner] Job ${jobId} failed to release lease after retryable failure: ${saveError.message}`);
+        });
+      }
+      throw error;
+    }
+    log.error(`[serenity-job-runner] Job ${jobId} failed: ${error.message}`);
+    job.setStatus('FAILED');
+    job.setError({
+      code: error.code ?? 'JOB_FAILED',
+      message: error.message,
+      retryable: isRetryableFailure(error),
+    });
+  }
+
+  if (!tokenOwnershipTransferred) {
+    await invalidateJobPromiseToken(context, job);
+  }
+  // Scrub the lease on every terminal path (defense-in-depth): unconditional so a
+  // stale lease left on the record by a prior crashed attempt is cleared even if
+  // this delivery did not itself claim one (`clearJobLease` is a no-op when absent).
+  clearJobLease(job);
+  await job.save();
+
+  return ok();
+}
+
+export const main = wrap(run)
+  .with(sqsEventAdapter)
+  .with(logWrapper)
+  .with(dataAccess)
+  .with(sqs)
+  .with(imsClientWrapper)
+  .with(vaultSecrets, vaultOpts)
+  .with(helixStatus);

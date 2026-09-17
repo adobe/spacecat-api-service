@@ -40,10 +40,11 @@ function isApiKeyRoute(suffix) {
  *
  * This subclass keeps the IMS auth path open ONLY for the api-key endpoints
  * (`/tools/api-keys`, `/tools/api-keys/:id`) and returns null for any other
- * path so the request falls through to the next handler. Once the broader
- * Auto-Fix migration (ASO-607) lands and `AdobeImsHandler` is removed from
- * the global chain, this scoped handler keeps IaaS key management working
- * without re-introducing a global IMS auth backdoor.
+ * path so the request falls through to the next handler. The global
+ * `AdobeImsHandler` that formerly backed direct IMS-token auth on every route
+ * has been removed from the chain (all consumers migrated to JWT session
+ * tokens); this scoped handler is now the sole IMS surface and keeps IaaS key
+ * management working without re-introducing a global IMS auth backdoor.
  *
  * The path guard is a hardcoded prefix rather than a route-table lookup -
  * there are only three api-key routes, they are unlikely to change, and the

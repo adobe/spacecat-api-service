@@ -20,6 +20,18 @@ import { generateIsoWeekRange, getWeekDateRange } from './llmo-brand-presence.js
 import { parseAgentTypes } from './llmo-agent-types.js';
 import { checkDateRange } from './traffic-date-range.js';
 import { cachedOk } from '../../support/cached-response.js';
+import {
+  rotationContext,
+  shouldRotate,
+  rotatingPostgrest,
+  computeWindow,
+} from './traffic-rotation.js';
+
+// Read-time rotation of the two frozen demo sites' agentic data lives entirely
+// in the wrapped PostgREST client injected by withAgenticTrafficAuth; handlers
+// call client.rpc(...) unaware of rotation. The one exception is /weeks, whose
+// window is a pure function of now() (not a client fetch) — it still reads this.
+const rotationCtx = (siteId) => rotationContext(siteId, 'agentic');
 
 // Site-scoped agentic traffic handlers. Queries mysticat-data-service via PostgREST.
 
@@ -45,6 +57,10 @@ const VALID_SORT_COLUMNS_BY_USER_AGENT = new Set([
 ]);
 const DEFAULT_BY_URL_LIMIT = 50;
 const MAX_BY_URL_LIMIT = 200;
+// Upper bound on the URL set accepted by the hits-by-urls endpoint. Must stay
+// <= the matching cap in rpc_agentic_hits_for_urls (2000) so the handler
+// rejects oversized input with a clean 400 before the RPC raises.
+const MAX_HITS_BY_URLS = 2000;
 
 // UI platform code → DB value. 'all' / unknown → null (no filter). Applied
 // in parseAgenticTrafficParams, so it affects every site-scoped endpoint.
@@ -56,8 +72,57 @@ const PLATFORM_CODE_TO_DB = {
   perplexity: 'Perplexity',
   gemini: 'Gemini',
   google: 'Google',
+  'google-ai-mode': 'Google AI Mode',
+  copilot: 'Copilot',
   amazon: 'Amazon',
+  parallel: 'Parallel.ai',
+  manus: 'Manus',
+  keenable: 'Keenable.ai',
+  'meta-ai': 'Meta',
 };
+
+// A comma in the `platform` param signals a multi-select (Serenity). Returns the
+// trimmed non-empty tokens, or null when the value is a single value / absent —
+// which keeps the single-platform path byte-identical to before.
+function splitPlatformList(raw) {
+  if (typeof raw !== 'string' || !raw.includes(',')) {
+    return null;
+  }
+  return raw.split(',').map((t) => t.trim()).filter(Boolean);
+}
+
+// Prototype-safe UI-code → DB-value lookup: a raw like `toString`/`constructor` must not
+// resolve to an inherited Object.prototype member (which would leak a Function into the
+// RPC param). Own-property check only.
+function toDbPlatform(code) {
+  return Object.hasOwn(PLATFORM_CODE_TO_DB, code) ? PLATFORM_CODE_TO_DB[code] : null;
+}
+
+// Resolves the `platform` param into exactly one of two shapes:
+//   single  → { platform: <db value|null>, platforms: null }   (unchanged, fail-open)
+//   multi   → { platform: null, platforms: <db values[]|null> } (comma list; 'all' → no filter)
+// Unknown codes are silently dropped (matches the project-wide whitelist-filter
+// convention: `platform`/`successRate` silent-drop rather than 400 — see #2290).
+// A result of 0 or 1 real tokens collapses to the SINGLE path, so a trailing/bare comma,
+// a dup, or an unknown-heavy list (`chatgpt,` / `chatgpt,chatgpt` / `chatgpt,bogus`) stays
+// byte-identical to `chatgpt` — same export hash + scalar `p_platform`, not `p_platforms`.
+// The scalar and array RPC params AND-intersect, so a real multi selection nulls the scalar.
+function parsePlatforms(raw) {
+  const tokens = splitPlatformList(raw);
+  if (!tokens) {
+    return { platform: toDbPlatform(raw), platforms: null };
+  }
+  // An explicit 'all' anywhere in the list means "no platform filter".
+  if (tokens.includes('all')) {
+    return { platform: null, platforms: null };
+  }
+  const mapped = [...new Set(tokens.map(toDbPlatform).filter(Boolean))];
+  if (mapped.length >= 2) {
+    return { platform: null, platforms: mapped };
+  }
+  // 0 → fail-open (no filter); 1 → single path (byte-identical to a scalar request).
+  return { platform: mapped[0] ?? null, platforms: null };
+}
 
 // Re-exported for existing imports.
 export { parseAgentTypes };
@@ -95,10 +160,19 @@ function sanitizeDateString(value, fallback) {
 function parseAgenticTrafficParams(context) {
   const q = context.data || {};
   const defaults = defaultDateRange();
+  const { platform, platforms } = parsePlatforms(q.platform);
+  // Keep the silent-drop observable: a comma list that matched no known platform
+  // (and isn't the explicit 'all') falls open to all platforms — log it.
+  if (typeof q.platform === 'string' && q.platform.includes(',') && !platform && !platforms
+    && !q.platform.split(',').some((t) => t.trim() === 'all')) {
+    context.log?.debug?.(`agentic-traffic: platform list "${q.platform}" matched no known platforms — no platform filter applied`);
+  }
   return {
     startDate: sanitizeDateString(q.startDate || q.start_date, defaults.startDate),
     endDate: sanitizeDateString(q.endDate || q.end_date, defaults.endDate),
-    platform: PLATFORM_CODE_TO_DB[q.platform] ?? null,
+    platform,
+    // Additive multi-select inclusion list (Serenity). null → single/absent.
+    platforms,
     categoryName: sanitizeFilterString(q.categoryName || q.category_name),
     agentType: sanitizeFilterString(q.agentType || q.agent_type),
     // Additive inclusion list, orthogonal to single-value `agentType`. Used by URL Inspector.
@@ -113,8 +187,15 @@ function parseAgenticTrafficParams(context) {
   };
 }
 
+// Spread into every agentic RPC param set. Only present for a real multi-select, so a
+// single-platform request omits it entirely (byte-identical, and works against a
+// pre-migration RPC signature). Mirrors buildAgentTypesRpcParam so no handler is missed.
+function buildPlatformRpcParam(parsed) {
+  return parsed.platforms ? { p_platforms: parsed.platforms } : {};
+}
+
 function buildRpcParams(siteId, parsed) {
-  return {
+  const params = {
     p_site_id: siteId,
     p_start_date: parsed.startDate,
     p_end_date: parsed.endDate,
@@ -124,11 +205,13 @@ function buildRpcParams(siteId, parsed) {
     p_user_agent: parsed.userAgent,
     p_content_type: parsed.contentType,
     p_success_rate: parsed.successRate,
+    ...buildPlatformRpcParam(parsed),
   };
+  return params;
 }
 
 function canonicalizeExportPayload(siteId, parsed) {
-  return {
+  const payload = {
     kind: EXPORT_KIND,
     v: 1,
     c: EXPORT_CANONICAL_VERSION,
@@ -144,6 +227,12 @@ function canonicalizeExportPayload(siteId, parsed) {
     successRate: parsed.successRate,
     urlPathSearch: parsed.urlPathSearch,
   };
+  // Only include the multi-select list when present, so single-platform exports
+  // keep their pre-migration hash (matches buildRpcParams) and stay reachable in S3.
+  if (parsed.platforms) {
+    payload.platforms = parsed.platforms;
+  }
+  return payload;
 }
 
 // RFC 8785 JCS — strict on string/number/boolean/null/array/object. NaN/Infinity throw.
@@ -415,7 +504,12 @@ async function withAgenticTrafficAuth(context, getSiteAndValidateAccess, handler
     return badRequest(error.message);
   }
 
-  return handlerFn(context, Site.postgrestService, siteId, siteContext);
+  // Demo sites read through a rotating client (frozen data → rolling window);
+  // every other site gets the real client unchanged (zero behavior change).
+  const client = shouldRotate(siteId, 'agentic')
+    ? rotatingPostgrest(Site.postgrestService, siteId, 'agentic')
+    : Site.postgrestService;
+  return handlerFn(context, client, siteId, siteContext);
 }
 
 /**
@@ -430,7 +524,8 @@ export function createAgenticTrafficKpisHandler(getSiteAndValidateAccess) {
       'kpis',
       async (ctx, client, siteId) => {
         const parsed = parseAgenticTrafficParams(ctx);
-        const { data, error } = await client.rpc('rpc_agentic_traffic_kpis', buildRpcParams(siteId, parsed));
+        const rpcParams = buildRpcParams(siteId, parsed);
+        const { data, error } = await client.rpc('rpc_agentic_traffic_kpis', rpcParams);
         if (error) {
           ctx.log.error(`Agentic traffic kpis PostgREST error: ${error.message}`);
           return internalServerError('Failed to fetch agentic traffic KPIs');
@@ -504,10 +599,8 @@ export function createAgenticTrafficByRegionHandler(getSiteAndValidateAccess) {
       'by-region',
       async (ctx, client, siteId) => {
         const parsed = parseAgenticTrafficParams(ctx);
-        const { data, error } = await client.rpc(
-          'rpc_agentic_traffic_by_region',
-          buildRpcParams(siteId, parsed),
-        );
+        const rpcParams = buildRpcParams(siteId, parsed);
+        const { data, error } = await client.rpc('rpc_agentic_traffic_by_region', rpcParams);
         if (error) {
           ctx.log.error(`Agentic traffic by-region PostgREST error: ${error.message}`);
           return internalServerError('Failed to fetch agentic traffic by region');
@@ -536,10 +629,7 @@ export function createAgenticTrafficByCategoryHandler(getSiteAndValidateAccess) 
         // by_category groups by category — no p_category_name parameter.
         const rpcParams = buildRpcParams(siteId, parsed);
         delete rpcParams.p_category_name;
-        const { data, error } = await client.rpc(
-          'rpc_agentic_traffic_by_category',
-          rpcParams,
-        );
+        const { data, error } = await client.rpc('rpc_agentic_traffic_by_category', rpcParams);
         if (error) {
           ctx.log.error(`Agentic traffic by-category PostgREST error: ${error.message}`);
           return internalServerError('Failed to fetch agentic traffic by category');
@@ -565,10 +655,8 @@ export function createAgenticTrafficByPageTypeHandler(getSiteAndValidateAccess) 
       'by-page-type',
       async (ctx, client, siteId) => {
         const parsed = parseAgenticTrafficParams(ctx);
-        const { data, error } = await client.rpc(
-          'rpc_agentic_traffic_by_page_type',
-          buildRpcParams(siteId, parsed),
-        );
+        const rpcParams = buildRpcParams(siteId, parsed);
+        const { data, error } = await client.rpc('rpc_agentic_traffic_by_page_type', rpcParams);
         if (error) {
           ctx.log.error(`Agentic traffic by-page-type PostgREST error: ${error.message}`);
           return internalServerError('Failed to fetch agentic traffic by page type');
@@ -594,10 +682,8 @@ export function createAgenticTrafficByStatusHandler(getSiteAndValidateAccess) {
       'by-status',
       async (ctx, client, siteId) => {
         const parsed = parseAgenticTrafficParams(ctx);
-        const { data, error } = await client.rpc(
-          'rpc_agentic_traffic_by_status',
-          buildRpcParams(siteId, parsed),
-        );
+        const rpcParams = buildRpcParams(siteId, parsed);
+        const { data, error } = await client.rpc('rpc_agentic_traffic_by_status', rpcParams);
         if (error) {
           ctx.log.error(`Agentic traffic by-status PostgREST error: ${error.message}`);
           return internalServerError('Failed to fetch agentic traffic by status');
@@ -727,6 +813,92 @@ export function createAgenticTrafficByUrlHandler(getSiteAndValidateAccess) {
             hitsTrend: Array.isArray(row.hits_trend)
               ? row.hits_trend.map((point) => ({
                 weekStart: point.week_start,
+                value: Number(point.value ?? 0),
+              }))
+              : [],
+          })),
+        });
+      },
+    );
+  };
+}
+
+/**
+ * POST /sites/:siteId/agentic-traffic/hits-by-urls
+ *
+ * Bounded keyed lookup of per-URL agentic totalHits + weekly hitsTrend for a
+ * caller-supplied set of canonical URLs (LLMO-5586). Backs the per-URL
+ * consumers (URL Inspector, opportunity sections, domain chart) that only need
+ * hits, so they no longer eager-page the expensive ranked `by-url` grid.
+ *
+ * Body: {
+ *   urls: [{ host, urlPath }],   // the URLs already on screen
+ *   startDate, endDate,          // same shape as the other agentic endpoints
+ *   platform?, agentType?, agentTypes?, userAgent?
+ * }
+ * Returns: { rows: [{ host, urlPath, totalHits, hitsTrend }] }
+ *
+ * Calls rpc_agentic_hits_for_urls, which matches rpc_agentic_traffic_by_url's
+ * fact-derived totals/trend exactly without the full-site scan + ranking.
+ */
+export function createAgenticTrafficHitsByUrlsHandler(getSiteAndValidateAccess) {
+  return async function getAgenticTrafficHitsByUrls(context) {
+    return withAgenticTrafficAuth(
+      context,
+      getSiteAndValidateAccess,
+      'hits-by-urls',
+      async (ctx, client, siteId) => {
+        const parsed = parseAgenticTrafficParams(ctx);
+
+        const rawUrls = ctx.data?.urls;
+        if (!Array.isArray(rawUrls)) {
+          return badRequest('urls must be an array of { host, urlPath } objects');
+        }
+        if (rawUrls.length > MAX_HITS_BY_URLS) {
+          return badRequest(`urls must contain at most ${MAX_HITS_BY_URLS} entries`);
+        }
+
+        // Normalise to the RPC's { host, url_path } shape; accept camelCase or
+        // snake_case for url_path and drop entries missing host or path.
+        const urls = rawUrls
+          .map((u) => ({ host: u?.host, url_path: u?.urlPath ?? u?.url_path }))
+          .filter((u) => hasText(u.host) && hasText(u.url_path));
+
+        if (urls.length === 0) {
+          // ok() not cachedOk(): this is a POST whose result varies by body,
+          // and cachedOk is documented as GET-only.
+          return ok({ rows: [] });
+        }
+
+        const rpcParams = {
+          p_site_id: siteId,
+          p_start_date: parsed.startDate,
+          p_end_date: parsed.endDate,
+          p_urls: urls,
+          p_platform: parsed.platform,
+          p_user_agent: parsed.userAgent,
+          ...buildAgentTypesRpcParam(parsed),
+          ...buildPlatformRpcParam(parsed),
+        };
+
+        const { data, error } = await client.rpc('rpc_agentic_hits_for_urls', rpcParams);
+        if (error) {
+          ctx.log.error(`Agentic traffic hits-by-urls PostgREST error: ${error.message}`);
+          return internalServerError('Failed to fetch agentic hits by URLs');
+        }
+        /* c8 ignore next */
+        const rows = data ?? [];
+        // raw vs valid surfaces caller-side URL-list bugs (entries dropped for
+        // missing host/path); returned is the RPC row count.
+        ctx.log.info(`Agentic traffic hits-by-urls: raw=${rawUrls.length} valid=${urls.length} returned=${rows.length}`);
+        return ok({
+          rows: rows.map((row) => ({
+            host: row.host || '',
+            urlPath: row.url_path || '',
+            totalHits: Number(row.total_hits ?? 0),
+            hitsTrend: Array.isArray(row.hits_trend)
+              ? row.hits_trend.map((point) => ({
+                weekStart: point.week_start ?? null,
                 value: Number(point.value ?? 0),
               }))
               : [],
@@ -936,9 +1108,10 @@ export function createAgenticTrafficFilterDimensionsHandler(getSiteAndValidateAc
       'filter-dimensions',
       async (ctx, client, siteId) => {
         const parsed = parseAgenticTrafficParams(ctx);
+        const rpcParams = buildRpcParams(siteId, parsed);
         const { data, error } = await client.rpc(
           'rpc_agentic_traffic_distinct_filters',
-          buildRpcParams(siteId, parsed),
+          rpcParams,
         );
         if (error) {
           ctx.log.error(`Agentic traffic filter-dimensions PostgREST error: ${error.message}`);
@@ -1007,6 +1180,12 @@ export function createAgenticTrafficWeeksHandler(getSiteAndValidateAccess) {
       getSiteAndValidateAccess,
       'weeks',
       async (ctx, client, siteId) => {
+        const rot = rotationCtx(siteId);
+        if (rot.rotate) {
+          // Rolling window is a pure function of now() — keeps /weeks consistent
+          // with the relabeled trend without touching the frozen min/max dates.
+          return cachedOk({ weeks: computeWindow(rot.now).weeks });
+        }
         const [minResult, maxResult] = await Promise.all([
           client
             .from('agentic_traffic')
@@ -1110,6 +1289,9 @@ export function createAgenticTrafficUrlBrandPresenceHandler(getSiteAndValidateAc
           p_model: parsed.platform || null,
           p_site_id: siteId,
         };
+        // Single-model only: this RPC is the PG (Adobe) path and has no p_models param.
+        // Serenity multi-select brand-presence reads the Semrush url-inspector endpoints,
+        // not this RPC; and the PG customer never renders the multi-select. See LLMO-7553.
 
         const { data, error } = await client.rpc(
           'rpc_brand_presence_url_detail',

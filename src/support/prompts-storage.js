@@ -15,12 +15,90 @@ import crypto from 'node:crypto';
 import { hasText, isValidUUID } from '@adobe/spacecat-shared-utils';
 
 import { classifyIntents } from './intent-classifier.js';
+import { throwOnPgConstraintViolation } from './errors.js';
+import { assertPermittedSource } from './prompt-sources.js';
 import { INTENT_VALUES, normalizeIntent } from './intent.js';
+import { canonicalizeSource, foldSourceValue } from './serenity/prompt-tags.js';
 
 // Re-exported for backward compatibility — `normalizeIntent`/`INTENT_VALUES` now
 // live in `./intent.js` so the LLM intent classifier can reuse them without an
 // import cycle. Existing importers of these from `prompts-storage.js` keep working.
 export { INTENT_VALUES, normalizeIntent };
+
+/**
+ * The closed `origin` vocabulary — who authored the prompt's text
+ * (origin-dimension.md §1). Matches the `category_origin` enum on `prompts.origin`.
+ */
+export const V2_PROMPT_ORIGINS = Object.freeze(['ai', 'human']);
+const DEFAULT_ORIGIN = 'human';
+
+/**
+ * Derives the `origin` to store for a v2-prompts write, as a function of the
+ * request PRINCIPAL, never of the caller-supplied body value (origin-dimension.md
+ * §3). `origin` records who authored the prompt's text and is read-only wherever a
+ * user can reach it:
+ *
+ *   - a USER-authenticated principal (an end-user IMS / JWT session) always writes
+ *     `human`; any `origin` in the body is IGNORED (never rejected — the derived
+ *     value is authoritative, so the caller loses nothing);
+ *   - a SERVICE principal (an S2S consumer/admin, or a scoped/legacy API key) is
+ *     believed: its body value is honoured, validated against
+ *     {@link V2_PROMPT_ORIGINS}, defaulting to `human` only when absent or
+ *     out-of-vocabulary. This is the DRS contract (`origin: 'ai'`); dropping it
+ *     would relabel every generated prompt `human` on its next upsert
+ *     (origin-dimension.md §3 consequence 1). NOTE: an S2S caller authenticates
+ *     with a JWT, so `isUserPrincipal` CANNOT be decided by auth type alone — the
+ *     caller (`createPromptsByBrand`) consults the token's S2S claims first.
+ *
+ * This governs CREATE only — `origin` is never patched on update (it is fixed by
+ * the writer that created the row), which the update path enforces by not writing
+ * the column at all.
+ *
+ * @param {unknown} bodyOrigin - the caller-supplied `origin`, or undefined.
+ * @param {boolean} isUserPrincipal - false for a service principal (S2S
+ *   consumer/admin or scoped/legacy API key); true for an end-user IMS/JWT session.
+ * @returns {string} the origin to store (`ai` or `human`).
+ */
+export function deriveV2PromptOrigin(bodyOrigin, isUserPrincipal) {
+  if (isUserPrincipal) {
+    return DEFAULT_ORIGIN;
+  }
+  return V2_PROMPT_ORIGINS.includes(/** @type {string} */ (bodyOrigin))
+    ? /** @type {string} */ (bodyOrigin)
+    : DEFAULT_ORIGIN;
+}
+
+/**
+ * Classifies a request PRINCIPAL as a SERVICE principal (vs. an end user), for the
+ * purpose of the {@link deriveV2PromptOrigin} decision. A service principal is:
+ *
+ *   - an S2S consumer or admin — these authenticate with a JWT, so `getType()` is
+ *     `'jwt'`, indistinguishable BY TYPE from an end-user session; they are
+ *     identified only by the signature-validated `is_s2s_consumer` /
+ *     `is_s2s_admin` claim (surfaced as `isS2SConsumer()` / `isS2SAdmin()`), never
+ *     by caller-controlled body input; OR
+ *   - a non-jwt/ims auth type (a scoped/legacy API key).
+ *
+ * Fails SAFE to the least-privileged (USER) principal: an ABSENT or indeterminate
+ * auth type with no S2S signal, or a non-function `getType` / `isS2S*`, resolves to
+ * `false` (→ user) rather than throwing or silently gaining service privilege. This
+ * is why a future unwrapped caller (an internal queue consumer, re-ordered
+ * middleware) cannot slip into the service path.
+ *
+ * @param {*} authInfo - the request's AuthInfo (`context.attributes.authInfo`).
+ * @returns {boolean} true for a service principal (its body `origin` is honoured).
+ */
+export function isServicePrincipal(authInfo) {
+  const isS2SConsumer = typeof authInfo?.isS2SConsumer === 'function'
+    && !!authInfo.isS2SConsumer();
+  const isS2SAdmin = typeof authInfo?.isS2SAdmin === 'function'
+    && !!authInfo.isS2SAdmin();
+  if (isS2SConsumer || isS2SAdmin) {
+    return true;
+  }
+  const authType = typeof authInfo?.getType === 'function' ? authInfo.getType() : undefined;
+  return !!authType && authType !== 'jwt' && authType !== 'ims';
+}
 
 /**
  * Per-client cache of whether `prompts.intent` is selectable/writable. Keyed by
@@ -100,6 +178,83 @@ async function withMissingIntentFallback(postgrestClient, run) {
     return run(false);
   }
   return result;
+}
+
+// Bound the number of ids per `id=in.(...)` PostgREST GET so the query string
+// stays well under proxy/header URL-length limits: a full page (pageSize caps at
+// 1000) of ~36-char UUIDs would be ~37KB and risk a 414. 100 ids ≈ 3.7KB.
+const INTENT_LOOKUP_CHUNK_SIZE = 100;
+// Chunk size for the set-based bulk delete. PostgREST caps any single response at
+// 1000 rows, so a `prompt_id=in.(...)` update over >1000 matching ids would delete
+// them all yet omit the excess from RETURNING, mis-reporting deleted ids as
+// not-found. Chunking under the cap keeps the returned-id diff exact for any input
+// size, independent of the caller's own cap. 500 stays comfortably under 1000.
+const PROMPT_DELETE_CHUNK_SIZE = 500;
+
+function chunkArray(arr, size) {
+  const chunks = [];
+  for (let i = 0; i < arr.length; i += size) {
+    chunks.push(arr.slice(i, i + size));
+  }
+  return chunks;
+}
+
+/**
+ * Loads `intent` for a set of prompts by their `prompts.id` (uuid) values.
+ * Used to enrich reads (e.g. brand-presence executions) that carry a `prompt_id`
+ * FK but not intent itself. Any error — including a missing `intent` column — is a
+ * non-fatal miss (empty Map) so callers never fail a request over this enrichment.
+ * No missing-column retry is needed here: this helper's only output is intent, so a
+ * column-absent environment simply yields an empty Map, same as the error path.
+ *
+ * The id list is chunked across parallel queries to bound the IN-clause URL length,
+ * and an optional `organizationId` predicate scopes the lookup for defense-in-depth
+ * (callers already pass tenant-scoped ids). A missing-`intent`-column error logs at
+ * debug (benign, older DB image); any other error logs at warn so blank intent is
+ * diagnosable — neither fails the caller.
+ *
+ * @param {object} params
+ * @param {Array<string>} params.promptIds - prompts.id (uuid) values; nullish/dupes are ignored
+ * @param {string} [params.organizationId] - scopes the lookup to this org (defense-in-depth)
+ * @param {object} params.postgrestClient - PostgREST client
+ * @param {object} [params.log] - logger; `debug` for benign missing-column, `warn` otherwise
+ * @returns {Promise<Map<string, string>>} Map of promptId -> intent (only non-empty intents)
+ */
+export async function getIntentsByPromptIds({
+  promptIds, organizationId, postgrestClient, log,
+}) {
+  const ids = [...new Set((promptIds || []).filter(Boolean))];
+  if (!ids.length || !postgrestClient?.from) {
+    return new Map();
+  }
+
+  const results = await Promise.all(
+    chunkArray(ids, INTENT_LOOKUP_CHUNK_SIZE).map((batch) => {
+      let query = postgrestClient.from('prompts').select('id, intent').in('id', batch);
+      if (organizationId) {
+        query = query.eq('organization_id', organizationId);
+      }
+      return query;
+    }),
+  );
+
+  const map = new Map();
+  results.forEach(({ data, error }) => {
+    if (error) {
+      if (isMissingIntentColumnError(error)) {
+        log?.debug?.(`getIntentsByPromptIds: prompts.intent unavailable (${error.message}); returning no intent`);
+      } else {
+        log?.warn?.(`getIntentsByPromptIds: intent lookup failed (${error.message}); returning no intent`);
+      }
+      return;
+    }
+    (data || []).forEach((r) => {
+      if (r.intent) {
+        map.set(String(r.id), r.intent);
+      }
+    });
+  });
+  return map;
 }
 
 /**
@@ -306,6 +461,8 @@ async function ensureLookupEntries(organizationId, prompts, categoryMap, topicMa
   }
 }
 
+const UPDATE_CONCURRENCY = 20;
+
 const SORT_COLUMN_MAP = {
   topic: 'topics(name)',
   prompt: 'text',
@@ -313,6 +470,11 @@ const SORT_COLUMN_MAP = {
   origin: 'origin',
   status: 'status',
   updatedAt: 'updated_at',
+  // Sort on the `source_canonical` generated column (WP-S4:
+  // `GENERATED ALWAYS AS (lower(replace(source,'_','-'))) STORED`, btree-indexed),
+  // so the two drift spellings of a producer order together and the label — which
+  // lives in elmo, never on the server — plays no part (source-dimension.md §3.1).
+  source: 'source_canonical',
 };
 
 function mapRowToPrompt(row) {
@@ -331,8 +493,23 @@ function mapRowToPrompt(row) {
     name: row.name,
     regions: row.regions || [],
     status: row.status || 'active',
-    origin: row.origin || 'human',
-    source: row.source || 'config',
+    // Return the stored `origin` verbatim — deliberately NO `|| 'human'` AND no
+    // `?? 'human'` fallback (origin-dimension.md §WP-O2b item 4 / §2.3).
+    // INVARIANT: `prompts.origin` is NOT NULL in production (zero NULLs in
+    // 265,980 rows, §2.3). Any fallback — including nullish-coalescing, which
+    // masks NULL exactly as `||` masks it for a NULL — would silently mislabel a
+    // model-written (`ai`) prompt as `human` were a NULL ever present, the exact
+    // corruption this dimension exists to prevent. Surfacing the raw value is the
+    // fail-loud choice over a fabricated `human`; unlike `source`/`status`, whose
+    // fallbacks are cosmetic, an origin fallback is a correctness hazard.
+    origin: row.origin,
+    // Second derivation boundary (source-dimension.md §3.1): the v2 read surface
+    // returns the CANONICAL slug, so elmo's badge — which keys on the API's value —
+    // resolves (`agentic_traffic` → `agentic-traffic`). A value that fails the guard
+    // (empty, `:`, over-long, root-shadowing) returns the RAW string rather than
+    // null: the grid must still show the operator what is stored. `?? 'config'` only
+    // guards a nullish column (in-memory/test rows); the DB column is NOT NULL.
+    source: canonicalizeSource(row.source) ?? row.source ?? 'config',
     intent: row.intent ?? null,
     createdAt: row.created_at,
     createdBy: row.created_by,
@@ -379,8 +556,11 @@ function mapRowToPrompt(row) {
  * topic name, category name
  * @param {string} [params.region] - Filter by region (array containment)
  * @param {string} [params.origin] - Filter by origin (ai, human)
+ * @param {string} [params.source] - Filter by source, matched on the
+ * `source_canonical` generated column: `citation-attempt` also matches rows
+ * stored as `citation_attempt` (drift spellings fold together, case-insensitive).
  * @param {string} [params.sort] - Sort column (topic, prompt, category, origin,
- * status, updatedAt)
+ * source, status, updatedAt)
  * @param {string} [params.order] - Sort direction (asc, desc). Default desc
  * @param {number} [params.limit] - Page size (default 100, max 5000)
  * @param {number} [params.page] - Page number, 1-based (default 1)
@@ -396,6 +576,7 @@ export async function listPrompts({
   search,
   region,
   origin,
+  source,
   sort,
   order,
   limit = 100,
@@ -507,8 +688,21 @@ export async function listPrompts({
       baseQuery = baseQuery.eq('origin', origin);
     }
 
+    if (hasText(source)) {
+      // Match on the `source_canonical` generated column (WP-S4) — the DB
+      // canonicalizes `lower(replace(source,'_','-'))` at write time, so a single
+      // equality on the folded incoming value catches every drift spelling AND is
+      // case-insensitive (`citation-attempt` finds rows stored `citation_attempt`
+      // or `Citation_Attempt`). Fold the query-param value with the same transform
+      // (`foldSourceValue` — the single definition) so the two sides align.
+      baseQuery = baseQuery.eq('source_canonical', foldSourceValue(source));
+    }
+
     if (hasText(region)) {
-      baseQuery = baseQuery.contains('regions', [region]);
+      // Stored region codes can be lower- or upper-case, so match both
+      // variants — a case-sensitive `.contains` would miss the other. (LLMO-5755)
+      const regionVariants = [...new Set([region.toLowerCase(), region.toUpperCase()])];
+      baseQuery = baseQuery.overlaps('regions', regionVariants);
     }
 
     if (hasText(search)) {
@@ -608,8 +802,24 @@ export async function getPromptById({
 }
 
 /**
+ * Canonical prompt-identity key: `lower(text):sorted(regions):source`, matching
+ * the store's partial unique index (brand_id, lower(text), sorted_regions, source)
+ * (SITES-47870). Both the incoming-match map and the pre-insert dedup use this so
+ * their normalization can't drift apart. `source` defaults to 'config' to mirror
+ * the column default for prompts that omit it.
+ *
+ * @param {{ text?: string, regions?: string[], source?: string }} p
+ * @returns {string}
+ */
+function buildPromptKey({ text, regions, source }) {
+  const t = String(text || '').trim().toLowerCase();
+  const r = (regions || []).map((x) => String(x).toLowerCase()).sort().join(',');
+  return `${t}:${r}:${source || 'config'}`;
+}
+
+/**
  * Upserts prompts into the prompts table.
- * Match by id (prompt_id) or by (text, regions). Regions normalized (lowercase, sorted).
+ * Match by id (prompt_id) or by (text, regions, source). Regions normalized (lowercase, sorted).
  *
  * @param {object} params
  * @param {string} params.organizationId - SpaceCat organization UUID
@@ -618,6 +828,11 @@ export async function getPromptById({
  * categoryId, topicId, ... }
  * @param {object} params.postgrestClient - PostgREST client
  * @param {string} params.updatedBy - User performing the update
+ * @param {((text: string) => Promise<string|null>)} [params.classifyIntent] -
+ *   Optional best-effort intent classifier; applied only to prompts that change
+ *   text without an explicit intent. Non-fatal: a null result leaves intent unset.
+ * @param {number} [params.classifyIntentBatchTimeoutMs] - Cap on the classifier
+ *   batch (ms); the upsert proceeds without intent once it elapses.
  * @returns {Promise<{created: number, updated: number, prompts: object[]}>}
  */
 export async function upsertPrompts({
@@ -627,28 +842,57 @@ export async function upsertPrompts({
   postgrestClient,
   updatedBy = 'system',
   classifyIntent,
-  classifyIntentBatchTimeoutMs,
+  classifyIntentBatchTimeoutMs = 8000,
 }) {
   if (!postgrestClient?.from) {
     throw new Error('PostgREST client is required for prompts');
+  }
+
+  // Write-boundary chokepoint (SITES-47870 / D2): validate every source up front,
+  // before any DB work or side effects. ensureLookupEntries (below) creates
+  // category/topic rows for the whole batch, so validating per-prompt inside the
+  // main loop would leave orphan lookup rows when a later prompt's source is
+  // rejected. Fail the whole batch first, cleanly.
+  for (const p of prompts) {
+    assertPermittedSource(p.source || 'config');
   }
 
   const incomingIds = prompts
     .map((p) => p.id || p.prompt_id)
     .filter(hasText);
 
-  let existingQuery = postgrestClient
-    .from('prompts')
-    .select('id,prompt_id,text,regions,status')
-    .eq('organization_id', organizationId)
-    .eq('brand_id', brandUuid);
-
-  if (incomingIds.length > 0) {
-    existingQuery = existingQuery.in('prompt_id', incomingIds);
-  }
-
   const [{ data: existing }, lookups] = await Promise.all([
-    existingQuery,
+    withMissingIntentFallback(postgrestClient, (includeIntent) => {
+      const cols = includeIntent
+        ? 'id,prompt_id,text,regions,status,source,intent'
+        : 'id,prompt_id,text,regions,status,source';
+      const baseQuery = () => postgrestClient
+        .from('prompts')
+        .select(cols)
+        .eq('organization_id', organizationId)
+        .eq('brand_id', brandUuid);
+      if (incomingIds.length === 0) {
+        return baseQuery();
+      }
+      // Chunk the `prompt_id=in.(...)` filter the same way getIntentsByPromptIds
+      // does (INTENT_LOOKUP_CHUNK_SIZE) — PostgREST caps any single response at
+      // 1000 rows, so an unchunked IN-list over a brand with >1000 matching
+      // existing prompts silently drops the excess. Those dropped rows then look
+      // "new" below and get misrouted to INSERT, colliding with
+      // uq_prompt_text_region_source_per_brand (confirmed live, 2026-08-24: a
+      // 1000-id batch against a brand with ~1200 existing prompts came back
+      // missing ~200 of them, and the resulting INSERT 409'd).
+      return Promise.all(
+        chunkArray(incomingIds, INTENT_LOOKUP_CHUNK_SIZE)
+          .map((batch) => baseQuery().in('prompt_id', batch)),
+      ).then((results) => {
+        const firstError = results.find((r) => r.error)?.error || null;
+        if (firstError) {
+          return { data: null, error: firstError };
+        }
+        return { data: results.flatMap((r) => r.data || []), error: null };
+      });
+    }),
     buildLookupMaps(organizationId, postgrestClient),
   ]);
 
@@ -657,14 +901,23 @@ export async function upsertPrompts({
   // eslint-disable-next-line no-await-in-loop,max-len
   await ensureLookupEntries(organizationId, prompts, categoryMap, topicMap, postgrestClient, updatedBy);
 
-  const getKey = (p) => {
-    const norm = (p.regions || []).map((r) => String(r).toLowerCase()).sort();
-    return `${String(p.prompt || p.text || '').trim()}:${norm.join(',')}`;
-  };
+  // `source` is part of prompt identity (SITES-47870): the store's unique key is
+  // (brand_id, lower(text), sorted_regions(regions), source), so the same text
+  // and regions produced by two pipelines coexists as separate per-source rows.
+  // Match/dedup here must therefore key on source too, or an incoming prompt
+  // would be matched to an existing same-text row of a DIFFERENT source and
+  // update it (moving counts between columns) instead of inserting its own row.
+  const getKey = (p) => buildPromptKey({
+    text: p.prompt || p.text,
+    regions: p.regions,
+    source: p.source,
+  });
 
   const existingById = new Map((existing || []).map((p) => [p.prompt_id, p]));
   const existingByKey = new Map(
-    (existing || []).map((p) => [getKey({ prompt: p.text, regions: p.regions }), p]),
+    (existing || []).map(
+      (p) => [getKey({ prompt: p.text, regions: p.regions, source: p.source }), p],
+    ),
   );
 
   const toInsert = [];
@@ -674,12 +927,13 @@ export async function upsertPrompts({
   for (const p of prompts) {
     const text = p.prompt || p.text;
     const regions = p.regions || [];
+    const source = p.source || 'config';
     const promptId = hasText(p.id)
       ? p.id
       : (p.prompt_id || crypto.randomUUID().toString());
 
     // eslint-disable-next-line max-len
-    const match = existingById.get(promptId) || existingByKey.get(getKey({ prompt: text, regions }));
+    const match = existingById.get(promptId) || existingByKey.get(getKey({ prompt: text, regions, source }));
 
     const categoryUuid = hasText(p.category)
       ? categoryMap.get(p.category.toLowerCase().trim()) || null
@@ -699,29 +953,108 @@ export async function upsertPrompts({
       topic_id: topicUuid,
       status: p.status || 'active',
       origin: p.origin || 'human',
-      source: p.source || 'config',
+      source,
       intent: normalizeIntent(p.intent),
       updated_by: updatedBy,
     };
 
+    // `source` is immutable on an UPDATE (SITES-47870). getKey folds source into
+    // the match key, so a key-match always shares source; but existingById
+    // matches by prompt_id ALONE, so an id-match can carry a different incoming
+    // source. Overwriting it would silently move an existing row between report
+    // columns (the exact corruption the source-aware key prevents) and could
+    // raise an unmapped 23505 on the UPDATE. Preserve the stored source; source
+    // is only set at insert time. The `match.source ?? source` below is a
+    // defensive fallback only: the companion migration (#793) makes prompts.source
+    // NOT NULL, so match.source is always present for a real DB row — the `??`
+    // just keeps an in-memory/test row without a source from becoming `undefined`;
+    // it is NOT a backfill path.
     if (match && match.status !== 'active') {
+      if (match.status === 'deleted') {
+        const reactivated = {
+          ...row,
+          id: match.id,
+          status: 'active',
+          intent: row.intent ?? match.intent,
+          source: match.source ?? source,
+          // `origin` is fixed by the writer that created the row and is never
+          // re-derived on a later write (origin-dimension.md §3): preserve the
+          // stored value across a reactivation. `?? row.origin` is a defensive
+          // fallback for an in-memory/test match without an origin, mirroring
+          // `source` above — not a backfill path (prod has zero NULL origins).
+          origin: match.origin ?? row.origin,
+        };
+        toUpdate.push(reactivated);
+        processed.push({ ...reactivated, prompt_id: promptId });
+      }
       // eslint-disable-next-line no-continue
       continue;
     }
 
     if (match) {
-      toUpdate.push({ ...row, id: match.id });
-      processed.push({ ...row, prompt_id: promptId });
+      // `source` AND `origin` are both immutable on an UPDATE: source names the
+      // producing system, origin names the writer that created the row, and
+      // neither is re-derived on a later write (origin-dimension.md §3). Preserve
+      // the stored values so a user-principal derive of `human` cannot relabel an
+      // existing `ai` prompt. `?? row.*` is the same defensive in-memory/test
+      // fallback used for `source` — not a backfill.
+      const updated = {
+        ...row,
+        id: match.id,
+        source: match.source ?? source,
+        origin: match.origin ?? row.origin,
+      };
+      toUpdate.push(updated);
+      processed.push({ ...updated, prompt_id: promptId });
     } else {
       toInsert.push(row);
       processed.push({ ...row, prompt_id: promptId });
     }
   }
 
+  // Guard against uq_prompt_text_region_source_per_brand: deduplicate toInsert
+  // by (lower(text), sorted_regions, source) before the bulk INSERT. For a new
+  // brand existingByKey is empty, so cross-topic text collisions all land here.
+  // `source` is part of the key (SITES-47870), so the same text under two
+  // different sources is NOT a collision — each keeps its own row.
+  // Deterministic tie-break: sort by (topic_id, prompt_id) asc, keep first.
+  // Each drop is logged (warn) with a text hash — auditable without echoing
+  // customer data. Dropped entries are removed from processed so counts stay
+  // honest. Guard is > 1: a single-row batch cannot collide with itself.
+  if (toInsert.length > 1) {
+    const dedupKey = (row) => buildPromptKey(row);
+    const sortedForDedup = [...toInsert].sort((a, b) => {
+      const tCmp = String(a.topic_id ?? '').localeCompare(String(b.topic_id ?? ''));
+      return tCmp !== 0 ? tCmp : String(a.prompt_id).localeCompare(String(b.prompt_id));
+    });
+    const winnerByKey = new Map();
+    const droppedIds = new Set();
+    for (const row of sortedForDedup) {
+      const key = dedupKey(row);
+      if (winnerByKey.has(key)) {
+        droppedIds.add(row.prompt_id);
+        // eslint-disable-next-line no-console
+        console.warn('[upsertPrompts] dedup-drop', {
+          brand_id: row.brand_id,
+          text_hash: crypto.createHash('sha256').update(row.text || '').digest('hex').slice(0, 12),
+          dropped_prompt_id: row.prompt_id,
+          dropped_topic_id: row.topic_id ?? null,
+          winning_prompt_id: winnerByKey.get(key).prompt_id,
+          winning_topic_id: winnerByKey.get(key).topic_id ?? null,
+        });
+      } else {
+        winnerByKey.set(key, row);
+      }
+    }
+    if (droppedIds.size > 0) {
+      const keep = (r) => !droppedIds.has(r.prompt_id);
+      toInsert.splice(0, toInsert.length, ...toInsert.filter(keep));
+      processed.splice(0, processed.length, ...processed.filter(keep));
+    }
+  }
+
   // Best-effort intent classification for prompts that arrived WITHOUT an
-  // intent (typically human-added). Pipeline prompts already carry a
-  // normalized intent and are skipped. Failures leave intent null; they MUST
-  // NOT block the write — the backfill/reconciliation path covers them later.
+  // intent. Failures leave intent null; the backfill path covers them later.
   if (typeof classifyIntent === 'function') {
     const rowsNeedingIntent = [...toInsert, ...toUpdate]
       .filter((r) => r.intent === null && hasText(r.text));
@@ -733,8 +1066,6 @@ export async function upsertPrompts({
       );
       const apply = (r) => {
         const classified = intentByText.get(r.text);
-        // Only overwrite when we actually got a bucket back — a null/absent
-        // result (failed or timed-out classification) leaves intent as null.
         if (r.intent === null && hasText(r.text) && classified != null) {
           // eslint-disable-next-line no-param-reassign
           r.intent = classified;
@@ -742,7 +1073,6 @@ export async function upsertPrompts({
       };
       toInsert.forEach(apply);
       toUpdate.forEach(apply);
-      // Keep the returned payload consistent with what was persisted.
       processed.forEach(apply);
     }
   }
@@ -762,25 +1092,46 @@ export async function upsertPrompts({
         .select(),
     );
     if (error) {
+      throwOnPgConstraintViolation(error, {
+        23505: { status: 409, message: 'A prompt with the same text, region and source already exists for this brand.' },
+      });
       throw new Error(`Failed to insert prompts: ${error.message}`);
     }
     created = inserted?.length ?? toInsert.length;
   }
 
-  for (const row of toUpdate) {
-    const { id, ...patch } = row;
-    // eslint-disable-next-line no-await-in-loop
-    const { error } = await withMissingIntentFallback(
-      postgrestClient,
-      (includeIntent) => postgrestClient
-        .from('prompts')
-        .update(includeIntent ? patch : stripIntent(patch))
-        .eq('id', id),
+  if (toUpdate.length > 0) {
+    let cursor = 0;
+    const errors = [];
+    const worker = async () => {
+      for (;;) {
+        const index = cursor;
+        cursor += 1;
+        if (index >= toUpdate.length) {
+          return;
+        }
+        const { id, ...patch } = toUpdate[index];
+        // eslint-disable-next-line no-await-in-loop
+        const { error } = await withMissingIntentFallback(
+          postgrestClient,
+          (includeIntent) => postgrestClient
+            .from('prompts')
+            .update(includeIntent ? patch : stripIntent(patch))
+            .eq('id', id),
+        );
+        if (error) {
+          errors.push(error);
+        } else {
+          updated += 1;
+        }
+      }
+    };
+    await Promise.all(
+      Array.from({ length: Math.min(UPDATE_CONCURRENCY, toUpdate.length) }, () => worker()),
     );
-    if (error) {
-      throw new Error(`Failed to update prompt: ${error.message}`);
+    if (errors.length > 0) {
+      throw new Error(`Failed to update ${errors.length} prompt(s): ${errors.map((e) => e.message).join('; ')}`);
     }
-    updated += 1;
   }
 
   const promptsOut = processed.map((r) => ({
@@ -831,6 +1182,9 @@ export async function updatePromptById({
   }
 
   const patch = { updated_by: updatedBy };
+  // `source` is deliberately NOT patchable (source-dimension.md §1 item 6): a
+  // prompt's producer is fixed at creation, and the dimension has no write surface.
+  // A caller-supplied `updates.source` is ignored rather than written.
   if (updates.prompt !== undefined) {
     patch.text = updates.prompt;
   }
@@ -843,9 +1197,10 @@ export async function updatePromptById({
   if (updates.status !== undefined) {
     patch.status = updates.status;
   }
-  if (updates.origin !== undefined) {
-    patch.origin = updates.origin;
-  }
+  // `origin` is deliberately NOT patchable: it is fixed by the writer that
+  // created the row and is never re-derived on update (origin-dimension.md §3
+  // item 3 / §1 item 5). A caller-supplied `origin` in the PATCH body is ignored,
+  // leaving the stored value — including an `ai` prompt's — untouched.
   if (updates.intent !== undefined) {
     // The shared fallback strips intent when the column is known-absent.
     patch.intent = normalizeIntent(updates.intent);
@@ -895,6 +1250,96 @@ export async function updatePromptById({
     promptId,
     postgrestClient,
   });
+}
+
+/**
+ * Normalizes a regions array for set comparison: lower-cased, trimmed, non-empty
+ * codes, sorted. Used by the brand-region consistency guard so casing/order
+ * differences never defeat the removed-region comparison.
+ *
+ * @param {string[]} regions
+ * @returns {string[]} normalized, sorted region codes
+ */
+function normalizeRegionsForCompare(regions) {
+  if (!Array.isArray(regions)) {
+    return [];
+  }
+  return regions
+    .filter((r) => r != null)
+    .map((r) => (typeof r === 'string' ? r : String(r)).trim().toLowerCase())
+    .filter((r) => r.length > 0)
+    .sort();
+}
+
+/**
+ * Counts, per region, how many of a brand's non-deleted prompts still use each
+ * of the given regions (LLMO-5645). Used to guard a brand-level region change:
+ * DRS schedules off each prompt's `regions`, so a region must not be removed
+ * from a brand while prompts still reference it (that would orphan those
+ * prompts on a market the brand no longer covers). The operator relocates the
+ * prompts first; comparison is case-insensitive. Deleted prompts are skipped.
+ *
+ * @param {object} params
+ * @param {string} params.organizationId - SpaceCat organization UUID
+ * @param {string} params.brandUuid - brands.id (uuid)
+ * @param {string[]} params.oldRegions - brand regions BEFORE the update
+ * @param {string[]} params.newRegions - brand regions AFTER the update
+ * @param {object} params.postgrestClient - PostgREST client
+ * @param {object} [params.log] - Logger
+ * @returns {Promise<Record<string, number>>} map of removed region (lowercase)
+ *   → count of prompts still using it; empty when nothing blocks the change
+ */
+export async function findPromptsBlockingRegionRemoval({
+  organizationId,
+  brandUuid,
+  oldRegions,
+  newRegions,
+  postgrestClient,
+  log = console,
+}) {
+  if (!postgrestClient?.from) {
+    throw new Error('PostgREST client is required');
+  }
+
+  const newSet = new Set(normalizeRegionsForCompare(newRegions));
+  const removed = normalizeRegionsForCompare(oldRegions).filter((r) => !newSet.has(r));
+  if (removed.length === 0) {
+    return {};
+  }
+
+  // Fetch the brand's non-deleted prompts. A single brand carries tens to a few
+  // hundred prompts in practice; cap the read and warn (never silently truncate)
+  // if a brand somehow exceeds it so the operator knows the check was partial.
+  const READ_CAP = 5000;
+  const { data, error } = await postgrestClient
+    .from('prompts')
+    .select('id, regions')
+    .eq('organization_id', organizationId)
+    .eq('brand_id', brandUuid)
+    .neq('status', 'deleted')
+    .limit(READ_CAP);
+
+  if (error) {
+    throw new Error(`Failed to read prompts for region consistency check: ${error.message}`);
+  }
+
+  const prompts = data || [];
+  if (prompts.length >= READ_CAP) {
+    log.warn?.(`findPromptsBlockingRegionRemoval: brand ${brandUuid} has >= ${READ_CAP} prompts; `
+      + 'consistency check may be partial');
+  }
+
+  const counts = {};
+  prompts.forEach((p) => {
+    const promptRegions = new Set(normalizeRegionsForCompare(p.regions));
+    removed.forEach((r) => {
+      if (promptRegions.has(r)) {
+        counts[r] = (counts[r] || 0) + 1;
+      }
+    });
+  });
+
+  return counts;
 }
 
 /**
@@ -957,30 +1402,61 @@ export async function bulkDeletePrompts({
   }
 
   const total = promptIds.length;
-  let success = 0;
-  const failures = [];
+  if (total === 0) {
+    return { metadata: { total: 0, success: 0, failure: 0 }, failures: [] };
+  }
 
-  for (const promptId of promptIds) {
-    try {
-      // eslint-disable-next-line no-await-in-loop
-      const { data, error } = await postgrestClient
+  // Soft-delete the whole batch in ONE round-trip. The loop this replaced issued
+  // one PostgREST UPDATE per id, so a full batch stacked that many serial
+  // request round-trips and — on a large brand's library — pushed
+  // time-to-first-byte past the ~15s Fastly edge timeout, surfacing as a 503 to
+  // the caller (#3279). A single `prompt_id=in.(...)` update is one round-trip:
+  // each id still resolves through uq_prompt_per_brand (brand_id, prompt_id), and
+  // the returning rows tell us exactly which ids matched. Chunked under the
+  // PostgREST 1000-row response ceiling (PROMPT_DELETE_CHUNK_SIZE) so the
+  // returned-id diff stays exact for any input size, not just the caller's cap.
+  let rows;
+  try {
+    // One round-trip per chunk (a single chunk for the caller's 100-id cap); the
+    // chunking only matters if a future caller exceeds PROMPT_DELETE_CHUNK_SIZE.
+    const results = await Promise.all(
+      chunkArray(promptIds, PROMPT_DELETE_CHUNK_SIZE).map((chunk) => postgrestClient
         .from('prompts')
         .update({ status: 'deleted', updated_by: updatedBy })
         .eq('organization_id', organizationId)
         .eq('brand_id', brandUuid)
-        .eq('prompt_id', promptId)
-        .select('id')
-        .maybeSingle();
+        .in('prompt_id', chunk)
+        .select('prompt_id')),
+    );
+    const firstError = results.find((r) => r.error)?.error;
+    if (firstError) {
+      // A batch-level failure fails every id identically — fan it out per id
+      // so the caller's { metadata, failures } contract is unchanged from the loop.
+      return {
+        metadata: { total, success: 0, failure: total },
+        failures: promptIds.map((promptId) => ({ promptId, reason: firstError.message })),
+      };
+    }
+    rows = results.flatMap((r) => r.data ?? []);
+  } catch (err) {
+    return {
+      metadata: { total, success: 0, failure: total },
+      failures: promptIds.map((promptId) => ({ promptId, reason: err.message })),
+    };
+  }
 
-      if (error) {
-        failures.push({ promptId, reason: error.message });
-      } else if (!data) {
-        failures.push({ promptId, reason: 'Prompt not found' });
-      } else {
-        success += 1;
-      }
-    } catch (err) {
-      failures.push({ promptId, reason: err.message });
+  // Diff the returned ids against the input to classify each id. Membership (not
+  // the returned-row count) preserves the loop's semantics for a duplicate id in
+  // the input: an update is idempotent, so a repeated id that exists is still a
+  // success, and total === success + failure always holds.
+  const deleted = new Set(rows.map((row) => row.prompt_id));
+  let success = 0;
+  const failures = [];
+  for (const promptId of promptIds) {
+    if (deleted.has(promptId)) {
+      success += 1;
+    } else {
+      failures.push({ promptId, reason: 'Prompt not found' });
     }
   }
 

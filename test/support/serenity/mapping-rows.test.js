@@ -1,0 +1,463 @@
+/*
+ * Copyright 2026 Adobe. All rights reserved.
+ * This file is licensed to you under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License. You may obtain a copy
+ * of the License at http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed under
+ * the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR REPRESENTATIONS
+ * OF ANY KIND, either express or implied. See the License for the specific language
+ * governing permissions and limitations under the License.
+ */
+
+import { expect } from 'chai';
+import sinon from 'sinon';
+
+import {
+  upsertMappingRow, tombstoneMappingRow, tombstoneAllForBrand, linkSiteToLiveRows,
+  linkSiteToRow, projectsForSite, relinkSiteForRows,
+} from '../../../src/support/serenity/mapping-rows.js';
+
+const BRAND = 'brand-1';
+const SLICE = {
+  brandId: BRAND, semrushProjectId: 'proj-1', geoTargetId: 2840, languageCode: 'en',
+};
+
+function fakeRow({ deletedAt, siteId } = {}) {
+  return {
+    getDeletedAt: sinon.stub().returns(deletedAt),
+    setDeletedAt: sinon.stub(),
+    getSiteId: sinon.stub().returns(siteId),
+    setSiteId: sinon.stub(),
+    save: sinon.stub().resolves(),
+  };
+}
+
+function slicePartialUniqueError() {
+  const err = new Error('Failed to create');
+  err.cause = {
+    code: '23505',
+    message: 'duplicate key value violates unique constraint "uq_brand_to_semrush_slice_live"',
+  };
+  return err;
+}
+
+describe('serenity mapping-rows', () => {
+  let log;
+
+  beforeEach(() => {
+    log = { warn: sinon.spy(), error: sinon.spy(), info: sinon.spy() };
+  });
+
+  afterEach(() => sinon.restore());
+
+  describe('upsertMappingRow', () => {
+    it('no-ops when dataAccess has no BrandSemrushProject', async () => {
+      await upsertMappingRow({}, SLICE, log);
+      await upsertMappingRow(null, SLICE, log);
+      await upsertMappingRow(undefined, SLICE, log);
+      expect(log.error).to.not.have.been.called;
+      expect(log.warn).to.not.have.been.called;
+    });
+
+    it('no-ops and warns when the slice is incomplete', async () => {
+      const create = sinon.stub();
+      const dataAccess = { BrandSemrushProject: { create } };
+      await upsertMappingRow(dataAccess, { ...SLICE, brandId: '' }, log);
+      await upsertMappingRow(dataAccess, { ...SLICE, semrushProjectId: null }, log);
+      await upsertMappingRow(dataAccess, { ...SLICE, languageCode: undefined }, log);
+      expect(create).to.not.have.been.called;
+      expect(log.warn).to.have.been.calledThrice;
+    });
+
+    it('no-ops and warns when geoTargetId is 0 or missing (resolved-but-invalid slice)', async () => {
+      const create = sinon.stub();
+      const dataAccess = { BrandSemrushProject: { create } };
+      // 0 is the normalized value a caller falls back to when it couldn't
+      // read the real geoTargetId — never a real Google Ads Geo Target ID.
+      await upsertMappingRow(dataAccess, { ...SLICE, geoTargetId: 0 }, log);
+      await upsertMappingRow(dataAccess, { ...SLICE, geoTargetId: undefined }, log);
+      await upsertMappingRow(dataAccess, { ...SLICE, geoTargetId: -1 }, log);
+      expect(create).to.not.have.been.called;
+      expect(log.warn).to.have.been.calledThrice;
+    });
+
+    it('upserts keyed on semrushProjectId, clearing deletedAt (revive), never touching siteId', async () => {
+      const create = sinon.stub().resolves({});
+      await upsertMappingRow({ BrandSemrushProject: { create } }, SLICE, log);
+
+      expect(create).to.have.been.calledOnce;
+      const [payload, options] = create.firstCall.args;
+      expect(payload).to.deep.equal({
+        brandId: SLICE.brandId,
+        semrushProjectId: SLICE.semrushProjectId,
+        geoTargetId: SLICE.geoTargetId,
+        languageCode: SLICE.languageCode,
+        deletedAt: null,
+      });
+      expect(payload).to.not.have.property('siteId');
+      expect(options).to.deep.equal({ upsert: true, onConflict: 'semrushProjectId' });
+      expect(log.error).to.not.have.been.called;
+    });
+
+    it('classifies a live-slice-index 23505 as an accepted duplicate-slice race (warn, non-alarmed, swallowed)', async () => {
+      const create = sinon.stub().rejects(slicePartialUniqueError());
+      await upsertMappingRow({ BrandSemrushProject: { create } }, SLICE, log);
+
+      expect(log.error).to.not.have.been.called;
+      expect(log.warn).to.have.been.calledOnce;
+      const [message] = log.warn.firstCall.args;
+      expect(message).to.include('SERENITY_MAPPING_DUPLICATE_SLICE_SKIPPED');
+    });
+
+    it('logs the alarmed write-failure token for any other error (fails noisy, not silent)', async () => {
+      const create = sinon.stub().rejects(new Error('connection refused'));
+      await upsertMappingRow({ BrandSemrushProject: { create } }, SLICE, log);
+
+      expect(log.warn).to.not.have.been.called;
+      expect(log.error).to.have.been.calledOnce;
+      const [message] = log.error.firstCall.args;
+      expect(message).to.include('SERENITY_MAPPING_ROW_WRITE_FAILED');
+    });
+
+    it('classifies a 23505 on a different constraint as a real failure (alarmed), not the accepted race', async () => {
+      const err = new Error('Failed to create');
+      err.cause = { code: '23505', message: 'duplicate key value violates unique constraint "uq_brand_to_semrush_project"' };
+      const create = sinon.stub().rejects(err);
+      await upsertMappingRow({ BrandSemrushProject: { create } }, SLICE, log);
+
+      expect(log.warn).to.not.have.been.called;
+      expect(log.error).to.have.been.calledOnce;
+    });
+
+    it('treats a 23505 with no message as a real failure (message fallback branch)', async () => {
+      const err = new Error('Failed to create');
+      err.cause = { code: '23505' };
+      const create = sinon.stub().rejects(err);
+      await upsertMappingRow({ BrandSemrushProject: { create } }, SLICE, log);
+
+      expect(log.warn).to.not.have.been.called;
+      expect(log.error).to.have.been.calledOnce;
+    });
+  });
+
+  describe('tombstoneMappingRow', () => {
+    it('no-ops when dataAccess has no BrandSemrushProject or semrushProjectId is missing', async () => {
+      await tombstoneMappingRow({}, 'proj-1', log);
+      await tombstoneMappingRow({ BrandSemrushProject: {} }, '', log);
+      expect(log.error).to.not.have.been.called;
+    });
+
+    it('is a no-op when no row matches', async () => {
+      const findBySemrushProjectId = sinon.stub().resolves(null);
+      await tombstoneMappingRow({ BrandSemrushProject: { findBySemrushProjectId } }, 'proj-1', log);
+      expect(log.error).to.not.have.been.called;
+    });
+
+    it('sets deletedAt and saves the matched row', async () => {
+      const row = fakeRow();
+      const findBySemrushProjectId = sinon.stub().resolves(row);
+      await tombstoneMappingRow({ BrandSemrushProject: { findBySemrushProjectId } }, 'proj-1', log);
+
+      expect(row.setDeletedAt).to.have.been.calledOnce;
+      expect(row.setDeletedAt.firstCall.args[0]).to.be.a('string');
+      expect(row.save).to.have.been.calledOnce;
+    });
+
+    it('returns the tombstoned row siteId (LLMO-6405 R12); null when unmatched', async () => {
+      const row = fakeRow({ siteId: 'site-42' });
+      const found = { BrandSemrushProject: { findBySemrushProjectId: sinon.stub().resolves(row) } };
+      expect(await tombstoneMappingRow(found, 'proj-1', log)).to.deep.equal({ siteId: 'site-42' });
+
+      const notFound = sinon.stub().resolves(null);
+      const missing = { BrandSemrushProject: { findBySemrushProjectId: notFound } };
+      expect(await tombstoneMappingRow(missing, 'proj-1', log)).to.deep.equal({ siteId: null });
+
+      // A no-data-access / bad-input call also returns the { siteId: null } shape.
+      expect(await tombstoneMappingRow({}, 'proj-1', log)).to.deep.equal({ siteId: null });
+    });
+
+    it('logs the alarmed token and swallows a save failure', async () => {
+      const row = fakeRow();
+      row.save.rejects(new Error('boom'));
+      const findBySemrushProjectId = sinon.stub().resolves(row);
+      await tombstoneMappingRow({ BrandSemrushProject: { findBySemrushProjectId } }, 'proj-1', log);
+
+      expect(log.error).to.have.been.calledOnce;
+      expect(log.error.firstCall.args[0]).to.include('SERENITY_MAPPING_ROW_WRITE_FAILED');
+    });
+  });
+
+  describe('tombstoneAllForBrand', () => {
+    it('no-ops when dataAccess has no BrandSemrushProject or brandId is missing', async () => {
+      await tombstoneAllForBrand({}, BRAND, log);
+      await tombstoneAllForBrand({ BrandSemrushProject: {} }, '', log);
+      expect(log.error).to.not.have.been.called;
+    });
+
+    it('tombstones only live rows, leaving already-tombstoned rows untouched', async () => {
+      const live1 = fakeRow();
+      const live2 = fakeRow();
+      const alreadyTombstoned = fakeRow({ deletedAt: '2026-06-01T00:00:00.000Z' });
+      const allByBrandId = sinon.stub().resolves([live1, alreadyTombstoned, live2]);
+      await tombstoneAllForBrand({ BrandSemrushProject: { allByBrandId } }, BRAND, log);
+
+      expect(live1.setDeletedAt).to.have.been.calledOnce;
+      expect(live1.save).to.have.been.calledOnce;
+      expect(live2.setDeletedAt).to.have.been.calledOnce;
+      expect(live2.save).to.have.been.calledOnce;
+      expect(alreadyTombstoned.setDeletedAt).to.not.have.been.called;
+      expect(alreadyTombstoned.save).to.not.have.been.called;
+    });
+
+    it('is a no-op (no throw) when the brand has no rows', async () => {
+      const allByBrandId = sinon.stub().resolves([]);
+      await tombstoneAllForBrand({ BrandSemrushProject: { allByBrandId } }, BRAND, log);
+      expect(log.error).to.not.have.been.called;
+    });
+
+    it('logs the alarmed token and swallows a bulk-tombstone failure', async () => {
+      const allByBrandId = sinon.stub().rejects(new Error('boom'));
+      await tombstoneAllForBrand({ BrandSemrushProject: { allByBrandId } }, BRAND, log);
+
+      expect(log.error).to.have.been.calledOnce;
+      expect(log.error.firstCall.args[0]).to.include('SERENITY_MAPPING_ROW_WRITE_FAILED');
+    });
+
+    it('tolerates a non-array result from allByBrandId (defensive fallback)', async () => {
+      const allByBrandId = sinon.stub().resolves(null);
+      await tombstoneAllForBrand({ BrandSemrushProject: { allByBrandId } }, BRAND, log);
+      expect(log.error).to.not.have.been.called;
+    });
+
+    it('processes every row even when one save rejects, and logs only the partial-failure count', async () => {
+      const live1 = fakeRow();
+      const live2 = fakeRow();
+      const live3 = fakeRow();
+      live2.save.rejects(new Error('boom'));
+      const allByBrandId = sinon.stub().resolves([live1, live2, live3]);
+      await tombstoneAllForBrand({ BrandSemrushProject: { allByBrandId } }, BRAND, log);
+
+      // Every row was attempted — a single rejection did not abandon the rest.
+      expect(live1.save).to.have.been.calledOnce;
+      expect(live2.save).to.have.been.calledOnce;
+      expect(live3.save).to.have.been.calledOnce;
+      expect(log.error).to.have.been.calledOnce;
+      expect(log.error.firstCall.args[0]).to.include('SERENITY_MAPPING_ROW_WRITE_FAILED');
+      expect(log.error.firstCall.args[1]).to.include({ failed: 1, total: 3 });
+    });
+  });
+
+  describe('linkSiteToLiveRows', () => {
+    const SITE = 'site-1';
+
+    it('no-ops when dataAccess has no BrandSemrushProject, brandId, or siteId is missing', async () => {
+      await linkSiteToLiveRows({}, BRAND, SITE, log);
+      await linkSiteToLiveRows({ BrandSemrushProject: {} }, '', SITE, log);
+      await linkSiteToLiveRows({ BrandSemrushProject: {} }, BRAND, null, log);
+      expect(log.error).to.not.have.been.called;
+    });
+
+    it('links only live rows with no existing siteId; never overwrites an existing link', async () => {
+      const unlinked = fakeRow();
+      const alreadyLinked = fakeRow({ siteId: 'site-other' });
+      const tombstonedUnlinked = fakeRow({ deletedAt: '2026-06-01T00:00:00.000Z' });
+      const allByBrandId = sinon.stub().resolves([unlinked, alreadyLinked, tombstonedUnlinked]);
+      await linkSiteToLiveRows({ BrandSemrushProject: { allByBrandId } }, BRAND, SITE, log);
+
+      expect(unlinked.setSiteId).to.have.been.calledOnceWith(SITE);
+      expect(unlinked.save).to.have.been.calledOnce;
+      expect(alreadyLinked.setSiteId).to.not.have.been.called;
+      expect(tombstonedUnlinked.setSiteId).to.not.have.been.called;
+    });
+
+    it('logs the alarmed token and swallows a link failure', async () => {
+      const allByBrandId = sinon.stub().rejects(new Error('boom'));
+      await linkSiteToLiveRows({ BrandSemrushProject: { allByBrandId } }, BRAND, SITE, log);
+
+      expect(log.error).to.have.been.calledOnce;
+      expect(log.error.firstCall.args[0]).to.include('SERENITY_MAPPING_ROW_WRITE_FAILED');
+    });
+
+    it('tolerates a non-array result from allByBrandId (defensive fallback)', async () => {
+      const allByBrandId = sinon.stub().resolves(undefined);
+      await linkSiteToLiveRows({ BrandSemrushProject: { allByBrandId } }, BRAND, SITE, log);
+      expect(log.error).to.not.have.been.called;
+    });
+
+    it('links every eligible row even when one save rejects, and logs only the partial-failure count', async () => {
+      const unlinked1 = fakeRow();
+      const unlinked2 = fakeRow();
+      unlinked2.save.rejects(new Error('boom'));
+      const allByBrandId = sinon.stub().resolves([unlinked1, unlinked2]);
+      await linkSiteToLiveRows({ BrandSemrushProject: { allByBrandId } }, BRAND, SITE, log);
+
+      expect(unlinked1.setSiteId).to.have.been.calledOnceWith(SITE);
+      expect(unlinked2.setSiteId).to.have.been.calledOnceWith(SITE);
+      expect(log.error).to.have.been.calledOnce;
+      expect(log.error.firstCall.args[0]).to.include('SERENITY_MAPPING_ROW_WRITE_FAILED');
+      expect(log.error.firstCall.args[1]).to.include({ failed: 1, total: 2 });
+    });
+  });
+
+  describe('projectsForSite', () => {
+    const SITE = 'site-1';
+
+    it('returns [] when dataAccess has no BrandSemrushProject, brandId, or siteId is missing', async () => {
+      expect(await projectsForSite({}, BRAND, SITE)).to.deep.equal([]);
+      expect(await projectsForSite({ BrandSemrushProject: {} }, '', SITE)).to.deep.equal([]);
+      expect(await projectsForSite({ BrandSemrushProject: {} }, BRAND, null)).to.deep.equal([]);
+    });
+
+    it('returns only live rows whose siteId matches, excluding tombstoned and other-site rows', async () => {
+      const matching = fakeRow({ siteId: SITE });
+      const otherSite = fakeRow({ siteId: 'site-other' });
+      const tombstonedMatching = fakeRow({ siteId: SITE, deletedAt: '2026-06-01T00:00:00.000Z' });
+      const allByBrandId = sinon.stub().resolves([matching, otherSite, tombstonedMatching]);
+
+      const rows = await projectsForSite({ BrandSemrushProject: { allByBrandId } }, BRAND, SITE);
+
+      expect(rows).to.deep.equal([matching]);
+    });
+
+    it('returns every live row sharing the site (locale variants of one market)', async () => {
+      const first = fakeRow({ siteId: SITE });
+      const second = fakeRow({ siteId: SITE });
+      const allByBrandId = sinon.stub().resolves([first, second]);
+
+      const rows = await projectsForSite({ BrandSemrushProject: { allByBrandId } }, BRAND, SITE);
+
+      expect(rows).to.deep.equal([first, second]);
+    });
+
+    it('tolerates a non-array result from allByBrandId (defensive fallback)', async () => {
+      const allByBrandId = sinon.stub().resolves(null);
+      expect(await projectsForSite({ BrandSemrushProject: { allByBrandId } }, BRAND, SITE))
+        .to.deep.equal([]);
+    });
+  });
+
+  describe('linkSiteToRow', () => {
+    const PROJECT = 'proj-new';
+    const SITE = 'site-1';
+
+    it('no-ops when dataAccess has no BrandSemrushProject, projectId, or siteId is missing', async () => {
+      const findBySemrushProjectId = sinon.stub().resolves(fakeRow());
+      await linkSiteToRow({}, PROJECT, SITE, log);
+      await linkSiteToRow({ BrandSemrushProject: { findBySemrushProjectId } }, '', SITE, log);
+      await linkSiteToRow({ BrandSemrushProject: { findBySemrushProjectId } }, PROJECT, '', log);
+
+      expect(findBySemrushProjectId).to.not.have.been.called;
+      expect(log.error).to.not.have.been.called;
+    });
+
+    it('links the site onto the one row named by the project id', async () => {
+      const row = fakeRow();
+      const findBySemrushProjectId = sinon.stub().resolves(row);
+      await linkSiteToRow({ BrandSemrushProject: { findBySemrushProjectId } }, PROJECT, SITE, log);
+
+      expect(findBySemrushProjectId).to.have.been.calledOnceWith(PROJECT);
+      expect(row.setSiteId).to.have.been.calledOnceWith(SITE);
+      expect(row.save).to.have.been.calledOnce;
+    });
+
+    it('never overwrites an existing link', async () => {
+      // A row that already names a site has been spoken for — correcting a wrong
+      // link is a deliberate act, not a side effect of creating a market.
+      const row = fakeRow({ siteId: 'site-already-there' });
+      const findBySemrushProjectId = sinon.stub().resolves(row);
+      await linkSiteToRow({ BrandSemrushProject: { findBySemrushProjectId } }, PROJECT, SITE, log);
+
+      expect(row.setSiteId).to.not.have.been.called;
+      expect(row.save).to.not.have.been.called;
+    });
+
+    it('leaves a tombstoned row alone', async () => {
+      const row = fakeRow({ deletedAt: '2026-08-19T00:00:00.000Z' });
+      const findBySemrushProjectId = sinon.stub().resolves(row);
+      await linkSiteToRow({ BrandSemrushProject: { findBySemrushProjectId } }, PROJECT, SITE, log);
+
+      expect(row.setSiteId).to.not.have.been.called;
+      expect(row.save).to.not.have.been.called;
+    });
+
+    it('is a no-op (no throw) when no row matches the project id', async () => {
+      const findBySemrushProjectId = sinon.stub().resolves(null);
+      await linkSiteToRow({ BrandSemrushProject: { findBySemrushProjectId } }, PROJECT, SITE, log);
+      expect(log.error).to.not.have.been.called;
+    });
+
+    it('logs the alarmed token and swallows a save failure', async () => {
+      const row = fakeRow();
+      row.save.rejects(new Error('boom'));
+      const findBySemrushProjectId = sinon.stub().resolves(row);
+      await linkSiteToRow({ BrandSemrushProject: { findBySemrushProjectId } }, PROJECT, SITE, log);
+
+      expect(log.error).to.have.been.calledOnce;
+      expect(log.error.firstCall.args[0]).to.include('SERENITY_MAPPING_ROW_WRITE_FAILED');
+      expect(log.error.firstCall.args[1]).to.include({ op: 'link-site-row' });
+    });
+
+    it('does not touch a sibling market of the same brand', async () => {
+      // The race the by-brand sweep cannot close: two concurrent creates on one
+      // brand each leave an unlinked row behind before either links, so a
+      // siteId-IS-NULL scan would give the second caller's market the first
+      // caller's site.
+      const mine = fakeRow();
+      const sibling = fakeRow();
+      const findBySemrushProjectId = sinon.stub().resolves(mine);
+      const allByBrandId = sinon.stub().resolves([mine, sibling]);
+      await linkSiteToRow(
+        { BrandSemrushProject: { findBySemrushProjectId, allByBrandId } },
+        PROJECT,
+        SITE,
+        log,
+      );
+
+      expect(mine.setSiteId).to.have.been.calledOnceWith(SITE);
+      expect(sibling.setSiteId).to.not.have.been.called;
+      expect(allByBrandId).to.not.have.been.called;
+    });
+  });
+
+  describe('relinkSiteForRows', () => {
+    const NEW_SITE = 'site-new';
+
+    it('no-ops when dataAccess/siteId/rows are missing or empty', async () => {
+      const row = fakeRow({ siteId: 'site-old' });
+      await relinkSiteForRows({}, [row], NEW_SITE, log);
+      await relinkSiteForRows({ BrandSemrushProject: {} }, [row], '', log);
+      await relinkSiteForRows({ BrandSemrushProject: {} }, [], NEW_SITE, log);
+      await relinkSiteForRows({ BrandSemrushProject: {} }, null, NEW_SITE, log);
+
+      expect(row.setSiteId).to.not.have.been.called;
+      expect(row.save).to.not.have.been.called;
+      expect(log.error).to.not.have.been.called;
+    });
+
+    it('DELIBERATELY overwrites an existing link on every supplied row', async () => {
+      // Unlike linkSiteToRow, a re-point moves rows that already name a site.
+      const a = fakeRow({ siteId: 'site-old' });
+      const b = fakeRow({ siteId: 'site-old' });
+      await relinkSiteForRows({ BrandSemrushProject: {} }, [a, b], NEW_SITE, log);
+
+      expect(a.setSiteId).to.have.been.calledOnceWith(NEW_SITE);
+      expect(b.setSiteId).to.have.been.calledOnceWith(NEW_SITE);
+      expect(a.save).to.have.been.calledOnce;
+      expect(b.save).to.have.been.calledOnce;
+      expect(log.error).to.not.have.been.called;
+    });
+
+    it('logs the alarmed token on a partial save failure without throwing', async () => {
+      const ok = fakeRow({ siteId: 'site-old' });
+      const bad = fakeRow({ siteId: 'site-old' });
+      bad.save.rejects(new Error('boom'));
+      await relinkSiteForRows({ BrandSemrushProject: {} }, [ok, bad], NEW_SITE, log);
+
+      expect(ok.save).to.have.been.calledOnce;
+      expect(log.error).to.have.been.calledOnce;
+      expect(log.error.firstCall.args[0]).to.include('SERENITY_MAPPING_ROW_WRITE_FAILED');
+      expect(log.error.firstCall.args[1]).to.include({ op: 're-link-site' });
+    });
+  });
+});

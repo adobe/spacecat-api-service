@@ -24,7 +24,10 @@ import {
   createReferralTrafficUrlTrendHandler,
   createReferralTrafficBusinessImpactHandler,
   createReferralTrafficWeeksHandler,
+  createReferralTrafficByDeviceHandler,
   createReferralTrafficHasDataHandler,
+  REFERRAL_HAS_DATA_SOURCES,
+  REFERRAL_HAS_DATA_TABLES,
 } from '../../../src/controllers/llmo/llmo-referral-traffic.js';
 
 use(sinonChai);
@@ -48,6 +51,7 @@ function makeWeeksChainClient(
   const chain = {
     select: sinon.stub().returnsThis(),
     eq: sinon.stub().returnsThis(),
+    or: sinon.stub().returnsThis(),
     order: sinon.stub().returnsThis(),
     limit: sinon.stub()
       .onFirstCall().resolves(minResult)
@@ -58,12 +62,16 @@ function makeWeeksChainClient(
 }
 
 /**
- * The two Traffic Insights tables checked by the has-data handler.
- * Must stay in sync with TRAFFIC_INSIGHTS_TABLES in llmo-referral-traffic.js.
+ * All referral tables checked by the has-data handler, in resolution-priority
+ * order. Must stay in sync with REFERRAL_HAS_DATA_TABLES in
+ * llmo-referral-traffic.js.
  */
 const HAS_DATA_TABLES = [
-  'referral_traffic_optel',
+  'referral_traffic_adobe_analytics',
+  'referral_traffic_cja',
+  'referral_traffic_ga4',
   'referral_traffic_cdn',
+  'referral_traffic_optel',
 ];
 
 /**
@@ -76,6 +84,7 @@ function makeHasDataChainClient(resultsByTable = {}) {
   const makeChain = (result) => ({
     select: sinon.stub().returnsThis(),
     eq: sinon.stub().returnsThis(),
+    gte: sinon.stub().returnsThis(),
     limit: sinon.stub().resolves(result),
   });
   const chains = {};
@@ -100,18 +109,24 @@ function makeContext(overrides = {}) {
   };
 }
 
-const stubbedValidateAccess = sinon.stub().resolves({
-  site: { getOrganizationId: () => 'org-1' },
-  organization: { getId: () => 'org-1' },
-});
+let sandbox;
+let stubbedValidateAccess;
+
+// Fresh sandbox per test, so neither call history nor a per-test behaviour
+// override can reach the next test.
+function setUpAuthStubs() {
+  sandbox = sinon.createSandbox();
+  stubbedValidateAccess = sandbox.stub().resolves({
+    site: { getOrganizationId: () => 'org-1' },
+    organization: { getId: () => 'org-1' },
+  });
+}
 
 describe('llmo-referral-traffic', () => {
+  beforeEach(setUpAuthStubs);
+
   afterEach(() => {
-    stubbedValidateAccess.reset();
-    stubbedValidateAccess.resolves({
-      site: { getOrganizationId: () => 'org-1' },
-      organization: { getId: () => 'org-1' },
-    });
+    sandbox.restore();
   });
 
   // ── auth / PostgREST availability ──────────────────────────────────────────
@@ -211,6 +226,90 @@ describe('llmo-referral-traffic', () => {
       expect(rpcArgs.p_start_date).to.be.a('string').and.match(/^\d{4}-\d{2}-\d{2}$/);
       expect(rpcArgs.p_end_date).to.be.a('string').and.match(/^\d{4}-\d{2}-\d{2}$/);
     });
+
+    it('maps categoryName to p_category_name and defaults to null when absent', async () => {
+      const client = makeRpcClient({ data: [] });
+      const ctx = makeContext({ client });
+      ctx.data = { categoryName: 'Footwear' };
+      await createReferralTrafficKpisHandler(stubbedValidateAccess)(ctx);
+      expect(client.rpc.getCall(0).args[1].p_category_name).to.equal('Footwear');
+
+      const clientEmpty = makeRpcClient({ data: [] });
+      const ctxEmpty = makeContext({ client: clientEmpty });
+      ctxEmpty.data = {};
+      await createReferralTrafficKpisHandler(stubbedValidateAccess)(ctxEmpty);
+      expect(clientEmpty.rpc.getCall(0).args[1].p_category_name).to.equal(null);
+    });
+
+    it('accepts category_name snake_case alias', async () => {
+      const client = makeRpcClient({ data: [] });
+      const ctx = makeContext({ client });
+      ctx.data = { category_name: 'Apparel' };
+      await createReferralTrafficKpisHandler(stubbedValidateAccess)(ctx);
+      expect(client.rpc.getCall(0).args[1].p_category_name).to.equal('Apparel');
+    });
+  });
+
+  // ── urlPathPrefix parsing / normalization (LLMO-7315) ─────────────────────
+  // Exercised through the kpis handler because parseParams + commonRpcParams are
+  // shared by every RPC endpoint, so p_url_path_prefix threading is proven once.
+
+  describe('urlPathPrefix (LLMO-7315)', () => {
+    const kpisPrefix = async (data) => {
+      const client = makeRpcClient({ data: [] });
+      await createReferralTrafficKpisHandler(stubbedValidateAccess)(makeContext({ client, data }));
+      return client.rpc.getCall(0).args[1].p_url_path_prefix;
+    };
+
+    it('threads a normalized prefix into commonRpcParams as p_url_path_prefix', async () => {
+      expect(await kpisPrefix({ urlPathPrefix: '/knicks' })).to.equal('/knicks');
+    });
+
+    it('prepends a missing leading slash', async () => {
+      expect(await kpisPrefix({ urlPathPrefix: 'knicks' })).to.equal('/knicks');
+    });
+
+    it('strips all trailing slashes', async () => {
+      expect(await kpisPrefix({ urlPathPrefix: '/knicks/' })).to.equal('/knicks');
+      expect(await kpisPrefix({ urlPathPrefix: '/knicks///' })).to.equal('/knicks');
+    });
+
+    it('trims surrounding whitespace', async () => {
+      expect(await kpisPrefix({ urlPathPrefix: '  /knicks  ' })).to.equal('/knicks');
+    });
+
+    it('treats an empty string as no filter (null)', async () => {
+      expect(await kpisPrefix({ urlPathPrefix: '' })).to.equal(null);
+    });
+
+    it('treats "/" as no filter (null)', async () => {
+      expect(await kpisPrefix({ urlPathPrefix: '/' })).to.equal(null);
+    });
+
+    it('treats a slashes-only value ("//") as no filter (null)', async () => {
+      expect(await kpisPrefix({ urlPathPrefix: '//' })).to.equal(null);
+    });
+
+    it('ignores a repeated (array) param as no filter (null)', async () => {
+      expect(await kpisPrefix({ urlPathPrefix: ['/knicks', '/nets'] })).to.equal(null);
+    });
+
+    it('ignores an over-long value as no filter (null)', async () => {
+      expect(await kpisPrefix({ urlPathPrefix: `/${'a'.repeat(600)}` })).to.equal(null);
+    });
+
+    it('defaults to null when the param is absent', async () => {
+      expect(await kpisPrefix({})).to.equal(null);
+    });
+
+    it('accepts the url_path_prefix snake_case alias', async () => {
+      expect(await kpisPrefix({ url_path_prefix: '/knicks' })).to.equal('/knicks');
+    });
+
+    it('prefers urlPathPrefix over the snake_case alias', async () => {
+      expect(await kpisPrefix({ urlPathPrefix: '/nets', url_path_prefix: '/knicks' }))
+        .to.equal('/nets');
+    });
   });
 
   // ── /filter-dimensions ────────────────────────────────────────────────────
@@ -224,6 +323,7 @@ describe('llmo-referral-traffic', () => {
           devices: ['desktop', 'mobile'],
           page_intents: ['purchase'],
           available_sources: ['optel', 'cdn'],
+          categories: ['Apparel', 'Footwear'],
         }],
       });
       const handler = createReferralTrafficFilterDimensionsHandler(stubbedValidateAccess);
@@ -235,6 +335,7 @@ describe('llmo-referral-traffic', () => {
       expect(body.devices).to.deep.equal(['desktop', 'mobile']);
       expect(body.pageIntents).to.deep.equal(['purchase']);
       expect(body.availableSources).to.deep.equal(['optel', 'cdn']);
+      expect(body.categories).to.deep.equal(['Apparel', 'Footwear']);
     });
 
     it('returns empty arrays when RPC returns no rows', async () => {
@@ -244,6 +345,21 @@ describe('llmo-referral-traffic', () => {
       const body = await res.json();
       expect(body.platforms).to.deep.equal([]);
       expect(body.availableSources).to.deep.equal([]);
+      expect(body.categories).to.deep.equal([]);
+    });
+
+    it('forwards p_url_path_prefix to the filter-dimensions RPC (LLMO-7315)', async () => {
+      const client = makeRpcClient({ data: [], error: null });
+      const handler = createReferralTrafficFilterDimensionsHandler(stubbedValidateAccess);
+      await handler(makeContext({ client, data: { urlPathPrefix: '/knicks' } }));
+      expect(client.rpc.getCall(0).args[1].p_url_path_prefix).to.equal('/knicks');
+    });
+
+    it('passes p_url_path_prefix=null when no prefix is given (LLMO-7315)', async () => {
+      const client = makeRpcClient({ data: [], error: null });
+      const handler = createReferralTrafficFilterDimensionsHandler(stubbedValidateAccess);
+      await handler(makeContext({ client }));
+      expect(client.rpc.getCall(0).args[1].p_url_path_prefix).to.equal(null);
     });
 
     it('returns 500 on PostgREST error', async () => {
@@ -626,6 +742,19 @@ describe('llmo-referral-traffic', () => {
       expect(client.rpc.getCall(0).args[1].p_url_search).to.equal('blog');
     });
 
+    it('forwards p_url_path_prefix alongside p_url_search (LLMO-7315)', async () => {
+      const client = makeRpcClient({ data: [] });
+      const handler = createReferralTrafficByUrlHandler(stubbedValidateAccess);
+      await handler(makeContext({
+        client,
+        data: { urlPathSearch: 'blog', urlPathPrefix: '/knicks' },
+      }));
+      const rpcArgs = client.rpc.getCall(0).args[1];
+      // Both filters can be set at once; neither clobbers the other.
+      expect(rpcArgs.p_url_search).to.equal('blog');
+      expect(rpcArgs.p_url_path_prefix).to.equal('/knicks');
+    });
+
     it('clamps pageSize above the max', async () => {
       const client = makeRpcClient({ data: [] });
       const handler = createReferralTrafficByUrlHandler(stubbedValidateAccess);
@@ -820,6 +949,15 @@ describe('llmo-referral-traffic', () => {
       expect(rpcArgs.p_start_date).to.equal('2026-01-01');
       expect(rpcArgs.p_end_date).to.equal('2026-01-28');
       expect(rpcArgs.p_platform).to.equal('openai');
+    });
+
+    it('does NOT forward p_url_path_prefix to rpc_referral_traffic_url_trend (LLMO-7315)', async () => {
+      // url_trend does an exact url_path match; the RPC has no p_url_path_prefix
+      // param, so passing one would fail PostgREST overload resolution (PGRST202).
+      const client = makeRpcClient({ data: [] });
+      const handler = createReferralTrafficUrlTrendHandler(stubbedValidateAccess);
+      await handler(makeContext({ client, data: { urlPath: '/blog', urlPathPrefix: '/knicks' } }));
+      expect(client.rpc.getCall(0).args[1]).to.not.have.property('p_url_path_prefix');
     });
 
     it('uses {} when context.data is null', async () => {
@@ -1052,15 +1190,39 @@ describe('llmo-referral-traffic', () => {
       await handler(makeContext({ client }));
       expect(client.from.calledWith('referral_traffic_optel')).to.be.true;
     });
+
+    it('does not url-path-prefix scope the weeks read even when a prefix is given (LLMO-7315)', async () => {
+      // /weeks is intentionally domain-level: the dashboard scopes the picker to a
+      // sub-path by passing the domain-root siteId, so no PostgREST .or() filter is
+      // applied here (avoids per-source filter-string escaping).
+      const client = makeWeeksChainClient(
+        { data: [{ traffic_date: '2026-01-05' }], error: null },
+        { data: [{ traffic_date: '2026-01-12' }], error: null },
+      );
+      const handler = createReferralTrafficWeeksHandler(stubbedValidateAccess);
+      await handler(makeContext({ client, data: { urlPathPrefix: '/knicks' } }));
+      expect(client.chain.or).to.not.have.been.called;
+    });
   });
 
   // ── /has-data ─────────────────────────────────────────────────────────────
-  // Checks only Traffic Insights sources (optel, cdn). Business Impact sources
-  // (adobe_analytics, ga4) are gated separately via the DRS provider endpoint.
+  // Checks ALL referral sources and returns availableSources in
+  // resolution-priority order (adobe_analytics > cja > ga4 > cdn > optel).
 
   const ROW = { traffic_date: '2026-01-05' };
 
   describe('has-data', () => {
+    it('keeps the test table list in sync with the controller and maps every source to a table (drift guard)', () => {
+      // The local HAS_DATA_TABLES mirrors REFERRAL_HAS_DATA_TABLES; asserting
+      // equality makes adding/removing/reordering a source in the controller
+      // fail the build here instead of silently drifting.
+      expect(HAS_DATA_TABLES).to.deep.equal(REFERRAL_HAS_DATA_TABLES);
+      // Guards REFERRAL_HAS_DATA_SOURCES ⊆ SOURCE_TO_TABLE keys: a typo'd or
+      // newly-added source with no table mapping would surface as undefined.
+      expect(REFERRAL_HAS_DATA_TABLES).to.have.lengthOf(REFERRAL_HAS_DATA_SOURCES.length);
+      expect(REFERRAL_HAS_DATA_TABLES.every((t) => typeof t === 'string' && t.length > 0)).to.equal(true);
+    });
+
     it('returns hasData:true and availableSources:["optel"] when only optel has records', async () => {
       const client = makeHasDataChainClient({
         referral_traffic_optel: { data: [ROW], error: null },
@@ -1072,6 +1234,7 @@ describe('llmo-referral-traffic', () => {
       const body = await res.json();
       expect(body.hasData).to.equal(true);
       expect(body.availableSources).to.deep.equal(['optel']);
+      expect(body.activeSource).to.equal('optel');
     });
 
     it('returns hasData:true and availableSources:["cdn"] when only cdn has records', async () => {
@@ -1085,9 +1248,10 @@ describe('llmo-referral-traffic', () => {
       const body = await res.json();
       expect(body.hasData).to.equal(true);
       expect(body.availableSources).to.deep.equal(['cdn']);
+      expect(body.activeSource).to.equal('cdn');
     });
 
-    it('returns hasData:true and availableSources:["optel","cdn"] when both have records', async () => {
+    it('returns availableSources:["cdn","optel"] (cdn before optel) when both Traffic Insights sources have records', async () => {
       const client = makeHasDataChainClient({
         referral_traffic_optel: { data: [ROW], error: null },
         referral_traffic_cdn: { data: [ROW], error: null },
@@ -1098,10 +1262,102 @@ describe('llmo-referral-traffic', () => {
       expect(res.status).to.equal(200);
       const body = await res.json();
       expect(body.hasData).to.equal(true);
-      expect(body.availableSources).to.deep.equal(['optel', 'cdn']);
+      expect(body.availableSources).to.deep.equal(['cdn', 'optel']);
+      expect(body.activeSource).to.equal('cdn');
     });
 
-    it('returns hasData:false and availableSources:[] when both tables are empty', async () => {
+    it('returns hasData:true and availableSources:["adobe_analytics"] when only adobe_analytics has records', async () => {
+      const client = makeHasDataChainClient({
+        referral_traffic_adobe_analytics: { data: [ROW], error: null },
+      });
+      const res = await createReferralTrafficHasDataHandler(stubbedValidateAccess)(
+        makeContext({ client }),
+      );
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.hasData).to.equal(true);
+      expect(body.availableSources).to.deep.equal(['adobe_analytics']);
+      expect(body.activeSource).to.equal('adobe_analytics');
+    });
+
+    it('ranks Business Impact sources above Traffic Insights (adobe_analytics before cdn)', async () => {
+      const client = makeHasDataChainClient({
+        referral_traffic_adobe_analytics: { data: [ROW], error: null },
+        referral_traffic_cdn: { data: [ROW], error: null },
+      });
+      const res = await createReferralTrafficHasDataHandler(stubbedValidateAccess)(
+        makeContext({ client }),
+      );
+      const body = await res.json();
+      expect(body.availableSources).to.deep.equal(['adobe_analytics', 'cdn']);
+      expect(body.activeSource).to.equal('adobe_analytics');
+    });
+
+    it('preserves full priority order (adobe_analytics > cja > ga4 > cdn > optel) when all sources have records', async () => {
+      const client = makeHasDataChainClient(
+        Object.fromEntries(HAS_DATA_TABLES.map((t) => [t, { data: [ROW], error: null }])),
+      );
+      const res = await createReferralTrafficHasDataHandler(stubbedValidateAccess)(
+        makeContext({ client }),
+      );
+      const body = await res.json();
+      expect(body.availableSources).to.deep.equal(['adobe_analytics', 'cja', 'ga4', 'cdn', 'optel']);
+      expect(body.activeSource).to.equal('adobe_analytics');
+    });
+
+    it('orders non-adjacent combos correctly (ga4 before optel)', async () => {
+      const client = makeHasDataChainClient({
+        referral_traffic_ga4: { data: [ROW], error: null },
+        referral_traffic_optel: { data: [ROW], error: null },
+      });
+      const res = await createReferralTrafficHasDataHandler(stubbedValidateAccess)(
+        makeContext({ client }),
+      );
+      const body = await res.json();
+      expect(body.availableSources).to.deep.equal(['ga4', 'optel']);
+      expect(body.activeSource).to.equal('ga4');
+    });
+
+    it('orders non-adjacent combos correctly (cja before cdn)', async () => {
+      const client = makeHasDataChainClient({
+        referral_traffic_cja: { data: [ROW], error: null },
+        referral_traffic_cdn: { data: [ROW], error: null },
+      });
+      const res = await createReferralTrafficHasDataHandler(stubbedValidateAccess)(
+        makeContext({ client }),
+      );
+      const body = await res.json();
+      expect(body.availableSources).to.deep.equal(['cja', 'cdn']);
+      expect(body.activeSource).to.equal('cja');
+    });
+
+    it('returns availableSources:["cja"] when only cja has records', async () => {
+      const client = makeHasDataChainClient({
+        referral_traffic_cja: { data: [ROW], error: null },
+      });
+      const res = await createReferralTrafficHasDataHandler(stubbedValidateAccess)(
+        makeContext({ client }),
+      );
+      const body = await res.json();
+      expect(body.hasData).to.equal(true);
+      expect(body.availableSources).to.deep.equal(['cja']);
+      expect(body.activeSource).to.equal('cja');
+    });
+
+    it('returns availableSources:["ga4"] when only ga4 has records', async () => {
+      const client = makeHasDataChainClient({
+        referral_traffic_ga4: { data: [ROW], error: null },
+      });
+      const res = await createReferralTrafficHasDataHandler(stubbedValidateAccess)(
+        makeContext({ client }),
+      );
+      const body = await res.json();
+      expect(body.hasData).to.equal(true);
+      expect(body.availableSources).to.deep.equal(['ga4']);
+      expect(body.activeSource).to.equal('ga4');
+    });
+
+    it('returns hasData:false and availableSources:[] when all sources are empty', async () => {
       const client = makeHasDataChainClient();
       const res = await createReferralTrafficHasDataHandler(stubbedValidateAccess)(
         makeContext({ client }),
@@ -1110,9 +1366,10 @@ describe('llmo-referral-traffic', () => {
       const body = await res.json();
       expect(body.hasData).to.equal(false);
       expect(body.availableSources).to.deep.equal([]);
+      expect(body.activeSource).to.equal(null);
     });
 
-    it('returns hasData:false and availableSources:[] when both tables return null data', async () => {
+    it('returns hasData:false and availableSources:[] when all sources return null data', async () => {
       const nullResults = Object.fromEntries(
         HAS_DATA_TABLES.map((t) => [t, { data: null, error: null }]),
       );
@@ -1124,6 +1381,7 @@ describe('llmo-referral-traffic', () => {
       const body = await res.json();
       expect(body.hasData).to.equal(false);
       expect(body.availableSources).to.deep.equal([]);
+      expect(body.activeSource).to.equal(null);
     });
 
     it('returns 500 and fails closed when one source errors (even if the other has data)', async () => {
@@ -1137,7 +1395,18 @@ describe('llmo-referral-traffic', () => {
       expect(res.status).to.equal(500);
     });
 
-    it('returns 500 when both sources error simultaneously', async () => {
+    it('fails closed (500) and logs the table when a Business Impact source is the sole errorer', async () => {
+      const client = makeHasDataChainClient({
+        referral_traffic_ga4: { data: null, error: { message: 'ga4-fail' } },
+        referral_traffic_cdn: { data: [ROW], error: null },
+      });
+      const ctx = makeContext({ client });
+      const res = await createReferralTrafficHasDataHandler(stubbedValidateAccess)(ctx);
+      expect(res.status).to.equal(500);
+      expect(ctx.log.error).to.have.been.calledWithMatch(/referral_traffic_ga4/);
+    });
+
+    it('returns 500 when all sources error simultaneously', async () => {
       const errorResults = Object.fromEntries(
         HAS_DATA_TABLES.map((t) => [t, { data: null, error: { message: `${t}-fail` } }]),
       );
@@ -1163,6 +1432,7 @@ describe('llmo-referral-traffic', () => {
       const throwingChain = {
         select: sinon.stub().returnsThis(),
         eq: sinon.stub().returnsThis(),
+        gte: sinon.stub().returnsThis(),
         limit: sinon.stub().rejects(new Error('network timeout')),
       };
       const ctx = makeContext({ client: { from: sinon.stub().returns(throwingChain) } });
@@ -1170,16 +1440,29 @@ describe('llmo-referral-traffic', () => {
       expect(res.status).to.equal(500);
     });
 
-    it('queries only optel and cdn tables with the site id', async () => {
+    it('queries all five referral source tables with the site id and lookback bound, once each', async () => {
       const client = makeHasDataChainClient();
+      const beforeProbe = Date.now();
       await createReferralTrafficHasDataHandler(stubbedValidateAccess)(makeContext({ client }));
+      const afterProbe = Date.now();
+      const minLookback = new Date(beforeProbe - 420 * 86400000).toISOString().slice(0, 10);
+      const maxLookback = new Date(afterProbe - 420 * 86400000).toISOString().slice(0, 10);
+      const lookbacks = new Set();
       for (const table of HAS_DATA_TABLES) {
         expect(client.from).to.have.been.calledWith(table);
         expect(client.chains[table].eq).to.have.been.calledWith('site_id', SITE_ID);
+        expect(client.chains[table].gte).to.have.been.calledWith(
+          'traffic_date',
+          sinon.match(/^\d{4}-\d{2}-\d{2}$/),
+        );
+        const lookback = client.chains[table].gte.firstCall.args[1];
+        expect(lookback >= minLookback && lookback <= maxLookback).to.equal(true);
+        lookbacks.add(lookback);
         expect(client.chains[table].limit).to.have.been.calledWith(1);
       }
-      expect(client.from).not.to.have.been.calledWith('referral_traffic_adobe_analytics');
-      expect(client.from).not.to.have.been.calledWith('referral_traffic_ga4');
+      expect(lookbacks.size).to.equal(1);
+      // Exactly one probe per source — no extra or duplicate table reads.
+      expect(client.from.callCount).to.equal(HAS_DATA_TABLES.length);
     });
 
     it('returns 400 when Site.postgrestService is missing', async () => {
@@ -1255,6 +1538,211 @@ describe('llmo-referral-traffic', () => {
       const handler = createReferralTrafficKpisHandler(stubbedValidateAccess);
       await handler(makeContext({ client, data: { source: 'invalid' } }));
       expect(client.rpc.getCall(0).args[1].p_source).to.equal('optel');
+    });
+  });
+});
+
+describe('llmo-referral-traffic — rotation (demo sites)', () => {
+  // demoStrategy has referral:true in ROTATION_CONFIG. Canned block = Jun 8–Jul 5 2026.
+  const ROTATION_SITE_ID = '66b55446-4cc3-46f1-9cd4-9eb57601b3f1';
+  const CANNED_START = '2026-06-08';
+  const CANNED_END = '2026-07-05';
+  // Freeze now=2026-07-06 (Monday) → phase 0, P0 = anchor ⇒ window = block [Jun 8, Jul 5].
+  const FULL = { startDate: '2026-06-08', endDate: '2026-07-05' };
+  const REF_ROW = {
+    total_pageviews: 100,
+    bounce_rate: 0.3,
+    consent_rate: 0.8,
+    traffic_date: '2026-06-10',
+    week_start: '2026-06-10',
+    platform: 'openai',
+    channels: ['llm'],
+    visits: 90,
+    avg_time_on_site: 45,
+    revenue: 12,
+    visitors: 80,
+    orders: 3,
+    region: 'US',
+    device: 'desktop',
+    page_intent: 'INFORMATIONAL',
+    url_path: '/coffee',
+    host: 'frescopa.coffee',
+    entries: 50,
+    exits: 40,
+    total_count: 1,
+    avg_session_duration: 30,
+    pages_per_visit: 2,
+    conversion_rate: 0.03,
+  };
+
+  beforeEach(() => {
+    setUpAuthStubs();
+    sandbox.useFakeTimers({ now: Date.UTC(2026, 6, 6), toFake: ['Date'] });
+  });
+  afterEach(() => {
+    sandbox.restore();
+  });
+
+  const assertCannedDates = (client) => {
+    expect(client.rpc).to.have.been.called;
+    client.rpc.getCalls().forEach((call) => {
+      expect(call.args[1].p_start_date >= CANNED_START).to.equal(true);
+      expect(call.args[1].p_end_date <= CANNED_END).to.equal(true);
+    });
+  };
+
+  const ROTATED = [
+    ['filter-dimensions', createReferralTrafficFilterDimensionsHandler],
+    ['kpis', createReferralTrafficKpisHandler],
+    ['trend', createReferralTrafficTrendHandler],
+    ['by-platform', createReferralTrafficByPlatformHandler],
+    ['by-region', createReferralTrafficByRegionHandler],
+    ['by-page-intent', createReferralTrafficByPageIntentHandler],
+    ['by-url', createReferralTrafficByUrlHandler],
+    ['by-device', createReferralTrafficByDeviceHandler],
+    ['business-impact', createReferralTrafficBusinessImpactHandler],
+  ];
+  ROTATED.forEach(([name, factory]) => {
+    it(`${name}: rewrites the inbound range into the canned block`, async () => {
+      const client = makeRpcClient({ data: [REF_ROW], error: null });
+      const ctx = makeContext({ client, params: { siteId: ROTATION_SITE_ID }, data: FULL });
+      const res = await factory(stubbedValidateAccess)(ctx);
+      expect(res.status).to.equal(200);
+      assertCannedDates(client);
+    });
+  });
+
+  it('by-url-trend: relabels canned week_start into the current window', async () => {
+    const client = makeRpcClient({ data: [{ week_start: '2026-06-10', total_pageviews: 20 }], error: null });
+    const ctx = makeContext({
+      client,
+      params: { siteId: ROTATION_SITE_ID },
+      data: { ...FULL, urlPath: '/coffee' },
+    });
+    const res = await createReferralTrafficUrlTrendHandler(stubbedValidateAccess)(ctx);
+    const body = await res.json();
+    // phase 0 (P0 = anchor) ⇒ identity: canned 2026-06-10 stays 2026-06-10.
+    expect(body.trend[0].weekStart).to.equal('2026-06-10');
+  });
+
+  it('weeks: synthesises the rolling window when the source has canned data', async () => {
+    // Rotation path does a single existence check (limit(1)); first call has data.
+    const client = makeWeeksChainClient(
+      { data: [{ traffic_date: '2026-06-03' }], error: null },
+      { data: [{ traffic_date: '2026-06-24' }], error: null },
+    );
+    const ctx = makeContext({ client, params: { siteId: ROTATION_SITE_ID }, data: FULL });
+    const res = await createReferralTrafficWeeksHandler(stubbedValidateAccess)(ctx);
+    expect((await res.json()).weeks).to.have.length(4);
+  });
+
+  it('weeks: returns [] when the requested source has no canned rows', async () => {
+    const client = makeWeeksChainClient({ data: [], error: null });
+    const ctx = makeContext({ client, params: { siteId: ROTATION_SITE_ID }, data: FULL });
+    const res = await createReferralTrafficWeeksHandler(stubbedValidateAccess)(ctx);
+    expect((await res.json()).weeks).to.deep.equal([]);
+  });
+
+  it('weeks: surfaces an existence-check error as 500', async () => {
+    const client = makeWeeksChainClient({ data: null, error: { message: 'boom' } });
+    const ctx = makeContext({ client, params: { siteId: ROTATION_SITE_ID }, data: FULL });
+    const res = await createReferralTrafficWeeksHandler(stubbedValidateAccess)(ctx);
+    expect(res.status).to.equal(500);
+  });
+
+  it('non-rotation site: passes the requested range through unchanged', async () => {
+    const client = makeRpcClient({ data: [REF_ROW], error: null });
+    const ctx = makeContext({ client }); // default SITE_ID (not a demo site)
+    await createReferralTrafficKpisHandler(stubbedValidateAccess)(ctx);
+    expect(client.rpc.getCall(0).args[1].p_start_date).to.equal('2026-01-01');
+    expect(client.rpc.getCall(0).args[1].p_end_date).to.equal('2026-01-28');
+  });
+
+  // ── platform multi-select (Serenity, LLMO-7616) ────────────────────────────
+  // parseParams/commonRpcParams resolve `platform` into exactly one of the scalar
+  // `p_platform` (single/all/legacy — byte-identical) or the array `p_platforms`
+  // (a real comma multi-select). Unknown codes are silently dropped.
+  describe('platform multi-select (Serenity)', () => {
+    it('maps a single platform to scalar p_platform and omits p_platforms (byte-identical)', async () => {
+      const client = makeRpcClient({ data: [] });
+      const ctx = makeContext({ client });
+      ctx.data = { platform: 'openai' };
+      await createReferralTrafficKpisHandler(stubbedValidateAccess)(ctx);
+      const rpcArgs = client.rpc.getCall(0).args[1];
+      expect(rpcArgs.p_platform).to.equal('openai');
+      expect(rpcArgs).to.not.have.property('p_platforms');
+    });
+
+    it('maps a comma list to p_platforms and nulls the scalar p_platform', async () => {
+      const client = makeRpcClient({ data: [] });
+      const ctx = makeContext({ client });
+      ctx.data = { platform: 'openai,gemini' };
+      await createReferralTrafficKpisHandler(stubbedValidateAccess)(ctx);
+      const rpcArgs = client.rpc.getCall(0).args[1];
+      // gemini maps to the DB value 'google' via PLATFORM_CODE_TO_DB.
+      expect(rpcArgs.p_platforms).to.deep.equal(['openai', 'google']);
+      expect(rpcArgs.p_platform).to.equal(null);
+    });
+
+    it('treats an explicit "all" anywhere in the list as no platform filter', async () => {
+      const client = makeRpcClient({ data: [] });
+      const ctx = makeContext({ client });
+      ctx.data = { platform: 'openai,all' };
+      await createReferralTrafficKpisHandler(stubbedValidateAccess)(ctx);
+      const rpcArgs = client.rpc.getCall(0).args[1];
+      expect(rpcArgs.p_platform).to.equal(null);
+      expect(rpcArgs).to.not.have.property('p_platforms');
+    });
+
+    it('collapses a ≤1-token list back to the single scalar path (byte-identical)', async () => {
+      for (const platform of ['openai,', 'openai,openai', 'openai,bogus']) {
+        const client = makeRpcClient({ data: [] });
+        const ctx = makeContext({ client });
+        ctx.data = { platform };
+        // eslint-disable-next-line no-await-in-loop
+        await createReferralTrafficKpisHandler(stubbedValidateAccess)(ctx);
+        const rpcArgs = client.rpc.getCall(0).args[1];
+        expect(rpcArgs.p_platform, platform).to.equal('openai');
+        expect(rpcArgs, platform).to.not.have.property('p_platforms');
+      }
+    });
+
+    it('silently drops an all-unknown list (no p_platforms, scalar null)', async () => {
+      const client = makeRpcClient({ data: [] });
+      const ctx = makeContext({ client });
+      ctx.data = { platform: 'bogus,nope' };
+      await createReferralTrafficKpisHandler(stubbedValidateAccess)(ctx);
+      const rpcArgs = client.rpc.getCall(0).args[1];
+      expect(rpcArgs.p_platform).to.equal(null);
+      expect(rpcArgs).to.not.have.property('p_platforms');
+    });
+
+    it('is prototype-safe: inherited keys never leak into the RPC params', async () => {
+      const client = makeRpcClient({ data: [] });
+      const ctx = makeContext({ client });
+      ctx.data = { platform: 'constructor,toString' };
+      await createReferralTrafficKpisHandler(stubbedValidateAccess)(ctx);
+      const rpcArgs = client.rpc.getCall(0).args[1];
+      expect(rpcArgs.p_platform).to.equal(null);
+      expect(rpcArgs).to.not.have.property('p_platforms');
+    });
+
+    it('forwards p_platforms through by-url', async () => {
+      const client = makeRpcClient({ data: [] });
+      const ctx = makeContext({ client });
+      ctx.data = { platform: 'openai,gemini' };
+      await createReferralTrafficByUrlHandler(stubbedValidateAccess)(ctx);
+      expect(client.rpc.getCall(0).args[1].p_platforms).to.deep.equal(['openai', 'google']);
+    });
+
+    it('forwards p_platforms through url-trend while still omitting p_url_path_prefix', async () => {
+      const client = makeRpcClient({ data: [] });
+      const ctx = makeContext({ client });
+      ctx.data = { platform: 'openai,gemini', urlPath: '/blog' };
+      await createReferralTrafficUrlTrendHandler(stubbedValidateAccess)(ctx);
+      const rpcArgs = client.rpc.getCall(0).args[1];
+      expect(rpcArgs.p_platforms).to.deep.equal(['openai', 'google']);
+      expect(rpcArgs).to.not.have.property('p_url_path_prefix');
     });
   });
 });

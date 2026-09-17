@@ -21,6 +21,7 @@ import {
 import {
   engineToLlm,
   responseFromGrpcError,
+  resolveSearchType,
   PROTO_FROM_JSON,
   PROTO_TO_JSON,
 } from '../../../grpc-utils.js';
@@ -29,6 +30,7 @@ export async function handleStatsByCountry(sp, clients) {
   const domain = sp.get('domain');
   const engine = engineToLlm(sp.get('engine')) || LLM_ENUM.ALL;
   const date = sp.get('date');
+  const searchType = resolveSearchType(domain);
 
   let statsRequest;
   try {
@@ -38,6 +40,7 @@ export async function handleStatsByCountry(sp, clients) {
         llm: engine,
         target: { domain, name: domain },
         target_date: date,
+        search_type: searchType,
       },
       PROTO_FROM_JSON,
     );

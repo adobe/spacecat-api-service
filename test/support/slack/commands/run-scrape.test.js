@@ -209,7 +209,7 @@ describe('RunScrapeCommand', () => {
       slackContext.files = [
         {
           name: 'sites.csv',
-          url_private: 'https://example.com/sites.csv',
+          url_private: 'https://files.slack.com/sites.csv',
         },
       ];
 
@@ -223,11 +223,11 @@ describe('RunScrapeCommand', () => {
       slackContext.files = [
         {
           name: 'sites1.csv',
-          url_private: 'https://example.com/sites1.csv',
+          url_private: 'https://files.slack.com/sites1.csv',
         },
         {
           name: 'sites2.csv',
-          url_private: 'https://example.com/sites2.csv',
+          url_private: 'https://files.slack.com/sites2.csv',
         },
       ];
 
@@ -241,7 +241,7 @@ describe('RunScrapeCommand', () => {
       slackContext.files = [
         {
           name: 'sites.txt',
-          url_private: 'https://example.com/sites.txt',
+          url_private: 'https://files.slack.com/sites.txt',
         },
       ];
 
@@ -251,7 +251,7 @@ describe('RunScrapeCommand', () => {
     });
 
     it('triggers scrapes for all sites in the CSV file', async () => {
-      const fileUrl = 'https://example.com/sites.csv';
+      const fileUrl = 'https://files.slack.com/sites.csv';
       dataAccessStub.Site.findByBaseURL.resolves({
         getId: () => '123',
         getSiteTopPagesBySourceAndGeo: sandbox.stub().resolves([
@@ -281,7 +281,7 @@ describe('RunScrapeCommand', () => {
     });
 
     it('warns when no scrape jobs are triggered from CSV', async () => {
-      const fileUrl = 'https://example.com/sites.csv';
+      const fileUrl = 'https://files.slack.com/sites.csv';
       dataAccessStub.Site.findByBaseURL.resolves(null);
       slackContext.files = [
         {
@@ -300,7 +300,7 @@ describe('RunScrapeCommand', () => {
     });
 
     it('handles failing scrape for a site in the CSV file', async () => {
-      const fileUrl = 'https://example.com/sites.csv';
+      const fileUrl = 'https://files.slack.com/sites.csv';
       dataAccessStub.Site.findByBaseURL.onCall(0).resolves({
         getId: () => '123',
         getSiteTopPagesBySourceAndGeo: sandbox.stub().resolves([

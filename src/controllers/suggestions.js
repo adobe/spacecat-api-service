@@ -14,10 +14,12 @@ import {
   badRequest,
   createResponse,
   forbidden,
+  internalServerError,
   noContent,
   notFound,
   ok,
 } from '@adobe/spacecat-shared-http-utils';
+import { HeadObjectCommand } from '@aws-sdk/client-s3';
 import {
   hasText,
   isArray, isNonEmptyArray,
@@ -26,15 +28,36 @@ import {
   isInteger,
   isValidUUID,
   isValidUrl,
+  isWithinSiteScope,
+  isPathPatternWithinSiteScope,
 } from '@adobe/spacecat-shared-utils';
 
-import { Suggestion as SuggestionModel, GeoExperiment as GeoExperimentModel } from '@adobe/spacecat-shared-data-access';
-import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
-import DrsClient, { EXPERIMENT_PHASES } from '@adobe/spacecat-shared-drs-client';
+import {
+  Audit,
+  Suggestion as SuggestionModel,
+  GeoExperiment as GeoExperimentModel,
+  Site as SiteModel,
+  Entitlement as EntitlementModel,
+  REVIEW_SOURCES,
+  REVIEW_VERDICTS,
+  REJECTION_CATEGORIES,
+  FEEDBACK_TIERS,
+  verdictToSignal,
+  toReviewView,
+  isAllowedSuggestionTransition,
+} from '@adobe/spacecat-shared-data-access';
+import TierClient from '@adobe/spacecat-shared-tier-client';
+import TokowakaClient, { ROUTING_VALIDATOR_TYPE } from '@adobe/spacecat-shared-tokowaka-client';
 import { SuggestionDto, SUGGESTION_VIEWS, SUGGESTION_SKIP_REASONS } from '../dto/suggestion.js';
+import { isValidLocale } from '../utils/validations.js';
+import { applyFieldProjection } from '../utils/field-projection.js';
+import { lookupByUrl } from '../support/lookup-by-url.js';
+import { requirePostgrestClient } from '../support/postgrest-availability.js';
 import {
   getScheduleParams,
   buildExperimentMetadata,
+  presignInsightsRawData,
+  isImpactMeasurementEligible,
 } from '../support/geo-experiment-helper.js';
 import { FixDto } from '../dto/fix.js';
 import { GeoExperimentDto } from '../dto/geo-experiment.js';
@@ -45,14 +68,124 @@ import {
   getHostName,
   getIsSummitPlgEnabled,
   isViewAsTrialRequest,
+  triggerGeoExperimentImpactMeasurement,
 } from '../support/utils.js';
-import AccessControlUtil from '../support/access-control-util.js';
+import AccessControlUtil, { X_PRODUCT_HEADER } from '../support/access-control-util.js';
+import { redactFeedbackContent } from '../support/feedback-redaction.js';
+import { filterOpportunitiesByFacsComposite } from '../support/facs-composite-resolvers.js';
 import { CAP_FIX_ENTITY_CREATE, CAP_SUGGESTION_WRITE } from '../routes/capability-constants.js';
-import { grantSuggestionsForOpportunity } from '../support/grant-suggestions-handler.js';
+import {
+  grantSuggestionsForOpportunity,
+  revokeGrantsForSuggestions,
+} from '../support/grant-suggestions-handler.js';
+import { getImsTokenFromPromiseToken } from '../support/edge-routing-auth.js';
+import { isImsGroupMember } from '../support/ims-group.js';
 import { postSlackMessage } from '../utils/slack/base.js';
 import { createAtomicStrategy, deleteAtomicStrategy } from '../support/atomic-strategy-helper.js';
+import OaeValidationController from './oae-validation.js';
+import { PLG_OPPORTUNITY_TYPES } from './plg/plg-onboarding/displacement.js';
 
 const VALIDATION_ERROR_NAME = 'ValidationError';
+
+// TODO: switch to GeoExperimentModel.METADATA_KEYS.OAE_VALIDATION_JOBS once the
+// spacecat-shared release containing that key is pulled in (@adobe/spacecat-shared-data-access
+// version bump) -- kept as a literal for now so this doesn't silently write to an `undefined`
+// metadata key against the currently-pinned dependency version.
+const OAE_VALIDATION_JOBS_METADATA_KEY = 'oaeValidationJobs';
+
+// Freemium (PLG / FREE_TRIAL) orgs cannot be assigned per-user product profiles,
+// so EDS auto-fix is gated behind membership of this IMS group instead. Members
+// of the group are allowed to trigger auto-fix; everyone else is blocked.
+const ASO_EDS_AUTOFIX_GROUP_NAME = 'ASO-EDS-Autofix-Users';
+
+/**
+ * Guidance CSV reference keys carried by `gads-placement-exclusions` suggestions.
+ * Each value is an object `{ uri, row_count, byte_size }` where `uri` is an
+ * `s3://bucket/key` pointer into the `spacecat-{env}-mystique-assets` bucket.
+ * @type {string[]}
+ */
+const GADS_GUIDANCE_REF_KEYS = [
+  'account_auto_ref',
+  'account_pmax_ref',
+  'site_auto_ref',
+  'site_pmax_ref',
+];
+
+// Click-time presigned guidance-CSV download URLs are short-lived (1 hour): the
+// URL is minted on the download request, so it only needs to outlive the click.
+const GADS_GUIDANCE_CSV_TTL_SECONDS = 60 * 60;
+
+// Server-side key prefix that binds a guidance CSV to its site. Mystique writes
+// these CSVs to
+// `gads-placement-exclusions/csv/{site_id}/{customer_id}/{obs_version}/{scope}.{source}.csv`
+// (contract: experience-platform/mystique `s3_bodies.write_csv_body`). Because
+// `data.guidance` is caller-writable, we presign only keys under the AUTHORIZED
+// site's prefix, so a tampered `uri` cannot read another tenant's object within
+// the shared mystique-assets bucket.
+const GADS_GUIDANCE_CSV_KEY_ROOT = 'gads-placement-exclusions/csv';
+
+/**
+ * Parses an `s3://bucket/key` URI into its bucket and key parts.
+ * @param {string} uri - The S3 URI to parse.
+ * @returns {{ bucket: string, key: string }|null} Parsed parts, or null when the
+ *   input is not a well-formed `s3://bucket/key` URI.
+ */
+const parseS3Uri = (uri) => {
+  if (!hasText(uri) || !uri.startsWith('s3://')) {
+    return null;
+  }
+  const withoutScheme = uri.slice('s3://'.length);
+  const slashIndex = withoutScheme.indexOf('/');
+  if (slashIndex <= 0) {
+    return null;
+  }
+  const bucket = withoutScheme.slice(0, slashIndex);
+  const key = withoutScheme.slice(slashIndex + 1);
+  // `slashIndex > 0` guarantees a non-empty bucket segment; only the key can be empty.
+  if (!hasText(key)) {
+    return null;
+  }
+  return { bucket, key };
+};
+
+// Allowed state_transition values on a backoffice review (SITES-43974). Validated
+// so the Learning Agent corpus never receives arbitrary free-text transitions.
+const FEEDBACK_STATE_TRANSITIONS = [
+  'PENDING_VALIDATION->NEW',
+  'PENDING_VALIDATION->REJECTED',
+  'EDIT',
+];
+
+// Defensive cap on reviews returned by ?include=reviews. Expected volume per
+// suggestion is 2-3, but this bounds payload size (esp. with ?include=patches)
+// and is backed by idx_feedback_event_suggestion (suggestion_id, event_time).
+const FEEDBACK_REVIEW_READ_LIMIT = 100;
+
+// Contextual experiment names by opportunity type to be visible on Oppty Workspace Strategy UI
+const EXPERIMENT_NAME_BY_OPPORTUNITY_TYPE = {
+  prerender: 'Recover content visibility',
+  toc: 'Add table of contents',
+  summarization: 'Add LLM-Friendly Summaries',
+};
+
+const getExperimentName = (opportunityType) => EXPERIMENT_NAME_BY_OPPORTUNITY_TYPE[opportunityType]
+  || `${opportunityType.charAt(0).toUpperCase()}${opportunityType.slice(1).replace(/-/g, ' ')}`;
+
+// The underlying opportunity type is generic (opportunityId, not prerenderOpportunityId) so a
+// future opportunity type can be added later without reshaping the route. This map is the one
+// place that gates which opportunity types are actually supported today, and which
+// import-worker message type knows how to validate each one — adding a second type means
+// adding an entry here (and building that type's own resolver/comparator on the import-worker
+// side); no other abstraction exists yet, per YAGNI.
+const VALIDATION_MESSAGE_TYPE_BY_OPPORTUNITY_TYPE = {
+  [Audit.AUDIT_TYPES.PRERENDER]: 'optimize-at-edge-enabled-marking',
+};
+
+// Lightweight default projection for the by-urls lookup (omits the heavy `data` blob;
+// callers opt in via `fields=...,data`). `opportunityId` is force-included alongside `id`
+// since results span opportunities. See the Lookup Service architecture doc ("Offsite
+// Intelligence - Funneling"), section 4.2, in the gambit-ai-toolkit knowledge base.
+const SUGGESTION_BY_URL_LIGHTWEIGHT_FIELDS = ['id', 'opportunityId', 'type', 'status', 'rank', 'updatedAt'];
 
 async function isSitePlgTier(site, log) {
   try {
@@ -65,6 +198,43 @@ async function isSitePlgTier(site, log) {
   }
 }
 
+/**
+ * Derives the feedback tier ('paid' | 'free') for a site from its ASO
+ * entitlement. PAID -> 'paid'; FREE_TRIAL / PLG / no entitlement -> 'free'.
+ * Never throws — defaults to 'free' on any lookup failure (SITES-43974).
+ *
+ * @param {Object} site - Site entity.
+ * @param {Object} log - logger.
+ * @returns {Promise<string>} one of FEEDBACK_TIERS.
+ */
+async function deriveFeedbackTier(site, log) {
+  try {
+    const enrollments = await site.getSiteEnrollments();
+    const entitlements = await Promise.all((enrollments ?? []).map((e) => e.getEntitlement()));
+    const isPaid = entitlements.some(
+      (e) => e?.getProductCode() === 'ASO' && e.getTier() === 'PAID',
+    );
+    return isPaid ? FEEDBACK_TIERS.PAID : FEEDBACK_TIERS.FREE;
+  } catch (err) {
+    log?.warn?.(`Failed to determine feedback tier for site ${site.getId?.()}: ${err.message}`);
+    return FEEDBACK_TIERS.FREE;
+  }
+}
+
+/**
+ * Parses an `?include=` query value into a set of requested includes.
+ * @param {string|undefined} includeParam
+ * @returns {Set<string>}
+ */
+function parseIncludes(includeParam) {
+  return new Set(
+    String(includeParam ?? '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
+  );
+}
+
 async function postPlgSuggestionSkipAlert(site, opportunity, suggestion, context, isPlgTier) {
   const { env, log } = context;
   const channelId = env?.SLACK_PLG_SKIP_CHANNEL_ID;
@@ -74,30 +244,51 @@ async function postPlgSuggestionSkipAlert(site, opportunity, suggestion, context
   }
 
   try {
+    const opportunityType = opportunity.getType?.() ?? 'unknown';
+    if (!PLG_OPPORTUNITY_TYPES.includes(opportunityType)) {
+      return;
+    }
+
     const plg = isPlgTier !== undefined ? isPlgTier : await isSitePlgTier(site, log);
     if (!plg) {
       return;
     }
 
     const siteBaseURL = site.getBaseURL?.() ?? site.getId();
-    const opportunityType = opportunity.getType?.() ?? 'unknown';
     const opportunityId = opportunity.getId?.() ?? 'unknown';
     const suggestionId = suggestion.getId?.() ?? 'unknown';
     const skipReason = suggestion.getSkipReason?.() ?? null;
     const skipDetail = suggestion.getSkipDetail?.() ?? null;
+    const organizationId = site.getOrganizationId?.() ?? null;
+
+    let orgName = null;
+    if (organizationId) {
+      try {
+        const org = await context.dataAccess.Organization.findById(organizationId);
+        orgName = org?.getName?.() || null;
+      } catch (orgLookupError) {
+        log.warn(`Failed to look up org name for PLG suggestion skip alert: ${orgLookupError.message}`);
+      }
+    }
 
     let message = ':no_entry_sign: *PLG Customer Skipped a Suggestion*\n\n'
       + `• *Site:* \`${siteBaseURL}\`\n`
-      + `• *Site ID:* \`${site.getId()}\`\n`
-      + `• *Opportunity Type:* \`${opportunityType}\`\n`
-      + `• *Opportunity ID:* \`${opportunityId}\`\n`
-      + `• *Suggestion ID:* \`${suggestionId}\``;
+      + `• *Site ID:* \`${site.getId()}\``;
 
-    if (skipReason) {
-      message += `\n• *Skip Reason:* \`${skipReason}\``;
+    if (orgName) {
+      message += `\n• *IMS Org Name:* ${orgName}`;
     }
-    if (skipDetail) {
-      message += `\n• *Skip Detail:* \`${skipDetail}\``;
+
+    message += `\n• *Opportunity Type:* \`${opportunityType}\`\n`
+      + `• *Opportunity ID:* \`${opportunityId}\`\n`
+      + `• *Suggestion ID:* \`${suggestionId}\`\n`
+      + `• *Skip Reason:* \`${skipReason ?? ''}\`\n`
+      + `• *Skip Detail:* \`${skipDetail ?? ''}\``;
+
+    if (organizationId) {
+      const experienceUrl = env.EXPERIENCE_URL || 'https://experience.adobe.com';
+      const asoUrl = `${experienceUrl}/?organizationId=${organizationId}#/sites-optimizer/sites/${site.getId()}`;
+      message += `\n• *ASO Link:* ${asoUrl}`;
     }
 
     await postSlackMessage(channelId, message, token);
@@ -255,7 +446,7 @@ function SuggestionsController(ctx, sqs, env) {
   };
 
   const {
-    Opportunity, Suggestion, SuggestionGrant, Site, Configuration, GeoExperiment,
+    Opportunity, Suggestion, SuggestionGrant, Site, GeoExperiment, Configuration,
   } = dataAccess;
 
   if (!isObject(Opportunity)) {
@@ -269,16 +460,61 @@ function SuggestionsController(ctx, sqs, env) {
   const accessControlUtil = AccessControlUtil.fromContext(ctx);
 
   /**
+   * Loads the human-review history for a suggestion from feedback_event,
+   * newest-first, mapped to the API review view. Returns [] (never throws) when
+   * the feedback store is unavailable or the query fails — reviews are
+   * supplementary to the suggestion payload.
+   *
+   * @param {Object} context - request context.
+   * @param {string} suggestionId
+   * @param {Object} [opts]
+   * @param {boolean} [opts.includePatches=false]
+   * @returns {Promise<Array<Object>>}
+   */
+  const fetchReviewsForSuggestion = async (
+    context,
+    suggestionId,
+    { includePatches = false } = {},
+  ) => {
+    // Reviews are supplementary to the suggestion payload, so this read fails
+    // soft (returns []) rather than failing the whole getByID — intentionally
+    // different from the capture path, which returns 503 when the store is down.
+    const postgrestClient = context.dataAccess?.services?.postgrestClient;
+    if (!postgrestClient?.from) {
+      context.log?.warn?.('feedback store (postgrestClient) unavailable; returning no reviews');
+      return [];
+    }
+    const { data, error } = await postgrestClient
+      .from('feedback_event')
+      .select('*')
+      .eq('suggestion_id', suggestionId)
+      .order('event_time', { ascending: false })
+      .limit(FEEDBACK_REVIEW_READ_LIMIT);
+    if (error) {
+      context.log?.error?.(`Failed to load reviews for suggestion ${suggestionId}: ${error.message}`);
+      return [];
+    }
+    return (data ?? []).map((row) => toReviewView(row, { includePatches }));
+  };
+
+  /**
    * Filters suggestions to only granted ones when summit-plg is enabled for the site
    * and the request originates from the sites-optimizer-ui client.
    * Returns all suggestions unchanged when either condition is not met.
    * @param {Object} site - Site entity.
    * @param {Array} suggestions - Suggestion entities to filter.
    * @param {Object} context - Request context.
+   * @param {Object} [opts]
+   * @param {boolean} [opts.failClosed=false] - On a grant-status lookup error, return `[]`
+   *   instead of the pre-existing fail-open default (`suggestions` unfiltered). Opt-in only -
+   *   every existing caller keeps the fail-open default. Intended for a caller whose blast
+   *   radius on a false pass-through is wider than a single opportunity's suggestions (e.g.
+   *   the site-wide by-urls lookup), where failing open would leak ungranted content across
+   *   every opportunity matched in that one call.
    * @returns {Promise<Array>} Filtered suggestion entities.
    */
-  const filterByGrantStatus = async (site, suggestions, context) => {
-    if (!await getIsSummitPlgEnabled(site, ctx, context)) {
+  const filterByGrantStatus = async (site, suggestions, context, { failClosed = false } = {}) => {
+    if (!await getIsSummitPlgEnabled(site, ctx, context, accessControlUtil)) {
       return suggestions;
     }
     try {
@@ -287,7 +523,7 @@ function SuggestionsController(ctx, sqs, env) {
       return suggestions.filter((s) => grantedIds.includes(s.getId()));
     } catch (err) {
       ctx.log?.error?.('Failed to filter suggestions by grant status', err?.message ?? err);
-      return suggestions;
+      return failClosed ? [] : suggestions;
     }
   };
 
@@ -301,6 +537,11 @@ function SuggestionsController(ctx, sqs, env) {
     const opptyId = context.params?.opportunityId;
     const viewParam = context.data?.view;
     const statusParam = context.data?.status;
+    const locale = context.data?.locale ?? null;
+
+    if (!isValidLocale(locale)) {
+      return badRequest('Invalid locale format');
+    }
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -340,7 +581,7 @@ function SuggestionsController(ctx, sqs, env) {
         return notFound('Opportunity not found');
       }
     }
-    if (opportunity && await getIsSummitPlgEnabled(site, ctx, context)) {
+    if (opportunity && await getIsSummitPlgEnabled(site, ctx, context, accessControlUtil)) {
       try {
         await grantSuggestionsForOpportunity(dataAccess, site, opportunity);
       /* c8 ignore next 3 */
@@ -357,9 +598,13 @@ function SuggestionsController(ctx, sqs, env) {
     }
     const grantedEntities = await filterByGrantStatus(site, suggestionEntities, context);
     const suggestions = grantedEntities.map(
-      (sugg) => SuggestionDto.toJSON(sugg, view, opportunity),
+      (sugg) => SuggestionDto.toJSON(sugg, view, opportunity, locale),
     );
-    return ok(suggestions);
+    const { list, error } = applyFieldProjection(suggestions, context.data?.fields);
+    if (error) {
+      return badRequest(error);
+    }
+    return ok(list);
   };
 
   /**
@@ -376,6 +621,11 @@ function SuggestionsController(ctx, sqs, env) {
     const limit = parseInt(context.params?.limit, 10) || DEFAULT_PAGE_SIZE;
     const cursor = context.params?.cursor || null;
     const viewParam = context.data?.view;
+    const locale = context.data?.locale ?? null;
+
+    if (!isValidLocale(locale)) {
+      return badRequest('Invalid locale format');
+    }
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -418,11 +668,15 @@ function SuggestionsController(ctx, sqs, env) {
     }
     const grantedEntities = await filterByGrantStatus(site, suggestionEntities, context);
     const suggestions = grantedEntities.map(
-      (sugg) => SuggestionDto.toJSON(sugg, view, opportunity),
+      (sugg) => SuggestionDto.toJSON(sugg, view, opportunity, locale),
     );
 
+    const { list, error } = applyFieldProjection(suggestions, context.data?.fields);
+    if (error) {
+      return badRequest(error);
+    }
     return ok({
-      suggestions,
+      suggestions: list,
       pagination: {
         limit,
         cursor: newCursor ?? null,
@@ -441,6 +695,11 @@ function SuggestionsController(ctx, sqs, env) {
     const opptyId = context.params?.opportunityId;
     const status = context.params?.status || undefined;
     const viewParam = context.data?.view;
+    const locale = context.data?.locale ?? null;
+
+    if (!isValidLocale(locale)) {
+      return badRequest('Invalid locale format');
+    }
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -476,9 +735,13 @@ function SuggestionsController(ctx, sqs, env) {
     }
     const grantedEntities = await filterByGrantStatus(site, suggestionEntities, context);
     const suggestions = grantedEntities.map(
-      (sugg) => SuggestionDto.toJSON(sugg, view, opportunity),
+      (sugg) => SuggestionDto.toJSON(sugg, view, opportunity, locale),
     );
-    return ok(suggestions);
+    const { list, error } = applyFieldProjection(suggestions, context.data?.fields);
+    if (error) {
+      return badRequest(error);
+    }
+    return ok(list);
   };
 
   /**
@@ -493,6 +756,11 @@ function SuggestionsController(ctx, sqs, env) {
     const limit = parseInt(context.params?.limit, 10) || DEFAULT_PAGE_SIZE;
     const cursor = context.params?.cursor || null;
     const viewParam = context.data?.view;
+    const locale = context.data?.locale ?? null;
+
+    if (!isValidLocale(locale)) {
+      return badRequest('Invalid locale format');
+    }
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -537,10 +805,14 @@ function SuggestionsController(ctx, sqs, env) {
     }
     const grantedEntities = await filterByGrantStatus(site, suggestionEntities, context);
     const suggestions = grantedEntities.map(
-      (sugg) => SuggestionDto.toJSON(sugg, view, opportunity),
+      (sugg) => SuggestionDto.toJSON(sugg, view, opportunity, locale),
     );
+    const { list, error } = applyFieldProjection(suggestions, context.data?.fields);
+    if (error) {
+      return badRequest(error);
+    }
     return ok({
-      suggestions,
+      suggestions: list,
       pagination: {
         limit,
         cursor: newCursor ?? null,
@@ -559,6 +831,11 @@ function SuggestionsController(ctx, sqs, env) {
     const opptyId = context.params?.opportunityId || undefined;
     const suggestionId = context.params?.suggestionId || undefined;
     const viewParam = context.data?.view;
+    const locale = context.data?.locale ?? null;
+
+    if (!isValidLocale(locale)) {
+      return badRequest('Invalid locale format');
+    }
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -594,11 +871,142 @@ function SuggestionsController(ctx, sqs, env) {
     if (!opportunity || opportunity.getSiteId() !== siteId) {
       return notFound();
     }
-    if (await getIsSummitPlgEnabled(site, ctx, context)
+    if (await getIsSummitPlgEnabled(site, ctx, context, accessControlUtil)
       && !(await SuggestionGrant.isSuggestionGranted(suggestion.getId()))) {
       return notFound('Suggestion not found');
     }
-    return ok(SuggestionDto.toJSON(suggestion, view, opportunity));
+
+    const json = SuggestionDto.toJSON(suggestion, view, opportunity, locale);
+
+    // ?include=reviews composes human-review feedback_event rows at read time
+    // (no inline mirror on the suggestion). ?include=reviews,patches additionally
+    // surfaces the raw previous/edited fix (heavy — opt-in only).
+    const includes = parseIncludes(context.data?.include);
+    if (includes.has('reviews')) {
+      json.reviews = await fetchReviewsForSuggestion(
+        context,
+        suggestionId,
+        { includePatches: includes.has('patches') },
+      );
+    }
+
+    return ok(json);
+  };
+
+  /**
+   * Returns a short-lived presigned download URL for one of a
+   * `gads-placement-exclusions` suggestion's guidance CSV references.
+   *
+   * The browser cannot presign S3 keys, so the URL is minted on the download
+   * request (mirroring `llmo/brand-claims.js`): the CSV's `s3://` uri is resolved
+   * from the suggestion's stored `data.guidance[refKey]`. Because that stored data
+   * is caller-writable, authorization does not trust it: the bucket is pinned
+   * server-side to `S3_MYSTIQUE_BUCKET` (no cross-bucket reads) and the key must
+   * sit under the authorized site's prefix `gads-placement-exclusions/csv/{siteId}/`
+   * (no cross-object/cross-tenant reads). Existence is verified, then a 1-hour
+   * `GetObject` URL is signed. Minting per click needs no long TTL.
+   *
+   * @param {object} context of the request.
+   * @returns {Promise<Response>} `{ presignedUrl, expiresAt }`, or an error response.
+   */
+  const getPresignedGuidanceCsvUrl = async (context) => {
+    const siteId = context.params?.siteId;
+    const opptyId = context.params?.opportunityId || undefined;
+    const suggestionId = context.params?.suggestionId || undefined;
+    const refKey = context.params?.refKey;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+    if (!isValidUUID(opptyId)) {
+      return badRequest('Opportunity ID required');
+    }
+    if (!isValidUUID(suggestionId)) {
+      return badRequest('Suggestion ID required');
+    }
+    if (!GADS_GUIDANCE_REF_KEYS.includes(refKey)) {
+      return badRequest('Invalid guidance CSV reference');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('User does not belong to the organization');
+    }
+
+    // S3 config is an environment-global signal, so this guard is placed after
+    // access control (consistent with the sibling handlers) rather than ahead of it.
+    const { s3 } = ctx;
+    const mystiqueBucket = env?.S3_MYSTIQUE_BUCKET;
+    if (!s3?.s3Client || !s3.getSignedUrl || !s3.GetObjectCommand || !hasText(mystiqueBucket)) {
+      return badRequest('S3 storage is not configured for this environment');
+    }
+
+    const suggestion = await Suggestion.findById(suggestionId);
+    if (!suggestion || suggestion.getOpportunityId() !== opptyId) {
+      return notFound('Suggestion not found');
+    }
+    const opportunity = await suggestion.getOpportunity();
+    if (!opportunity || opportunity.getSiteId() !== siteId) {
+      return notFound();
+    }
+    if (await getIsSummitPlgEnabled(site, ctx, context, accessControlUtil)
+      && !(await SuggestionGrant.isSuggestionGranted(suggestion.getId()))) {
+      return notFound('Suggestion not found');
+    }
+
+    const parsed = parseS3Uri(suggestion.getData()?.guidance?.[refKey]?.uri);
+    if (!parsed) {
+      return notFound('Guidance CSV not available');
+    }
+    // `data` is caller-writable (PATCH/POST persist it verbatim), so neither the
+    // ref's bucket nor its key is trusted for authorization. Bucket must be the
+    // pinned mystique-assets bucket (no cross-bucket reads)...
+    if (parsed.bucket !== mystiqueBucket) {
+      context.log.warn(`Refusing to presign guidance CSV for suggestion ${suggestionId}: ref ${refKey} names bucket ${parsed.bucket}, expected ${mystiqueBucket}`);
+      return notFound('Guidance CSV not available');
+    }
+    // ...and key must sit under the AUTHORIZED site's CSV prefix, binding the
+    // signed object to the site (closes cross-object/cross-tenant reads within
+    // the shared bucket). `siteId` is already access-checked above.
+    const expectedKeyPrefix = `${GADS_GUIDANCE_CSV_KEY_ROOT}/${siteId}/`;
+    if (!parsed.key.startsWith(expectedKeyPrefix)) {
+      context.log.warn(`Refusing to presign guidance CSV for suggestion ${suggestionId}: ref ${refKey} key is outside the site prefix ${expectedKeyPrefix}`);
+      return notFound('Guidance CSV not available');
+    }
+
+    try {
+      // Presigning never verifies existence; HeadObject yields a clean 404 when
+      // the object is missing (e.g. a ref written ahead of its CSV).
+      await s3.s3Client.send(new HeadObjectCommand({ Bucket: mystiqueBucket, Key: parsed.key }));
+      const command = new s3.GetObjectCommand({ Bucket: mystiqueBucket, Key: parsed.key });
+      const presignedUrl = await s3.getSignedUrl(
+        s3.s3Client,
+        command,
+        { expiresIn: GADS_GUIDANCE_CSV_TTL_SECONDS },
+      );
+      return ok({
+        presignedUrl,
+        expiresAt: new Date(Date.now() + GADS_GUIDANCE_CSV_TTL_SECONDS * 1000).toISOString(),
+      });
+    } catch (err) {
+      if (err.name === 'NotFound' || err.$metadata?.httpStatusCode === 404) {
+        context.log.warn(`Guidance CSV object missing for suggestion ${suggestionId} ref ${refKey}: ${parsed.key}`);
+        return notFound('Guidance CSV not available');
+      }
+      // A server-side S3 failure is not the client's fault: return 5xx (503 for
+      // throttling/transient so clients retry, 500 otherwise) with a generic
+      // message — the internal error text stays in the log, not the response.
+      context.log.error(`Failed to presign guidance CSV for suggestion ${suggestionId} ref ${refKey}: ${err.message}`);
+      const status = err.$metadata?.httpStatusCode;
+      const transient = status === 429 || status === 503
+        || ['ThrottlingException', 'TooManyRequestsException', 'SlowDown', 'RequestLimitExceeded', 'ServiceUnavailable'].includes(err.name);
+      return transient
+        ? createResponse({ message: 'Guidance CSV service temporarily unavailable' }, 503)
+        : internalServerError('Error retrieving guidance CSV');
+    }
   };
 
   /**
@@ -636,10 +1044,35 @@ function SuggestionsController(ctx, sqs, env) {
       return forbidden('User does not belong to the organization');
     }
 
+    // suggestionKey is a protected identity field (readOnly on the ORM schema,
+    // collision-checked only via the internal rekey_bbl_suggestion RPC used by
+    // Mystique's in-process projector). Setting it on create via this public API
+    // is restricted to callers with an explicit grant — either a scoped S2S
+    // suggestion:write capability or plain admin access Any caller without that grant has
+    // suggestionKey silently dropped rather than erroring, so ordinary suggestion
+    // creation (the overwhelmingly common case) is unaffected.
+    const suggKeyS2SResult = await accessControlUtil.hasS2SCapability(CAP_SUGGESTION_WRITE);
+    const canSetSuggestionKey = suggKeyS2SResult.allowed || accessControlUtil.hasAdminAccess();
+
     const suggestionPromises = context.data.map(async (suggData, index) => {
       try {
         // eslint-disable-next-line no-param-reassign
         suggData.opportunityId = opptyId;
+
+        if (hasText(suggData.suggestionKey)) {
+          if (!canSetSuggestionKey) {
+            // eslint-disable-next-line no-param-reassign
+            delete suggData.suggestionKey;
+          } else if (!suggData.suggestionKey.startsWith(`site:${siteId}:`)) {
+            // Check to make sure the suggestionKey is scoped to the correct site
+            return {
+              index,
+              message: `suggestionKey must be scoped to site ${siteId}`,
+              statusCode: 400,
+            };
+          }
+        }
+
         const suggestionEntity = await Suggestion.create(suggData);
         return {
           index,
@@ -957,6 +1390,21 @@ function SuggestionsController(ctx, sqs, env) {
             }
           }
 
+          // Per-item transition-legality gate (SITES-49063; part of the SITES-47286
+          // warn->enforce rollout). NOTE: the REJECTED hard-rule above is a stricter
+          // subset of this and fires first — keep it ahead of this general gate.
+          if (!isAllowedSuggestionTransition(currentStatus, status)) {
+            // logged so unexpected 400s can be triaged from Splunk when
+            // STATUS_TRANSITION_ENFORCEMENT is flipped to enforce (SITES-47286).
+            context.log.info(`[patchSuggestionsStatus] rejected illegal status transition suggestionId=${id} ${currentStatus} -> ${status}`);
+            return {
+              index,
+              uuid: id,
+              message: `Illegal status transition: ${currentStatus} -> ${status}`,
+              statusCode: 400,
+            };
+          }
+
           suggestion.setStatus(status);
           if (status === SuggestionModel.STATUSES.SKIPPED) {
             isNewSkipTransition = true;
@@ -1142,14 +1590,115 @@ function SuggestionsController(ctx, sqs, env) {
       return notFound('Site not found');
     }
 
+    // The 'auto_fix' subService maps to the `dx_aem_perf_auto_fix` user scope, which is only
+    // minted for ASO product logins. LLMO logins never carry this scope, so gating LLMO autofix
+    // on it always yields a 403 (LLMO-6553). Only enforce the subService for ASO; for any other
+    // product, fall back to plain org-membership access.
+    const xProduct = context.pathInfo?.headers?.[X_PRODUCT_HEADER];
+    const autoFixSubService = xProduct === 'ASO' ? 'auto_fix' : '';
+
     const s2sResult = await accessControlUtil.hasS2SCapability(CAP_FIX_ENTITY_CREATE);
     if (s2sResult.allowed) {
       ctx.log?.info(`[acl] S2S auto-fix granted - clientId=${s2sResult.clientId} consumerId=${s2sResult.consumerId}`);
-    } else if (!await accessControlUtil.hasAccess(site, 'auto_fix')) {
+    } else if (!await accessControlUtil.hasAccess(site, autoFixSubService)) {
       if (s2sResult.reason !== 'not-s2s') {
         ctx.log?.info(`[acl] Denied PATCH auto-fix - reason=${s2sResult.reason} clientId=${s2sResult.clientId || 'n/a'} consumerId=${s2sResult.consumerId || 'n/a'}`);
       }
       return forbidden('User does not belong to the organization or does not have sufficient permissions');
+    }
+
+    // LLMO auto-fix: enforce the finer-grained LLMO capability for this site.
+    // LLMO logins never carry the ASO `auto_fix` scope, so the access check above
+    // only confirmed org membership; require the LLMO capability too. S2S callers
+    // were already authorized via CAP_FIX_ENTITY_CREATE and are not FACS subjects,
+    // so they are exempt.
+    if (
+      xProduct === 'LLMO'
+      && !s2sResult.allowed
+      && !await accessControlUtil.hasLlmoCapabilityForSite(site)
+    ) {
+      return forbidden(accessControlUtil.llmoForbiddenMessage('Only LLMO administrators can trigger auto-fix'));
+    }
+
+    if (site.getDeliveryType() === SiteModel.DELIVERY_TYPES.AEM_EDGE) {
+      try {
+        const asoProductCode = EntitlementModel.PRODUCT_CODES.ASO;
+        const tierClient = await TierClient.createForSite(context, site, asoProductCode);
+        const { entitlement, siteEnrollment } = await tierClient.checkValidEntitlement();
+        const blockedTiers = [EntitlementModel.TIERS.PLG, EntitlementModel.TIERS.FREE_TRIAL];
+        if (blockedTiers.includes(entitlement?.getTier()) && siteEnrollment) {
+          // Crosswalk and Dark Alley (da.live) EDS sites author with the caller's
+          // OWN IMS token, so their existing permissions govern the write and the
+          // IMS group is NOT required — they are exempt from the group gate. Only
+          // Google Drive / SharePoint sources are written via a service account
+          // disconnected from the caller and therefore need the group. Fail-closed:
+          // exempt ONLY known user-token sources (authoringType cs/crosswalk, or a
+          // `markup` content source resolved from the stored type or the source URL);
+          // an unknown/absent source is still gated.
+          //
+          // NOTE: authoringType `documentauthoring` is NOT a reliable user-token
+          // signal — it is the DEFAULT for EDS (getAuthoringType returns DA for every
+          // hlx-hosted site, and the UI flattens all non-crosswalk EDS sites to it on
+          // save), so Google Drive / SharePoint sites carry it too. Exempting on it
+          // would skip the group gate for exactly the service-account sources it
+          // protects. Dark Alley is instead identified by its `markup` source below.
+          const authoringType = site.getAuthoringType?.();
+          const contentSource = site.getHlxConfig?.()?.content?.source;
+          const contentSourceType = contentSource?.type;
+          const contentSourceUrl = contentSource?.url ?? '';
+          // da.live (Dark Alley) and the `/franklin.delivery/` bin path (crosswalk)
+          // are user-token `markup` sources even when the stored `type` is absent —
+          // resolve from the URL, mirroring the UI's detectContentSourceType.
+          const isMarkupSource = contentSourceType === 'markup'
+            || contentSourceUrl.includes('da.live')
+            || contentSourceUrl.includes('/franklin.delivery/');
+          const isUserTokenContentSource = authoringType === SiteModel.AUTHORING_TYPES.CS_CW
+            || isMarkupSource;
+
+          if (isUserTokenContentSource) {
+            context.log.info(`Auto-fix allowed for site ${siteId}: AEM Edge user-token content source (authoringType=${authoringType}, contentSourceType=${contentSourceType}); IMS group not required`);
+          } else {
+            // Freemium EDS auto-fix on a service-account source (Google Drive /
+            // SharePoint) applies changes via a service account disconnected from
+            // the caller, so authorize the caller only when they belong to the
+            // dedicated IMS group. Recover the caller's IMS identity by exchanging
+            // the forwarded promise token — safe to consume here because these EDS
+            // fixes run under service credentials (not this token), unlike
+            // promise-based CS authoring.
+            //
+            // Once the user is CONFIRMED freemium (blocked tier + active
+            // enrollment) on a service-account source, the gate is fail-closed: any
+            // error resolving the org, token, or group membership denies. This
+            // inner try/catch is separate from the outer one on purpose — the outer
+            // catch stays fail-open for the tier-determination phase (so a transient
+            // TierClient error never blocks paid users), but must not swallow errors
+            // here and let a confirmed freemium caller through ungated.
+            try {
+              const org = await site.getOrganization();
+              const imsOrgId = org?.getImsOrgId();
+              let imsUserToken;
+              try {
+                imsUserToken = await getImsTokenFromPromiseToken(context);
+              } catch (tokenErr) {
+                context.log?.warn(`Auto-fix group check: could not resolve IMS token for site ${siteId}: ${tokenErr.message}`);
+              }
+              const isGroupMember = await isImsGroupMember(context, {
+                imsOrgId, imsUserToken, groupName: ASO_EDS_AUTOFIX_GROUP_NAME,
+              }, context.log);
+              if (!isGroupMember) {
+                context.log.warn(`Auto-fix blocked for site ${siteId}: AEM Edge Freemium caller not in '${ASO_EDS_AUTOFIX_GROUP_NAME}' IMS group`);
+                return forbidden(`Deploying auto-fixes on this Edge Delivery site requires membership of the '${ASO_EDS_AUTOFIX_GROUP_NAME}' IMS group`);
+              }
+              context.log.info(`Auto-fix allowed for site ${siteId}: AEM Edge Freemium caller in '${ASO_EDS_AUTOFIX_GROUP_NAME}' IMS group`);
+            } catch (gateErr) {
+              context.log.warn(`Auto-fix blocked for site ${siteId}: freemium authorization gate error: ${gateErr.message}`);
+              return forbidden('Could not verify Edge Delivery auto-fix authorization; please try again');
+            }
+          }
+        }
+      } catch (e) {
+        context.log?.warn(`Failed to check entitlement tier for site ${siteId}: ${e.message}`);
+      }
     }
 
     const opportunity = await Opportunity.findById(opportunityId);
@@ -1193,10 +1742,11 @@ function SuggestionsController(ctx, sqs, env) {
       if (invalidEntry !== undefined) {
         return badRequest('Each page must be a valid URL string or an object with pageUrl (valid URL) and optional imageUrls (array of valid URLs)');
       }
-      const configuration = await Configuration.findLatest();
-      if (!configuration.isHandlerEnabledForSite(`${opportunity.getType()}-auto-fix`, site)) {
-        return badRequest(`Handler is not enabled for site ${site.getId()} autofix type ${opportunity.getType()}`);
-      }
+      // Note: the per-site `<type>-auto-fix` handler enabled-list check was removed
+      // intentionally. Auto-fix deploys are user-initiated one-off actions; gating them
+      // on the scheduled-audit enabled-list blocked legitimate ad-hoc deploys for sites
+      // that simply weren't on that list. Access control (`auto_fix` permission) above
+      // still rejects unauthorized callers.
       const { AUTOFIX_JOBS_QUEUE: queueUrl } = env;
       // Intentionally omit opportunityId: worker uses context differently for URL-based assessments
       await sqs.sendMessage(queueUrl, {
@@ -1217,7 +1767,7 @@ function SuggestionsController(ctx, sqs, env) {
     }
 
     // Block auto-deploy on non-granted suggestions for summit-plg users
-    if (await getIsSummitPlgEnabled(site, ctx, context)) {
+    if (await getIsSummitPlgEnabled(site, ctx, context, accessControlUtil)) {
       const { notGrantedIds } = await SuggestionGrant.splitSuggestionsByGrantStatus(suggestionIds);
       if (notGrantedIds.length > 0) {
         const trialSuffix = isViewAsTrialRequest(context)
@@ -1227,10 +1777,8 @@ function SuggestionsController(ctx, sqs, env) {
       }
     }
 
-    const configuration = await Configuration.findLatest();
-    if (!configuration.isHandlerEnabledForSite(`${opportunity.getType()}-auto-fix`, site)) {
-      return badRequest(`Handler is not enabled for site ${site.getId()} autofix type ${opportunity.getType()}`);
-    }
+    // Note: the per-site `<type>-auto-fix` handler enabled-list check was removed
+    // intentionally — see the matching note in the assess-urls branch above.
     const suggestions = await Suggestion.allByOpportunityId(
       opportunityId,
     );
@@ -1493,6 +2041,12 @@ function SuggestionsController(ctx, sqs, env) {
     }
 
     try {
+      await revokeGrantsForSuggestions(SuggestionGrant, [suggestionId]);
+    } catch (revokeError) {
+      context.log.warn(`Failed to revoke grants for suggestion ${suggestionId}`, revokeError?.message ?? revokeError);
+    }
+
+    try {
       await suggestion.remove();
       return noContent();
     } catch (e) {
@@ -1731,7 +2285,8 @@ function SuggestionsController(ctx, sqs, env) {
       context.log.warn(`[edge-deploy-failed] site ${siteId} not found`);
       return notFound('Site not found');
     }
-    const apexBaseUrl = getHostName(site.getBaseURL()) || site.getBaseURL();
+    const siteBaseURL = site.getBaseURL();
+    const apexBaseUrl = getHostName(siteBaseURL) || siteBaseURL;
 
     if (!isValidUUID(opportunityId)) {
       context.log.warn(`[edge-deploy-failed] site: ${apexBaseUrl}, opportunityId ${opportunityId} is not a valid UUID`);
@@ -1788,6 +2343,23 @@ function SuggestionsController(ctx, sqs, env) {
     const pathSuggestions = [];
     const failedSuggestions = [];
     let coveredSuggestionsCount = 0;
+
+    const isSuggestionInScope = (suggestion) => {
+      const data = suggestion.getData();
+      if (isDomainWideSuggestion(suggestion) || isPathSuggestion(suggestion)) {
+        const patterns = data?.allowedRegexPatterns;
+        if (!isNonEmptyArray(patterns)) {
+          return true;
+        }
+        return patterns.every((pattern) => isPathPatternWithinSiteScope(pattern, siteBaseURL));
+      }
+      const url = getSuggestionUrl(data, opportunity);
+      if (!url) {
+        return true;
+      }
+      return isWithinSiteScope(url, siteBaseURL);
+    };
+
     // Check each requested suggestion (basic validation only)
     suggestionIds.forEach((suggestionId, index) => {
       const suggestion = allSuggestions.find((s) => s.getId() === suggestionId);
@@ -1799,6 +2371,14 @@ function SuggestionsController(ctx, sqs, env) {
           index,
           message: 'Suggestion not found',
           statusCode: 404,
+        });
+      } else if (!isSuggestionInScope(suggestion)) {
+        context.log.warn(`[edge-deploy-failed] site: ${apexBaseUrl}, suggestion ${suggestionId} URL is outside site scope`);
+        failedSuggestions.push({
+          uuid: suggestionId,
+          index,
+          message: 'Suggestion URL is outside the scope of the site base URL',
+          statusCode: 400,
         });
       } else if (isDomainWideSuggestion(suggestion)) {
         context.log.info(`[edge-deploy] ${suggestionId} → DOMAIN-WIDE`);
@@ -1881,7 +2461,6 @@ function SuggestionsController(ctx, sqs, env) {
 
     if (isAsyncExperimentRequested) {
       context.log.info(`[edge-geo-exp] async experiment requested for site: ${apexBaseUrl}`);
-      let urls;
       const geoExperimentId = crypto.randomUUID();
 
       context.log.info('[edge-geo-exp] Initiating experiment', {
@@ -1892,9 +2471,8 @@ function SuggestionsController(ctx, sqs, env) {
       });
 
       let geoExperiment = null;
-      // Tracks whether the Atomic strategy was successfully written, so the
-      // outer catch knows whether to compensate by deleting it.
       let atomicStrategyCreated = false;
+      let validSuggestionEntities = [];
       try {
         const preScheduleParams = getScheduleParams(
           context,
@@ -1903,68 +2481,101 @@ function SuggestionsController(ctx, sqs, env) {
           'pre',
         );
         if (!preScheduleParams.cronExpression || !preScheduleParams.expiryMs) {
-          context.log.warn(`[edge-geo-exp-failed] site: ${apexBaseUrl}, missing schedule config for pre phase`);
+          context.log.warn(`[geo-experiment-failed] site: ${apexBaseUrl}, missing schedule config for pre phase`);
           throw new Error('Missing required environment variables');
         }
-        const { s3Client, s3Bucket, PutObjectCommand } = context.s3;
-        const domainWideSuggestionIds = new Set(
-          domainWideSuggestions.map(({ suggestion }) => suggestion.getId()),
-        );
-        let promptSources;
-        if (domainWideSuggestions.length > 0) {
-          promptSources = [...allSuggestions]
-            .filter((s) => {
-              const data = s.getData() || {};
-              return !domainWideSuggestionIds.has(s.getId())
-                && s.getStatus() === SuggestionModel.STATUSES.NEW
-                && !data.edgeDeployed
-                && data.aiSummary
-                && data.valuable === true;
-            })
-            .sort((a, b) => {
-              const aScore = (a.getData()?.agenticTraffic || 0)
-                * (a.getData()?.contentGainRatio || 0);
-              const bScore = (b.getData()?.agenticTraffic || 0)
-                * (b.getData()?.contentGainRatio || 0);
-              return bScore - aScore;
-            })
-            .slice(0, 100);
+        const hasPatternDeploy = domainWideSuggestions.length > 0 || pathSuggestions.length > 0;
+        // A single request can select multiple pattern suggestions
+        const patternSuggestions = [
+          ...domainWideSuggestions.map(({ suggestion }) => suggestion),
+          ...pathSuggestions.map(({ suggestion }) => suggestion),
+        ];
+        const metadataBase = {};
+
+        const highImpactIds = context.data?.metadata?.highImpactSuggestionIds;
+        const hasHighImpactIds = Array.isArray(highImpactIds) && highImpactIds.length > 0;
+        if (hasPatternDeploy && !hasHighImpactIds) {
+          context.log.warn(`[geo-experiment-failed] site: ${apexBaseUrl}, missing/invalid metadata.highImpactSuggestionIds for pattern deploy`);
+          throw new Error('metadata.highImpactSuggestionIds is required for domain-wide/segment deployment');
+        }
+        if (hasHighImpactIds && !highImpactIds.every((id) => isValidUUID(id))) {
+          context.log.warn(`[geo-experiment-failed] site: ${apexBaseUrl}, invalid metadata.highImpactSuggestionIds`);
+          throw new Error('metadata.highImpactSuggestionIds must be an array of valid UUIDs');
+        }
+
+        if (hasHighImpactIds) {
+          context.log.info(`[edge-geo-exp] site: ${apexBaseUrl}, highImpactSuggestionIds: ${JSON.stringify(highImpactIds)}`);
+          const highImpactIdSet = new Set(highImpactIds);
+          const measurementSuggestions = allSuggestions.filter(
+            (s) => highImpactIdSet.has(s.getId()),
+          );
+          if (measurementSuggestions.length === 0) {
+            context.log.warn(`[geo-experiment-failed] site: ${apexBaseUrl}, no high-impact suggestions resolved for the provided IDs`);
+            throw new Error('No high-impact suggestions found for the provided IDs');
+          }
+          // suggestionIds holds everything that actually deploys; the high-impact measurement
+          // suggestions live in metadata and drive prompt generation/measurement only.
+          metadataBase.urls = [
+            ...new Set(measurementSuggestions.map((s) => s.getData()?.url).filter(Boolean)),
+          ];
+          metadataBase.highImpactSuggestionIds = measurementSuggestions.map((s) => s.getId());
+          if (hasPatternDeploy) {
+            metadataBase.patterns = patternSuggestions.map((ps) => (
+              ps.getData()?.isDomainWide ? '/*' : ps.getData()?.allowedRegexPatterns?.[0]
+            ));
+          }
         } else {
-          promptSources = validSuggestions;
+          metadataBase.urls = [
+            ...new Set(validSuggestions.map((s) => s.getData()?.url).filter(Boolean)),
+          ];
         }
-        urls = promptSources
-          .filter((s) => !domainWideSuggestionIds.has(s.getId()))
-          .map((s) => s.getData()?.url)
-          .filter(Boolean);
-        const prompts = promptSources.flatMap((s) => s.getData()?.prompts || []);
-        if (prompts.length === 0) {
-          context.log.warn(`[edge-geo-exp-failed] site: ${apexBaseUrl}, no prompts found in selected suggestions`);
-          throw new Error('No prompts found in selected suggestions');
+
+        // Best-effort: queue a routing-validation job for the high-impact measurement
+        // suggestions and record its jobId on the experiment so a future consumer can poll it.
+        // Only runs when highImpactSuggestionIds is actually present -- a plain (non-pattern)
+        // deploy has no discrete measurement target set to validate, so no job is created.
+        // A failure here must not block the deploy itself -- validation is an auxiliary check,
+        // not a gate.
+        // NOTE: this scoping is expected to change as the ROUTING_VALIDATION polling side
+        // (llmo-experimentation-engine) is finalized -- revisit together.
+        if (hasHighImpactIds) {
+          try {
+            const oaeValidationController = OaeValidationController(
+              { dataAccess, sqs },
+              context.log,
+              env,
+            );
+            const { jobId: oaeValidationJobId } = await oaeValidationController.createJob({
+              siteId,
+              opportunityId,
+              type: ROUTING_VALIDATOR_TYPE,
+              suggestionIds: metadataBase.highImpactSuggestionIds,
+            });
+            // Array (not a single id) so a future retry job (created by
+            // llmo-experimentation-engine's ROUTING_VALIDATION phase) can be appended, keeping a
+            // full history of every job run for this validation type rather than overwriting it.
+            metadataBase[OAE_VALIDATION_JOBS_METADATA_KEY] = {
+              [ROUTING_VALIDATOR_TYPE]: [oaeValidationJobId],
+            };
+          } catch (error) {
+            context.log.error(`[geo-experiment-failed] site: ${apexBaseUrl}, failed to queue OAE routing-validation job: ${error.message}`);
+          }
         }
-        const promptsS3Key = `geo-experiments/${siteId}/${geoExperimentId}-prompts.json`;
-        await s3Client.send(new PutObjectCommand({
-          Bucket: s3Bucket,
-          Key: promptsS3Key,
-          Body: JSON.stringify(prompts),
-          ContentType: 'application/json',
-        }));
-        context.log.info(`[edge-geo-exp] Uploaded ${prompts.length} prompts to S3: ${promptsS3Key}`);
+
+        const experimentName = context.data?.name || getExperimentName(opportunity.getType());
 
         geoExperiment = await GeoExperiment.create({
           geoExperimentId,
           siteId,
           opportunityId,
           type: GeoExperimentModel.TYPES.ONSITE_OPPORTUNITY_DEPLOYMENT,
-          name: context.data?.name
-            || `${opportunity.getType().charAt(0).toUpperCase()}${opportunity.getType().slice(1)}-${new Date().toISOString().slice(0, 10)}`,
-          promptsCount: prompts.length,
-          promptsLocation: promptsS3Key,
+          name: experimentName,
           status: GeoExperimentModel.STATUSES.GENERATING_BASELINE,
-          phase: GeoExperimentModel.PHASES.PRE_ANALYSIS_STARTED,
+          phase: GeoExperimentModel.PHASES.INITIATED,
           suggestionIds: validSuggestionIds,
           metadata: buildExperimentMetadata(
             context,
-            { urls },
+            metadataBase,
             GeoExperimentModel.TYPES.ONSITE_OPPORTUNITY_DEPLOYMENT,
             opportunity.getType(),
           ),
@@ -1975,78 +2586,36 @@ function SuggestionsController(ctx, sqs, env) {
           throw new Error('GeoExperiment was not created');
         }
 
-        context.log.info(`[edge-geo-exp] Created GeoExperiment ${geoExperimentId} with status GENERATING_BASELINE / phase PRE_ANALYSIS_STARTED`);
+        context.log.info(`[edge-geo-exp] Created GeoExperiment ${geoExperimentId} with status GENERATING_BASELINE / phase INITIATED`);
 
-        // Create the Atomic strategy before DRS / suggestion-marking so a
-        // failure rolls back cheaply via the outer catch.
         await createAtomicStrategy({
           siteId,
           geoExperimentId,
           opportunityId,
           opportunityType: opportunity.getType(),
-          name: geoExperiment.getName?.() || `${opportunity.getType()}-${new Date().toISOString().slice(0, 10)}`,
+          name: geoExperiment.getName?.() || experimentName,
           profile,
           s3: context.s3,
           log: context.log,
         });
         atomicStrategyCreated = true;
 
-        let preScheduleId;
-        try {
-          const drsClient = DrsClient.createFrom(context);
-          const drsResult = await drsClient.createExperimentSchedule({
-            siteId,
-            experimentId: geoExperimentId,
-            experimentPhase: EXPERIMENT_PHASES.PRE,
-            cronExpression: preScheduleParams.cronExpression,
-            expiresAt: new Date(Date.now() + preScheduleParams.expiryMs).toISOString(),
-            platforms: preScheduleParams.platforms,
-            providerIds: preScheduleParams.providerIds,
-            triggerImmediately: true,
-            enableBrandPresence: true,
-            metadata: { triggered_by: 'spacecat-edge-deploy', opportunityId },
-            timeout: 12_000,
+        validSuggestionEntities = [...validSuggestions, ...patternSuggestions];
+
+        validSuggestionEntities.forEach((suggestion) => {
+          suggestion.setData({
+            ...suggestion.getData(),
+            edgeOptimizeStatus: 'EXPERIMENT_IN_PROGRESS',
           });
-          preScheduleId = drsResult?.schedule?.schedule_id || drsResult?.schedule_id;
-          if (!preScheduleId) {
-            throw new Error('DRS schedule created but returned no schedule ID');
-          }
-          context.log.info(`[edge-geo-exp] DRS pre-analysis schedule created: ${preScheduleId}`);
-        } catch (drsError) {
-          context.log.error(`[edge-geo-exp-failed] site: ${apexBaseUrl}, DRS schedule creation failed: ${drsError.message}`, drsError);
-          throw drsError;
-        }
+          suggestion.setUpdatedBy(profile?.email || 'geo-experiment');
+        });
         try {
-          geoExperiment.setPreScheduleId(preScheduleId);
-          geoExperiment.setUpdatedBy(profile?.email || 'geo-experiment');
-          await geoExperiment.save();
-        } catch (updateError) {
-          context.log.error(`[edge-geo-exp-failed] site: ${apexBaseUrl}, Failed to update GeoExperiment pre schedule ID: ${updateError.message}. DRS schedule ${preScheduleId} will expire naturally.`, updateError);
-          throw updateError;
-        }
-        const validSuggestionEntities = [
-          ...validSuggestions,
-          ...domainWideSuggestions.map(({ suggestion }) => suggestion),
-          ...pathSuggestions.map(({ suggestion }) => suggestion),
-        ];
-
-        const markResults = await Promise.allSettled(
-          validSuggestionEntities.map(async (suggestion) => {
-            const currentData = suggestion.getData();
-            suggestion.setData({
-              ...currentData,
-              edgeOptimizeStatus: 'EXPERIMENT_IN_PROGRESS',
-            });
-            suggestion.setUpdatedBy(profile?.email || 'geo-experiment');
-            return suggestion.save();
-          }),
-        );
-
-        const markFailures = markResults.filter((r) => r.status === 'rejected');
-        if (markFailures.length > 0) {
-          context.log.warn(`[edge-geo-exp-failed] ${markFailures.length} suggestion(s) failed to mark as EXPERIMENT_IN_PROGRESS`, {
+          // saveMany is atomic per 25-item chunk; partial failure is acceptable here since the
+          // response below doesn't gate on this write succeeding.
+          await Suggestion.saveMany(validSuggestionEntities);
+        } catch (markError) {
+          context.log.warn(`[geo-experiment-failed] suggestion(s) failed to mark as EXPERIMENT_IN_PROGRESS: ${markError.message}`, {
             geoExperimentId,
-            errors: markFailures.map((r) => r.reason?.message),
           });
         }
 
@@ -2067,19 +2636,39 @@ function SuggestionsController(ctx, sqs, env) {
           },
           geoExperimentId,
           geoExperimentStatus: GeoExperimentModel.STATUSES.GENERATING_BASELINE,
-          geoExperimentPhase: GeoExperimentModel.PHASES.PRE_ANALYSIS_STARTED,
-          prePhaseScheduleId: preScheduleId,
+          geoExperimentPhase: GeoExperimentModel.PHASES.INITIATED,
+          // Pre-analysis schedule is created later by the experimentation engine.
+          prePhaseScheduleId: null,
         };
         experimentResponse.suggestions.sort((a, b) => a.index - b.index);
+
+        // Mark suggestions covered by domain/pattern so they get hidden on the UI (non-fatal).
+        if (hasPatternDeploy) {
+          const tokowakaClient = TokowakaClient.createFrom(context);
+          for (const ps of patternSuggestions) {
+            try {
+              // eslint-disable-next-line no-await-in-loop
+              await tokowakaClient.markPatternCoveredSuggestions(
+                ps,
+                allSuggestions,
+                siteId,
+                profile?.email || 'geo-experiment',
+              );
+            } catch (coverError) {
+              context.log.warn(`[geo-experiment-failed] Failed to mark pattern-covered suggestions for ${ps.getId()}: ${coverError.message}`, coverError);
+            }
+          }
+        }
+
         return createResponse(experimentResponse, 207);
       } catch (error) {
-        context.log.error(`[edge-geo-exp-failed] site: ${apexBaseUrl}, Error initiating experiment: ${error.message}`, error);
+        context.log.error(`[geo-experiment-failed] site: ${apexBaseUrl}, Error initiating experiment: ${error.message}`, error);
         if (geoExperiment?.getId?.()) {
           /* c8 ignore start */
           try {
             await geoExperiment.remove();
           } catch (removeError) {
-            context.log.error(`[edge-geo-exp-failed] Failed to clean up GeoExperiment ${geoExperimentId}: ${removeError.message}`, removeError);
+            context.log.error(`[geo-experiment-failed] Failed to clean up GeoExperiment ${geoExperimentId}: ${removeError.message}`, removeError);
           }
         }
         // Delete the strategy if it was created so we don't leave an orphan.
@@ -2095,13 +2684,8 @@ function SuggestionsController(ctx, sqs, env) {
             context.log.error(`[atomic-strategy-cleanup-failed] site: ${apexBaseUrl}, Failed to delete atomic strategy ${geoExperimentId}: ${cleanupError.message}`, cleanupError);
           }
         }
-        const allSuggestionEntities = [
-          ...validSuggestions,
-          ...domainWideSuggestions.map(({ suggestion }) => suggestion),
-          ...pathSuggestions.map(({ suggestion }) => suggestion),
-        ];
         await Promise.allSettled(
-          allSuggestionEntities
+          validSuggestionEntities
             .filter((s) => s.getData()?.edgeOptimizeStatus === 'EXPERIMENT_IN_PROGRESS')
             .map(async (s) => {
               try {
@@ -2110,7 +2694,7 @@ function SuggestionsController(ctx, sqs, env) {
                 s.setUpdatedBy(profile?.email || 'geo-experiment');
                 await s.save();
               } catch (unblockError) {
-                context.log.error(`[edge-geo-exp-failed] Failed to unblock suggestion ${s.getId()}: ${unblockError.message}`, unblockError);
+                context.log.error(`[geo-experiment-failed] Failed to unblock suggestion ${s.getId()}: ${unblockError.message}`, unblockError);
               }
             }),
         );
@@ -2203,6 +2787,101 @@ function SuggestionsController(ctx, sqs, env) {
   };
 
   /**
+   * Returns the URLs already deployed to the edge by the site's non-prerender ELMO
+   * ("Tokowaka") opportunities, as `[{ url, sources: [opportunityType] }]`.
+   *
+   * The ELMO Overview uses this to derive prerender / Content-Visibility gains: if a URL
+   * was edge-deployed by another Tokowaka opportunity, prerendering is effectively enabled
+   * for it. Previously the UI computed this by fanning out one `getSuggestions` call per
+   * opportunity (~N per site) and doing it twice; this endpoint collapses that to a single
+   * server-side read with a tiny payload.
+   *
+   * Implementation deliberately avoids a per-opportunity fan-out: it runs two queries —
+   * all of the site's opportunities, then all suggestions for the relevant ones via a
+   * single `opportunity_id IN (...)` filter. LaunchDarkly per-type gating stays client-side
+   * (the endpoint has no visibility into UI flags), which is why each entry carries its
+   * source opportunity `type`.
+   */
+  const getEdgeDeployedUrls = async (context) => {
+    const { siteId } = context.params;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('User does not have access to this site');
+    }
+
+    // 1. All opportunities for the site (single query, auto-paginated). Keep the stable
+    //    Tokowaka set: non-prerender AND tagged `isElmo` — the same filter the UI applied
+    //    before per-opportunity type gating (which remains client-side).
+    // ReBAC composite scope (D4): narrow to the caller's permitted opportunity
+    // types before exposing edge-deployed URLs (which surface the opportunity
+    // type per URL), so a type-scoped caller cannot see other types. No-op for
+    // site-wide / non-FACS / admin callers.
+    const opportunities = filterOpportunitiesByFacsComposite(
+      context,
+      await Opportunity.allBySiteId(siteId),
+    );
+    const opptyTypeById = new Map();
+    for (const oppty of opportunities) {
+      if (oppty.getType() === 'prerender') {
+        // eslint-disable-next-line no-continue
+        continue;
+      }
+      const tags = oppty.getTags() ?? [];
+      if (!tags.includes('isElmo')) {
+        // eslint-disable-next-line no-continue
+        continue;
+      }
+      opptyTypeById.set(oppty.getId(), oppty.getType());
+    }
+
+    if (opptyTypeById.size === 0) {
+      return ok([]);
+    }
+
+    // 2. All suggestions across those opportunities in one query (no per-opportunity
+    //    fan-out) via an `opportunity_id IN (...)` filter; auto-paginated.
+    const suggestions = await Suggestion.all(
+      {},
+      { where: (attrs, op) => op.in(attrs.opportunityId, [...opptyTypeById.keys()]) },
+    );
+
+    // 3. Build [{ url, sources: [opportunityType] }] over edge-deployed suggestions,
+    //    deduping by raw url and aggregating the source opportunity types.
+    const byUrl = new Map();
+    for (const suggestion of suggestions) {
+      const data = suggestion.getData() ?? {};
+      if (!data.edgeDeployed || !hasText(data.url)) {
+        // eslint-disable-next-line no-continue
+        continue;
+      }
+      const type = opptyTypeById.get(suggestion.getOpportunityId());
+      if (!type) {
+        // eslint-disable-next-line no-continue
+        continue;
+      }
+      const existing = byUrl.get(data.url);
+      if (existing) {
+        if (!existing.sources.includes(type)) {
+          existing.sources.push(type);
+        }
+      } else {
+        byUrl.set(data.url, { url: data.url, sources: [type] });
+      }
+    }
+
+    return ok([...byUrl.values()]);
+  };
+
+  /**
    * Lists all geo experiments for a site (no prompts included).
    */
   const listGeoExperiments = async (context) => {
@@ -2269,9 +2948,108 @@ function SuggestionsController(ctx, sqs, env) {
       context.log.info(`[geo-experiment] Could not fetch prompts for ${geoExperimentId}: ${s3Error.message}`);
     }
 
+    // Fetch impact-measurement insights from S3 only when explicitly requested.
+    // Insights exist once impact measurement completes; the S3 key is stored on the
+    // experiment as insightsLocation (see spacecat-shared GeoExperiment model).
+    // The insights JSON (and the per-analysis detail blobs its rawDataUrls point at) are
+    // written by Mystique/the engine to the Mystique assets bucket (S3_MYSTIQUE_BUCKET),
+    // NOT the default services bucket — read it from there.
+    let insights;
+    const includeInsights = context.data?.includeInsights === 'true';
+    if (includeInsights) {
+      insights = null;
+      const insightsS3Key = geoExperiment.getInsightsLocation?.();
+      const { S3_MYSTIQUE_BUCKET: mystiqueBucket } = context.env;
+      if (insightsS3Key && mystiqueBucket) {
+        try {
+          const { s3Client, GetObjectCommand } = context.s3;
+          const response = await s3Client.send(
+            new GetObjectCommand({ Bucket: mystiqueBucket, Key: insightsS3Key }),
+          );
+          const body = await response.Body.transformToString();
+          insights = JSON.parse(body);
+          // Presign each analysis's rawDataUrl so the UI can download the S3 detail blobs directly.
+          insights = await presignInsightsRawData(insights, context.s3, context.log);
+        } catch (s3Error) {
+          // Insights may not exist yet (e.g. impact measurement not yet complete)
+          context.log.info(`[geo-experiment] Could not fetch insights for ${geoExperimentId}: ${s3Error.message}`);
+        }
+      }
+    }
+
     return ok({
       ...GeoExperimentDto.toJSON(geoExperiment),
       prompts,
+      ...(includeInsights ? { insights } : {}),
+    });
+  };
+
+  /**
+   * Returns the impact-measurement insights ("results") for a geo experiment.
+   *
+   * Read-only counterpart to POST .../trigger-impact-measurement: that endpoint asks the
+   * engine to (re-)run measurement, this one just fetches the already-computed report. The
+   * insights JSON is written by Mystique/the engine to the Mystique assets bucket
+   * (S3_MYSTIQUE_BUCKET) at the key stored on the experiment as insightsLocation (see the
+   * spacecat-shared GeoExperiment model); each analysis's rawDataUrl is presigned so the UI
+   * can download the S3 detail blobs directly. Returns 404 when the experiment has no
+   * insights yet (impact measurement not complete).
+   */
+  const getGeoExperimentResults = async (context) => {
+    const { siteId, geoExperimentId } = context.params;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+    if (!isValidUUID(geoExperimentId)) {
+      return badRequest('GeoExperiment ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('User does not have access to this site');
+    }
+
+    const geoExperiment = await GeoExperiment.findById(geoExperimentId);
+    if (!geoExperiment || geoExperiment.getSiteId() !== siteId) {
+      return notFound('GeoExperiment not found');
+    }
+
+    const notReadyMessage = `No results available for GeoExperiment ${geoExperimentId} yet `
+      + `(phase '${geoExperiment.getPhase()}', status '${geoExperiment.getStatus()}'). `
+      + 'Impact measurement has not produced insights.';
+
+    const insightsS3Key = geoExperiment.getInsightsLocation?.();
+    const { S3_MYSTIQUE_BUCKET: mystiqueBucket } = context.env;
+    if (!insightsS3Key || !mystiqueBucket) {
+      return notFound(notReadyMessage);
+    }
+
+    let insights;
+    try {
+      const { s3Client, GetObjectCommand } = context.s3;
+      const response = await s3Client.send(
+        new GetObjectCommand({ Bucket: mystiqueBucket, Key: insightsS3Key }),
+      );
+      const body = await response.Body.transformToString();
+      insights = JSON.parse(body);
+      // Presign each analysis's rawDataUrl so the UI can download the S3 detail blobs directly.
+      insights = await presignInsightsRawData(insights, context.s3, context.log);
+    } catch (s3Error) {
+      // Insights may not exist yet (e.g. impact measurement not yet complete).
+      context.log.info(`[geo-experiment] Could not fetch results for ${geoExperimentId}: ${s3Error.message}`);
+      return notFound(notReadyMessage);
+    }
+
+    return ok({
+      geoExperimentId,
+      status: geoExperiment.getStatus(),
+      phase: geoExperiment.getPhase(),
+      insights,
     });
   };
 
@@ -2319,6 +3097,7 @@ function SuggestionsController(ctx, sqs, env) {
       { key: 'suggestionIds', setter: 'setSuggestionIds' },
       { key: 'promptsCount', setter: 'setPromptsCount' },
       { key: 'promptsLocation', setter: 'setPromptsLocation' },
+      { key: 'insightsLocation', setter: 'setInsightsLocation' },
       { key: 'startTime', setter: 'setStartTime' },
       { key: 'endTime', setter: 'setEndTime' },
       { key: 'metadata', setter: 'setMetadata' },
@@ -2371,6 +3150,126 @@ function SuggestionsController(ctx, sqs, env) {
 
     await geoExperiment.remove();
     return noContent();
+  };
+
+  /**
+   * Manually (re-)triggers Mystique impact measurement for a GeoExperiment. Only allowed once
+   * the experiment has reached post-analysis, with status in_progress or completed (see
+   * isImpactMeasurementEligible). Sends a TRIGGER_IMPACT_MEASUREMENT message to the
+   * llmo-experimentation-engine-queue; the engine re-validates eligibility and re-arms the
+   * experiment before resubmitting via its normal handlePostAnalysisCompleted path.
+   * See llmo-experimentation-engine's docs/decisions/004-manual-impact-measurement-retrigger.md.
+   */
+  const triggerImpactMeasurement = async (context) => {
+    const { siteId, geoExperimentId } = context.params;
+    const { authInfo: { profile } } = context.attributes;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+    if (!isValidUUID(geoExperimentId)) {
+      return badRequest('GeoExperiment ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('User does not have access to this site');
+    }
+
+    const geoExperiment = await GeoExperiment.findById(geoExperimentId);
+    if (!geoExperiment || geoExperiment.getSiteId() !== siteId) {
+      return notFound('GeoExperiment not found');
+    }
+
+    if (!isImpactMeasurementEligible(geoExperiment)) {
+      return badRequest(`GeoExperiment ${geoExperimentId} is at phase '${geoExperiment.getPhase()}' / status '${geoExperiment.getStatus()}' - impact measurement can only be triggered at phase 'post_analysis_done', 'impact_measurement_started', or 'impact_measurement_done' with status 'in_progress' or 'completed'.`);
+    }
+
+    const triggeredBy = profile?.email || profile?.name || 'unknown';
+    await triggerGeoExperimentImpactMeasurement(geoExperimentId, triggeredBy, { sqs, env });
+
+    context.log.info(`[geo-experiment] Sent manual impact-measurement trigger for GeoExperiment ${geoExperimentId} (siteId: ${siteId}, phase: ${geoExperiment.getPhase()}, status: ${geoExperiment.getStatus()}, triggeredBy: ${triggeredBy})`);
+
+    return accepted({
+      message: `Triggered impact measurement for GeoExperiment ${geoExperimentId}. The experimentation engine will process it shortly.`,
+    });
+  };
+
+  /**
+   * Triggers on-demand validation of a GeoExperiment's own suggestions. Lets the deploy-to-edge
+   * experimentation flow trigger the same S3-vs-live-edge content validation the hourly
+   * optimize-at-edge-enabled-marking job runs, scoped to one GeoExperiment's own suggestions.
+   *
+   * This is a validation of the GeoExperiment itself (not of its linked opportunity), so
+   * geoExperimentId lives in the route, matching the sibling GeoExperiment routes
+   * (PATCH/DELETE/trigger-impact-measurement). The linked opportunity is only used internally
+   * to determine which import-worker message type knows how to validate this GeoExperiment's
+   * suggestions.
+   *
+   * Fire-and-forget: enqueues an SQS message to import-worker's existing "imports" queue and
+   * responds immediately — this endpoint does not wait for or return the validation outcome
+   * itself. The result lands on GeoExperiment.metadata.validation and each covered Suggestion's
+   * own data.validation, not opportunity.data.validation (a geoExperimentId run only covers a
+   * scoped subset of suggestions, so writing the site-wide opportunity field would corrupt the
+   * bulk job's cache).
+   */
+  const triggerGeoExperimentValidation = async (context) => {
+    const { siteId, geoExperimentId } = context.params;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+    if (!isValidUUID(geoExperimentId)) {
+      return badRequest('GeoExperiment ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('User does not have access to this site');
+    }
+
+    const geoExperiment = await GeoExperiment.findById(geoExperimentId);
+    if (!geoExperiment || geoExperiment.getSiteId() !== siteId) {
+      return notFound('GeoExperiment not found');
+    }
+
+    const opportunityId = geoExperiment.getOpportunityId();
+    if (!opportunityId) {
+      return badRequest('GeoExperiment has no linked opportunity to validate');
+    }
+
+    const opportunity = await Opportunity.findById(opportunityId);
+    if (!opportunity || opportunity.getSiteId() !== siteId) {
+      return notFound('Opportunity not found');
+    }
+
+    const opportunityType = opportunity.getType();
+    const messageType = VALIDATION_MESSAGE_TYPE_BY_OPPORTUNITY_TYPE[opportunityType];
+    if (!messageType) {
+      return badRequest(`Validation not supported for opportunity type '${opportunityType}'`);
+    }
+
+    const configuration = await Configuration.findLatest();
+    await sqs.sendMessage(configuration.getQueues().imports, {
+      type: messageType,
+      siteId,
+      validateOnly: true,
+      geoExperimentId,
+    });
+
+    context.log.info(`[geo-experiment-validation] queued validation for site ${siteId}, geoExperiment ${geoExperimentId}, opportunity ${opportunityId}`);
+
+    return accepted({
+      siteId, geoExperimentId, opportunityId, status: 'queued',
+    });
   };
 
   const rollbackSuggestionFromEdge = async (context) => {
@@ -2566,6 +3465,8 @@ function SuggestionsController(ctx, sqs, env) {
     const siteId = context.params?.siteId;
     const opportunityId = context.params?.opportunityId;
 
+    context.log.info(`[edge-live-preview] Received request siteId=${siteId} opportunityId=${opportunityId}`);
+
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
     }
@@ -2610,23 +3511,29 @@ function SuggestionsController(ctx, sqs, env) {
       return notFound('Opportunity not found');
     }
 
+    const fetchStartedAt = Date.now();
     try {
-      context.log.info(`Fetching content from URL: ${url}`);
+      context.log.info(`[edge-live-preview] Fetching content siteId=${siteId} opportunityId=${opportunityId} url=${url}`);
 
       // Make fetch request with Tokowaka-AI User-Agent
       const response = await fetch(url, {
         method: 'GET',
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Tokowaka-AI Tokowaka/1.0 AdobeEdgeOptimize-AI AdobeEdgeOptimize/1.0',
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Spacecat/1.0 Tokowaka-AI AdobeEdgeOptimize-AI',
           Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         },
       });
 
+      const elapsedMs = Date.now() - fetchStartedAt;
+
       if (!response.ok) {
-        const requestId = response.headers.get('x-tokowaka-request-id');
+        const tokowakaRequestId = response.headers.get('x-tokowaka-request-id');
+        const edgeOptimizeRequestId = response.headers.get('x-edgeoptimize-request-id');
+        const requestId = tokowakaRequestId || edgeOptimizeRequestId;
+        const requestIdHeader = tokowakaRequestId ? 'x-tokowaka-request-id' : 'x-edgeoptimize-request-id';
         const logMessage = requestId
-          ? `Failed to fetch URL. Status: ${response.status}, x-tokowaka-request-id: ${requestId}`
-          : `Failed to fetch URL. Status: ${response.status}`;
+          ? `[edge-live-preview] Failed to fetch URL siteId=${siteId} opportunityId=${opportunityId} url=${url} status=${response.status} elapsedMs=${elapsedMs} ${requestIdHeader}=${requestId}`
+          : `[edge-live-preview] Failed to fetch URL siteId=${siteId} opportunityId=${opportunityId} url=${url} status=${response.status} elapsedMs=${elapsedMs}`;
         context.log.warn(logMessage);
         return ok({
           status: 'error',
@@ -2641,7 +3548,7 @@ function SuggestionsController(ctx, sqs, env) {
 
       const content = await response.text();
 
-      context.log.info(`Successfully fetched content from URL: ${url}`);
+      context.log.info(`[edge-live-preview] Successfully fetched content siteId=${siteId} opportunityId=${opportunityId} url=${url} elapsedMs=${elapsedMs}`);
 
       return ok({
         status: 'success',
@@ -2652,7 +3559,8 @@ function SuggestionsController(ctx, sqs, env) {
         },
       });
     } catch (error) {
-      context.log.error(`Error fetching from URL ${url}: ${error.message}`, error);
+      const elapsedMs = Date.now() - fetchStartedAt;
+      context.log.error(`[edge-live-preview] Error fetching URL siteId=${siteId} opportunityId=${opportunityId} url=${url} elapsedMs=${elapsedMs}: ${error.message}`, error);
       return ok({
         status: 'error',
         statusCode: 500,
@@ -2702,20 +3610,294 @@ function SuggestionsController(ctx, sqs, env) {
     }
   };
 
+  /**
+   * Capture an ESE review verdict from the Backoffice (SITES-43974 / SITES-39001).
+   *
+   * POST /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/backoffice-reviews
+   *
+   * `source` is bound to 'backoffice' by the route (never trusted from the body —
+   * FR-10). `event_id` is a mandatory client-supplied idempotency key (FR-09):
+   * a duplicate collapses to a no-op (HTTP 200 with the existing row). Customer-
+   * derived fields are secret-scrubbed and the markdown is sanitised before
+   * insert. The raw patches are NOT echoed in the response.
+   *
+   * @param {Object} context - request context.
+   * @returns {Promise<Response>}
+   */
+  const createBackofficeReview = async (context) => {
+    const siteId = context.params?.siteId;
+    const opptyId = context.params?.opportunityId;
+    const suggestionId = context.params?.suggestionId;
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+    if (!isValidUUID(opptyId)) {
+      return badRequest('Opportunity ID required');
+    }
+    if (!isValidUUID(suggestionId)) {
+      return badRequest('Suggestion ID required');
+    }
+
+    const body = isNonEmptyObject(context.data) ? context.data : {};
+    const {
+      eventId, verdict, detailMarkdown, guidanceMarkdown, rejectionCategory,
+      stateTransition, previousFix, editedFix, feedbackSubjectId,
+    } = body;
+
+    // FR-09: event_id is MANDATORY and client-supplied (no server fallback).
+    if (!hasText(eventId) || !isValidUUID(eventId)) {
+      return badRequest('event_id is required and must be a UUID');
+    }
+    // FR-10: a client must not self-assert a higher-trust source.
+    if (hasText(body.source) && body.source !== REVIEW_SOURCES.BACKOFFICE) {
+      return badRequest('source is derived from the route and must not be set in the body');
+    }
+    if (verdict !== REVIEW_VERDICTS.UP && verdict !== REVIEW_VERDICTS.DOWN) {
+      return badRequest('verdict must be "up" or "down"');
+    }
+    if (rejectionCategory != null
+      && !Object.values(REJECTION_CATEGORIES).includes(rejectionCategory)) {
+      return badRequest('invalid rejection_category');
+    }
+    if (stateTransition != null && !FEEDBACK_STATE_TRANSITIONS.includes(stateTransition)) {
+      return badRequest('invalid state_transition');
+    }
+    if (detailMarkdown != null) {
+      if (typeof detailMarkdown !== 'string') {
+        return badRequest('detail_markdown must be a string');
+      }
+      if (Buffer.byteLength(detailMarkdown, 'utf8') > 8192) {
+        return createResponse({ message: 'detail_markdown exceeds the 8 KB limit' }, 413);
+      }
+    }
+    // guidance_markdown is the AI-generated issue context (title + description).
+    // Larger cap than detail_markdown (64 KB) because issue descriptions +
+    // implementation guidance run long.
+    if (guidanceMarkdown != null) {
+      if (typeof guidanceMarkdown !== 'string') {
+        return badRequest('guidance_markdown must be a string');
+      }
+      if (Buffer.byteLength(guidanceMarkdown, 'utf8') > 65536) {
+        return createResponse({ message: 'guidance_markdown exceeds the 64 KB limit' }, 413);
+      }
+    }
+    // feedback_subject_id is an opaque grouping id (e.g. a CWV issue id) — a short
+    // string, not free text. Bounded to guard against abuse.
+    if (feedbackSubjectId != null) {
+      if (typeof feedbackSubjectId !== 'string' || feedbackSubjectId.length > 200) {
+        return badRequest('feedback_subject_id must be a string of at most 200 characters');
+      }
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('User does not belong to the organization');
+    }
+
+    const suggestion = await Suggestion.findById(suggestionId);
+    if (!suggestion || suggestion.getOpportunityId() !== opptyId) {
+      return notFound('Suggestion not found');
+    }
+    const opportunity = await suggestion.getOpportunity();
+    if (!opportunity || opportunity.getSiteId() !== siteId) {
+      return notFound('Suggestion not found');
+    }
+
+    const postgrestClient = context.dataAccess?.services?.postgrestClient;
+    if (!postgrestClient?.from) {
+      return createResponse({ message: 'Feedback store unavailable' }, 503);
+    }
+
+    // reviewer_id is server-derived from the authenticated principal — never the body.
+    // NOTE: for IMS callers profile.email is the IMS user identifier (an opaque
+    // GUID like <id>@<authSrc>), NOT a mailbox. It is stable per user, so it
+    // serves reviewer-continuity as a training signal; it is documented as an
+    // opaque IMS user id (not "email") in schemas.yaml + the feedback_event
+    // column comment.
+    const { profile } = context.attributes?.authInfo ?? {};
+    const reviewerId = profile?.email ?? null;
+
+    const tier = await deriveFeedbackTier(site, context.log);
+    const signal = verdictToSignal(verdict);
+
+    const {
+      detailMarkdown: cleanMarkdown,
+      guidanceMarkdown: cleanGuidance,
+      previousFix: cleanPreviousFix,
+      editedFix: cleanEditedFix,
+      scrubHits,
+    } = redactFeedbackContent({
+      detailMarkdown, guidanceMarkdown, previousFix, editedFix,
+    });
+
+    const scrubbed = Object.entries(scrubHits);
+    if (scrubbed.length > 0) {
+      context.log?.info?.(`feedback_capture.scrub_hit_total ${JSON.stringify(scrubHits)} suggestion=${suggestionId}`);
+    }
+
+    const row = {
+      event_id: eventId,
+      organization_id: site.getOrganizationId(),
+      site_id: siteId,
+      suggestion_id: suggestionId,
+      opportunity_type: opportunity.getType?.() ?? null,
+      source: REVIEW_SOURCES.BACKOFFICE,
+      signal,
+      reviewer_id: reviewerId,
+      detail_markdown: cleanMarkdown ?? null,
+      guidance_markdown: cleanGuidance ?? null,
+      feedback_subject_id: feedbackSubjectId ?? null,
+      previous_fix: cleanPreviousFix ?? null,
+      edited_fix: cleanEditedFix ?? null,
+      state_transition: hasText(stateTransition) ? stateTransition : null,
+      rejection_category: rejectionCategory ?? null,
+      tier,
+    };
+
+    const { data, error } = await postgrestClient
+      .from('feedback_event')
+      .insert(row)
+      .select()
+      .single();
+
+    if (error) {
+      // 23505 = unique_violation on event_id -> idempotent no-op (FR-09).
+      if (error.code === '23505') {
+        const existing = await postgrestClient
+          .from('feedback_event')
+          .select('*')
+          .eq('event_id', eventId)
+          .single();
+        if (existing?.data) {
+          return ok(toReviewView(existing.data));
+        }
+      }
+      context.log?.error?.(`Failed to record review for suggestion ${suggestionId}: ${error.message}`);
+      return createResponse({ message: 'Failed to record review' }, 500);
+    }
+
+    return createResponse(toReviewView(data), 201);
+  };
+
+  /**
+   * Looks up suggestions backed by any of the supplied source URLs, across ALL of the site's
+   * opportunities in one call. POST body: `{ urls: [...], fields?, status?, limit?, cursor?,
+   * locale? }` (all parameters travel in the body, not as query params - this middleware stack
+   * only ever exposes `request.json()` as `context.data` for a JSON POST). Keyset-paginated
+   * over the immutable `(opportunityId, id)`.
+   * @param {Object} context of the request
+   * @returns {Promise<Response>} Normalized results + suggestions map + unmatchedUrls + pagination.
+   */
+  const getByUrl = async (context) => {
+    const siteId = context.params?.siteId;
+    const locale = context.data?.locale ?? null;
+
+    if (!isValidLocale(locale)) {
+      return badRequest('Invalid locale format');
+    }
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('User does not belong to the organization');
+    }
+
+    // requirePostgrestClient (not requirePostgrest) because this controller closes over
+    // `dataAccess` once per request rather than reading it off the per-call `context` argument.
+    const postgrestClient = dataAccess.services?.postgrestClient;
+    const guard = requirePostgrestClient(postgrestClient, {
+      errorMessage: 'URL lookup requires Postgres (DATA_SERVICE_PROVIDER=postgres)',
+    });
+    if (guard) {
+      return guard;
+    }
+
+    const { response, error } = await lookupByUrl(postgrestClient, {
+      table: 'suggestion_urls',
+      siteId,
+      rawUrls: context.data?.urls,
+      params: context.data ?? {},
+      log: ctx.log,
+      validStatuses: Object.values(SuggestionModel.STATUSES),
+      defaultExcludedStatuses: [
+        SuggestionModel.STATUSES.SKIPPED,
+        SuggestionModel.STATUSES.REJECTED,
+        SuggestionModel.STATUSES.OUTDATED,
+      ],
+      fetchEntities: async (ids) => {
+        const { data } = await Suggestion.batchGetByKeys(ids.map((id) => ({ suggestionId: id })));
+        return data ?? [];
+      },
+      // Narrow to suggestions whose opportunity the caller may see. Fetches only the
+      // opportunities actually referenced by the hydrated suggestions (not every opportunity
+      // on the site) - the same siteId re-check opportunities.getByUrl does explicitly, then
+      // the D4 composite gate, then the same Summit-PLG grant gating every other suggestion
+      // read path applies (getAllForOpportunity*, getByStatus*, getByID), so this endpoint
+      // cannot return ungranted suggestion content those endpoints deliberately withhold.
+      // failClosed: true because a false pass-through here would leak ungranted content across
+      // every opportunity matched in this one call, not just a single opportunity as elsewhere.
+      filterEntities: async (suggestions) => {
+        const opptyIds = [...new Set(suggestions.map((s) => s.getOpportunityId()))];
+        const { data: candidateOpptys } = await Opportunity.batchGetByKeys(
+          opptyIds.map((id) => ({ opportunityId: id })),
+        );
+        const owned = (candidateOpptys ?? []).filter((o) => o.getSiteId() === siteId);
+        if (owned.length !== (candidateOpptys ?? []).length) {
+          ctx.log?.warn?.(`[suggestions.getByUrl] dropped ${(candidateOpptys ?? []).length - owned.length} `
+            + `opportunity(ies) whose siteId did not match the requested site ${siteId} - the suggestion_urls index may be stale`);
+        }
+        const permitted = filterOpportunitiesByFacsComposite(context, owned);
+        const permittedOpptyIds = new Set(permitted.map((o) => o.getId()));
+        const scoped = suggestions.filter((s) => permittedOpptyIds.has(s.getOpportunityId()));
+        return filterByGrantStatus(site, scoped, context, { failClosed: true });
+      },
+      getId: (sugg) => sugg.getId(),
+      getStatus: (sugg) => sugg.getStatus(),
+      getSortKey: (sugg) => `${sugg.getOpportunityId()}|${sugg.getId()}`,
+      toFullDto: (sugg) => SuggestionDto.toJSON(sugg, 'full', null, locale),
+      lightweightFields: SUGGESTION_BY_URL_LIGHTWEIGHT_FIELDS,
+      forceFields: ['id', 'opportunityId'],
+      idListKey: 'suggestionIds',
+      mapKey: 'suggestions',
+      includeNoMatchInResults: false,
+    });
+    if (error) {
+      return badRequest(error);
+    }
+    return ok(response);
+  };
+
   return {
+    createBackofficeReview,
+    getByUrl,
     autofixSuggestions,
     createSuggestions,
     deploySuggestionToEdge,
+    getEdgeDeployedUrls,
     listGeoExperiments,
     getGeoExperiment,
+    getGeoExperimentResults,
     patchGeoExperiment,
     deleteGeoExperiment,
+    triggerImpactMeasurement,
+    triggerGeoExperimentValidation,
     rollbackSuggestionFromEdge,
     previewSuggestions,
     fetchFromEdge,
     getAllForOpportunity,
     getAllForOpportunityPaged,
     getByID,
+    getPresignedGuidanceCsvUrl,
     getByStatus,
     getByStatusPaged,
     getSuggestionFixes,

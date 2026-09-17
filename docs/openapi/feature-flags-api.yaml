@@ -41,7 +41,7 @@ organization-feature-flags:
         $ref: './responses.yaml#/500'
     security:
       - api_key: [ ]
-      - ims_key: [ ]
+      - session_token: [ ]
       - scoped_api_key: [ ]
 
 organization-feature-flag-by-product-and-name:

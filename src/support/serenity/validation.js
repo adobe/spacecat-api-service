@@ -10,6 +10,8 @@
  * governing permissions and limitations under the License.
  */
 
+// @ts-check
+
 import { hasText } from '@adobe/spacecat-shared-utils';
 
 /**
@@ -43,4 +45,62 @@ export function normalizeLanguageCode(value) {
  */
 export function normalizeGeoTargetId(value) {
   return Number.isInteger(value) && value > 0 ? value : null;
+}
+
+// Upstream tag ids are opaque (UUIDs in practice); this only bounds an absurd
+// value, not a strict format — the id must round-trip from a prior list.
+export const MAX_TAG_ID_LEN = 200;
+
+// C0 control range end + DEL, checked by numeric char code (not a regex
+// escape range) so the bound in this source file stays unambiguous.
+const MAX_C0_CONTROL_CODE = 31;
+const DEL_CONTROL_CODE = 127;
+const WHITESPACE_REGEX = /\s/;
+
+/**
+ * True if `id` is a well-formed opaque upstream tag id: non-empty, bounded
+ * length, and free of whitespace/control characters that would corrupt a
+ * query value or path segment. Shared by every call site that accepts a
+ * caller-supplied upstream tag id (tags.js's parentId/tagId, prompts.js's
+ * tagIds array entries) so the bound can't silently diverge between them.
+ *
+ * @param {string} id - an already-trimmed, already-known-to-be-a-string id.
+ */
+export function isValidTagIdFormat(id) {
+  if (id.length === 0 || id.length > MAX_TAG_ID_LEN) {
+    return false;
+  }
+  for (let i = 0; i < id.length; i += 1) {
+    const ch = id[i];
+    const code = id.charCodeAt(i);
+    if (code <= MAX_C0_CONTROL_CODE || code === DEL_CONTROL_CODE || WHITESPACE_REGEX.test(ch)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// TAB/LF/CR are ordinary whitespace a human-authored prompt legitimately
+// carries — unlike isValidTagIdFormat's opaque-id check (above), a prompt-text
+// check must not reject them.
+const ALLOWED_WHITESPACE_CONTROL_CODES = new Set([9, 10, 13]);
+
+/**
+ * True if `text` contains a C0 control character (other than TAB/LF/CR) or
+ * DEL — bytes that have no legitimate place in human-authored prompt text
+ * regardless of what Semrush's own length/character contract turns out to be
+ * (LLMO-7533 §6). Reuses the same control-code range `isValidTagIdFormat`
+ * bounds against, but does NOT reject general whitespace.
+ *
+ * @param {string} text
+ */
+export function hasDisallowedControlChars(text) {
+  for (let i = 0; i < text.length; i += 1) {
+    const code = text.charCodeAt(i);
+    if ((code <= MAX_C0_CONTROL_CODE && !ALLOWED_WHITESPACE_CONTROL_CODES.has(code))
+      || code === DEL_CONTROL_CODE) {
+      return true;
+    }
+  }
+  return false;
 }

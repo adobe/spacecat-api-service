@@ -24,6 +24,7 @@ import {
   enableImports,
 } from '../../../controllers/llmo/llmo-onboarding.js';
 import { triggerBrandProfileAgent } from '../../brand-profile-trigger.js';
+import { assertSiteOrgReassignmentSafe } from '../../site-org-reassignment.js';
 
 // LLMO-4683: ISO 3166-1 alpha-2 region for the onboarding modal.
 // Operator types the brand's primary market so DRS prompt generation conditions
@@ -52,34 +53,31 @@ function buildRegionInputBlock() {
 
 /**
  * Slack button `value` for `start_llmo_onboarding`: plain URL (legacy) or JSON
- * `{ brandURL, tempOnboarding?: true }`.
+ * `{ brandURL }`.
  *
  * @param {string} [raw]
- * @returns {{ brandURL: string, tempOnboarding: boolean }}
+ * @returns {{ brandURL: string }}
  */
 export function parseStartLlmoOnboardingButtonValue(raw) {
   if (raw == null || raw === '') {
-    return { brandURL: '', tempOnboarding: false };
+    return { brandURL: '' };
   }
   const trimmed = String(raw).trim();
   if (trimmed.startsWith('{')) {
     try {
       const parsed = JSON.parse(trimmed);
       if (parsed && typeof parsed.brandURL === 'string') {
-        return {
-          brandURL: parsed.brandURL.trim(),
-          tempOnboarding: parsed.tempOnboarding === true,
-        };
+        return { brandURL: parsed.brandURL.trim() };
       }
     } catch {
       // fall through to raw string
     }
   }
-  return { brandURL: trimmed, tempOnboarding: false };
+  return { brandURL: trimmed };
 }
 
 // site isn't on spacecat yet
-async function fullOnboardingModal(body, client, respond, brandURL, tempOnboarding = false) {
+async function fullOnboardingModal(body, client, respond, brandURL) {
   const { user } = body;
 
   // Update the original message to show user's choice
@@ -101,7 +99,6 @@ async function fullOnboardingModal(body, client, respond, brandURL, tempOnboardi
         originalChannel,
         originalThreadTs,
         brandURL,
-        ...(tempOnboarding ? { tempOnboarding: true } : {}),
       }),
       title: {
         type: 'plain_text',
@@ -208,7 +205,7 @@ async function fullOnboardingModal(body, client, respond, brandURL, tempOnboardi
 }
 
 // site is already on spacecat
-async function elmoOnboardingModal(body, client, respond, brandURL, tempOnboarding = false) {
+async function elmoOnboardingModal(body, client, respond, brandURL) {
   const { user } = body;
 
   // Update the original message to show user's choice
@@ -230,7 +227,6 @@ async function elmoOnboardingModal(body, client, respond, brandURL, tempOnboardi
         originalChannel,
         originalThreadTs,
         brandURL,
-        ...(tempOnboarding ? { tempOnboarding: true } : {}),
       }),
       title: {
         type: 'plain_text',
@@ -333,6 +329,29 @@ async function checkOrg(imsOrgId, site, lambdaCtx, slackCtx) {
     return;
   }
 
+  // LLMO-7284 (AC12): refuse to reassign a site that still carries enrollments under
+  // its current org — either branch below re-parents the site only, orphaning those
+  // enrollments as foreign LLMO enrollments. Fail explicitly (surface the actionable
+  // reason to the operator, then re-throw so onboarding aborts before any enrollment
+  // is created) rather than drift silently. providedImsOrgId is undefined when the
+  // target org must still be created below (a guaranteed move to a fresh org); the
+  // guard treats that as a real move and only blocks when enrollments exist.
+  const { say } = slackCtx;
+  try {
+    await assertSiteOrgReassignmentSafe({
+      site,
+      targetOrgId: providedImsOrgId ?? null,
+      log: lambdaCtx.log,
+    });
+  } catch (guardError) {
+    try {
+      await say(`:x: ${guardError.message}`);
+    } catch (slackErr) {
+      lambdaCtx.log.warn('Failed to deliver reassignment-blocked notice to Slack', slackErr);
+    }
+    throw guardError;
+  }
+
   // if the provided ims org id exists, update the site to use this one
   if (providedImsOrgId) {
     site.setOrganizationId(providedImsOrgId);
@@ -361,18 +380,18 @@ export function startLLMOOnboarding(lambdaContext) {
       const { Site } = dataAccess;
 
       // check current onboarding status
-      const { brandURL, tempOnboarding } = parseStartLlmoOnboardingButtonValue(
+      const { brandURL } = parseStartLlmoOnboardingButtonValue(
         actions?.[0]?.value,
       );
       const site = await Site.findByBaseURL(brandURL);
 
       if (!site) {
-        await fullOnboardingModal(body, client, respond, brandURL, tempOnboarding);
+        await fullOnboardingModal(body, client, respond, brandURL);
         log.debug(`User ${user.id} started full onboarding process for ${brandURL}.`);
         return;
       }
 
-      await elmoOnboardingModal(body, client, respond, brandURL, tempOnboarding);
+      await elmoOnboardingModal(body, client, respond, brandURL);
       log.debug(`User ${user.id} started LLMO onboarding process for ${brandURL} with existing site ${site.getId()}.`);
     } catch (e) {
       log.error('Error handling start onboarding:', e);
@@ -390,7 +409,6 @@ export function startLLMOOnboarding(lambdaContext) {
  * @param {string} input.brandName
  * @param {string} input.imsOrgId
  * @param {string} [input.deliveryType]
- * @param {boolean} [input.tempOnboarding] If true, skip helix-query.yaml update.
  * @param {string} [input.region] Optional ISO 3166-1 alpha-2 region code (LLMO-4683)
  *   forwarded to DRS prompt generation. Omitted → DRS client default ('US') applies.
  * @param {Object} lambdaCtx
@@ -400,7 +418,7 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
   const { log, env } = lambdaCtx;
   const { say } = slackCtx;
   const {
-    baseURL, brandName, imsOrgId, deliveryType, tempOnboarding, region,
+    baseURL, brandName, imsOrgId, deliveryType, region,
   } = input;
 
   const dataFolder = generateDataFolder(baseURL, env.ENV);
@@ -427,7 +445,6 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
         brandName,
         imsOrgId,
         deliveryType,
-        ...(tempOnboarding ? { tempOnboarding: true } : {}),
         ...(region ? { region } : {}),
       },
       lambdaCtx,
@@ -436,8 +453,15 @@ export async function onboardSite(input, lambdaCtx, slackCtx) {
 
     const { site, siteId } = result;
 
+    // LLMO-7218 AC3/AC4: the per-step :warning: messages from activateBrandAndGeneratePrompts
+    // already streamed to this thread in real time as they happened; this final banner must
+    // not override that with an unconditional checkmark when required work actually failed.
+    const requiredWorkFailed = result.brandActivation?.requiredWorkFailed ?? false;
     const regionLine = region ? `\n:globe_with_meridians: *Region:* ${region}` : '';
-    const message = `:white_check_mark: *LLMO onboarding completed successfully!*
+    const statusLine = requiredWorkFailed
+      ? ':warning: *LLMO onboarding completed with warnings* — see the messages above for what needs manual follow-up.'
+      : ':white_check_mark: *LLMO onboarding completed successfully!*';
+    const message = `${statusLine}
 
 :link: *Site:* ${baseURL}
 :identification_card: *Site ID:* ${siteId}
@@ -478,14 +502,12 @@ export function onboardLLMOModal(lambdaContext) {
       let originalChannel;
       let originalThreadTs;
       let brandURL;
-      let tempOnboarding;
       try {
         /* c8 ignore next */
         const metadata = JSON.parse(view.private_metadata || '{}');
         originalChannel = metadata.originalChannel;
         originalThreadTs = metadata.originalThreadTs;
         brandURL = metadata.brandURL;
-        tempOnboarding = metadata.tempOnboarding === true;
       } catch (error) {
         log.warn('Failed to parse private metadata:', error);
       }
@@ -525,7 +547,6 @@ export function onboardLLMOModal(lambdaContext) {
         brandURL,
         originalChannel,
         originalThreadTs,
-        tempOnboarding: tempOnboarding === true,
       });
 
       // eslint-disable-next-line max-statements-per-line
@@ -555,7 +576,6 @@ export function onboardLLMOModal(lambdaContext) {
         baseURL: brandURL,
         imsOrgId,
         deliveryType,
-        ...(tempOnboarding ? { tempOnboarding: true } : {}),
         ...(region ? { region } : {}),
       }, lambdaContext, slackContext);
 

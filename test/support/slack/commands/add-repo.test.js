@@ -47,6 +47,7 @@ describe('AddRepoCommand', () => {
       getOrganizationId: sinon.stub().returns('org-123'),
       getOrganization: sinon.stub().resolves({
         getImsOrgId: () => 'ims-org-456',
+        getName: () => 'Test Org',
       }),
       getIsLive: sinon.stub(),
       updateGitHubURL: sinon.stub(),
@@ -169,7 +170,7 @@ describe('AddRepoCommand', () => {
         + '      :cat-egory-white: aem_edge\n'
         + '      :github-4173: _not set_\n'
         + '      :space-cat: org-123\n'
-        + '      :ims: ims-org-456\n'
+        + '      :ims: ims-org-456 (Test Org)\n'
         + '      :submarine: Is not live\n'
         + '      :lighthouse: <https://psi.experiencecloud.live?url=undefined&strategy=mobile|Run PSI Check>\n'
         + '    \n'

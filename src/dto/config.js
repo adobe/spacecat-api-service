@@ -40,7 +40,7 @@ const toListJSON = (config) => {
   if (isNonEmptyObject(json.llmo)) {
     result.llmo = {};
     const {
-      dataFolder, brand, tags, customerIntent, detectedCdn,
+      dataFolder, brand, tags, customerIntent, detectedCdn, showWww,
     } = json.llmo;
     if (dataFolder) {
       result.llmo.dataFolder = dataFolder;
@@ -56,6 +56,13 @@ const toListJSON = (config) => {
     }
     if (detectedCdn) {
       result.llmo.detectedCdn = detectedCdn;
+    }
+    // Whether to display the site's own domain with a leading "www." (LLMO-6673).
+    // A UI-relevant display flag, so it must ride along in the slim list response —
+    // without it the UI reads `showWww: undefined` from list-sourced sites and the
+    // www transform silently no-ops (e.g. the admin cross-org site list).
+    if (showWww) {
+      result.llmo.showWww = showWww;
     }
   }
   if (isNonEmptyObject(json.edgeOptimizeConfig)) {

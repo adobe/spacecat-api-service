@@ -165,7 +165,7 @@ function GetLlmoOpportunityUsageCommand(context) {
 
     // Filter opportunities that have 'isElmo' tag or are prerender or llm-blocked types
     const llmoOpportunities = opportunities.filter((opportunity) => {
-      const tags = [...(opportunity.getTags())];
+      const tags = [...(opportunity.getTags() ?? [])];
       const type = opportunity.getType() ?? '';
       return tags.includes('isElmo') || type === 'prerender' || type === 'llm-blocked';
     });

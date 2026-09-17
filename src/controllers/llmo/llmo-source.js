@@ -52,6 +52,24 @@ export const fetchLlmoSource = async (context, url) => {
     throw err;
   }
 
+  // Structured, queryable client-attribution signal for every outbound source
+  // fetch (both /llmo/data and /llmo/sheet-data route through here). Placed
+  // after the config guard so it only fires for fetches that actually proceed
+  // (a missing key throws above and produces no outbound request). Emitted at
+  // `info` (NOT debug): prod suppresses debug. `x-client-type` and `referer`
+  // distinguish the calling app (e.g. llmo-spacecat-dashboard vs llm-optimizer-ui)
+  // 1:1 with the fetched `url`, since request headers are otherwise not logged.
+  const headers = context.pathInfo?.headers || {};
+  const authInfo = context.attributes?.authInfo;
+  log.info('llmo_source_client', {
+    event: 'llmo_source_client',
+    url,
+    xClientType: headers['x-client-type'] || null,
+    referer: headers.referer || headers.referrer || null,
+    userAgent: headers['user-agent'] || null,
+    authType: authInfo?.getType?.() || null,
+  });
+
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
 

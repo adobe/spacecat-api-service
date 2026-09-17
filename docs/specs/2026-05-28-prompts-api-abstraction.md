@@ -183,7 +183,7 @@ Both `/serenity/tags` and `/serenity/models` require `geoTargetId` + `languageCo
 
 ### 3.5 DELETE market semantics
 
-**Upstream support verified 2026-05-28** against `adobe-hackathon.semrush.com`:
+**Upstream support verified 2026-05-28** against `www.semrush.com`:
 
 ```
 OPTIONS /enterprise/projects/api/v1/workspaces/{ws}/projects/{pid}
@@ -290,7 +290,7 @@ No `@deprecated` aliasing, no parallel surface, no decoder fallback. Any in-flig
 
 ### Pre-flight — upstream capability check (before Phase 1)
 
-Verify whether `DELETE /v1/workspaces/{ws}/projects/{pid}` is supported on `adobe-hackathon.semrush.com`. Quick `curl` with an IMS bearer + workspace + project id from the dev environment. Result determines whether §3.5 Option A or Option B ships.
+Verify whether `DELETE /v1/workspaces/{ws}/projects/{pid}` is supported on `www.semrush.com`. Quick `curl` with an IMS bearer + workspace + project id from the dev environment. Result determines whether §3.5 Option A or Option B ships.
 
 **Validation gate:** decision recorded in the api-service PR description (Option A / Option B). If Option B, the operator runbook (`docs/serenity.md`) gains an "orphan project cleanup" section.
 

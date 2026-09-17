@@ -1,7 +1,19 @@
 # ADR-002: Preflight API Redesigned as Site-Scoped REST Resource
 
 ## Status
-Proposed
+Superseded (2026-08-13)
+
+> **Superseded by the decision to host the site-scoped Preflight API directly on
+> Mystique** (`mysticat-architecture` → `host-preflight-apis-on-mystique.md`,
+> SITES-48932). The site-scoped REST design proposed here was ultimately
+> implemented **on Mystique** (`/v1/sites/{siteId}/preflights`), not in
+> spacecat-api-service. The V2 endpoints spacecat shipped as an interim step were
+> removed in **SITES-48935**.
+>
+> Note the "Deprecated" markers below on `POST/GET /preflight/jobs` are now
+> **inverted**: that V1 audit-worker (SQS) path is the surviving spacecat preflight
+> surface; it was the site-scoped V2 endpoints that were removed. Retained for
+> historical context.
 
 ## Context
 The preflight feature was initially shipped with two endpoint pairs that do not follow the
