@@ -14,14 +14,25 @@
 
 import { PROMPTS_REQUEST_ORDER_BY_ENUM } from '@quazar/ai-seo-ts/v2/prompt/enums_pb.js';
 import {
-  num, brandTarget, parseLimitOffset, resolveCountryForFts, requiredLlmFromQuery,
-  llmToEngine, promptMatchesResponsesQuery, mentionedBrandRestLabel,
-  PROMPTS_RESPONSES_PROMPTS_SCAN_LIMIT, toIsoDate, hasRelationIdentity,
-  relationStatusFor, deriveResponse,
+  num,
+  brandTarget,
+  parseLimitOffset,
+  resolveCountryForFts,
+  requiredLlmFromQuery,
+  llmToEngine,
+  promptMatchesResponsesQuery,
+  mentionedBrandRestLabel,
+  PROMPTS_RESPONSES_PROMPTS_SCAN_LIMIT,
+  toIsoDate,
+  hasRelationIdentity,
+  relationStatusFor,
+  deriveResponse,
+  normalizeAiVisibilityTarget,
+  resolveSearchType,
 } from '../grpc-utils.js';
 
 export async function handlePromptsResponses(sp, clients) {
-  const domain = sp.get('domain')?.trim();
+  const domain = normalizeAiVisibilityTarget(sp.get('domain'));
   if (!domain) { return { status: 400, body: { error: 'missing_domain', message: 'domain is required' } }; }
   const country = resolveCountryForFts(sp);
   const { limit, offset } = parseLimitOffset(sp);
@@ -31,6 +42,7 @@ export async function handlePromptsResponses(sp, clients) {
     country,
     llm,
     target: brandTarget(domain),
+    searchType: resolveSearchType(domain),
     range: { limit: PROMPTS_RESPONSES_PROMPTS_SCAN_LIMIT, offset: 0 },
     order: { by: PROMPTS_REQUEST_ORDER_BY_ENUM.TOPIC_VOLUME },
   });
