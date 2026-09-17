@@ -3171,6 +3171,12 @@ function SuggestionsController(ctx, sqs, env) {
     const { authInfo: { profile } } = context.attributes;
     const updatedBy = profile?.email || 'geo-experiment-cancel';
 
+    context.log.info('[geo-experiment-cancel] request', {
+      siteId,
+      geoExperimentId,
+      userId: profile?.email,
+    });
+
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
     }
