@@ -1213,27 +1213,17 @@ llmo-onboard:
                     brandalfTriggered:
                       type: boolean
                       description: True if the Brandalf brand-identification job was
-                        successfully submitted (v2 onboarding mode only; always false in v1).
+                        successfully submitted.
                     brandalfError:
                       type:
                         - string
                         - 'null'
                       description: Reason the Brandalf submission failed or was skipped, if any.
-                    promptGenerationJobId:
-                      type:
-                        - string
-                        - 'null'
-                      description: The v1-mode direct prompt-generation DRS job id, if submitted.
-                    promptGenerationError:
-                      type:
-                        - string
-                        - 'null'
-                      description: Reason the v1-mode prompt-generation submission failed, if any.
                     promptSuggestionSchedules:
                       type:
                         - array
                         - 'null'
-                      description: Per-pipeline registration result (v2 mode only); null when
+                      description: Per-pipeline registration result; null when
                         registration timed out rather than completed.
                       items:
                         type: object
@@ -1254,12 +1244,12 @@ llmo-onboard:
                     promptSuggestionSchedulesTimedOut:
                       type: boolean
                       description: True if prompt-suggestion schedule registration timed out
-                        before completing (v2 mode only).
+                        before completing.
                     requiredWorkFailed:
                       type: boolean
-                      description: True if any required submission for the resolved onboarding
-                        mode failed. When true, `message` reports a degraded outcome instead of
-                        unconditional success.
+                      description: True if any required submission (Brandalf or prompt-suggestion
+                        schedule registration) failed. When true, `message` reports a degraded
+                        outcome instead of unconditional success.
               required:
                 - message
                 - domain

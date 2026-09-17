@@ -165,11 +165,12 @@ describe('llmo-onboarding-mode', () => {
   });
 
   // ── resolveLlmoOnboardingMode ─────────────────────────────────────────────
-  // The legacy-site cutoff was removed in LLMO-7108. The resolver now decides:
+  // Always resolves v2 — the v1 kill switch was removed (brandalf-migration
+  // cleanup §2; upstream gate for DRS #2807). The resolver now decides:
   //   1. brandalf=true            → v2
   //   2. brandalf_migration=true  → v2
-  //   3. LLMO_ONBOARDING_DEFAULT_VERSION==='v1' (kill switch) → v1
-  //   4. otherwise                → v2
+  //   3. otherwise                → v2 (a stale LLMO_ONBOARDING_DEFAULT_VERSION
+  //      ='v1' pin is treated as invalid and resolves v2)
 
   describe('resolveLlmoOnboardingMode', () => {
     // ── Brandalf flag → v2 ─────────────────────────────────────────────────
@@ -207,24 +208,30 @@ describe('llmo-onboarding-mode', () => {
       });
     });
 
-    // ── Kill switch — no brandalf flag ─────────────────────────────────────
+    // ── Retired v1 kill switch — never returns v1 ──────────────────────────
+    // The LLMO_ONBOARDING_DEFAULT_VERSION==='v1' kill switch was removed
+    // (brandalf-migration cleanup §2; upstream gate for DRS #2807). A stale
+    // 'v1' pin must resolve v2, and the resolver must never return v1.
 
-    describe('kill switch — no brandalf flag', () => {
-      it('returns v1 when the kill switch is active and the flag row is missing', async () => {
+    describe('retired v1 kill switch — never returns v1', () => {
+      it('resolves v2 (not v1) with a stale LLMO_ONBOARDING_DEFAULT_VERSION=v1 pin and a missing flag row', async () => {
         const ctx = makeContext({
           env: { LLMO_ONBOARDING_DEFAULT_VERSION: 'v1' },
           brandalfValue: null,
         });
-        expect(await resolveLlmoOnboardingMode('org-1', ctx)).to.equal('v1');
+        expect(await resolveLlmoOnboardingMode('org-1', ctx)).to.equal('v2');
+        // The stale pin is surfaced as invalid rather than honored.
+        expect(ctx.log.warn).to.have.been.calledWith(
+          'Invalid LLMO_ONBOARDING_DEFAULT_VERSION "v1", falling back to v2',
+        );
       });
 
-      it('returns v1 when the kill switch is active and brandalf=false', async () => {
+      it('resolves v2 (not v1) with a stale v1 pin and brandalf=false', async () => {
         const ctx = makeContext({
           env: { LLMO_ONBOARDING_DEFAULT_VERSION: 'v1' },
           brandalfValue: false,
         });
-        expect(await resolveLlmoOnboardingMode('org-1', ctx)).to.equal('v1');
-        // brandalf=false → kill switch → v1 without any site lookup.
+        expect(await resolveLlmoOnboardingMode('org-1', ctx)).to.equal('v2');
         expect(ctx.dataAccess.Site.allByOrganizationId).to.not.have.been.called;
       });
     });

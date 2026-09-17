@@ -3,9 +3,10 @@
 **Jira:** [LLMO-4176](https://jira.corp.adobe.com/browse/LLMO-4176)
 **Epic:** [LLMO-4054 — Brandalf GA (Brandalf v1 fast follows)](https://jira.corp.adobe.com/browse/LLMO-4054)
 **Status:** Superseded in part by [LLMO-7108](https://jira.corp.adobe.com/browse/LLMO-7108)
-— the legacy-site cutoff has been removed (see the update note below). The
-`LLMO_ONBOARDING_DEFAULT_VERSION` kill switch is retained; the
-`LLMO_BRANDALF_GA_CUTOFF_MS` cutoff and its helpers are gone.
+— the legacy-site cutoff has been removed (see the update notes below) — and by the
+brandalf-migration cleanup §2 (api-service #3156), which **retired** the
+`LLMO_ONBOARDING_DEFAULT_VERSION === 'v1'` kill switch so `resolveLlmoOnboardingMode`
+can only return v2. The `LLMO_BRANDALF_GA_CUTOFF_MS` cutoff and its helpers are gone.
 **PRs:**
 - api-service: [adobe/spacecat-api-service#2171](https://github.com/adobe/spacecat-api-service/pull/2171)
 - audit-worker: [adobe/spacecat-audit-worker#2380](https://github.com/adobe/spacecat-audit-worker/pull/2380) *(companion fix — required for v1 onboarding to complete successfully)*
@@ -32,15 +33,17 @@ defaults to v2. Concretely:
   function has no side effects, so callers (e.g. the `(org, site) → brand`
   resolver GET in `brands.js`) no longer pass it.
 
-**Current decision order** in `resolveLlmoOnboardingMode`:
+**Current decision order** in `resolveLlmoOnboardingMode` (updated — the v1 kill
+switch has been retired; see the cleanup §2 note below):
 
 1. `brandalf=true` → **v2**
 2. `brandalf_migration=true` → **v2**
-3. `LLMO_ONBOARDING_DEFAULT_VERSION === 'v1'` (global kill switch) → **v1**
-4. otherwise → **v2**
+3. otherwise → **v2**
 
-The `LLMO_ONBOARDING_DEFAULT_VERSION` kill switch is **retained** as a global
-"hold not-yet-migrated orgs on v1" switch.
+`LLMO_ONBOARDING_DEFAULT_VERSION` is no longer a v1 kill switch: the resolver can
+never return v1. A non-v2 value (including a stale `'v1'`) is treated as invalid,
+logged as a warning, and resolves **v2**. The env var is read only to surface a
+lingering pin, and is deleted in the §1 follow-up.
 
 **Where the resolver runs.** `resolveLlmoOnboardingMode` is consumed on two
 paths, not just onboarding:
@@ -64,6 +67,25 @@ owning v2 brand rows — for those, this endpoint now serves the v2 brand.)
 The sections below describe the original cutoff-based design (rows referencing
 `LLMO_BRANDALF_GA_CUTOFF_MS` / "pre-cutoff sites") and are retained for
 historical context only — they no longer reflect the shipped code.
+
+## Update — brandalf-migration cleanup §2 (#3156): v1 kill switch retired
+
+The `LLMO_ONBOARDING_DEFAULT_VERSION === 'v1'` **global kill switch has been
+retired** (api-service
+[#3156](https://github.com/adobe/spacecat-api-service/pull/3156), the upstream gate
+for DRS [#2807](https://github.com/adobe-rnd/llmo-data-retrieval-service/issues/2807)
+Phase 2). `resolveLlmoOnboardingMode` can no longer return `v1`:
+
+- The `'v1'` arm was removed from `src/support/llmo-onboarding-mode.js`. Every path
+  now converges on **v2** (`brandalf=true` → v2, `brandalf_migration=true` → v2,
+  otherwise → v2), as reflected in the corrected "Current decision order" above.
+- `LLMO_ONBOARDING_DEFAULT_VERSION` is still read, but **only to warn** on a
+  lingering non-v2 pin — a stale `'v1'` now logs "invalid" and resolves v2. The env
+  var (and this whole flag-reading module) are deleted in the sequenced §1 follow-up
+  once no v1 customers remain.
+- On the read-only `(org, site) → brand` resolver in `brands.js`, a flagless org now
+  always resolves the v2 brand instead of 404'ing — the intended "stop producing v1
+  orgs" effect DRS #2807 depends on.
 
 ## Problem
 

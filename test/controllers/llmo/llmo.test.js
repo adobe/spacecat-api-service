@@ -3595,8 +3595,6 @@ describe('LlmoController', () => {
       const brandActivation = {
         brandalfTriggered: true,
         brandalfError: null,
-        promptGenerationJobId: null,
-        promptGenerationError: null,
         promptSuggestionSchedules: [
           { providerId: 'prompt_generation_semrush', status: 'created' },
         ],
