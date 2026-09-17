@@ -110,7 +110,7 @@
     "@adobe/spacecat-shared-slack-client": "1.7.2",
     "@adobe/spacecat-shared-ticket-client": "^1.0.4",
     "@adobe/spacecat-shared-tier-client": "1.6.3",
-    "@adobe/spacecat-shared-tokowaka-client": "1.24.0",
+    "@adobe/spacecat-shared-tokowaka-client": "https://raw.githubusercontent.com/adobe/spacecat-shared/cf0a920f0dc700bac9ca6552a464909f2200c1ed/packages/spacecat-shared-tokowaka-client/adobe-spacecat-shared-tokowaka-client-1.24.0-diag.0.tgz",
     "@adobe/spacecat-shared-user-manager-client": "1.5.0",
     "@adobe/spacecat-shared-utils": "1.126.0",
     "@adobe/spacecat-shared-vault-secrets": "1.4.1",
