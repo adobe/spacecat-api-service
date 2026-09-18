@@ -6777,7 +6777,7 @@ V2Prompt:
       description: Topic business key
     status:
       type: string
-      enum: [active, pending, deleted]
+      enum: [active, pending, deleted, expired]
       default: active
     origin:
       type: string
@@ -6785,13 +6785,17 @@ V2Prompt:
       default: human
     source:
       type: string
-      readOnly: true
       description: >-
-        The producing system (source-dimension.md). READ-ONLY: server-owned, with
-        no write surface — a create/update body cannot set it. Returned in its
-        CANONICAL form (`lower(replace(source, '_', '-'))`), so `agentic_traffic`
-        reads as `agentic-traffic`.
+        The producing system (source-dimension.md). End-user writes cannot set it;
+        service principals may set it through the generation-aware bulk-create
+        envelope. Returned in its CANONICAL form
+        (`lower(replace(source, '_', '-'))`), so `agentic_traffic` reads as
+        `agentic-traffic`.
       example: "config"
+    generationId:
+      type: [string, 'null']
+      format: uuid
+      description: Generation run that most recently wrote or expired this prompt.
     intent:
       type: [string, 'null']
       description: >-

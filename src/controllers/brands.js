@@ -51,6 +51,7 @@ import {
   getPromptStats,
   resolveBrandUuid,
   findPromptsBlockingRegionRemoval,
+  reconcilePromptGeneration,
   deriveV2PromptOrigin,
   isServicePrincipal,
 } from '../support/prompts-storage.js';
@@ -123,6 +124,19 @@ import {
 
 const HEADER_ERROR = 'x-error';
 const BRAND_GUIDANCE_FIELDS = ['brandContext', 'mentionSentimentGuidance'];
+const PROMPT_RECONCILIATION_FLAG = 'PROMPT_GENERATION_RECONCILIATION_ENABLED';
+const PROMPT_RECONCILIATION_MAX_FRACTION = 'PROMPT_GENERATION_MAX_EXPIRE_FRACTION';
+
+function isPromptGenerationReconciliationEnabled(env) {
+  return String(env?.[PROMPT_RECONCILIATION_FLAG] ?? '').trim().toLowerCase() === 'true';
+}
+
+function promptGenerationMaxExpireFraction(env) {
+  const configured = Number(env?.[PROMPT_RECONCILIATION_MAX_FRACTION]);
+  return Number.isFinite(configured) && configured > 0 && configured <= 1
+    ? configured
+    : 0.9;
+}
 
 /**
  * The brand's primary URL as the create payload spells it: the first non-empty
@@ -613,6 +627,7 @@ function BrandsController(ctx, log, env) {
         limit,
         page,
         postgrestClient,
+        excludeExpired: isPromptGenerationReconciliationEnabled(context.env || env),
       });
 
       return createResponse(result, 200);
@@ -678,7 +693,12 @@ function BrandsController(ctx, log, env) {
 
   const createPromptsByBrand = async (context) => {
     const { spaceCatId, brandId } = context.params || {};
-    const prompts = context.data;
+    const payload = context.data;
+    const isGenerationEnvelope = !Array.isArray(payload);
+    const prompts = isGenerationEnvelope ? payload?.prompts : payload;
+    const generationId = isGenerationEnvelope ? payload?.generationId : undefined;
+    const generationSource = isGenerationEnvelope ? payload?.source : undefined;
+    const reconcile = isGenerationEnvelope && payload?.reconcile === true;
 
     try {
       if (!hasText(spaceCatId)) {
@@ -695,6 +715,21 @@ function BrandsController(ctx, log, env) {
       }
       if (prompts.length > 3000) {
         return badRequest('Maximum 3000 prompts per request');
+      }
+
+      const { authInfo } = context.attributes ?? {};
+      const servicePrincipal = isServicePrincipal(authInfo);
+      if (isGenerationEnvelope && !servicePrincipal) {
+        return badRequest('Prompt generation reconciliation is available to service principals only');
+      }
+      if (isGenerationEnvelope && !hasText(generationSource)) {
+        return badRequest('Prompt source required for generation-aware writes');
+      }
+      if (isGenerationEnvelope && !isValidUUID(generationId)) {
+        return badRequest('Generation ID must be a valid UUID');
+      }
+      if (isGenerationEnvelope && !reconcile) {
+        return badRequest('Generation-aware writes must request reconciliation');
       }
 
       const organization = await getOrganizationOrNotFound(spaceCatId);
@@ -731,30 +766,86 @@ function BrandsController(ctx, log, env) {
       // prompts (posted `origin: 'ai'` over an S2S JWT) to `human`, since the
       // x-api-key service path DRS used to take was removed (SITES-34224).
       //
-      // `source` (the producing system) has NO write surface (source-dimension.md
-      // §1 item 6): a caller-supplied `source` is ignored, so a v2 create becomes
-      // the store's `config` default (item 5, gate §6.4/§6.6). It is dropped here
-      // rather than passed to upsertPrompts, whose `source: p.source || 'config'`
-      // write-side default stays load-bearing for the internal writers that DO set
-      // it. `updatePromptById` likewise never patches source (producer is fixed at
-      // creation).
-      const { authInfo } = context.attributes ?? {};
-      const isUserPrincipal = !isServicePrincipal(authInfo);
-      const derivedPrompts = prompts.map(({ source: _, ...p }) => ({
-        ...p,
-        origin: deriveV2PromptOrigin(p?.origin, isUserPrincipal),
-      }));
+      // Legacy array bodies retain their existing source ownership: per-prompt
+      // source is ignored and the store applies `config`. The service-only
+      // generation envelope supplies one validated source for the entire run.
+      // `updatePromptById` still never patches source (producer is fixed at creation).
+      const isUserPrincipal = !servicePrincipal;
+      const derivedPrompts = prompts.map(({ source: _, ...p }) => {
+        const derived = {
+          ...p,
+          origin: deriveV2PromptOrigin(p?.origin, isUserPrincipal),
+        };
+        if (isGenerationEnvelope) {
+          derived.source = generationSource;
+        }
+        return derived;
+      });
 
-      const { created, updated, prompts: outPrompts } = await upsertPrompts({
+      const upsertResult = await upsertPrompts({
         organizationId: spaceCatId,
         brandUuid,
         prompts: derivedPrompts,
         postgrestClient,
         updatedBy,
+        generationId: servicePrincipal ? generationId : undefined,
         classifyIntent: classifyIntent ?? undefined,
       });
 
-      return createResponse({ created, updated, prompts: outPrompts }, 201);
+      let reconciliation;
+      if (reconcile && isPromptGenerationReconciliationEnabled(context.env || env)) {
+        reconciliation = await reconcilePromptGeneration({
+          organizationId: spaceCatId,
+          brandUuid,
+          source: generationSource,
+          generationId,
+          postgrestClient,
+          updatedBy,
+          maxExpireFraction: promptGenerationMaxExpireFraction(context.env || env),
+        });
+
+        const metricDimensions = {
+          Source: generationSource,
+          Outcome: reconciliation.refused ? 'refused' : 'completed',
+        };
+        emitMetric(
+          {
+            name: 'ExpiredPromptCount',
+            value: reconciliation.expiredCount,
+            dimensions: metricDimensions,
+          },
+          {
+            environment: resolveEnvironment(context.env || env),
+            namespace: 'Mysticat/Prompts',
+          },
+        );
+        log.info('Prompt generation reconciliation completed', {
+          org: spaceCatId,
+          brand: brandUuid,
+          source: generationSource,
+          run_id: generationId,
+          expired_count: reconciliation.expiredCount,
+          active_after: reconciliation.activeAfter,
+          refused: reconciliation.refused,
+        });
+
+        if (reconciliation.refused) {
+          log.warn('Prompt generation reconciliation refused by fraction guard', {
+            org: spaceCatId,
+            brand: brandUuid,
+            source: generationSource,
+            run_id: generationId,
+            candidate_count: reconciliation.candidateCount,
+            active_after: reconciliation.activeAfter,
+            expire_fraction: reconciliation.expireFraction,
+          });
+          return createResponse({ ...upsertResult, reconciliation }, 409);
+        }
+      } else if (reconcile) {
+        reconciliation = { skipped: true, reason: 'disabled' };
+      }
+
+      return createResponse({ ...upsertResult, ...(reconciliation && { reconciliation }) }, 201);
     } catch (error) {
       if (error?.status === 409) {
         log.warn(`Prompt unique-constraint conflict for brand ${brandId} (org ${spaceCatId}): ${error.message}`);
@@ -2196,6 +2287,7 @@ function BrandsController(ctx, log, env) {
           newRegions: updates.region || [],
           postgrestClient,
           log,
+          excludeExpired: isPromptGenerationReconciliationEnabled(context.env || env),
         });
         const blockedRegions = Object.keys(blocking).sort();
         if (blockedRegions.length > 0) {

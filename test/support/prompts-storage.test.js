@@ -29,6 +29,7 @@ import {
   normalizeIntent,
   isMissingIntentColumnError,
   findPromptsBlockingRegionRemoval,
+  reconcilePromptGeneration,
   getIntentsByPromptIds,
   deriveV2PromptOrigin,
   isServicePrincipal,
@@ -49,6 +50,7 @@ describe('prompts-storage', () => {
       select: () => chain,
       eq: () => chain,
       neq: () => chain,
+      not: () => chain,
       order: () => chain,
       update: () => chain,
       ilike: () => chain,
@@ -370,6 +372,33 @@ describe('prompts-storage', () => {
       expect(result.total).to.equal(1);
       expect(result.limit).to.equal(100);
       expect(result.page).to.equal(1);
+    });
+
+    it('excludes deleted and expired prompts by default when reconciliation is enabled', async () => {
+      const not = sinon.spy();
+      const client = {
+        from: (table) => {
+          const chain = makeChain(
+            table === 'brands'
+              ? { data: { id: BRAND_UUID }, error: null }
+              : { data: [], error: null, count: 0 },
+          );
+          chain.not = (...args) => {
+            not(...args);
+            return chain;
+          };
+          return chain;
+        },
+      };
+
+      await listPrompts({
+        organizationId: ORG_ID,
+        brandId: BRAND_UUID,
+        postgrestClient: client,
+        excludeExpired: true,
+      });
+
+      expect(not).to.have.been.calledWith('status', 'in', '("deleted","expired")');
     });
 
     it('filters by topicId only (no categoryId)', async () => {
@@ -1608,6 +1637,108 @@ describe('prompts-storage', () => {
       expect(updateStub.callCount).to.equal(1);
       // Reactivation preserves the stored source (SITES-47870 immutability).
       expect(updateStub.firstCall.args[0].source).to.equal('gsc');
+    });
+
+    it('reactivates an expired prompt and stamps the current generation', async () => {
+      const expiredRow = {
+        id: 'row-uuid',
+        prompt_id: 'expired-1',
+        text: 'Expired text',
+        regions: [],
+        status: 'expired',
+        source: 'gsc',
+        origin: 'ai',
+        generation_id: '11111111-1111-4111-b111-111111111110',
+      };
+      const existingData = { data: [expiredRow], error: null };
+      const updateStub = sinon.stub().returns({ eq: () => thenable({ error: null }) });
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    ...thenable(existingData),
+                    in: () => thenable(existingData),
+                  }),
+                }),
+              }),
+              insert: () => ({ select: () => thenable({ data: [], error: null }) }),
+              update: updateStub,
+            };
+          }
+          return makeChain({});
+        },
+      };
+      const generationId = '22222222-2222-4222-b222-222222222222';
+
+      const result = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{
+          id: 'expired-1', prompt: 'Expired text', regions: [], source: 'gsc',
+        }],
+        postgrestClient: client,
+        generationId,
+      });
+
+      expect(result.updated).to.equal(1);
+      expect(updateStub.firstCall.args[0]).to.include({
+        status: 'active',
+        generation_id: generationId,
+      });
+    });
+
+    it('touches a re-emitted pending prompt without changing its status', async () => {
+      const pendingRow = {
+        id: 'row-uuid',
+        prompt_id: 'pending-current',
+        text: 'Pending text',
+        regions: [],
+        status: 'pending',
+        source: 'gsc',
+        origin: 'ai',
+      };
+      const existingData = { data: [pendingRow], error: null };
+      const updateStub = sinon.stub().returns({ eq: () => thenable({ error: null }) });
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    ...thenable(existingData),
+                    in: () => thenable(existingData),
+                  }),
+                }),
+              }),
+              insert: () => ({ select: () => thenable({ data: [], error: null }) }),
+              update: updateStub,
+            };
+          }
+          return makeChain({});
+        },
+      };
+      const generationId = '22222222-2222-4222-b222-222222222222';
+
+      const result = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{
+          id: 'pending-current', prompt: 'Pending text', regions: [], source: 'gsc',
+        }],
+        postgrestClient: client,
+        generationId,
+      });
+
+      expect(result.updated).to.equal(1);
+      expect(updateStub.firstCall.args[0]).to.deep.equal({
+        generation_id: generationId,
+        updated_by: 'system',
+      });
+      expect(result.prompts[0].status).to.equal('pending');
     });
 
     it('reactivating a deleted row by prompt_id keeps the stored source, not the incoming one', async () => {
@@ -4716,6 +4847,111 @@ describe('prompts-storage', () => {
       });
       expect(result).to.deep.equal({});
       expect(warn.calledOnce).to.equal(true);
+    });
+
+    describe('reconcilePromptGeneration', () => {
+      const GENERATION_ID = '22222222-2222-4222-b222-222222222222';
+
+      it('calls the atomic writer RPC and maps its result', async () => {
+        const rpc = sinon.stub().resolves({
+          data: [{
+            refused: false,
+            candidate_count: '2',
+            expired_count: '2',
+            active_after: '8',
+            expire_fraction: '0.2',
+          }],
+          error: null,
+        });
+
+        const result = await reconcilePromptGeneration({
+          organizationId: ORG_ID,
+          brandUuid: BRAND_UUID,
+          source: 'citation_attempt',
+          generationId: GENERATION_ID,
+          postgrestClient: { rpc },
+          updatedBy: 'drs@service',
+        });
+
+        expect(result).to.deep.equal({
+          refused: false,
+          candidateCount: 2,
+          expiredCount: 2,
+          activeAfter: 8,
+          expireFraction: 0.2,
+        });
+        expect(rpc).to.have.been.calledOnceWith('wrpc_reconcile_prompt_generation', {
+          p_organization_id: ORG_ID,
+          p_brand_id: BRAND_UUID,
+          p_source_canonical: 'citation-attempt',
+          p_generation_id: GENERATION_ID,
+          p_max_expire_fraction: 0.9,
+          p_updated_by: 'drs@service',
+        });
+      });
+
+      it('returns a fraction-guard refusal from the atomic RPC', async () => {
+        const rpc = sinon.stub().resolves({
+          data: [{
+            refused: true,
+            candidate_count: 10,
+            expired_count: 0,
+            active_after: 10,
+            expire_fraction: 1,
+          }],
+          error: null,
+        });
+
+        const result = await reconcilePromptGeneration({
+          organizationId: ORG_ID,
+          brandUuid: BRAND_UUID,
+          source: 'gsc',
+          generationId: GENERATION_ID,
+          postgrestClient: { rpc },
+          maxExpireFraction: 0.9,
+        });
+
+        expect(result.refused).to.equal(true);
+        expect(result.expiredCount).to.equal(0);
+      });
+
+      it('rejects an empty source and invalid generation id before querying', async () => {
+        const rpc = sinon.spy();
+        await expect(reconcilePromptGeneration({
+          organizationId: ORG_ID,
+          brandUuid: BRAND_UUID,
+          source: '',
+          generationId: GENERATION_ID,
+          postgrestClient: { rpc },
+        })).to.be.rejectedWith('Prompt source required');
+        await expect(reconcilePromptGeneration({
+          organizationId: ORG_ID,
+          brandUuid: BRAND_UUID,
+          source: 'gsc',
+          generationId: 'not-a-uuid',
+          postgrestClient: { rpc },
+        })).to.be.rejectedWith('Generation ID must be a valid UUID');
+        expect(rpc).not.to.have.been.called;
+      });
+
+      it('fails explicitly when the RPC errors or returns no result', async () => {
+        await expect(reconcilePromptGeneration({
+          organizationId: ORG_ID,
+          brandUuid: BRAND_UUID,
+          source: 'gsc',
+          generationId: GENERATION_ID,
+          postgrestClient: {
+            rpc: sinon.stub().resolves({ data: null, error: { message: 'database boom' } }),
+          },
+        })).to.be.rejectedWith('Failed to reconcile prompt generation: database boom');
+        await expect(reconcilePromptGeneration({
+          organizationId: ORG_ID,
+          brandUuid: BRAND_UUID,
+          source: 'gsc',
+          generationId: GENERATION_ID,
+          postgrestClient: { rpc: sinon.stub().resolves({ data: [], error: null }) },
+        })).to.be.rejectedWith('Prompt reconciliation returned no result');
+      });
     });
   });
 });

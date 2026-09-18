@@ -217,6 +217,7 @@ function chunkArray(arr, size) {
  * @param {Array<string>} params.promptIds - prompts.id (uuid) values; nullish/dupes are ignored
  * @param {string} [params.organizationId] - scopes the lookup to this org (defense-in-depth)
  * @param {object} params.postgrestClient - PostgREST client
+ * @param {boolean} [params.excludeExpired=false] - Exclude expired prompts with deleted
  * @param {object} [params.log] - logger; `debug` for benign missing-column, `warn` otherwise
  * @returns {Promise<Map<string, string>>} Map of promptId -> intent (only non-empty intents)
  */
@@ -510,6 +511,7 @@ function mapRowToPrompt(row) {
     // null: the grid must still show the operator what is stored. `?? 'config'` only
     // guards a nullish column (in-memory/test rows); the DB column is NOT NULL.
     source: canonicalizeSource(row.source) ?? row.source ?? 'config',
+    generationId: row.generation_id ?? null,
     intent: row.intent ?? null,
     createdAt: row.created_at,
     createdBy: row.created_by,
@@ -543,6 +545,80 @@ function mapRowToPrompt(row) {
 }
 
 /**
+ * Expires stale AI prompts after a generation has been written successfully.
+ *
+ * @param {object} params
+ * @param {string} params.organizationId - SpaceCat organization UUID
+ * @param {string} params.brandUuid - brands.id UUID
+ * @param {string} params.source - Registered prompt source
+ * @param {string} params.generationId - Current generation UUID
+ * @param {object} params.postgrestClient - PostgREST client
+ * @param {string} params.updatedBy - Service identity performing reconciliation
+ * @param {number} [params.maxExpireFraction=0.9] - Maximum stale/live fraction
+ * @returns {Promise<{
+ *   refused:boolean,
+ *   candidateCount:number,
+ *   expiredCount:number,
+ *   activeAfter:number,
+ *   expireFraction:number
+ * }>}
+ */
+export async function reconcilePromptGeneration({
+  organizationId,
+  brandUuid,
+  source,
+  generationId,
+  postgrestClient,
+  updatedBy = 'system',
+  maxExpireFraction = 0.9,
+}) {
+  if (!postgrestClient?.rpc) {
+    throw new Error('PostgREST client is required for prompt reconciliation');
+  }
+  if (!hasText(source)) {
+    const error = new Error('Prompt source required for reconciliation');
+    error.status = 400;
+    throw error;
+  }
+  assertPermittedSource(source);
+  if (!isValidUUID(generationId)) {
+    const error = new Error('Generation ID must be a valid UUID');
+    error.status = 400;
+    throw error;
+  }
+  if (!Number.isFinite(maxExpireFraction)
+    || maxExpireFraction <= 0
+    || maxExpireFraction > 1) {
+    throw new Error('Maximum expire fraction must be greater than 0 and at most 1');
+  }
+
+  const { data, error } = await postgrestClient.rpc('wrpc_reconcile_prompt_generation', {
+    p_organization_id: organizationId,
+    p_brand_id: brandUuid,
+    p_source_canonical: foldSourceValue(source),
+    p_generation_id: generationId,
+    p_max_expire_fraction: maxExpireFraction,
+    p_updated_by: updatedBy,
+  });
+  if (error) {
+    throw new Error(`Failed to reconcile prompt generation: ${error.message}`);
+  }
+
+  const result = Array.isArray(data) ? data[0] : data;
+  if (!result) {
+    throw new Error('Prompt reconciliation returned no result');
+  }
+
+  return {
+    refused: result.refused === true,
+    candidateCount: Number(result.candidate_count) || 0,
+    expiredCount: Number(result.expired_count) || 0,
+    activeAfter: Number(result.active_after) || 0,
+    expireFraction: Number(result.expire_fraction) || 0,
+  };
+}
+
+/**
  * Lists prompts for an organization with optional filters and sorting.
  * Joins brands, categories, topics for enrichment.
  *
@@ -551,7 +627,7 @@ function mapRowToPrompt(row) {
  * @param {string} [params.brandId] - Filter by brand (uuid or config id)
  * @param {string} [params.categoryId] - Filter by category UUID (categories.id)
  * @param {string} [params.topicId] - Filter by topic business key or UUID
- * @param {string} [params.status] - Filter by status (active, pending, deleted)
+ * @param {string} [params.status] - Filter by status (active, pending, deleted, expired)
  * @param {string} [params.search] - Free-text search across prompt text, name,
  * topic name, category name
  * @param {string} [params.region] - Filter by region (array containment)
@@ -565,6 +641,7 @@ function mapRowToPrompt(row) {
  * @param {number} [params.limit] - Page size (default 100, max 5000)
  * @param {number} [params.page] - Page number, 1-based (default 1)
  * @param {object} params.postgrestClient - PostgREST client
+ * @param {boolean} [params.excludeExpired=false] - Exclude expired prompts by default
  * @returns {Promise<{items:object[],total:number,limit:number,page:number}>}
  */
 export async function listPrompts({
@@ -582,6 +659,7 @@ export async function listPrompts({
   limit = 100,
   page = 1,
   postgrestClient,
+  excludeExpired = false,
 }) {
   if (!postgrestClient?.from) {
     return [];
@@ -637,6 +715,7 @@ export async function listPrompts({
     status,
     origin,
     source,${includeIntent ? '\n    intent,' : ''}
+    generation_id,
     category_id,
     topic_id,
     brand_id,
@@ -680,6 +759,8 @@ export async function listPrompts({
     }
     if (hasText(status)) {
       baseQuery = baseQuery.eq('status', status);
+    } else if (excludeExpired) {
+      baseQuery = baseQuery.not('status', 'in', '("deleted","expired")');
     } else {
       baseQuery = baseQuery.neq('status', 'deleted');
     }
@@ -828,6 +909,7 @@ function buildPromptKey({ text, regions, source }) {
  * categoryId, topicId, ... }
  * @param {object} params.postgrestClient - PostgREST client
  * @param {string} params.updatedBy - User performing the update
+ * @param {string} [params.generationId] - Current generation UUID for AI prompt runs
  * @param {((text: string) => Promise<string|null>)} [params.classifyIntent] -
  *   Optional best-effort intent classifier; applied only to prompts that change
  *   text without an explicit intent. Non-fatal: a null result leaves intent unset.
@@ -841,6 +923,7 @@ export async function upsertPrompts({
   prompts,
   postgrestClient,
   updatedBy = 'system',
+  generationId,
   classifyIntent,
   classifyIntentBatchTimeoutMs = 8000,
 }) {
@@ -864,8 +947,8 @@ export async function upsertPrompts({
   const [{ data: existing }, lookups] = await Promise.all([
     withMissingIntentFallback(postgrestClient, (includeIntent) => {
       const cols = includeIntent
-        ? 'id,prompt_id,text,regions,status,source,intent'
-        : 'id,prompt_id,text,regions,status,source';
+        ? 'id,prompt_id,text,regions,status,source,origin,generation_id,intent'
+        : 'id,prompt_id,text,regions,status,source,origin,generation_id';
       const baseQuery = () => postgrestClient
         .from('prompts')
         .select(cols)
@@ -954,6 +1037,7 @@ export async function upsertPrompts({
       status: p.status || 'active',
       origin: p.origin || 'human',
       source,
+      generation_id: generationId ?? null,
       intent: normalizeIntent(p.intent),
       updated_by: updatedBy,
     };
@@ -970,7 +1054,7 @@ export async function upsertPrompts({
     // just keeps an in-memory/test row without a source from becoming `undefined`;
     // it is NOT a backfill path.
     if (match && match.status !== 'active') {
-      if (match.status === 'deleted') {
+      if (match.status === 'deleted' || match.status === 'expired') {
         const reactivated = {
           ...row,
           id: match.id,
@@ -986,6 +1070,18 @@ export async function upsertPrompts({
         };
         toUpdate.push(reactivated);
         processed.push({ ...reactivated, prompt_id: promptId });
+      } else if (match.status === 'pending' && generationId) {
+        const touched = {
+          id: match.id,
+          generation_id: generationId,
+          updated_by: updatedBy,
+        };
+        toUpdate.push(touched);
+        processed.push({
+          ...match,
+          generation_id: generationId,
+          updated_by: updatedBy,
+        });
       }
       // eslint-disable-next-line no-continue
       continue;
@@ -1141,6 +1237,7 @@ export async function upsertPrompts({
     status: r.status,
     origin: r.origin,
     source: r.source,
+    generationId: r.generation_id ?? null,
     intent: r.intent,
     createdAt: r.created_at,
     createdBy: r.created_by,
@@ -1286,6 +1383,7 @@ function normalizeRegionsForCompare(regions) {
  * @param {string[]} params.newRegions - brand regions AFTER the update
  * @param {object} params.postgrestClient - PostgREST client
  * @param {object} [params.log] - Logger
+ * @param {boolean} [params.excludeExpired=false] - Exclude expired prompts with deleted
  * @returns {Promise<Record<string, number>>} map of removed region (lowercase)
  *   → count of prompts still using it; empty when nothing blocks the change
  */
@@ -1296,6 +1394,7 @@ export async function findPromptsBlockingRegionRemoval({
   newRegions,
   postgrestClient,
   log = console,
+  excludeExpired = false,
 }) {
   if (!postgrestClient?.from) {
     throw new Error('PostgREST client is required');
@@ -1311,13 +1410,15 @@ export async function findPromptsBlockingRegionRemoval({
   // hundred prompts in practice; cap the read and warn (never silently truncate)
   // if a brand somehow exceeds it so the operator knows the check was partial.
   const READ_CAP = 5000;
-  const { data, error } = await postgrestClient
+  let query = postgrestClient
     .from('prompts')
     .select('id, regions')
     .eq('organization_id', organizationId)
-    .eq('brand_id', brandUuid)
-    .neq('status', 'deleted')
-    .limit(READ_CAP);
+    .eq('brand_id', brandUuid);
+  query = excludeExpired
+    ? query.not('status', 'in', '("deleted","expired")')
+    : query.neq('status', 'deleted');
+  const { data, error } = await query.limit(READ_CAP);
 
   if (error) {
     throw new Error(`Failed to read prompts for region consistency check: ${error.message}`);

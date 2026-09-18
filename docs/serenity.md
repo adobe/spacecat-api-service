@@ -15,6 +15,40 @@ api-service exposes the Serenity endpoint surface documented in OpenAPI and fron
 | `SEMRUSH_PROJECTS_BASE_URL` | yes (no source default) | Vault `dx_mysticat/<env>/api-service`; locally `.env` | Upstream host for the Semrush AIO REST API. Must be `https://…`. Trailing slashes are stripped. Per-environment value so the production target can differ from the hackathon host without a code change. |
 | `PROMPT_INTENT_CLASSIFICATION_DEPLOYMENT_NAME` | no (falls back to `AZURE_OPEN_AI_API_DEPLOYMENT_NAME`) | Vault `dx_mysticat/<env>/api-service`; locally `.env` | Classifier-scoped Azure OpenAI deployment (model) name for server-side prompt-intent classification (serenity-docs#32). Takes precedence over the shared `AZURE_OPEN_AI_API_DEPLOYMENT_NAME` other Azure consumers use (e.g. `org-detector`), so intent classification can target a different model without affecting them. Unset ⇒ shared deployment; behavior unchanged until explicitly configured. |
 | `SERENITY_TARGETED_CREATE_LOOKUP` | no (**default ON**) | Vault `dx_mysticat/<env>/api-service`; locally `.env` | Kill-switch for the create/upsert-path existing-prompt dedup strategy. See the subsection below. |
+| `PROMPT_GENERATION_RECONCILIATION_ENABLED` | no (**default OFF**) | Vault `dx_mysticat/<env>/api-service`; locally `.env` | Enables generated-prompt reconciliation and hides `expired` prompts from default v2 prompt reads. Set only after the data-service schema and DRS caller are deployed. |
+| `PROMPT_GENERATION_MAX_EXPIRE_FRACTION` | no (**default `0.9`**) | Vault `dx_mysticat/<env>/api-service`; locally `.env` | Refuses a reconciliation that would expire more than this fraction of the brand's current `active`/`pending` prompt library. Must be greater than 0 and at most 1. |
+
+### Generated-prompt reconciliation rollout and incident response
+
+Deploy in dependency order: data-service schema and reconciliation function, api-service with
+`PROMPT_GENERATION_RECONCILIATION_ENABLED=false`, then the DRS caller. Enable the DRS and
+api-service flags in dev, stage, and prod in that order. The first generation or explicit backfill
+for a brand may produce the largest expiry, so verify the `Mysticat/Prompts` `ExpiredPromptCount`
+metric and the structured reconciliation log before widening.
+
+An HTTP `409` generation response means the fraction guard refused the expiry. The prompt writes
+have completed, but no stale prompt was expired. Identify the batch from `org`, `brand`, `source`,
+and `run_id`; do not raise the fraction until the generated current set is confirmed. Logs contain
+identifiers and counts only, never prompt text.
+
+To stop further lifecycle changes, set `PROMPT_GENERATION_RECONCILIATION_ENABLED=false` in both
+api-service and DRS. To roll back a confirmed bad batch, restore only its expired AI prompts using
+the logged dimensions:
+
+```sql
+UPDATE public.prompts
+SET status = 'active',
+    updated_by = '<operator>'
+WHERE organization_id = '<organization-uuid>'
+  AND brand_id = '<brand-uuid>'
+  AND source_canonical = '<canonical-source>'
+  AND generation_id = '<run-uuid>'
+  AND origin = 'ai'
+  AND status = 'expired';
+```
+
+Run and review the matching `SELECT count(*)` before the update. `deleted`, `ignored`, human, and
+other-source prompts are outside both reconciliation and rollback.
 
 ### Create-path dedup kill-switch (`SERENITY_TARGETED_CREATE_LOOKUP`)
 

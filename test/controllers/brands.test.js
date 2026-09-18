@@ -1018,6 +1018,213 @@ describe('Brands Controller', () => {
       expect(body).to.have.property('prompts');
     });
 
+    it('rejects generation-aware writes from an end-user principal', async () => {
+      const response = await brandsController.createPromptsByBrand({
+        ...context,
+        attributes: {
+          authInfo: {
+            getType: () => 'jwt',
+            isS2SConsumer: () => false,
+            isS2SAdmin: () => false,
+            profile: { email: 'user@test.com' },
+          },
+        },
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: {
+          prompts: [{ prompt: 'P', regions: ['us'] }],
+          generationId: '22222222-2222-4222-b222-222222222222',
+          source: 'gsc',
+          reconcile: true,
+        },
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(400);
+      expect((await response.json()).message).to.include('service principals only');
+    });
+
+    [
+      {
+        label: 'source is missing',
+        data: {
+          prompts: [{ prompt: 'P', regions: ['us'] }],
+          generationId: '22222222-2222-4222-b222-222222222222',
+          reconcile: true,
+        },
+        message: 'Prompt source required',
+      },
+      {
+        label: 'generation ID is missing',
+        data: {
+          prompts: [{ prompt: 'P', regions: ['us'] }],
+          source: 'gsc',
+          reconcile: true,
+        },
+        message: 'Generation ID must be a valid UUID',
+      },
+      {
+        label: 'reconciliation is not requested',
+        data: {
+          prompts: [{ prompt: 'P', regions: ['us'] }],
+          generationId: '22222222-2222-4222-b222-222222222222',
+          source: 'gsc',
+          reconcile: false,
+        },
+        message: 'must request reconciliation',
+      },
+    ].forEach(({ label, data, message }) => {
+      it(`rejects a service generation envelope when ${label}`, async () => {
+        const response = await brandsController.createPromptsByBrand({
+          ...context,
+          attributes: {
+            authInfo: {
+              getType: () => 'jwt',
+              isS2SConsumer: () => true,
+              isS2SAdmin: () => false,
+              profile: { email: 'drs@service' },
+            },
+          },
+          params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+          data,
+          dataAccess: mockDataAccess,
+        });
+
+        expect(response.status).to.equal(400);
+        expect((await response.json()).message).to.include(message);
+      });
+    });
+
+    it('accepts a service generation envelope and reports disabled reconciliation', async () => {
+      const thenable = (v) => ({ then: (resolve) => resolve(v), catch: () => thenable(v) });
+      const insertStub = sandbox.stub()
+        .returns({ select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }) });
+      mockDataAccess.services.postgrestClient.from = sandbox.stub().callsFake((table) => {
+        if (table === 'prompts') {
+          return {
+            select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+            insert: insertStub,
+            update: () => ({ eq: () => thenable({ error: null }) }),
+          };
+        }
+        const chain = {
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          maybeSingle: sandbox.stub().resolves({ data: { id: BRAND_UUID }, error: null }),
+        };
+        if (table === 'llmo_customer_config') {
+          chain.maybeSingle = sandbox.stub()
+            .resolves({ data: { config: { customer: { brands: [] } } }, error: null });
+        }
+        return chain;
+      });
+      const generationId = '22222222-2222-4222-b222-222222222222';
+
+      const response = await brandsController.createPromptsByBrand({
+        ...context,
+        env: { ...mockEnv, PROMPT_GENERATION_RECONCILIATION_ENABLED: 'false' },
+        attributes: {
+          authInfo: {
+            getType: () => 'jwt',
+            isS2SConsumer: () => true,
+            isS2SAdmin: () => false,
+            profile: { email: 'drs@service' },
+          },
+        },
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: {
+          prompts: [{ prompt: 'P', regions: ['us'], origin: 'ai' }],
+          generationId,
+          source: 'gsc',
+          reconcile: true,
+        },
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(201);
+      const inserted = insertStub.firstCall.args[0];
+      expect(inserted[0]).to.include({
+        origin: 'ai',
+        source: 'gsc',
+        generation_id: generationId,
+      });
+      expect((await response.json()).reconciliation).to.deep.equal({
+        skipped: true,
+        reason: 'disabled',
+      });
+    });
+
+    it('returns 409 with reconciliation counts when the atomic fraction guard refuses', async () => {
+      const thenable = (v) => ({ then: (resolve) => resolve(v), catch: () => thenable(v) });
+      const insertStub = sandbox.stub()
+        .returns({ select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }) });
+      const rpcStub = sandbox.stub().resolves({
+        data: [{
+          refused: true,
+          candidate_count: 10,
+          expired_count: 0,
+          active_after: 10,
+          expire_fraction: 1,
+        }],
+        error: null,
+      });
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake((table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+              insert: insertStub,
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          const chain = {
+            select: sandbox.stub().returnsThis(),
+            eq: sandbox.stub().returnsThis(),
+            maybeSingle: sandbox.stub().resolves({ data: { id: BRAND_UUID }, error: null }),
+          };
+          if (table === 'llmo_customer_config') {
+            chain.maybeSingle = sandbox.stub()
+              .resolves({ data: { config: { customer: { brands: [] } } }, error: null });
+          }
+          return chain;
+        }),
+        rpc: rpcStub,
+      };
+      const generationId = '22222222-2222-4222-b222-222222222222';
+
+      const response = await brandsController.createPromptsByBrand({
+        ...context,
+        env: { ...mockEnv, PROMPT_GENERATION_RECONCILIATION_ENABLED: 'true' },
+        attributes: {
+          authInfo: {
+            getType: () => 'jwt',
+            isS2SConsumer: () => true,
+            isS2SAdmin: () => false,
+            profile: { email: 'drs@service' },
+          },
+        },
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: {
+          prompts: [{ prompt: 'P', regions: ['us'], origin: 'ai' }],
+          generationId,
+          source: 'gsc',
+          reconcile: true,
+        },
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(409);
+      expect((await response.json()).reconciliation).to.deep.equal({
+        refused: true,
+        candidateCount: 10,
+        expiredCount: 0,
+        activeAfter: 10,
+        expireFraction: 1,
+      });
+      expect(loggerStub.warn).to.have.been.calledWith(
+        'Prompt generation reconciliation refused by fraction guard',
+      );
+    });
+
     it('createPromptsByBrand honours an S2S consumer\'s origin: ai (DRS contract, origin-dimension.md §3)', async () => {
       // An S2S consumer (e.g. DRS) authenticates with a JWT — authType is `jwt`,
       // identical to an end-user session — but is a SERVICE principal, identified
@@ -1313,12 +1520,17 @@ describe('Brands Controller', () => {
       const response = await brandsController.createPromptsByBrand({
         ...serviceContext,
         params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
-        data: [{ prompt: 'P', regions: ['us'], origin: 'ai' }],
+        data: [{
+          prompt: 'P', regions: ['us'], origin: 'ai', source: 'gsc',
+        }],
         dataAccess: mockDataAccess,
       });
 
       expect(response.status).to.equal(201);
-      expect(insertStub.firstCall.args[0][0].origin).to.equal('ai');
+      expect(insertStub.firstCall.args[0][0]).to.include({
+        origin: 'ai',
+        source: 'config',
+      });
     });
 
     // FIX (MysticatBot nit): direct controller coverage of the fail-safe branch
