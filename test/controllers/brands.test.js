@@ -1280,6 +1280,7 @@ describe('Brands Controller', () => {
     });
 
     it('reports successful enabled reconciliation and warns on an invalid fraction override', async () => {
+      const logSpy = sandbox.stub(console, 'log');
       const thenable = (v) => ({ then: (resolve) => resolve(v), catch: () => thenable(v) });
       const updateStub = sandbox.stub().returns({ eq: () => thenable({ error: null }) });
       const existing = [{
@@ -1379,6 +1380,13 @@ describe('Brands Controller', () => {
       expect(loggerStub.info).to.have.been.calledWith(
         'Prompt generation reconciliation completed',
       );
+      const emfLine = logSpy.getCalls()
+        .map((call) => call.args[0])
+        .find((line) => typeof line === 'string' && line.includes('ExpiredPromptCount'));
+      expect(emfLine, 'expected a successful reconciliation EMF line').to.be.a('string');
+      const envelope = JSON.parse(emfLine);
+      expect(envelope.ExpiredPromptCount).to.equal(1);
+      expect(envelope.Outcome).to.equal('completed');
     });
 
     it('createPromptsByBrand honours an S2S consumer\'s origin: ai (DRS contract, origin-dimension.md §3)', async () => {
