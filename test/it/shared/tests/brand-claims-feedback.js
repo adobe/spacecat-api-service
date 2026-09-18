@@ -61,6 +61,7 @@ export default function brandClaimsFeedbackTests(getHttpClient, resetData) {
         eventId,
         brandId: BRAND_1_ID,
         rating: 'up',
+        entryPoint: 'report_overview',
         comment: 'This report helped prioritize our next steps.',
       });
 
@@ -81,6 +82,7 @@ export default function brandClaimsFeedbackTests(getHttpClient, resetData) {
         recordType: 'product_feedback',
         surface: 'brand_claims',
         feedbackScope: 'report',
+        entryPoint: 'report_overview',
         id: eventId,
         rating: 'up',
         siteId: SITE_1_ID,
@@ -97,6 +99,7 @@ export default function brandClaimsFeedbackTests(getHttpClient, resetData) {
         brandId: BRAND_1_ID,
         rating: 'down',
         feedbackScope: 'claim_cluster',
+        entryPoint: 'claim_inline',
         clusterId: 'cluster-it-1',
         claimText: 'The brand is difficult to compare.',
         model: 'chatgpt',
@@ -116,6 +119,7 @@ export default function brandClaimsFeedbackTests(getHttpClient, resetData) {
       const record = JSON.parse(await object.Body.transformToString());
       expect(record).to.include({
         feedbackScope: 'claim_cluster',
+        entryPoint: 'claim_inline',
         clusterId: 'cluster-it-1',
         claimText: 'The brand is difficult to compare.',
         model: 'chatgpt',

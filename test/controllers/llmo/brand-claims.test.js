@@ -1076,6 +1076,7 @@ describe('handleBrandClaimsFeedback', () => {
       recordType: 'product_feedback',
       surface: 'brand_claims',
       feedbackScope: 'report',
+      entryPoint: 'report_overview',
       id: EVENT_ID,
       rating: 'down',
       note: 'The recommendations need more context.',
@@ -1100,6 +1101,7 @@ describe('handleBrandClaimsFeedback', () => {
       data: {
         ...context.data,
         feedbackScope: 'claim_cluster',
+        entryPoint: 'claim_inline',
         clusterId: 'cluster-123',
         claimText: 'Lovesac products are modular.',
         model: 'chatgpt',
@@ -1114,10 +1116,29 @@ describe('handleBrandClaimsFeedback', () => {
     );
     expect(JSON.parse(command.input.Body)).to.include({
       feedbackScope: 'claim_cluster',
+      entryPoint: 'claim_inline',
       clusterId: 'cluster-123',
       claimText: 'Lovesac products are modular.',
       model: 'chatgpt',
       sourceFile: 'brand_claims/llmo/site/week/data.json.gz',
+    });
+  });
+
+  it('defaults legacy claim-cluster feedback to the claim-details entry point', async () => {
+    const result = await handleBrandClaimsFeedback({
+      ...context,
+      data: {
+        ...context.data,
+        feedbackScope: 'claim_cluster',
+        clusterId: 'cluster-123',
+        claimText: 'Lovesac products are modular.',
+      },
+    }, site);
+
+    expect(result.status).to.equal(202);
+    expect(JSON.parse(s3Send.secondCall.args[0].input.Body)).to.include({
+      feedbackScope: 'claim_cluster',
+      entryPoint: 'claim_details',
     });
   });
 
@@ -1144,6 +1165,16 @@ describe('handleBrandClaimsFeedback', () => {
       { ...context.data, rating: 'neutral' },
       { ...context.data, comment: 42 },
       { ...context.data, feedbackScope: 'other' },
+      { ...context.data, entryPoint: 'other' },
+      { ...context.data, entryPoint: null },
+      { ...context.data, entryPoint: 'claim_inline' },
+      {
+        ...context.data,
+        feedbackScope: 'claim_cluster',
+        entryPoint: 'report_overview',
+        clusterId: 'cluster-1',
+        claimText: 'Claim',
+      },
       { ...context.data, clusterId: 'cluster-1' },
       {
         ...context.data,
@@ -1159,7 +1190,7 @@ describe('handleBrandClaimsFeedback', () => {
       },
     ].map((data) => handleBrandClaimsFeedback({ ...context, data }, site)));
     expect(results.map((result) => result.status)).to.deep.equal([
-      400, 400, 400, 400, 400, 400, 400, 400, 400, 400,
+      400, 400, 400, 400, 400, 400, 400, 400, 400, 400, 400, 400, 400, 400,
     ]);
     expect(s3Send).not.to.have.been.called;
   });
@@ -1262,6 +1293,60 @@ describe('handleBrandClaimsFeedback', () => {
       `product_feedback/brand_claims/up/paid/2026-09-15/20260915235959000_${EVENT_ID}.json`,
     );
     expect(JSON.parse(recordCommand.input.Body)).to.deep.equal(markerRecord);
+  });
+
+  it('rejects an idempotency marker from a different feedback entry point', async () => {
+    const markerRecord = {
+      schemaVersion: 1,
+      recordType: 'product_feedback',
+      surface: 'brand_claims',
+      feedbackScope: 'claim_cluster',
+      entryPoint: 'claim_details',
+      id: EVENT_ID,
+      timestamp: '2026-09-15T23:59:59.000Z',
+      rating: 'down',
+      abv_id: `abv_${createHmac('sha256', 'shared-secret')
+        .update('user-123@AdobeID')
+        .digest('hex')
+        .slice(0, 12)}`,
+      organizationId: ORG_ID,
+      customerName: 'Acme Corp',
+      imsOrgId: 'ABC@AdobeOrg',
+      siteId: SITE_ID,
+      brandId: BRAND_ID,
+      brand: 'Acme',
+      tier: 'paid',
+      clusterId: 'cluster-123',
+      claimText: 'Lovesac products are modular.',
+    };
+    s3Send.callsFake((command) => {
+      if (command.type === 'put' && command.input.Key.includes('/idempotency/')) {
+        const error = new Error('already exists');
+        error.name = 'PreconditionFailed';
+        return Promise.reject(error);
+      }
+      if (command.type === 'get') {
+        return Promise.resolve({
+          Body: {
+            transformToString: () => Promise.resolve(JSON.stringify(markerRecord)),
+          },
+        });
+      }
+      return Promise.resolve({});
+    });
+
+    const result = await handleBrandClaimsFeedback({
+      ...context,
+      data: {
+        ...context.data,
+        feedbackScope: 'claim_cluster',
+        entryPoint: 'claim_inline',
+        clusterId: 'cluster-123',
+        claimText: 'Lovesac products are modular.',
+      },
+    }, site);
+
+    expect(result.status).to.equal(500);
   });
 
   it('rejects an idempotency marker owned by another tenant', async () => {

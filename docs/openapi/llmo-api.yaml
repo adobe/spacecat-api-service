@@ -2217,6 +2217,8 @@ llmo-brand-claims-feedback:
       are derived by the service. The client-supplied `eventId` is used as an
       idempotency key, so retrying the same submission does not create a duplicate.
       Existing clients may omit `feedbackScope`; the service treats it as `report`.
+      Existing clients may also omit `entryPoint`; the service infers
+      `report_overview` for report feedback and `claim_details` for claim feedback.
     operationId: submitBrandClaimsFeedback
     requestBody:
       required: true
@@ -2229,6 +2231,8 @@ llmo-brand-claims-feedback:
               $ref: './examples.yaml#/BrandClaimsReportFeedbackRequest'
             claim-cluster:
               $ref: './examples.yaml#/BrandClaimsClaimFeedbackRequest'
+            claim-inline:
+              $ref: './examples.yaml#/BrandClaimsInlineFeedbackRequest'
     responses:
       '202':
         description: Feedback accepted and stored

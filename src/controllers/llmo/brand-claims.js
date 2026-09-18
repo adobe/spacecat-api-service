@@ -40,6 +40,7 @@ const PRODUCT_FEEDBACK_CLUSTER_ID_MAX_LENGTH = 200;
 const PRODUCT_FEEDBACK_MODEL_MAX_LENGTH = 100;
 const PRODUCT_FEEDBACK_SOURCE_FILE_MAX_LENGTH = 1024;
 const PRODUCT_FEEDBACK_SCOPES = ['report', 'claim_cluster'];
+const PRODUCT_FEEDBACK_ENTRY_POINTS = ['report_overview', 'claim_details', 'claim_inline'];
 const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 /**
@@ -342,6 +343,7 @@ export async function handleBrandClaimsFeedback(context, site) {
     rating,
     comment,
     feedbackScope = 'report',
+    entryPoint,
     clusterId,
     claimText,
     model,
@@ -362,6 +364,15 @@ export async function handleBrandClaimsFeedback(context, site) {
   }
   if (!PRODUCT_FEEDBACK_SCOPES.includes(feedbackScope)) {
     return badRequest('feedbackScope must be "report" or "claim_cluster"');
+  }
+  if (entryPoint !== undefined && !PRODUCT_FEEDBACK_ENTRY_POINTS.includes(entryPoint)) {
+    return badRequest('entryPoint must be "report_overview", "claim_details", or "claim_inline"');
+  }
+  const resolvedEntryPoint = entryPoint
+    ?? (feedbackScope === 'report' ? 'report_overview' : 'claim_details');
+  if ((feedbackScope === 'report' && resolvedEntryPoint !== 'report_overview')
+    || (feedbackScope === 'claim_cluster' && resolvedEntryPoint === 'report_overview')) {
+    return badRequest('entryPoint is not valid for the selected feedbackScope');
   }
   const claimFields = [clusterId, claimText, model, sourceFile];
   if (feedbackScope === 'report' && claimFields.some((value) => value !== undefined)) {
@@ -464,6 +475,7 @@ export async function handleBrandClaimsFeedback(context, site) {
     recordType: 'product_feedback',
     surface: 'brand_claims',
     feedbackScope,
+    entryPoint: resolvedEntryPoint,
     id: eventId,
     timestamp,
     rating,
@@ -512,6 +524,9 @@ export async function handleBrandClaimsFeedback(context, site) {
         Key: markerKey,
       }));
       recordToStore = JSON.parse(await marker.Body.transformToString());
+      const storedFeedbackScope = recordToStore?.feedbackScope ?? 'report';
+      const storedEntryPoint = recordToStore?.entryPoint
+        ?? (storedFeedbackScope === 'report' ? 'report_overview' : 'claim_details');
       if (recordToStore?.id !== eventId
         || !['up', 'down'].includes(recordToStore?.rating)
         || !hasText(recordToStore?.timestamp)
@@ -519,7 +534,8 @@ export async function handleBrandClaimsFeedback(context, site) {
         || recordToStore.siteId !== siteId
         || recordToStore.brandId !== brandId
         || recordToStore.abv_id !== abvId
-        || (recordToStore.feedbackScope ?? 'report') !== feedbackScope
+        || storedFeedbackScope !== feedbackScope
+        || storedEntryPoint !== resolvedEntryPoint
         || (feedbackScope === 'claim_cluster' && recordToStore.clusterId !== trimmedClusterId)) {
         throw new Error('invalid idempotency marker');
       }

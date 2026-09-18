@@ -13358,6 +13358,11 @@ BrandClaimsReportFeedbackRequest:
       enum: [report]
       default: report
       description: Feedback applies to the overall Brand Claims report.
+    entryPoint:
+      type: string
+      enum: [report_overview]
+      default: report_overview
+      description: UI entry point where the feedback was submitted. Omit for legacy clients.
     comment:
       type: string
       maxLength: 4000
@@ -13384,6 +13389,11 @@ BrandClaimsClaimFeedbackRequest:
       type: string
       enum: [claim_cluster]
       description: Feedback applies to one visible claim cluster.
+    entryPoint:
+      type: string
+      enum: [claim_details, claim_inline]
+      default: claim_details
+      description: UI entry point where the feedback was submitted. Omit for legacy clients.
     comment:
       type: string
       maxLength: 4000
