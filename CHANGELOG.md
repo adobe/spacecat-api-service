@@ -1,3 +1,24 @@
+## [1.824.2](https://github.com/adobe/spacecat-api-service/compare/v1.824.1...v1.824.2) (2026-09-17)
+
+
+### Bug Fixes
+
+* **redirects:** fall back to deliveryConfig JSONB lookup when external look up misses ([#3316](https://github.com/adobe/spacecat-api-service/issues/3316)) ([32692ac](https://github.com/adobe/spacecat-api-service/commit/32692ac6162d50ed156b1b8d429b7f5260e6c011))
+
+## [1.824.1](https://github.com/adobe/spacecat-api-service/compare/v1.824.0...v1.824.1) (2026-09-17)
+
+
+### Bug Fixes
+
+* **serenity:** scope owned-urls agentic traffic join to URL Inspector's agent-type allowlist ([#3286](https://github.com/adobe/spacecat-api-service/issues/3286)) ([3b7288f](https://github.com/adobe/spacecat-api-service/commit/3b7288f1f110aaa59148c676eea7c2e0d796393b)), closes [adobe/project-elmo-ui#3186](https://github.com/adobe/project-elmo-ui/issues/3186)
+
+# [1.824.0](https://github.com/adobe/spacecat-api-service/compare/v1.823.0...v1.824.0) (2026-09-17)
+
+
+### Features
+
+* **ai-visibility:** scope handlers to subpaths via SUBFOLDER ([#3273](https://github.com/adobe/spacecat-api-service/issues/3273)) ([b8e7e53](https://github.com/adobe/spacecat-api-service/commit/b8e7e534c3fc503822f0f95d6bffc756eb864c65)), closes [Hi#level](https://github.com/Hi/issues/level) [adobe-rnd/llmo-data-retrieval-service#3241](https://github.com/adobe-rnd/llmo-data-retrieval-service/issues/3241) [adobe/project-elmo-ui#3168](https://github.com/adobe/project-elmo-ui/issues/3168)
+
 # [1.823.0](https://github.com/adobe/spacecat-api-service/compare/v1.822.0...v1.823.0) (2026-09-17)
 
 
