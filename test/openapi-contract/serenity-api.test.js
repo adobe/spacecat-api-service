@@ -1088,9 +1088,11 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
             },
             // Both authorizers gate on the brand resolving serenity-active; ON so
             // the documented success shapes are exercised, not the inactive 404.
+            // The merged LLMO/serenity_tag_multi_dimension flag gates tag search
+            // AND deep tag authoring — ON for the documented shapes.
             '../../src/support/serenity/serenity-active.js': {
               isSerenityActiveForBrand: () => Promise.resolve(true),
-              isTagSearchActiveForBrand: () => Promise.resolve(true),
+              isTagMultiDimensionActiveForBrand: () => Promise.resolve(true),
             },
             '../../src/support/access-control-util.js': {
               default: {
@@ -1308,7 +1310,7 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
           // shapes are exercised rather than the inactive-brand 404.
           '../../src/support/serenity/serenity-active.js': {
             isSerenityActiveForBrand: () => Promise.resolve(true),
-            isTagSearchActiveForBrand: () => Promise.resolve(true),
+            isTagMultiDimensionActiveForBrand: () => Promise.resolve(true),
           },
           // activate reads brand-level aliases/URLs/competitors once per batch, and
           // persists the active-flip + primary site (brands.site_id) via updateBrand;
