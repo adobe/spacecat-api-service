@@ -26,6 +26,7 @@ scripts/*
 !scripts/reconcile-prompt-suggestion-schedules.mjs
 !scripts/serenity-job-runner-ops.mjs
 !scripts/serenity-retype-backfill.mjs
+!scripts/serenity-tag-flag-migration.mjs
 docs/index.html
 mcp-server.log
 # Scout MCP local config (per-developer, never commit)
