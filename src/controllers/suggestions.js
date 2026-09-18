@@ -3260,6 +3260,8 @@ function SuggestionsController(ctx, sqs, env) {
       }
     }
 
+    context.log.info(`[geo-experiment-cancel] rollback-gate-check: isDeployed=${isDeployed} (${typeof isDeployed}), opportunity=${!!opportunity} (${typeof opportunity}), experimentSuggestions.length=${experimentSuggestions.length}, gate=${isDeployed && !!opportunity && isNonEmptyArray(experimentSuggestions)}`);
+
     if (isDeployed && opportunity && isNonEmptyArray(experimentSuggestions)) {
       try {
         const tokowakaClient = TokowakaClient.createFrom(context);
