@@ -17,6 +17,7 @@ import sinon from 'sinon';
 
 import AuthInfo from '@adobe/spacecat-shared-http-utils/src/auth/auth-info.js';
 import { ValidationError } from '@adobe/spacecat-shared-data-access';
+import { canonicalizeUrl } from '@adobe/spacecat-shared-utils';
 import esmock from 'esmock';
 import OpportunitiesController from '../../src/controllers/opportunities.js';
 
@@ -177,6 +178,7 @@ describe('Opportunities Controller', () => {
   const opportunitiesFunctions = [
     'getAllForSite',
     'getByStatus',
+    'getByUrl',
     'getByID',
     'createOpportunity',
     'patchOpportunity',
@@ -1719,6 +1721,185 @@ describe('Opportunities Controller', () => {
 
       expect(plgStub.calledOnce).to.be.true;
       expect(plgStub.firstCall.args[2]).to.equal(requestContext);
+    });
+  });
+
+  describe('getByUrl', () => {
+    const inputUrl = 'https://example.com/a';
+    let batchStub;
+    let daWithPg;
+    let controllerWithPg;
+
+    beforeEach(() => {
+      batchStub = sandbox.stub().resolves({ data: [mockOpptyEntity] });
+      const pgResult = {
+        data: [{ entity_id: OPPORTUNITY_ID, entity_type: 'cited-analysis', url: canonicalizeUrl(inputUrl) }],
+        error: null,
+      };
+      // Chainable + thenable stub tolerant of the real query-builder chain
+      // (.select().eq().in().order()...), so the test isn't coupled to its exact shape.
+      const pgBuilder = new Proxy({}, {
+        get: (_t, p) => (p === 'then' ? (res) => res(pgResult) : () => pgBuilder),
+      });
+      const pgClient = { from: () => pgBuilder };
+      daWithPg = {
+        Opportunity: { ...mockOpportunity, batchGetByKeys: batchStub },
+        Site: mockSite,
+        services: { postgrestClient: pgClient },
+      };
+      controllerWithPg = OpportunitiesController({
+        dataAccess: daWithPg, pathInfo: { headers: {} }, ...defaultAuthAttributes,
+      });
+    });
+
+    it('returns 400 for an invalid site id', async () => {
+      const res = await controllerWithPg.getByUrl({ params: { siteId: 'nope' }, data: { urls: [inputUrl] } });
+      expect(res.status).to.equal(400);
+    });
+
+    it('returns 400 for a malformed locale', async () => {
+      const res = await controllerWithPg.getByUrl({
+        params: { siteId: SITE_ID }, data: { urls: [inputUrl], locale: 'not-a-locale!!' },
+      });
+      expect(res.status).to.equal(400);
+    });
+
+    it('honors a valid locale when projecting the matched opportunities', async () => {
+      const res = await controllerWithPg.getByUrl({
+        params: { siteId: SITE_ID }, data: { urls: [inputUrl], locale: 'en_us' },
+      });
+      expect(res.status).to.equal(200);
+    });
+
+    it('returns 404 when the site does not exist', async () => {
+      mockSite.findById.resolves(null);
+      const res = await controllerWithPg.getByUrl({
+        params: { siteId: SITE_ID }, data: { urls: [inputUrl] },
+      });
+      expect(res.status).to.equal(404);
+    });
+
+    it('returns 403 when the user lacks access to the site', async () => {
+      const mockSiteWithOrg = {
+        id: SITE_ID, getOrganization: async () => ({ getImsOrgId: () => 'test-org-id' }),
+      };
+      mockSiteWithOrg.constructor = { ENTITY_NAME: 'Site' };
+      mockSite.findById.resolves(mockSiteWithOrg);
+      const restrictedAuthInfo = new AuthInfo()
+        .withType('jwt')
+        .withScopes([{ name: 'user' }])
+        .withProfile({ is_admin: false })
+        .withAuthenticated(true);
+      restrictedAuthInfo.claims = { organizations: [] };
+      const ctrl = OpportunitiesController({
+        dataAccess: daWithPg,
+        pathInfo: { headers: {} },
+        attributes: { authInfo: restrictedAuthInfo },
+      });
+      const res = await ctrl.getByUrl({ params: { siteId: SITE_ID }, data: { urls: [inputUrl] } });
+      expect(res.status).to.equal(403);
+    });
+
+    it('returns 503 when the postgrest client is unavailable', async () => {
+      const ctrl = OpportunitiesController({
+        dataAccess: mockOpportunityDataAccess, pathInfo: { headers: {} }, ...defaultAuthAttributes,
+      });
+      const res = await ctrl.getByUrl({ params: { siteId: SITE_ID }, data: { urls: [inputUrl] } });
+      expect(res.status).to.equal(503);
+    });
+
+    it('returns 503 when the postgrest client is present but not a real PostgREST client (no .from)', async () => {
+      const ctrl = OpportunitiesController({
+        dataAccess: {
+          ...mockOpportunityDataAccess, services: { postgrestClient: {} },
+        },
+        pathInfo: { headers: {} },
+        ...defaultAuthAttributes,
+      });
+      const res = await ctrl.getByUrl({ params: { siteId: SITE_ID }, data: { urls: [inputUrl] } });
+      expect(res.status).to.equal(503);
+    });
+
+    it('returns 400 for an invalid urls body', async () => {
+      const res = await controllerWithPg.getByUrl({ params: { siteId: SITE_ID }, data: { urls: 'nope' } });
+      expect(res.status).to.equal(400);
+      const body = await res.json();
+      expect(body.message).to.match(/must be an array/);
+    });
+
+    it('returns 400 when the request has no body at all', async () => {
+      const res = await controllerWithPg.getByUrl({ params: { siteId: SITE_ID } });
+      expect(res.status).to.equal(400);
+    });
+
+    it('treats an unrecognized batchGetByKeys result as no hydrated opportunities', async () => {
+      batchStub.resolves({ data: null });
+      const res = await controllerWithPg.getByUrl({
+        params: { siteId: SITE_ID }, data: { urls: [inputUrl] },
+      });
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.opportunities).to.deep.equal({});
+    });
+
+    it('drops and warns on a hydrated opportunity whose siteId does not match the requested site (stale/cross-site index row)', async () => {
+      const logStub = { warn: sandbox.stub(), info: sandbox.stub(), error: sandbox.stub() };
+      const siteIdStub = sandbox.stub(mockOpptyEntity, 'getSiteId').returns('a-different-site-id');
+      const ctrl = OpportunitiesController({
+        dataAccess: daWithPg, pathInfo: { headers: {} }, log: logStub, ...defaultAuthAttributes,
+      });
+      const res = await ctrl.getByUrl({ params: { siteId: SITE_ID }, data: { urls: [inputUrl] } });
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      // dropped for tenancy, not merely narrowed by type - absent from both the map and results
+      expect(body.opportunities).to.deep.equal({});
+      expect(body.results).to.deep.equal([{ url: inputUrl, opportunityIds: [] }]);
+      expect(logStub.warn).to.have.been.calledOnce;
+      expect(logStub.warn.firstCall.args[0]).to.match(/siteId did not match/);
+      siteIdStub.restore();
+    });
+
+    it('returns matched opportunities for the supplied urls', async () => {
+      const res = await controllerWithPg.getByUrl({
+        params: { siteId: SITE_ID },
+        data: { urls: [inputUrl, 'https://example.com/miss'] },
+      });
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.results).to.deep.equal([
+        { url: inputUrl, opportunityIds: [OPPORTUNITY_ID] },
+        { url: 'https://example.com/miss', opportunityIds: [] },
+      ]);
+      expect(body.opportunities[OPPORTUNITY_ID]).to.include({ id: OPPORTUNITY_ID });
+      expect(body.opportunities[OPPORTUNITY_ID]).to.not.have.property('data');
+      expect(batchStub).to.have.been.calledOnce;
+    });
+
+    it('returns an opportunity whose type is in the caller\'s permitted set (D4 composite)', async () => {
+      // mockOpptyEntity.getType() === 'SEO'; a grant scoped to that type must retain it.
+      const res = await controllerWithPg.getByUrl({
+        params: { siteId: SITE_ID },
+        data: { urls: [inputUrl] },
+        attributes: { facsComposite: { values: ['SEO'] } },
+      });
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.opportunities[OPPORTUNITY_ID]).to.include({ id: OPPORTUNITY_ID });
+      expect(body.results).to.deep.equal([{ url: inputUrl, opportunityIds: [OPPORTUNITY_ID] }]);
+    });
+
+    it('narrows out an opportunity whose type is NOT in the caller\'s permitted set (D4 composite)', async () => {
+      // caller is scoped to 'broken-backlinks'; the 'SEO' opportunity must be hidden,
+      // but the requested URL is still echoed (with no ids) since opportunities keep no-match URLs.
+      const res = await controllerWithPg.getByUrl({
+        params: { siteId: SITE_ID },
+        data: { urls: [inputUrl] },
+        attributes: { facsComposite: { values: ['broken-backlinks'] } },
+      });
+      expect(res.status).to.equal(200);
+      const body = await res.json();
+      expect(body.opportunities).to.deep.equal({});
+      expect(body.results).to.deep.equal([{ url: inputUrl, opportunityIds: [] }]);
     });
   });
 });

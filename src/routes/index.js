@@ -114,6 +114,8 @@ function isStaticRoute(routePattern) {
  * @param {Object} redirectsController - ASO dispatcher redirect-overlay controller.
  * @param {Object} auditPolicyController - Audit policy + audit scope controller.
  * @param {Object} promptSuggestionSchedulesController - LLMO prompt-suggestion schedule controller.
+ * @param {Object} oaeValidationController - The OAE validation controller.
+ * @param {Object} launchDarklyController - Admin-only LaunchDarkly flags summary controller.
  * @return {{staticRoutes: {}, dynamicRoutes: {}}} - An object with static and dynamic routes.
  */
 export default function getRouteHandlers(
@@ -185,6 +187,8 @@ export default function getRouteHandlers(
   redirectsController,
   auditPolicyController,
   promptSuggestionSchedulesController,
+  oaeValidationController,
+  launchDarklyController,
 ) {
   const staticRoutes = {};
   const dynamicRoutes = {};
@@ -244,13 +248,17 @@ export default function getRouteHandlers(
     'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts': serenityController.createPrompts,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/bulk-tags': serenityController.bulkTagPrompts,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/bulk-delete': serenityController.bulkDeletePrompts,
+    'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/finalize': serenityController.finalizePrompts,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/jobs/:jobId': serenityController.getPromptsJobStatus,
     'PATCH /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/:semrushPromptId': serenityController.updatePrompt,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets': serenityController.listMarkets,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets': serenityController.createMarket,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/generation/jobs/:jobId': serenityController.getSemrushMarketGenerationJobStatus,
+    'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/generation/jobs/:jobId/reauth': serenityController.reauthSemrushMarketGenerationJob,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode': serenityController.getMarket,
     'DELETE /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode': serenityController.deleteMarket,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags': serenityController.listTags,
+    'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags/search': serenityController.searchTags,
     'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags': serenityController.createTag,
     'PATCH /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags/:tagId': serenityController.updateTag,
     'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags/:tagId/impact': serenityController.getTagImpact,
@@ -391,6 +399,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/experiments': experimentsController.getExperiments,
     'GET /sites/:siteId/metrics/:metric/:source': sitesController.getSiteMetricsBySource,
     'GET /sites/:siteId/metrics/:metric/:source/by-url/:base64PageUrl': sitesController.getPageMetricsBySource,
+    'GET /sites/:siteId/keyword-cpc': sitesController.getSiteKeywordCpc,
     'GET /sites/:siteId/latest-metrics': sitesController.getLatestSiteMetrics,
     'GET /sites/by-base-url/:baseURL': sitesController.getByBaseURL,
     'GET /sites/by-delivery-type/:deliveryType': sitesController.getAllByDeliveryType,
@@ -399,6 +408,8 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/opportunities': opportunitiesController.getAllForSite,
     'GET /sites/:siteId/opportunities/top-paid': topPaidOpportunitiesController.getTopPaidOpportunities,
     'GET /sites/:siteId/opportunities/by-status/:status': opportunitiesController.getByStatus,
+    'POST /sites/:siteId/opportunities/by-urls': opportunitiesController.getByUrl,
+    'POST /sites/:siteId/suggestions/by-urls': suggestionsController.getByUrl,
     'GET /sites/:siteId/opportunities/:opportunityId': opportunitiesController.getByID,
     'POST /sites/:siteId/page-relationships/search': pageRelationshipsController.search,
     'POST /sites/:siteId/opportunities': opportunitiesController.createOpportunity,
@@ -515,6 +526,7 @@ export default function getRouteHandlers(
     'DELETE /tools/api-keys/:id': apiKeyController.deleteApiKey,
     'GET /tools/api-keys': apiKeyController.getApiKeys,
     'GET /tools/proxy': proxyController.getPreview,
+    'GET /tools/launchdarkly/flags': launchDarklyController.getFlags,
     'GET /monitoring/drs-bp-pg-audit': drsBpPgAuditController.getProjectionAudit,
 
     // Hybrid permission model — state-layer management + capability
@@ -564,6 +576,7 @@ export default function getRouteHandlers(
 
     // Fixes
     'GET /sites/:siteId/fixes': (c) => fixesController.getAllForSite(c),
+    'GET /sites/:siteId/deployed-opportunities': (c) => fixesController.getDeployedOpportunitiesForSite(c),
     'GET /sites/:siteId/opportunities/:opportunityId/fixes': (c) => fixesController.getAllForOpportunity(c),
     'GET /sites/:siteId/opportunities/:opportunityId/fixes/by-status/:status': (c) => fixesController.getByStatus(c),
     'GET /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': (c) => fixesController.getByID(c),
@@ -605,6 +618,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/llmo/brand-claims': llmoController.getBrandClaims,
     'GET /sites/:siteId/llmo/brand-claims/weeks': llmoController.getBrandClaimsWeeks,
     'POST /sites/:siteId/llmo/brand-claims/request': llmoController.requestBrandClaims,
+    'POST /sites/:siteId/llmo/brand-claims/feedback': llmoController.submitBrandClaimsFeedback,
     'GET /sites/:siteId/llmo/strategy/demo/brand-presence': llmoController.getDemoBrandPresence,
     'GET /sites/:siteId/llmo/strategy/demo/recommendations': llmoController.getDemoRecommendations,
     'POST /llmo/onboard': llmoController.onboardCustomer,
@@ -639,6 +653,10 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/llmo/edge-optimize-status': llmoController.checkEdgeOptimizeStatus,
     'GET /sites/:siteId/llmo/probes/edge-optimize': llmoController.checkWafConnectivity,
     'PUT /sites/:siteId/llmo/opportunities-reviewed': llmoController.markOpportunitiesReviewed,
+    // OAE validation jobs — triggered internally (e.g. the edge-deploy flow) or by other
+    // spacecat services, not a customer-facing FACS surface.
+    'POST /sites/:siteId/llmo/oae-validation/jobs': oaeValidationController.createValidationJob,
+    'GET /sites/:siteId/llmo/oae-validation/jobs/:jobId': oaeValidationController.getValidationJob,
 
     // LLMO Cloudflare Onboarding Routes
     'GET /sites/:siteId/llmo/cdn-onboard/cloudflare/config': llmoCloudflareController.getCloudflareConfig,

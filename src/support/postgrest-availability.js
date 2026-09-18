@@ -77,3 +77,23 @@ export function requirePostgrestForFacsMappings(context) {
     errorMessage: 'FACS state-layer endpoints require Postgres (DATA_SERVICE_PROVIDER=postgres)',
   });
 }
+
+/**
+ * Same guard as `requirePostgrest`, for callers that already have the client in hand instead of
+ * a request `context` — e.g. a controller built as `Controller(ctx)` that closes over
+ * `dataAccess` once at construction time rather than reading it off each call's `context`
+ * argument (opportunities.js / suggestions.js `getByUrl`). Deliberately a separate export
+ * rather than an overload of `requirePostgrest` itself, so none of that function's existing
+ * callers (`controllers/brands.js`, `controllers/project.js`, `controllers/sites.js`,
+ * `controllers/state-access-mappings.js`) are touched.
+ *
+ * @param {*} postgrestClient - `dataAccess.services.postgrestClient`, or any falsy/malformed value
+ * @param {{ errorMessage: string }} opts
+ * @returns {Response|null}
+ */
+export function requirePostgrestClient(postgrestClient, { errorMessage }) {
+  if (!postgrestClient?.from) {
+    return createResponse({ message: errorMessage }, 503);
+  }
+  return null;
+}

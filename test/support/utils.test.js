@@ -39,6 +39,7 @@ import {
   isViewAsTrialRequest,
   isViewFullExperienceRequest,
   getImsUserTokenStrict,
+  getRawPromiseToken,
   resolveCallerImsUserId,
   sendGlobalImportRunMessage,
   triggerGlobalImportRun,
@@ -1462,14 +1463,17 @@ describe('utils', () => {
       baseURL = 'https://example.com',
       authoringType = CS,
       deliveryType = AEM_CS,
-      deliveryConfig = { programId: 'p1', environmentId: 'e1' },
+      deliveryConfig: initialDeliveryConfig = { programId: 'p1', environmentId: 'e1' },
     } = {}) {
+      let deliveryConfig = initialDeliveryConfig;
       return {
         getId: () => id,
         getBaseURL: () => baseURL,
         getAuthoringType: () => authoringType,
         getDeliveryType: () => deliveryType,
         getDeliveryConfig: () => deliveryConfig,
+        setDeliveryConfig: (newConfig) => { deliveryConfig = newConfig; },
+        save: async () => Promise.resolve(),
       };
     }
 
@@ -1714,6 +1718,84 @@ describe('utils', () => {
         ),
       ).to.be.rejectedWith('SQS down');
       expect(context.log.error).to.have.been.calledOnce;
+    });
+
+    it('sets asoOverlayRedirectAutofixEnabled and appends broken-backlinks when site is valid for redirects', async () => {
+      const site = makeSite();
+      await queueDeliveryConfigWriter(
+        { site, baseURL: 'https://example.com', slackContext: {} },
+        context,
+      );
+      expect(site.getDeliveryConfig()).to.deep.equal({
+        programId: 'p1',
+        environmentId: 'e1',
+        asoOverlayRedirectAutofixEnabled: true,
+        mysticatLegacyAutofixBridgeOpportunities: ['broken-backlinks'],
+      });
+    });
+
+    it('does not touch deliveryConfig when site is not valid for redirects', async () => {
+      const site = makeSite({ authoringType: NON_CS, deliveryType: 'AEM_AMS' });
+      await queueDeliveryConfigWriter(
+        { site, baseURL: 'https://example.com', slackContext: {} },
+        context,
+      );
+      expect(site.getDeliveryConfig()).to.deep.equal({ programId: 'p1', environmentId: 'e1' });
+    });
+
+    it('preserves and dedupes pre-existing mysticatLegacyAutofixBridgeOpportunities entries', async () => {
+      const site = makeSite({
+        deliveryConfig: {
+          programId: 'p1',
+          environmentId: 'e1',
+          mysticatLegacyAutofixBridgeOpportunities: ['alt-text', 'broken-backlinks'],
+        },
+      });
+      await queueDeliveryConfigWriter(
+        { site, baseURL: 'https://example.com', slackContext: {} },
+        context,
+      );
+      expect(site.getDeliveryConfig().mysticatLegacyAutofixBridgeOpportunities).to.deep.equal([
+        'alt-text',
+        'broken-backlinks',
+      ]);
+    });
+
+    it('logs an error and leaves mysticatLegacyAutofixBridgeOpportunities untouched when it is not an array', async () => {
+      const site = makeSite({
+        deliveryConfig: {
+          programId: 'p1',
+          environmentId: 'e1',
+          mysticatLegacyAutofixBridgeOpportunities: 'not-an-array',
+        },
+      });
+      const result = await queueDeliveryConfigWriter(
+        { site, baseURL: 'https://example.com', slackContext: {} },
+        context,
+      );
+      expect(result).to.deep.equal({ ok: true });
+      expect(site.getDeliveryConfig()).to.deep.equal({
+        programId: 'p1',
+        environmentId: 'e1',
+        mysticatLegacyAutofixBridgeOpportunities: 'not-an-array',
+        asoOverlayRedirectAutofixEnabled: true,
+      });
+      expect(context.log.error).to.have.been.calledWithMatch(
+        'mysticatLegacyAutofixBridgeOpportunities is not an array',
+      );
+    });
+
+    it('logs and returns a warning without derailing when site.save() rejects', async () => {
+      const site = makeSite();
+      site.save = sandbox.stub().rejects(new Error('optimistic lock conflict'));
+      const result = await queueDeliveryConfigWriter(
+        { site, baseURL: 'https://example.com', slackContext: {} },
+        context,
+      );
+      expect(result.ok).to.be.true;
+      expect(result.warning).to.include('optimistic lock conflict');
+      expect(context.log.error).to.have.been.calledWithMatch('Failed to save site');
+      expect(sqsStub.sendMessage).to.have.been.calledOnce;
     });
   });
 
@@ -2112,6 +2194,79 @@ describe('utils', () => {
       expect(err.status).to.equal(400);
       expect(err.message).to.not.contain('\n');
       expect(err.message).to.not.contain('\r');
+    });
+  });
+
+  describe('getRawPromiseToken', () => {
+    const ctx = (token) => ({
+      pathInfo: { headers: token === undefined ? {} : { 'x-promise-token': token } },
+    });
+
+    it('decodes and returns the promise token when the header is present', () => {
+      expect(getRawPromiseToken(ctx('promise%20token%20xyz'))).to.equal('promise token xyz');
+    });
+
+    it('returns an already-decoded token unchanged', () => {
+      expect(getRawPromiseToken(ctx('raw-promise-token'))).to.equal('raw-promise-token');
+    });
+
+    it('returns the raw header value when it is not valid percent-encoding', () => {
+      expect(getRawPromiseToken(ctx('promise%zztoken'))).to.equal('promise%zztoken');
+    });
+
+    it('returns undefined when the header is absent', () => {
+      expect(getRawPromiseToken(ctx())).to.equal(undefined);
+    });
+
+    it('returns undefined when the header is empty', () => {
+      expect(getRawPromiseToken(ctx(''))).to.equal(undefined);
+    });
+
+    it('returns undefined when the context is nullish', () => {
+      expect(getRawPromiseToken(undefined)).to.equal(undefined);
+    });
+  });
+
+  describe('exchangePromiseTokenResponse', () => {
+    it('returns the complete IMS rotation response while exchangePromiseToken preserves its access-token return type', async () => {
+      const exchangeToken = sinon.stub().resolves({
+        access_token: 'access-token',
+        promise_token: 'rotated-token',
+        promise_token_expires_in: 14399,
+        token_type: 'bearer',
+      });
+      const createFrom = sinon.stub().returns({ exchangeToken });
+      const {
+        exchangePromiseToken,
+        exchangePromiseTokenResponse,
+      } = await esmock('../../src/support/utils.js', {
+        '@adobe/spacecat-shared-ims-client': {
+          ImsPromiseClient: {
+            createFrom,
+            CLIENT_TYPE: { CONSUMER: 'consumer', EMITTER: 'emitter' },
+          },
+        },
+      });
+      const context = { env: {} };
+
+      const result = await exchangePromiseTokenResponse(context, 'raw-token', 'SEMRUSH');
+      const accessToken = await exchangePromiseToken(context, 'next-raw-token', 'SEMRUSH');
+
+      expect(result).to.deep.equal({
+        access_token: 'access-token',
+        promise_token: 'rotated-token',
+        promise_token_expires_in: 14399,
+        token_type: 'bearer',
+      });
+      expect(accessToken).to.equal('access-token');
+      expect(createFrom).to.have.been.calledTwice;
+      expect(createFrom).to.have.been.calledWith(
+        context,
+        'consumer',
+        { pair: 'SEMRUSH' },
+      );
+      expect(exchangeToken).to.have.been.calledWith('raw-token', false);
+      expect(exchangeToken).to.have.been.calledWith('next-raw-token', false);
     });
   });
 

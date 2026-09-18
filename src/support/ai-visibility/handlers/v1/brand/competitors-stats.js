@@ -12,8 +12,14 @@
 
 /* c8 ignore start */
 
-import { fromJson, toJson } from '@bufbuild/protobuf';
-import { COUNTRY_ENUM, LLM_ENUM } from '@quazar/ai-seo-ts/common/types_pb.js';
+import {
+  fromJson,
+  toJson,
+} from '@bufbuild/protobuf';
+import {
+  COUNTRY_ENUM,
+  LLM_ENUM,
+} from '@quazar/ai-seo-ts/common/types_pb.js';
 import {
   StatsRequestSchema,
   StatsResponseSchema,
@@ -25,10 +31,17 @@ import {
   resolveCountry,
   resolveSearchType,
   responseFromGrpcError,
+  normalizeAiVisibilityTarget,
 } from '../../../grpc-utils.js';
 
 export async function handleCompetitorsStats(sp, clients) {
-  const domain = sp.get('domain');
+  const domain = normalizeAiVisibilityTarget(sp.get('domain'));
+  if (!domain) {
+    return {
+      status: 400,
+      body: { error: 'invalid_request', message: 'domain is required' },
+    };
+  }
   const country = resolveCountry(sp) || COUNTRY_ENUM.US;
   const engine = engineToLlm(sp.get('engine')) || LLM_ENUM.ALL;
   const competitors = sp.get('competitors')?.split(',') || [];

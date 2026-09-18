@@ -39,6 +39,7 @@ import {
 import { upsertFeatureFlag } from '../../support/feature-flags-storage.js';
 import { detectCdnForDomain } from '../../support/cdn-detection.js';
 import { upsertBrand } from '../../support/brands-storage.js';
+import { assertSiteOrgReassignmentSafe } from '../../support/site-org-reassignment.js';
 import {
   PROMPT_SUGGESTION_PIPELINES,
   registerPromptSuggestionSchedule,
@@ -105,6 +106,13 @@ const SCHEDULE_REGISTRATION_TIMEOUT_MS = 8000;
 // isPayingLlmoSite's fail-safe-to-trial intent: an indeterminate tier never gets a
 // recurring, fleet-wide Fargate schedule.
 const TIER_LOOKUP_TIMEOUT_MS = 5000;
+
+// Cap for the best-effort ops alert posted when the path-preserving overrideBaseURL
+// fallback fires (LLMO-7458). postLlmoAlert makes a Slack HTTP call on the synchronous
+// onboarding path, so a slow/hung Slack API must not push the response past the CDN
+// first-byte timeout. The durable outcome is the persisted overrideBaseURL; the alert
+// is advisory, so on timeout we stop waiting.
+const ALERT_POST_TIMEOUT_MS = 2000;
 
 /**
  * Awaits `promise`, but resolves to `fallback` if it rejects or doesn't settle
@@ -1109,19 +1117,21 @@ export async function determineOverrideBaseURL(baseURL, context) {
  * @returns {Promise<object>} The site object
  */
 export async function createOrFindSite(baseURL, organizationId, context, deliveryType) {
-  const { dataAccess } = context;
+  const { dataAccess, log } = context;
   const { Site } = dataAccess;
 
   const site = await Site.findByBaseURL(baseURL);
   if (site) {
     if (site.getOrganizationId() !== organizationId) {
-      const enrollments = await site.getSiteEnrollments();
-      if (!Array.isArray(enrollments)) {
-        throw new Error(`Unable to verify enrollments for site ${baseURL} (current org: ${site.getOrganizationId()}, requested org: ${organizationId}); aborting org move.`);
-      }
-      if (enrollments.length > 0) {
-        throw new Error(`Site ${baseURL} belongs to org ${site.getOrganizationId()} with active enrollments and cannot be moved to org ${organizationId}.`);
-      }
+      // LLMO-7284: converged onto the same guard the admin Slack reassignment paths use
+      // (set-ims-org-modal.js, onboard-llmo-modal.js::checkOrg, approve-org.js) instead of a
+      // separate inline check, so a straggler enrollment can't be orphaned by one path while
+      // the others are guarded. Throws `.status=409/.code=site_org_reassignment_blocked` when
+      // the move would orphan enrollments, or `.status=502/.code=site_org_reassignment_unverified`
+      // when the enrollments read is unverifiable — both callers of this function only ever
+      // inspect `error.message` (never `.status`/`.code`), so this is not an observable
+      // behavior change for onboarding's HTTP/Slack surfaces, only the internal message text.
+      await assertSiteOrgReassignmentSafe({ site, targetOrgId: organizationId, log });
       site.setOrganizationId(organizationId);
       // Persist the re-parent immediately. resolveLlmoOnboardingMode (called
       // right after this in performLlmoOnboarding) reads sites by org_id, so
@@ -1756,11 +1766,27 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
       // audits scrape (www vs apex), but can run ~10s (dozens of SEO calls) and push
       // the synchronous response past the CDN first-byte timeout (~15s) → client 503
       // even though onboarding succeeded. On timeout/error we skip it. (LLMO-5606.)
-      const overrideBaseURL = await settleWithin(
+      const detectedOverrideBaseURL = await settleWithin(
         determineOverrideBaseURL(baseURL, context),
         OVERRIDE_DETECT_TIMEOUT_MS,
         null,
       );
+
+      // Path-preservation fallback (LLMO-7458): the downstream wwwUrlResolver is
+      // hostname-only (RUM domainkeys are keyed per host), so for any baseURL with
+      // a non-root path it returns just the hostname unless overrideBaseURL is set —
+      // silently dropping the path and auditing the apex domain. A null detection
+      // (timeout, error, or "no override needed") therefore strips a path-based
+      // site's path. When detection yields nothing for a non-root path, pin baseURL
+      // itself so the path survives. The host form (www vs apex) is taken as
+      // onboarded and is NOT canonically verified here, so ops is alerted to confirm.
+      let overrideBaseURL = detectedOverrideBaseURL;
+      const isPathPreservingFallback = !overrideBaseURL
+        && new URL(baseURL).pathname !== '/';
+      if (isPathPreservingFallback) {
+        overrideBaseURL = baseURL;
+      }
+
       if (overrideBaseURL) {
         siteConfig.updateFetchConfig({
           ...currentFetchConfig,
@@ -1768,6 +1794,27 @@ export async function performLlmoOnboarding(params, context, say = () => {}) {
         });
         log.info(`Set overrideBaseURL to ${overrideBaseURL} for site ${site.getId()}`);
         say(`:arrows_counterclockwise: Set overrideBaseURL to ${overrideBaseURL}`);
+        if (isPathPreservingFallback) {
+          // Durable, Splunk-queryable signal independent of the best-effort Slack
+          // alert below (which no-ops when unconfigured and swallows its own errors).
+          log.warn(`Path-preserving fallback (LLMO-7458): pinned overrideBaseURL=${overrideBaseURL} for site ${site.getId()}; SEO detection returned no alternate host, www-vs-apex form not canonically verified`);
+          // Best-effort, time-bounded: postLlmoAlert makes a Slack call on the
+          // synchronous onboarding path, so cap it (LLMO-5606 time budget).
+          await settleWithin(
+            postLlmoAlert(
+              ':warning: *overrideBaseURL set by path-preserving fallback* — SEO host '
+              + 'detection did not return an alternate host (no override needed, or it '
+              + 'timed out/failed), so the onboarded URL was pinned to preserve its '
+              + 'path. The host form (www vs apex) may not be canonical; please verify.\n\n'
+              + `• Site: \`${baseURL}\`\n`
+              + `• overrideBaseURL: \`${overrideBaseURL}\`\n`
+              + `• Site ID: \`${site.getId()}\``,
+              context,
+            ),
+            ALERT_POST_TIMEOUT_MS,
+            undefined,
+          );
+        }
       }
     } else {
       log.info(`Site ${site.getId()} already has overrideBaseURL: ${currentFetchConfig.overrideBaseURL}, skipping auto-detection`);

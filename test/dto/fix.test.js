@@ -304,6 +304,45 @@ describe('Fix DTO', () => {
     });
   });
 
+  describe('toDeployedOpportunityJSON', () => {
+    it('projects a fix into a deployment entry with title and anchor', () => {
+      const fix = createMockFix();
+
+      const json = FixDto.toDeployedOpportunityJSON(fix, 'Fix CWV issues', '2026-08-15T10:00:00.000Z');
+
+      expect(json).to.deep.equal({
+        opportunityId: 'opportunity-id-456',
+        opportunityTitle: 'Fix CWV issues',
+        type: 'CODE_CHANGE',
+        status: 'PENDING',
+        fixId: 'fix-id-123',
+        deployedAt: '2026-08-15T10:00:00.000Z',
+        changeDetails: { field: 'value' },
+      });
+    });
+
+    it('falls back to null when the opportunity title is unavailable', () => {
+      const fix = createMockFix();
+
+      const json = FixDto.toDeployedOpportunityJSON(fix, undefined, '2026-08-15T10:00:00.000Z');
+
+      expect(json.opportunityTitle).to.equal(null);
+    });
+
+    it('back-fills a v2 changeDetails.target.documentPath', () => {
+      const fix = createMockFix({
+        getChangeDetails: () => ({
+          schemaVersion: 2,
+          target: { documentPath: 'https://author.example.com/edit.xlsx' },
+        }),
+      });
+
+      const json = FixDto.toDeployedOpportunityJSON(fix, 'A', '2026-08-15T10:00:00.000Z');
+
+      expect(json.changeDetails.documentPath).to.equal('https://author.example.com/edit.xlsx');
+    });
+  });
+
   describe('withLegacyDocumentPath', () => {
     it('returns the input unchanged when there is nothing to back-fill', () => {
       expect(withLegacyDocumentPath(undefined)).to.equal(undefined);

@@ -4621,6 +4621,40 @@ describe('LlmoController', () => {
     });
   });
 
+  describe('submitBrandClaimsFeedback', () => {
+    let reqCtx;
+
+    beforeEach(() => {
+      reqCtx = {
+        ...mockContext,
+        params: { siteId: TEST_SITE_ID },
+        data: {
+          eventId: 'invalid',
+          brandId: '22222222-2222-4222-8222-222222222222',
+          rating: 'up',
+        },
+      };
+    });
+
+    it('validates site access before handling feedback', async () => {
+      const result = await controller.submitBrandClaimsFeedback(reqCtx);
+      expect(result.status).to.equal(400);
+      expect((await result.json()).message).to.equal('eventId must be a valid UUID');
+    });
+
+    it('returns 403 when site access validation fails', async () => {
+      const controllerDenied = controllerWithAccessDenied(mockContext);
+      const result = await controllerDenied.submitBrandClaimsFeedback(reqCtx);
+      expect(result.status).to.equal(403);
+    });
+
+    it('returns 404 when the site is not found', async () => {
+      mockDataAccess.Site.findById.resolves(null);
+      const result = await controller.submitBrandClaimsFeedback(reqCtx);
+      expect(result.status).to.equal(404);
+    });
+  });
+
   describe('getDemoBrandPresence', () => {
     let demoContext;
     let mockGetSignedUrl;

@@ -42,6 +42,31 @@ function makeResponse(status, body, headers = {}) {
   };
 }
 
+function makeStreamingResponse(status, chunks) {
+  const encoded = chunks.map((chunk) => new TextEncoder().encode(chunk));
+  let index = 0;
+  const cancel = sinon.stub().resolves();
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    headers: { get: () => null },
+    body: {
+      getReader: () => ({
+        read: async () => {
+          if (index >= encoded.length) {
+            return { done: true, value: undefined };
+          }
+          const value = encoded[index];
+          index += 1;
+          return { done: false, value };
+        },
+        cancel,
+      }),
+    },
+    cancel,
+  };
+}
+
 describe('createElementsTransport', () => {
   let fetchStub;
   let originalFetch;
@@ -148,6 +173,72 @@ describe('createElementsTransport', () => {
       const transport = createElementsTransport({ env: ENV, imsToken: IMS_TOKEN });
       const result = await transport.fetchElement(WORKSPACE_ID, ELEMENT_ID, {});
       expect(result).to.deep.equal(responseBody);
+    });
+
+    it('accepts a response exactly at the per-call decompressed byte ceiling', async () => {
+      const body = JSON.stringify({ ok: true });
+      fetchStub.resolves(makeStreamingResponse(200, [body]));
+      const transport = createElementsTransport({ env: ENV, imsToken: IMS_TOKEN });
+      const result = await transport.fetchElement(WORKSPACE_ID, ELEMENT_ID, {}, {
+        maxResponseBytes: new TextEncoder().encode(body).byteLength,
+      });
+      expect(result).to.deep.equal({ ok: true });
+    });
+
+    it('cancels and rejects a streamed response above the decompressed byte ceiling', async () => {
+      const response = makeStreamingResponse(200, ['1234', '5678']);
+      fetchStub.resolves(response);
+      const transport = createElementsTransport({ env: ENV, imsToken: IMS_TOKEN });
+      await expect(transport.fetchElement(WORKSPACE_ID, ELEMENT_ID, {}, {
+        maxResponseBytes: 7,
+      })).to.be.rejectedWith(ElementsTransportError, /exceeds configured 7-byte limit/);
+      expect(response.cancel).to.have.been.calledOnce;
+    });
+
+    it('preserves the typed streamed-overflow error when cancellation fails', async () => {
+      const response = makeStreamingResponse(200, ['1234', '5678']);
+      response.cancel.rejects(new Error('cancel failed'));
+      fetchStub.resolves(response);
+      const transport = createElementsTransport({ env: ENV, imsToken: IMS_TOKEN });
+
+      await expect(transport.fetchElement(WORKSPACE_ID, ELEMENT_ID, {}, {
+        maxResponseBytes: 7,
+      })).to.be.rejectedWith(ElementsTransportError, /exceeds configured 7-byte limit/);
+      expect(response.cancel).to.have.been.calledOnce;
+    });
+
+    it('best-effort cancels an unread body rejected by Content-Length', async () => {
+      const cancel = sinon.stub().rejects(new Error('cancel failed'));
+      fetchStub.resolves({
+        ok: true,
+        status: 200,
+        headers: { get: (name) => (name === 'content-length' ? '8' : null) },
+        body: { cancel },
+      });
+      const transport = createElementsTransport({ env: ENV, imsToken: IMS_TOKEN });
+
+      await expect(transport.fetchElement(WORKSPACE_ID, ELEMENT_ID, {}, {
+        maxResponseBytes: 7,
+      })).to.be.rejectedWith(ElementsTransportError, /exceeds configured 7-byte limit/);
+      expect(cancel).to.have.been.calledOnce;
+    });
+
+    it('redacts the workspace from endpoint-specific error descriptors', async () => {
+      fetchStub.resolves(makeResponse(500, { error: 'failed' }));
+      const transport = createElementsTransport({ env: ENV, imsToken: IMS_TOKEN });
+      let error;
+      try {
+        await transport.fetchElement(WORKSPACE_ID, ELEMENT_ID, {}, {
+          redactWorkspaceInErrors: true,
+        });
+      } catch (e) {
+        error = e;
+      }
+      expect(error.workspaceId).to.equal(undefined);
+      expect(error.endpoint).to.include('/workspaces/[redacted]/');
+      expect(error.endpoint).to.not.include(WORKSPACE_ID);
+      expect(error.message).to.include('/workspaces/[redacted]/');
+      expect(error.message).to.not.include(WORKSPACE_ID);
     });
 
     it('URL-encodes workspaceId in the path', async () => {
@@ -306,6 +397,45 @@ describe('createElementsTransport', () => {
         const err = await settledPromise;
         expect(err).to.be.instanceOf(ElementsTransportError);
         expect(err.status).to.equal(504);
+      } finally {
+        clock.restore();
+      }
+    });
+
+    it('keeps the timeout active after headers while the response body is read', async () => {
+      const clock = sinon.useFakeTimers();
+      try {
+        fetchStub.callsFake(async (url, init) => ({
+          ok: true,
+          status: 200,
+          headers: { get: () => null },
+          body: {
+            getReader: () => ({
+              read: () => new Promise((resolve, reject) => {
+                init.signal.addEventListener('abort', () => {
+                  reject(Object.assign(new Error('The operation was aborted'), {
+                    name: 'AbortError',
+                  }));
+                }, { once: true });
+              }),
+              cancel: sinon.stub().resolves(),
+            }),
+          },
+        }));
+        const transport = createElementsTransport({ env: ENV, imsToken: IMS_TOKEN });
+        const settledPromise = transport.fetchElement(WORKSPACE_ID, ELEMENT_ID, {}, {
+          timeoutMs: 5000,
+          maxResponseBytes: 8 * 1024 * 1024,
+        }).catch((e) => e);
+
+        // Fetch has already returned headers, but its body remains stalled.
+        await clock.tickAsync(4999);
+        await clock.tickAsync(1);
+
+        const err = await settledPromise;
+        expect(err).to.be.instanceOf(ElementsTransportError);
+        expect(err.status).to.equal(504);
+        expect(err.message).to.include('timed out after 5000ms');
       } finally {
         clock.restore();
       }

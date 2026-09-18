@@ -10,6 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
+import { createHmac } from 'node:crypto';
 import { expect, use } from 'chai';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
@@ -75,7 +76,7 @@ describe('handleBrandClaims', () => {
         return listBehavior();
       }
       if (command instanceof HeadObjectCommand) {
-        return headBehavior();
+        return headBehavior(command);
       }
       return Promise.resolve({});
     });
@@ -285,6 +286,190 @@ describe('handleBrandClaims', () => {
     expect(headCmd.input.Key).to.equal(`brand_claims/llmo/${TEST_SITE_ID}/gpt-4.1.json.gz`);
   });
 
+  const headCalls = () => mockS3Send.getCalls()
+    .filter((c) => c.args[0] instanceof HeadObjectCommand);
+
+  it('serves English with default locale fields when no locale is requested', async () => {
+    const result = await handleBrandClaims(baseContext);
+
+    expect(result.status).to.equal(200);
+    const body = await result.json();
+    expect(body.requestedLocale).to.equal(null);
+    expect(body.servedLocale).to.equal('default');
+    expect(signedKey()).to.equal(FLAT_KEY);
+    // Only the existence HEAD — no extra localized probe when locale is absent.
+    expect(headCalls()).to.have.length(1);
+  });
+
+  it('serves the localized sibling when it exists (single HEAD, no English probe)', async () => {
+    listResult = { CommonPrefixes: [weekPrefix('2026-W17')] };
+    const context = { ...baseContext, data: { locale: 'ja_jp' } };
+
+    const result = await handleBrandClaims(context);
+
+    expect(result.status).to.equal(200);
+    const body = await result.json();
+    expect(body.requestedLocale).to.equal('ja_jp');
+    expect(body.servedLocale).to.equal('ja_jp');
+    const localizedKey = `brand_claims/llmo/${TEST_SITE_ID}/2026-W17/data.ja_jp.json.gz`;
+    expect(signedKey()).to.equal(localizedKey);
+    // The localized HEAD confirmed existence, so there is no redundant English HEAD.
+    const heads = headCalls();
+    expect(heads).to.have.length(1);
+    expect(heads[0].args[0].input.Key).to.equal(localizedKey);
+  });
+
+  it('applies locale to an explicit week folder', async () => {
+    const context = { ...baseContext, data: { week: '2026-W17', locale: 'fr_fr' } };
+
+    const result = await handleBrandClaims(context);
+
+    expect(result.status).to.equal(200);
+    const body = await result.json();
+    expect(body.servedLocale).to.equal('fr_fr');
+    expect(signedKey()).to.equal(`brand_claims/llmo/${TEST_SITE_ID}/2026-W17/data.fr_fr.json.gz`);
+  });
+
+  it('falls back to English when the localized sibling is missing (HEAD 404)', async () => {
+    const notFoundError = new Error('Not Found');
+    notFoundError.name = 'NotFound';
+    // Localized HEAD 404s; the English existence HEAD succeeds.
+    headBehavior = (command) => (command.input.Key.endsWith('data.ja_jp.json.gz')
+      ? Promise.reject(notFoundError)
+      : Promise.resolve({}));
+    const context = { ...baseContext, data: { locale: 'ja_jp' } };
+
+    const result = await handleBrandClaims(context);
+
+    expect(result.status).to.equal(200);
+    const body = await result.json();
+    expect(body.requestedLocale).to.equal('ja_jp');
+    expect(body.servedLocale).to.equal('default'); // fell back to English
+    expect(signedKey()).to.equal(FLAT_KEY);
+    // Two HEADs: localized (404) then the English existence check.
+    const heads = headCalls();
+    expect(heads).to.have.length(2);
+    expect(heads[0].args[0].input.Key).to.equal(`brand_claims/llmo/${TEST_SITE_ID}/data.ja_jp.json.gz`);
+    expect(heads[1].args[0].input.Key).to.equal(FLAT_KEY);
+    expect(mockLog.info).to.have.been.calledWithMatch(/falling back to English/);
+  });
+
+  it('falls back to English when the localized HEAD 404s via $metadata (no error name)', async () => {
+    // Some S3 clients surface a missing object as an httpStatusCode, not a `NotFound`
+    // name — that branch must fall back to English just the same.
+    const statusError = new Error('Not Found');
+    statusError.$metadata = { httpStatusCode: 404 };
+    headBehavior = (command) => (command.input.Key.endsWith('data.ja_jp.json.gz')
+      ? Promise.reject(statusError)
+      : Promise.resolve({}));
+    const context = { ...baseContext, data: { locale: 'ja_jp' } };
+
+    const result = await handleBrandClaims(context);
+
+    expect(result.status).to.equal(200);
+    const body = await result.json();
+    expect(body.servedLocale).to.equal('default'); // fell back to English
+    expect(signedKey()).to.equal(FLAT_KEY);
+    expect(mockLog.info).to.have.been.calledWithMatch(/falling back to English/);
+  });
+
+  it('rethrows a non-404 error from the localized HEAD (no silent English fallback)', async () => {
+    // A NoSuchBucket/transient fault on the localized HEAD must NOT be swallowed as a
+    // "missing localized file" — it rethrows into the shared handler so the real
+    // failure surfaces instead of masquerading as an English fallback.
+    const bucketError = new Error('bucket gone');
+    bucketError.name = 'NoSuchBucket';
+    headBehavior = (command) => (command.input.Key.endsWith('data.ja_jp.json.gz')
+      ? Promise.reject(bucketError)
+      : Promise.resolve({}));
+    const context = { ...baseContext, data: { locale: 'ja_jp' } };
+
+    const result = await handleBrandClaims(context);
+
+    expect(result.status).to.equal(400);
+    expect((await result.json()).message).to.equal('S3 storage is not properly configured for this environment');
+    expect(mockGetSignedUrl).not.to.have.been.called;
+  });
+
+  it('returns 404 when both the localized and English objects are missing', async () => {
+    const notFoundError = new Error('Not Found');
+    notFoundError.name = 'NotFound';
+    headBehavior = () => Promise.reject(notFoundError); // every HEAD 404s
+    const context = { ...baseContext, data: { locale: 'ja_jp' } };
+
+    const result = await handleBrandClaims(context);
+
+    expect(result.status).to.equal(404);
+    expect(mockGetSignedUrl).not.to.have.been.called;
+  });
+
+  it('ignores locale when model is supplied (model files are not localized)', async () => {
+    const context = { ...baseContext, data: { model: 'gpt-4.1', locale: 'ja_jp' } };
+
+    const result = await handleBrandClaims(context);
+
+    expect(result.status).to.equal(200);
+    const body = await result.json();
+    expect(body.requestedLocale).to.equal(null);
+    expect(body.servedLocale).to.equal('default');
+    expect(signedKey()).to.equal(`brand_claims/llmo/${TEST_SITE_ID}/gpt-4.1.json.gz`);
+    // Flat model path: exactly one HEAD, no localized probe and no listing.
+    expect(mockS3Send).to.have.been.calledOnce;
+    expect(mockS3Send.getCall(0).args[0]).to.be.instanceOf(HeadObjectCommand);
+  });
+
+  it('returns 400 for an invalid locale string', async () => {
+    const context = { ...baseContext, data: { locale: 'japanese' } };
+
+    const result = await handleBrandClaims(context);
+
+    expect(result.status).to.equal(400);
+    expect((await result.json()).message).to.equal('Invalid locale parameter: expected e.g. ja_jp');
+    expect(mockS3Send).not.to.have.been.called;
+  });
+
+  it('returns 400 for a locale with a path separator (no key probing)', async () => {
+    const context = { ...baseContext, data: { locale: '../secret' } };
+
+    const result = await handleBrandClaims(context);
+
+    expect(result.status).to.equal(400);
+    expect((await result.json()).message).to.equal('Invalid locale parameter: expected e.g. ja_jp');
+    expect(mockS3Send).not.to.have.been.called;
+  });
+
+  it('returns 400 when locale has uppercase letters (strict lowercase only)', async () => {
+    const context = { ...baseContext, data: { locale: 'JA_JP' } };
+
+    const result = await handleBrandClaims(context);
+
+    expect(result.status).to.equal(400);
+    expect(mockS3Send).not.to.have.been.called;
+  });
+
+  it('treats an empty locale as absent and serves English (no extra HEAD)', async () => {
+    // `?locale=` -> hasText false -> useLocale false -> unchanged English behavior.
+    const context = { ...baseContext, data: { locale: '' } };
+
+    const result = await handleBrandClaims(context);
+
+    expect(result.status).to.equal(200);
+    const body = await result.json();
+    expect(body.requestedLocale).to.equal(null);
+    expect(body.servedLocale).to.equal('default');
+    expect(headCalls()).to.have.length(1); // only the English existence HEAD
+  });
+
+  it('returns 400 for a whitespace-only locale (present but invalid)', async () => {
+    // `?locale=%20%20` -> hasText true (not trimmed) -> validated -> rejected.
+    const context = { ...baseContext, data: { locale: '  ' } };
+
+    const result = await handleBrandClaims(context);
+
+    expect(result.status).to.equal(400);
+    expect(mockS3Send).not.to.have.been.called;
+  });
+
   it('returns 400 when S3 is not configured', async () => {
     const result = await handleBrandClaims({ ...baseContext, s3: null });
     expect(result.status).to.equal(400);
@@ -339,19 +524,21 @@ describe('handleBrandClaims', () => {
     const result = await handleBrandClaims(baseContext);
 
     expect(result.status).to.equal(400);
-    expect((await result.json()).message).to.equal('Storage bucket not found: test-bucket');
+    // Generic client message — the bucket name stays in the log, not the response.
+    expect((await result.json()).message).to.equal('S3 storage is not properly configured for this environment');
     expect(mockLog.error).to.have.been.calledWith('S3 bucket test-bucket not found');
   });
 
-  it('returns 400 for generic S3 errors', async () => {
+  it('returns 500 with a generic message for other S3 errors (no raw detail leaked)', async () => {
     const accessDeniedError = new Error('Access denied');
     accessDeniedError.name = 'AccessDenied';
     headBehavior = () => Promise.reject(accessDeniedError);
 
     const result = await handleBrandClaims(baseContext);
 
-    expect(result.status).to.equal(400);
-    expect((await result.json()).message).to.equal('Error retrieving brand claims: Access denied');
+    expect(result.status).to.equal(500);
+    // The raw AWS message (recon primitive) is logged, never returned to the caller.
+    expect((await result.json()).message).to.equal('Unable to retrieve brand claims');
     expect(mockLog.error).to.have.been.calledWith(
       `S3 error retrieving brand claims for site ${TEST_SITE_ID}: Access denied`,
     );
@@ -759,5 +946,334 @@ describe('handleRequestBrandClaims (on-demand, LLMO-7263)', () => {
     expect(result.status).to.equal(202);
     expect(sqsSend).to.have.been.calledOnce;
     expect(context.log.warn).to.have.been.called;
+  });
+});
+
+describe('handleBrandClaimsFeedback', () => {
+  const EVENT_ID = '11111111-1111-4111-8111-111111111111';
+  const BRAND_ID = '22222222-2222-4222-8222-222222222222';
+  const ORG_ID = '33333333-3333-4333-8333-333333333333';
+  const SITE_ID = '44444444-4444-4444-8444-444444444444';
+
+  let handleBrandClaimsFeedback;
+  let sandbox;
+  let s3Send;
+  let getBrandById;
+  let context;
+  let site;
+  let MockPutObjectCommand;
+  let MockGetObjectCommand;
+
+  const httpUtils = {
+    accepted: (body) => ({ status: 202, json: async () => body }),
+    badRequest: (message) => ({ status: 400, json: async () => ({ message }) }),
+    notFound: (message) => ({ status: 404, json: async () => ({ message }) }),
+    internalServerError: (message) => ({ status: 500, json: async () => ({ message }) }),
+    createResponse: (body, status) => ({ status, json: async () => body }),
+  };
+
+  beforeEach(async () => {
+    sandbox = sinon.createSandbox();
+    s3Send = sandbox.stub().resolves({});
+    getBrandById = sandbox.stub().resolves({
+      id: BRAND_ID,
+      name: 'Acme',
+      baseSiteId: SITE_ID,
+      siteIds: [SITE_ID],
+    });
+
+    const mod = await esmock('../../../src/controllers/llmo/brand-claims.js', {
+      '@adobe/spacecat-shared-http-utils': httpUtils,
+      '../../../src/support/brands-storage.js': { getBrandById },
+    });
+    handleBrandClaimsFeedback = mod.handleBrandClaimsFeedback;
+    MockPutObjectCommand = function PutObjectCommand(input) {
+      this.input = input;
+      this.type = 'put';
+    };
+    MockGetObjectCommand = function GetObjectCommand(input) {
+      this.input = input;
+      this.type = 'get';
+    };
+
+    site = {
+      getId: () => SITE_ID,
+      getOrganizationId: () => ORG_ID,
+    };
+    context = {
+      data: {
+        eventId: EVENT_ID,
+        brandId: BRAND_ID,
+        rating: 'down',
+        comment: 'The recommendations need more context.',
+      },
+      dataAccess: {
+        Organization: {
+          findById: sandbox.stub().resolves({
+            getName: () => 'Acme Corp',
+            getImsOrgId: () => 'ABC@AdobeOrg',
+          }),
+        },
+        Entitlement: {
+          findByOrganizationIdAndProductCode: sandbox.stub().resolves({
+            getTier: () => 'PAID',
+          }),
+        },
+        services: {
+          postgrestClient: { from: sandbox.stub() },
+        },
+      },
+      attributes: {
+        authInfo: {
+          getProfile: () => ({
+            user_id: 'user-123@AdobeID',
+            email: 'user-123@AdobeID',
+            sub: 'user-123@AdobeID',
+          }),
+        },
+      },
+      env: {
+        ABV_LEARNING_DATA_BUCKET: 'learning-bucket',
+        ABV_ID_HASH_SALT: 'shared-secret',
+      },
+      log: {
+        info: sandbox.stub(),
+        warn: sandbox.stub(),
+        error: sandbox.stub(),
+      },
+      s3: {
+        s3Client: { send: s3Send },
+        PutObjectCommand: MockPutObjectCommand,
+        GetObjectCommand: MockGetObjectCommand,
+      },
+    };
+  });
+
+  afterEach(() => sandbox.restore());
+
+  it('writes an encrypted, contextual product-feedback record and returns 202', async () => {
+    const result = await handleBrandClaimsFeedback(context, site);
+
+    expect(result.status).to.equal(202);
+    expect(s3Send).to.have.been.calledTwice;
+    const markerCommand = s3Send.firstCall.args[0];
+    expect(markerCommand.input.Key).to.equal(
+      `product_feedback/brand_claims/idempotency/${EVENT_ID}.json`,
+    );
+    const command = s3Send.secondCall.args[0];
+    expect(command.input).to.include({
+      Bucket: 'learning-bucket',
+      ContentType: 'application/json',
+      ServerSideEncryption: 'AES256',
+      IfNoneMatch: '*',
+    });
+    expect(command.input.Key).to.match(
+      new RegExp(`^product_feedback/brand_claims/down/paid/\\d{4}-\\d{2}-\\d{2}/\\d{17}_${EVENT_ID}\\.json$`),
+    );
+    const record = JSON.parse(command.input.Body);
+    expect(record).to.include({
+      schemaVersion: 1,
+      recordType: 'product_feedback',
+      surface: 'brand_claims',
+      id: EVENT_ID,
+      rating: 'down',
+      note: 'The recommendations need more context.',
+      organizationId: ORG_ID,
+      customerName: 'Acme Corp',
+      imsOrgId: 'ABC@AdobeOrg',
+      siteId: SITE_ID,
+      brandId: BRAND_ID,
+      brand: 'Acme',
+      tier: 'paid',
+    });
+    const expectedAbvId = `abv_${createHmac('sha256', 'shared-secret')
+      .update('user-123@AdobeID')
+      .digest('hex')
+      .slice(0, 12)}`;
+    expect(record.abv_id).to.equal(expectedAbvId);
+  });
+
+  it('omits the explicit encryption header for a local S3 emulator', async () => {
+    const result = await handleBrandClaimsFeedback({
+      ...context,
+      env: {
+        ...context.env,
+        AWS_ENDPOINT_URL_S3: 'http://localhost:9100',
+      },
+    }, site);
+
+    expect(result.status).to.equal(202);
+    expect(s3Send.firstCall.args[0].input).not.to.have.property('ServerSideEncryption');
+    expect(s3Send.secondCall.args[0].input).not.to.have.property('ServerSideEncryption');
+  });
+
+  it('rejects invalid ids, rating, and comment shape before writing', async () => {
+    const results = await Promise.all([
+      { ...context.data, eventId: 'bad' },
+      { ...context.data, eventId: '00000000-0000-0000-0000-000000000000' },
+      { ...context.data, eventId: '6ba7b810-9dad-11d1-80b4-00c04fd430c8' },
+      { ...context.data, brandId: 'bad' },
+      { ...context.data, rating: 'neutral' },
+      { ...context.data, comment: 42 },
+    ].map((data) => handleBrandClaimsFeedback({ ...context, data }, site)));
+    expect(results.map((result) => result.status)).to.deep.equal([400, 400, 400, 400, 400, 400]);
+    expect(s3Send).not.to.have.been.called;
+  });
+
+  it('rejects comments over 4000 characters', async () => {
+    const result = await handleBrandClaimsFeedback({
+      ...context,
+      data: { ...context.data, comment: 'x'.repeat(4001) },
+    }, site);
+
+    expect(result.status).to.equal(413);
+    expect(s3Send).not.to.have.been.called;
+  });
+
+  it('returns 404 when the brand does not belong to the site organization', async () => {
+    getBrandById.resolves(null);
+    const result = await handleBrandClaimsFeedback(context, site);
+
+    expect(result.status).to.equal(404);
+    expect(s3Send).not.to.have.been.called;
+  });
+
+  it('rejects a brand that is not linked to the report site', async () => {
+    getBrandById.resolves({
+      id: BRAND_ID,
+      name: 'Acme',
+      baseSiteId: '55555555-5555-4555-8555-555555555555',
+      siteIds: [],
+    });
+
+    const result = await handleBrandClaimsFeedback(context, site);
+
+    expect(result.status).to.equal(400);
+    expect((await result.json()).message).to.equal('Brand does not belong to this site');
+    expect(s3Send).not.to.have.been.called;
+  });
+
+  it('fails closed when the shared bucket or hash salt is not configured', async () => {
+    const result = await handleBrandClaimsFeedback({
+      ...context,
+      env: { ...context.env, ABV_ID_HASH_SALT: undefined },
+    }, site);
+
+    expect(result.status).to.equal(500);
+    expect(s3Send).not.to.have.been.called;
+  });
+
+  it('fails closed when the caller has no stable identity', async () => {
+    context.attributes.authInfo.getProfile = () => ({});
+
+    const result = await handleBrandClaimsFeedback(context, site);
+
+    expect(result.status).to.equal(500);
+    expect(s3Send).not.to.have.been.called;
+  });
+
+  it('treats a duplicate event id as an idempotent success', async () => {
+    const markerRecord = {
+      schemaVersion: 1,
+      recordType: 'product_feedback',
+      surface: 'brand_claims',
+      id: EVENT_ID,
+      timestamp: '2026-09-15T23:59:59.000Z',
+      rating: 'up',
+      abv_id: `abv_${createHmac('sha256', 'shared-secret')
+        .update('user-123@AdobeID')
+        .digest('hex')
+        .slice(0, 12)}`,
+      organizationId: ORG_ID,
+      customerName: 'Acme Corp',
+      imsOrgId: 'ABC@AdobeOrg',
+      siteId: SITE_ID,
+      brandId: BRAND_ID,
+      brand: 'Acme',
+      tier: 'paid',
+    };
+    s3Send.callsFake((command) => {
+      if (command.type === 'put' && command.input.Key.includes('/idempotency/')) {
+        const error = new Error('already exists');
+        error.name = 'PreconditionFailed';
+        return Promise.reject(error);
+      }
+      if (command.type === 'get') {
+        return Promise.resolve({
+          Body: {
+            transformToString: () => Promise.resolve(JSON.stringify(markerRecord)),
+          },
+        });
+      }
+      return Promise.resolve({});
+    });
+
+    const result = await handleBrandClaimsFeedback(context, site);
+
+    expect(result.status).to.equal(202);
+    expect((await result.json()).id).to.equal(EVENT_ID);
+    const recordCommand = s3Send.thirdCall.args[0];
+    expect(recordCommand.input.Key).to.equal(
+      `product_feedback/brand_claims/up/paid/2026-09-15/20260915235959000_${EVENT_ID}.json`,
+    );
+    expect(JSON.parse(recordCommand.input.Body)).to.deep.equal(markerRecord);
+  });
+
+  it('rejects an idempotency marker owned by another tenant', async () => {
+    const markerRecord = {
+      schemaVersion: 1,
+      recordType: 'product_feedback',
+      surface: 'brand_claims',
+      id: EVENT_ID,
+      timestamp: '2026-09-15T23:59:59.000Z',
+      rating: 'up',
+      abv_id: 'abv_other',
+      organizationId: '99999999-9999-4999-8999-999999999999',
+      customerName: 'Other',
+      imsOrgId: null,
+      siteId: '88888888-8888-4888-8888-888888888888',
+      brandId: '77777777-7777-4777-8777-777777777777',
+      brand: 'Other',
+      tier: 'paid',
+    };
+    s3Send.callsFake((command) => {
+      if (command.type === 'put' && command.input.Key.includes('/idempotency/')) {
+        const error = new Error('already exists');
+        error.name = 'PreconditionFailed';
+        return Promise.reject(error);
+      }
+      if (command.type === 'get') {
+        return Promise.resolve({
+          Body: {
+            transformToString: () => Promise.resolve(JSON.stringify(markerRecord)),
+          },
+        });
+      }
+      return Promise.resolve({});
+    });
+
+    const result = await handleBrandClaimsFeedback(context, site);
+
+    expect(result.status).to.equal(500);
+    expect(s3Send).to.have.been.calledTwice;
+  });
+
+  it('returns a generic 500 when the S3 write fails', async () => {
+    s3Send.rejects(new Error('secret bucket detail'));
+
+    const result = await handleBrandClaimsFeedback(context, site);
+
+    expect(result.status).to.equal(500);
+    expect((await result.json()).message).to.equal('Unable to submit Brand Claims feedback');
+  });
+
+  it('does not write a false free tier when entitlement lookup fails', async () => {
+    context.dataAccess.Entitlement.findByOrganizationIdAndProductCode
+      .rejects(new Error('entitlement unavailable'));
+
+    const result = await handleBrandClaimsFeedback(context, site);
+
+    expect(result.status).to.equal(500);
+    expect(s3Send).not.to.have.been.called;
   });
 });

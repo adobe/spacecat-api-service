@@ -14,7 +14,12 @@ import { expect } from 'chai';
 import {
   ASYNC_JOB_1_ID,
   NON_EXISTENT_JOB_ID,
+  SITE_1_ID,
 } from '../seed-ids.js';
+import {
+  SERENITY_CLASSIFY_JOB_ID,
+  SITE_3_PREFLIGHT_JOB_ID,
+} from '../../postgres/seed-data/async-jobs.js';
 
 /**
  * Shared Preflight endpoint tests.
@@ -126,6 +131,45 @@ export default function preflightTests(getHttpClient, resetData, options = {}) {
           expect(job.endedAt).to.be.a('string');
           expect(job.createdAt).to.be.a('string');
           expect(job.updatedAt).to.be.a('string');
+        });
+
+        // ── SEC-5: cross-tenant credential-exposure (IDOR) scoping ──
+        // The generic AsyncJob table is keyed only by UUID; without scoping any
+        // caller with any job UUID could read any tenant's job (including
+        // token-bearing types). loadJobScopedToCaller enforces jobType + ownership.
+
+        it('owner: returns 200 with the payload field allowlist (MFE contract)', async () => {
+          // SITE_1 belongs to ORG_1, of which the `user` persona is a member.
+          const http = getHttpClient();
+          const res = await http.user.get(`/preflight/jobs/${ASYNC_JOB_1_ID}`);
+          expect(res.status).to.equal(200);
+          expect(res.body.jobId).to.equal(ASYNC_JOB_1_ID);
+          expect(res.body.metadata.jobType).to.equal('preflight');
+          // The DTO projects an explicit payload allowlist. The MFE-read fields survive…
+          expect(res.body.metadata.payload.step).to.equal('identify');
+          expect(res.body.metadata.payload.siteId).to.equal(SITE_1_ID);
+          expect(res.body.metadata.payload.urls).to.be.an('array');
+          // …and no key outside the allowlist is present.
+          expect(Object.keys(res.body.metadata.payload))
+            .to.have.members(['step', 'siteId', 'urls']);
+        });
+
+        it('returns 404 for a preflight job owned by a different tenant (no cross-tenant read)', async () => {
+          // SITE_3 is ORG_2 — denied to the `user` persona. The job exists, but its
+          // existence must not be disclosed to a non-owner.
+          const http = getHttpClient();
+          const res = await http.user.get(`/preflight/jobs/${SITE_3_PREFLIGHT_JOB_ID}`);
+          expect(res.status).to.equal(404);
+        });
+
+        it('returns 404 for a token-bearing non-preflight job and never leaks its token', async () => {
+          // A serenity-classify-prompts job persists a live promise token on metadata.
+          // The preflight endpoint (allowlist ['preflight']) must reject it as 404 and
+          // never surface the token in the response body.
+          const http = getHttpClient();
+          const res = await http.admin.get(`/preflight/jobs/${SERENITY_CLASSIFY_JOB_ID}`);
+          expect(res.status).to.equal(404);
+          expect(JSON.stringify(res.body)).to.not.include('do-not-leak');
         });
       }
     });

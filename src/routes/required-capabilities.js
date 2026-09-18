@@ -180,6 +180,9 @@ export const INTERNAL_ROUTES = [
   'GET /tools/api-keys',
   // URL preview proxy - UI-only utility for iframe rendering; not for S2S consumers
   'GET /tools/proxy',
+  // LaunchDarkly flags summary - admin-only via hasAdminAccess(); internal tooling
+  // endpoint, not for S2S consumers
+  'GET /tools/launchdarkly/flags',
   // Insights orchestration - admin-only via hasAdminAccess(); not for S2S consumers
   'POST /ephemeral-run/batch',
   'GET /ephemeral-run/batch/:batchId/status',
@@ -323,11 +326,15 @@ const routeRequiredCapabilities = {
   'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/bulk-tags': 'organization:write',
   'PATCH /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/:semrushPromptId': 'organization:write',
   'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/bulk-delete': 'organization:write',
+  'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/finalize': 'organization:write',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets': 'organization:read',
   'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets': 'organization:write',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode': 'organization:read',
   'DELETE /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode': 'organization:write',
+  'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/generation/jobs/:jobId': 'organization:read',
+  'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/generation/jobs/:jobId/reauth': 'organization:write',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags': 'organization:read',
+  'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags/search': 'organization:read',
   'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags': 'organization:write',
   'PATCH /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags/:tagId': 'organization:write',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags/:tagId/impact': 'organization:read',
@@ -443,6 +450,9 @@ const routeRequiredCapabilities = {
   // preflight jobs (legacy)
   'POST /preflight/jobs': 'site:write',
   'GET /preflight/jobs/:jobId': 'site:read',
+  // OAE validation jobs
+  'POST /sites/:siteId/llmo/oae-validation/jobs': 'site:write',
+  'GET /sites/:siteId/llmo/oae-validation/jobs/:jobId': 'site:read',
   // Preflight checks - proxies user's Bearer token to AEM Author; end-user UI only
   'POST /sites/:siteId/autofix-checks': 'site:read',
 
@@ -542,6 +552,7 @@ const routeRequiredCapabilities = {
   'GET /sites/:siteId/geo-experiments/:geoExperimentId/results': 'site:read', // impact-measurement insights
   'GET /sites/:siteId/metrics/:metric/:source': 'site:read',
   'GET /sites/:siteId/metrics/:metric/:source/by-url/:base64PageUrl': 'site:read',
+  'GET /sites/:siteId/keyword-cpc': 'site:read',
   'GET /sites/:siteId/latest-metrics': 'site:read',
   'GET /sites/by-base-url/:baseURL': 'site:read',
   'GET /sites/by-delivery-type/:deliveryType': 'site:read',
@@ -553,6 +564,8 @@ const routeRequiredCapabilities = {
   'GET /sites/:siteId/opportunities/top-paid': 'opportunity:read',
   'GET /sites/:siteId/opportunities/by-status/:status': 'opportunity:read',
   'GET /sites/:siteId/opportunities/:opportunityId': 'opportunity:read',
+  'POST /sites/:siteId/opportunities/by-urls': 'opportunity:read',
+  'POST /sites/:siteId/suggestions/by-urls': 'suggestion:read',
   'POST /sites/:siteId/opportunities': 'opportunity:write',
   'PATCH /sites/:siteId/opportunities/:opportunityId': 'opportunity:write',
   'DELETE /sites/:siteId/opportunities/:opportunityId': 'opportunity:write',
@@ -690,6 +703,7 @@ const routeRequiredCapabilities = {
 
   // Fixes
   'GET /sites/:siteId/fixes': 'fixEntity:read',
+  'GET /sites/:siteId/deployed-opportunities': 'fixEntity:read',
   'GET /sites/:siteId/opportunities/:opportunityId/fixes': 'fixEntity:read',
   'GET /sites/:siteId/opportunities/:opportunityId/fixes/by-status/:status': 'fixEntity:read',
   'GET /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': 'fixEntity:read',
@@ -740,6 +754,7 @@ const routeRequiredCapabilities = {
   'GET /sites/:siteId/llmo/brand-claims': 'site:read',
   'GET /sites/:siteId/llmo/brand-claims/weeks': 'site:read',
   'POST /sites/:siteId/llmo/brand-claims/request': 'site:write',
+  'POST /sites/:siteId/llmo/brand-claims/feedback': 'site:read',
   'GET /sites/:siteId/llmo/strategy/demo/brand-presence': 'site:read',
   'GET /sites/:siteId/llmo/strategy/demo/recommendations': 'site:read',
   'GET /llmo/agentic-traffic/global': 'report:read',

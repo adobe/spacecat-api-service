@@ -16,7 +16,7 @@ import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
 import esmock from 'esmock';
 import { ProjectEngineApiError } from '@adobe/spacecat-shared-project-engine-client';
-import { ErrorWithStatusCode } from '../../src/support/utils.js';
+import { ErrorWithStatusCode, getSemrushPair } from '../../src/support/utils.js';
 import {
   ERROR_CODES,
   MainBrandBenchmarkInvariantError,
@@ -101,6 +101,7 @@ function fakeContext({
   brand = makeBrandModel(),
   env = {},
   promiseToken = undefined,
+  promiseAudience = undefined,
   headers = {},
 } = {}) {
   return {
@@ -109,6 +110,7 @@ function fakeContext({
       headers: {
         ...(bearer ? { authorization: `Bearer ${bearer}` } : {}),
         ...(promiseToken ? { 'x-promise-token': promiseToken } : {}),
+        ...(promiseAudience ? { 'x-promise-audience': promiseAudience } : {}),
         ...headers,
       },
     },
@@ -151,6 +153,7 @@ describe('SerenityController', () => {
     handleCreateMarket: sinon.stub(),
     handleDeleteMarket: sinon.stub(),
     handleListTags: sinon.stub(),
+    handleSearchTags: sinon.stub(),
     handleListModels: sinon.stub(),
     handleUpdateModels: sinon.stub(),
     listGlobalModelCatalog: sinon.stub(),
@@ -160,12 +163,15 @@ describe('SerenityController', () => {
     handleCreateMarketSubworkspace: sinon.stub(),
     handleDeleteMarketSubworkspace: sinon.stub(),
     handleListTagsSubworkspace: sinon.stub(),
+    handleSearchTagsSubworkspace: sinon.stub(),
     handleListModelsSubworkspace: sinon.stub(),
     handleUpdateModelsSubworkspace: sinon.stub(),
     handleListPromptsSubworkspace: sinon.stub(),
     handleCreatePromptsSubworkspace: sinon.stub(),
     handleUpdatePromptSubworkspace: sinon.stub(),
     handleBulkDeletePromptsSubworkspace: sinon.stub(),
+    handleFinalizePrompts: sinon.stub(),
+    handleFinalizePromptsSubworkspace: sinon.stub(),
     handleCreateTag: sinon.stub(),
     handleCreateTagSubworkspace: sinon.stub(),
     handleUpdateTag: sinon.stub(),
@@ -183,6 +189,8 @@ describe('SerenityController', () => {
   let resolveWorkspaceIdStub;
   let resolveBrandWorkspaceStub;
   let isSerenityActiveStub;
+  let isTagSearchActiveStub;
+  let isUnboundedTagAuthoringActiveStub;
   let createTransportStub;
   let resolveBrandUuidStub;
   let getBrandAliasesStub;
@@ -195,10 +203,12 @@ describe('SerenityController', () => {
   let unlinkMarketSiteIfOrphanedStub;
   let getBrandBaseSiteIdStub;
   let exchangePromiseTokenStub;
+  let exchangePromiseTokenResponseStub;
   let linkSiteToLiveRowsStub;
   let linkSiteToRowStub;
   let tombstoneAllForBrandStub;
   let createAndEnqueueJobStub;
+  let maybeEnqueueMarketGenerationStub;
   let MockTransportError;
   let SerenityController;
 
@@ -215,6 +225,8 @@ describe('SerenityController', () => {
     // existing assertion that drives a brand-level route reaches its handler.
     // The "serenity inactive" describe overrides this to false.
     isSerenityActiveStub = sinon.stub().resolves(true);
+    isTagSearchActiveStub = sinon.stub().resolves(true);
+    isUnboundedTagAuthoringActiveStub = sinon.stub().resolves(true);
     decommissionStub = sinon.stub().resolves();
     ensureSubworkspaceStub = sinon.stub().resolves(SUBWS);
     clearBrandWorkspaceCacheStub = sinon.stub();
@@ -234,12 +246,22 @@ describe('SerenityController', () => {
     unlinkMarketSiteIfOrphanedStub = sinon.stub().resolves(true);
     getBrandBaseSiteIdStub = sinon.stub().resolves(null);
     exchangePromiseTokenStub = sinon.stub().resolves('exchanged-ims-token');
+    exchangePromiseTokenResponseStub = sinon.stub().resolves({
+      access_token: 'bulk-tags-ims-token',
+      promise_token: 'rotated-promise-token',
+      promise_token_expires_in: 14399,
+      token_type: 'bearer',
+    });
     linkSiteToLiveRowsStub = sinon.stub().resolves();
     linkSiteToRowStub = sinon.stub().resolves();
     tombstoneAllForBrandStub = sinon.stub().resolves();
     createAndEnqueueJobStub = sinon.stub().resolves({
       getId: () => 'job-abc', getStatus: () => 'IN_PROGRESS',
     });
+    // Default: no async generation handle (flag off / not requested). The async
+    // paths override this per-test. Only this export is overridden; the rest of
+    // async-prompt-gen (isAsyncPromptGenEnabled etc.) stays real via esmock merge.
+    maybeEnqueueMarketGenerationStub = sinon.stub().resolves(null);
     // Alias the REAL SerenityTransportError so instances are recognised by errors.js's
     // isSemrushTransportError (which mapError now delegates to). Same (status, message, body)
     // constructor signature the tests already use.
@@ -294,6 +316,10 @@ describe('SerenityController', () => {
         handleUpdatePromptSubworkspace: handlers.handleUpdatePromptSubworkspace,
         handleBulkDeletePromptsSubworkspace: handlers.handleBulkDeletePromptsSubworkspace,
       },
+      '../../src/support/serenity/handlers/prompts-finalize.js': {
+        handleFinalizePrompts: handlers.handleFinalizePrompts,
+        handleFinalizePromptsSubworkspace: handlers.handleFinalizePromptsSubworkspace,
+      },
       '../../src/support/serenity/handlers/tags.js': {
         handleCreateTag: handlers.handleCreateTag,
         handleCreateTagSubworkspace: handlers.handleCreateTagSubworkspace,
@@ -304,12 +330,18 @@ describe('SerenityController', () => {
         handleTagImpact: handlers.handleTagImpact,
         handleTagImpactSubworkspace: handlers.handleTagImpactSubworkspace,
       },
+      '../../src/support/serenity/handlers/tag-search.js': {
+        handleSearchTags: handlers.handleSearchTags,
+        handleSearchTagsSubworkspace: handlers.handleSearchTagsSubworkspace,
+      },
       '../../src/support/serenity/workspace-lifecycle.js': {
         ensureSubworkspace: ensureSubworkspaceStub,
         decommissionBrandWorkspace: decommissionStub,
       },
       '../../src/support/serenity/serenity-active.js': {
         isSerenityActiveForBrand: isSerenityActiveStub,
+        isTagSearchActiveForBrand: isTagSearchActiveStub,
+        isUnboundedTagAuthoringActiveForBrand: isUnboundedTagAuthoringActiveStub,
       },
       '../../src/support/access-control-util.js': MockAccessControlUtil,
       '../../src/support/prompts-storage.js': {
@@ -337,6 +369,29 @@ describe('SerenityController', () => {
         resolveSemrushImsToken: makeResolveSemrushImsTokenStub(
           (...args) => exchangePromiseTokenStub(...args),
         ),
+        getRawPromiseToken: (ctx) => {
+          const token = ctx?.pathInfo?.headers?.['x-promise-token'];
+          if (!token) {
+            return undefined;
+          }
+          try {
+            return decodeURIComponent(token);
+          } catch {
+            return token;
+          }
+        },
+        resolvePromisePair: (ctx) => {
+          const audience = ctx?.pathInfo?.headers?.['x-promise-audience'];
+          if (!audience) {
+            return undefined;
+          }
+          if (audience.trim().toLowerCase() === 'semrush') {
+            return getSemrushPair();
+          }
+          throw new ErrorWithStatusCode(`Unknown promise audience: ${audience}`, 400);
+        },
+        getSemrushPair,
+        exchangePromiseTokenResponse: exchangePromiseTokenResponseStub,
       },
       '../../src/support/serenity/mapping-rows.js': {
         linkSiteToLiveRows: linkSiteToLiveRowsStub,
@@ -345,6 +400,9 @@ describe('SerenityController', () => {
       },
       '../../src/support/serenity/async-job-runner.js': {
         createAndEnqueueJob: createAndEnqueueJobStub,
+      },
+      '../../src/support/serenity/async-prompt-gen.js': {
+        maybeEnqueueMarketGeneration: maybeEnqueueMarketGenerationStub,
       },
       '../../src/support/serenity/handlers/classify-prompts-job.js': {
         CLASSIFY_PROMPTS_JOB_TYPE: 'serenity-classify-prompts',
@@ -1090,6 +1148,150 @@ describe('SerenityController', () => {
       expect(handlers.handleListTags).to.have.been.calledOnce;
     });
 
+    it('searchTags dispatches the parsed query without any cursor secret', async () => {
+      handlers.handleSearchTags.resolves({ items: [], cursor: null, complete: true });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext();
+      ctx.request = {
+        url: 'https://x?geoTargetId=2840&languageCode=en&q=campaign&limit=10',
+      };
+      const response = await controller.searchTags(ctx);
+      expect(response.status).to.equal(200);
+      expect(handlers.handleSearchTags).to.have.been.calledOnce;
+      expect(handlers.handleSearchTags.firstCall.args[4]).to.deep.include({
+        geoTargetId: '2840',
+        languageCode: 'en',
+        q: 'campaign',
+        limit: '10',
+      });
+      expect(handlers.handleSearchTags.firstCall.args).to.have.length(7);
+      expect(handlers.handleSearchTags.firstCall.args[6]).to.deep.equal({
+        maxParents: 200,
+        maxNodes: 10_000,
+        maxDurationMs: 15_000,
+        concurrency: 6,
+        maxPagesPerParent: 50,
+      });
+    });
+
+    it('searchTags dispatches without a cursor secret even when unrelated secrets exist', async () => {
+      handlers.handleSearchTags.resolves({ items: [], cursor: null, complete: true });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({
+        env: {
+          IMS_CLIENT_SECRET: 'ims-secret',
+          AUTOFIX_CRYPT_SECRET: 'autofix-secret',
+        },
+      });
+      ctx.request = {
+        url: 'https://x?geoTargetId=2840&languageCode=en&q=campaign&limit=10',
+      };
+      const response = await controller.searchTags(ctx);
+      expect(response.status).to.equal(200);
+      expect(handlers.handleSearchTags).to.have.been.calledOnce;
+      expect(handlers.handleSearchTagsSubworkspace).not.to.have.been.called;
+    });
+
+    it('searchTags 503s without dispatching when the search kill switch is set', async () => {
+      handlers.handleSearchTags.resolves({ items: [], cursor: null, complete: true });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({
+        env: {
+          SERENITY_TAG_SEARCH_DISABLED: 'true',
+        },
+      });
+      ctx.request = { url: 'https://x?geoTargetId=2840&languageCode=en&q=campaign' };
+      const response = await controller.searchTags(ctx);
+      expect(response.status).to.equal(503);
+      expect((await readBody(response)).error).to.equal('tagSearchUnavailable');
+      expect(handlers.handleSearchTags).not.to.have.been.called;
+    });
+
+    it('searchTags stays dark until the brand rollout flag is enabled', async () => {
+      isTagSearchActiveStub.resolves(false);
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext();
+      ctx.request = { url: 'https://x?geoTargetId=2840&languageCode=en&q=campaign' };
+
+      const response = await controller.searchTags(ctx);
+
+      expect(response.status).to.equal(404);
+      expect((await readBody(response)).message).to.equal('Tag search is not active for this brand');
+      expect(isTagSearchActiveStub).to.have.been.calledWith(sinon.match.any, ORG, BRAND);
+      expect(handlers.handleSearchTags).not.to.have.been.called;
+    });
+
+    it('searchTags stays enabled for any kill-switch value other than "true"', async () => {
+      handlers.handleSearchTags.resolves({ items: [], cursor: null, complete: true });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({
+        env: {
+          SERENITY_TAG_SEARCH_DISABLED: 'false',
+        },
+      });
+      ctx.request = { url: 'https://x?geoTargetId=2840&languageCode=en&q=campaign' };
+      const response = await controller.searchTags(ctx);
+      expect(response.status).to.equal(200);
+      expect(handlers.handleSearchTags).to.have.been.calledOnce;
+    });
+
+    it('searchTags passes env-resolved traversal budgets to the handler', async () => {
+      handlers.handleSearchTags.resolves({ items: [], cursor: null, complete: true });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({
+        env: {
+          SERENITY_TAG_TREE_MAX_PARENTS: '25',
+          SERENITY_TAG_TREE_MAX_DURATION_MS: '4000',
+        },
+      });
+      ctx.request = { url: 'https://x?geoTargetId=2840&languageCode=en&q=campaign' };
+      const response = await controller.searchTags(ctx);
+      expect(response.status).to.equal(200);
+      expect(handlers.handleSearchTags.firstCall.args[6]).to.deep.equal({
+        maxParents: 25,
+        maxNodes: 10_000,
+        maxDurationMs: 4000,
+        concurrency: 6,
+        maxPagesPerParent: 50,
+      });
+    });
+
+    it('searchTags returns authorization errors without dispatching', async () => {
+      accessControlHasAccessStub.resolves(false);
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.searchTags(fakeContext());
+
+      expect(response.status).to.equal(403);
+      expect(handlers.handleSearchTags).not.to.have.been.called;
+      expect(handlers.handleSearchTagsSubworkspace).not.to.have.been.called;
+    });
+
+    it('searchTags maps handler errors through the Serenity error envelope', async () => {
+      handlers.handleSearchTags.rejects(new ErrorWithStatusCode('invalid search', 400));
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.searchTags(fakeContext());
+
+      expect(response.status).to.equal(400);
+      expect((await readBody(response)).message).to.equal('invalid search');
+    });
+
+    it('searchTags exposes the documented traversal budget details', async () => {
+      const error = new ErrorWithStatusCode('Unable to read the complete tag tree', 503);
+      error.code = ERROR_CODES.TAG_TREE_LIMIT_EXCEEDED;
+      error.details = { budget: 'nodes', maximum: 10_000, internal: 'not-public' };
+      handlers.handleSearchTags.rejects(error);
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+
+      const response = await controller.searchTags(fakeContext());
+
+      expect(response.status).to.equal(503);
+      expect(await readBody(response)).to.deep.equal({
+        error: ERROR_CODES.TAG_TREE_LIMIT_EXCEEDED,
+        message: 'Unable to read the complete tag tree',
+        details: { budget: 'nodes', maximum: 10_000 },
+      });
+    });
+
     it('listModels dispatches to handleListModels and wraps the result in ok()', async () => {
       handlers.handleListModels.resolves({ items: [] });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
@@ -1323,7 +1525,7 @@ describe('SerenityController', () => {
       expect(options.callerId).to.equal('unknown');
     });
 
-    it('bulkTagPrompts dispatches flat arguments and reads Idempotency-Key case-insensitively', async () => {
+    it('bulkTagPrompts exchanges once and forwards the rotated token and SEMRUSH pair in flat mode', async () => {
       const data = {
         geoTargetId: 2840,
         languageCode: 'en',
@@ -1340,6 +1542,8 @@ describe('SerenityController', () => {
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const ctx = fakeContext({
         data,
+        promiseToken: 'raw-promise-token',
+        promiseAudience: 'semrush',
         headers: { 'iDeMpOtEnCy-KeY': 'flat-key' },
       });
 
@@ -1357,8 +1561,61 @@ describe('SerenityController', () => {
         'unknown',
         'flat-key',
         sinon.match.object,
+        {
+          promise_token: 'rotated-promise-token',
+          expires_in: 14399,
+          token_type: 'bearer',
+        },
+        getSemrushPair(),
       );
       expect(handlers.handleBulkTagsSubworkspace).not.to.have.been.called;
+      expect(exchangePromiseTokenResponseStub).to.have.been.calledOnceWithExactly(
+        ctx,
+        'raw-promise-token',
+        getSemrushPair(),
+      );
+      expect(exchangePromiseTokenStub).not.to.have.been.called;
+    });
+
+    it('bulkTagPrompts 400s without a promise token and does not exchange or dispatch', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+
+      const response = await controller.bulkTagPrompts(fakeContext({ data: {} }));
+
+      expect(response.status).to.equal(400);
+      expect((await readBody(response)).message).to.match(/require a promise token/i);
+      expect(exchangePromiseTokenResponseStub).not.to.have.been.called;
+      expect(handlers.handleBulkTags).not.to.have.been.called;
+      expect(handlers.handleBulkTagsSubworkspace).not.to.have.been.called;
+    });
+
+    it('bulkTagPrompts 400s without the SEMRUSH promise audience and does not dispatch', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+
+      const response = await controller.bulkTagPrompts(fakeContext({
+        data: {},
+        promiseToken: 'raw-promise-token',
+      }));
+
+      expect(response.status).to.equal(400);
+      expect((await readBody(response)).message).to.match(/x-promise-audience: semrush/);
+      expect(exchangePromiseTokenResponseStub).not.to.have.been.called;
+      expect(handlers.handleBulkTags).not.to.have.been.called;
+    });
+
+    it('bulkTagPrompts 400s for an invalid promise audience without exchange or dispatch', async () => {
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+
+      const response = await controller.bulkTagPrompts(fakeContext({
+        data: {},
+        promiseToken: 'raw-promise-token',
+        promiseAudience: 'other',
+      }));
+
+      expect(response.status).to.equal(400);
+      expect((await readBody(response)).message).to.match(/Unknown promise audience/);
+      expect(exchangePromiseTokenResponseStub).not.to.have.been.called;
+      expect(handlers.handleBulkTags).not.to.have.been.called;
     });
 
     it('createTag routes to the flat handler in flat mode and returns its status', async () => {
@@ -1376,6 +1633,7 @@ describe('SerenityController', () => {
       expect(body.tag).to.equal('category:Footwear');
       expect(handlers.handleCreateTag).to.have.been.calledOnce;
       expect(handlers.handleCreateTag.firstCall.args[4]).to.deep.equal({});
+      expect(handlers.handleCreateTag.firstCall.args[6]).to.equal(true);
       expect(handlers.handleCreateTagSubworkspace).to.not.have.been.called;
     });
 
@@ -1401,6 +1659,19 @@ describe('SerenityController', () => {
       expect(response.status).to.equal(400);
       const body = await readBody(response);
       expect(body.message).to.match(/name is required/);
+    });
+
+    it('forwards the disabled unbounded-authoring rollout state to tag mutations', async () => {
+      isUnboundedTagAuthoringActiveStub.resolves(false);
+      handlers.handleCreateTag.resolves({ status: 201, body: {} });
+      handlers.handleUpdateTag.resolves({ status: 200, body: {} });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+
+      await controller.createTag(fakeContext());
+      await controller.updateTag(fakeContext({ params: { tagId: 'tag-1' } }));
+
+      expect(handlers.handleCreateTag.firstCall.args[6]).to.equal(false);
+      expect(handlers.handleUpdateTag.firstCall.args[7]).to.equal(false);
     });
 
     it('updateTag requires the :tagId path param', async () => {
@@ -1429,6 +1700,7 @@ describe('SerenityController', () => {
       expect(body).to.include({ tagId: 'tag-1', parentId: 'root-1' });
       expect(handlers.handleUpdateTag).to.have.been.calledOnce;
       expect(handlers.handleUpdateTag.firstCall.args[4]).to.equal('tag-1');
+      expect(handlers.handleUpdateTag.firstCall.args[7]).to.equal(true);
       expect(handlers.handleUpdateTagSubworkspace).to.not.have.been.called;
     });
 
@@ -1614,6 +1886,53 @@ describe('SerenityController', () => {
       expect(ensureMarketSiteStub).to.have.been.calledOnce;
       const opts = ensureMarketSiteStub.firstCall.args[1];
       expect(opts).to.include({ organizationId: ORG, brandId: BRAND, domain: 'x.com' });
+    });
+
+    describe('createMarket async prompt generation (flag-gated)', () => {
+      const asyncData = {
+        market: 'us', languageCode: 'en', brandDomain: 'x.com', brandNames: ['X'], generatePrompts: true,
+      };
+      const subwsBody = {
+        brandId: BRAND, geoTargetId: 2840, languageCode: 'en', projectId: 'P-NEW', workspaceId: SUBWS,
+      };
+
+      it('flag ON: skips synchronous generateTopics and annotates the 201 with the promptGeneration handle', async () => {
+        handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: { ...subwsBody } });
+        maybeEnqueueMarketGenerationStub.resolves({ jobId: 'gen-1', status: 'provisioning', reused: false });
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const response = await controller.createMarket(fakeContext({
+          env: { SERENITY_ASYNC_PROMPT_GEN: 'true' }, data: asyncData,
+        }));
+        expect(response.status).to.equal(201);
+        // Synchronous generation is skipped — the producer runs async instead.
+        const subwsOpts = handlers.handleCreateMarketSubworkspace.firstCall.args[7];
+        expect(subwsOpts.generateTopics).to.equal(false);
+        expect(maybeEnqueueMarketGenerationStub).to.have.been.calledOnce;
+        const body = await readBody(response);
+        expect(body.promptGeneration).to.deep.equal({ jobId: 'gen-1', status: 'provisioning', reused: false });
+      });
+
+      it('flag ON: an enqueue failure is non-fatal — the created market still returns 201 without a handle', async () => {
+        handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: { ...subwsBody } });
+        maybeEnqueueMarketGenerationStub.rejects(new Error('sqs down'));
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const response = await controller.createMarket(fakeContext({
+          env: { SERENITY_ASYNC_PROMPT_GEN: 'true' }, data: asyncData,
+        }));
+        expect(response.status).to.equal(201);
+        const body = await readBody(response);
+        expect(body.promptGeneration).to.equal(undefined);
+      });
+
+      it('flag OFF: preserves synchronous generateTopics and never enqueues', async () => {
+        handlers.handleCreateMarketSubworkspace.resolves({ status: 201, body: { ...subwsBody } });
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const response = await controller.createMarket(fakeContext({ env: {}, data: asyncData }));
+        expect(response.status).to.equal(201);
+        const subwsOpts = handlers.handleCreateMarketSubworkspace.firstCall.args[7];
+        expect(subwsOpts.generateTopics).to.equal(true);
+        expect(maybeEnqueueMarketGenerationStub).to.not.have.been.called;
+      });
     });
 
     it('createMarket links the mirrored site onto THIS market\'s mapping row on 201', async () => {
@@ -2060,6 +2379,19 @@ describe('SerenityController', () => {
       expect(handlers.handleCreatePrompts).to.not.have.been.called;
     });
 
+    it('finalizePrompts routes to the subworkspace handler in subworkspace mode', async () => {
+      handlers.handleFinalizePromptsSubworkspace.resolves({ slices: [] });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.finalizePrompts(fakeContext({
+        data: { slices: [{ geoTargetId: 2840, languageCode: 'en' }] },
+      }));
+      expect(response.status).to.equal(200);
+      expect(handlers.handleFinalizePromptsSubworkspace).to.have.been.calledOnce;
+      expect(handlers.handleFinalizePromptsSubworkspace.firstCall.args[1])
+        .to.equal('subworkspace-ws-1');
+      expect(handlers.handleFinalizePrompts).to.not.have.been.called;
+    });
+
     it('updatePrompt routes to the subworkspace handler in subworkspace mode', async () => {
       handlers.handleUpdatePromptSubworkspace.resolves({ status: 200, body: { semrushPromptId: 'p2' } });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
@@ -2088,6 +2420,7 @@ describe('SerenityController', () => {
       expect(handlers.handleCreateTagSubworkspace).to.have.been.calledOnce;
       expect(handlers.handleCreateTagSubworkspace.firstCall.args[1]).to.equal('subworkspace-ws-1');
       expect(handlers.handleCreateTagSubworkspace.firstCall.args[2]).to.deep.equal({});
+      expect(handlers.handleCreateTagSubworkspace.firstCall.args[4]).to.equal(true);
       expect(handlers.handleCreateTag).to.not.have.been.called;
     });
 
@@ -2104,6 +2437,7 @@ describe('SerenityController', () => {
       expect(handlers.handleUpdateTagSubworkspace).to.have.been.calledOnce;
       expect(handlers.handleUpdateTagSubworkspace.firstCall.args[1]).to.equal('subworkspace-ws-1');
       expect(handlers.handleUpdateTagSubworkspace.firstCall.args[2]).to.equal('tag-1');
+      expect(handlers.handleUpdateTagSubworkspace.firstCall.args[5]).to.equal(true);
       expect(handlers.handleUpdateTag).to.not.have.been.called;
     });
 
@@ -2159,7 +2493,7 @@ describe('SerenityController', () => {
       expect(options.callerId).to.equal('unknown');
     });
 
-    it('bulkTagPrompts reads Idempotency-Key from Headers-like objects in subworkspace mode', async () => {
+    it('bulkTagPrompts forwards the rotated token in subworkspace mode', async () => {
       const data = {
         geoTargetId: 2840,
         languageCode: 'en',
@@ -2179,7 +2513,12 @@ describe('SerenityController', () => {
           name.toLowerCase() === 'idempotency-key' ? 'headers-key' : null
         )),
       };
-      const ctx = fakeContext({ data, headers });
+      const ctx = fakeContext({
+        data,
+        headers,
+        promiseToken: 'raw-subworkspace-promise-token',
+        promiseAudience: 'semrush',
+      });
 
       const response = await controller.bulkTagPrompts(ctx);
 
@@ -2194,8 +2533,20 @@ describe('SerenityController', () => {
         'unknown',
         'headers-key',
         sinon.match.object,
+        {
+          promise_token: 'rotated-promise-token',
+          expires_in: 14399,
+          token_type: 'bearer',
+        },
+        getSemrushPair(),
       );
       expect(handlers.handleBulkTags).not.to.have.been.called;
+      expect(exchangePromiseTokenResponseStub).to.have.been.calledOnceWithExactly(
+        ctx,
+        'raw-subworkspace-promise-token',
+        getSemrushPair(),
+      );
+      expect(exchangePromiseTokenStub).not.to.have.been.called;
     });
 
     it('listTags routes to the subworkspace handler in subworkspace mode', async () => {
@@ -2206,6 +2557,29 @@ describe('SerenityController', () => {
       expect(handlers.handleListTagsSubworkspace).to.have.been.calledOnce;
       expect(handlers.handleListTagsSubworkspace.firstCall.args[1]).to.equal('subworkspace-ws-1');
       expect(handlers.handleListTags).to.not.have.been.called;
+    });
+
+    it('searchTags routes to the subworkspace handler in subworkspace mode', async () => {
+      handlers.handleSearchTagsSubworkspace.resolves({
+        items: [], cursor: null, complete: true,
+      });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext();
+      ctx.request = { url: 'https://x?geoTargetId=2840&languageCode=en&q=campaign' };
+      const response = await controller.searchTags(ctx);
+
+      expect(response.status).to.equal(200);
+      expect(handlers.handleSearchTagsSubworkspace).to.have.been.calledOnce;
+      expect(handlers.handleSearchTagsSubworkspace.firstCall.args[1]).to.equal('subworkspace-ws-1');
+      expect(handlers.handleSearchTagsSubworkspace.firstCall.args).to.have.length(5);
+      expect(handlers.handleSearchTagsSubworkspace.firstCall.args[4]).to.deep.equal({
+        maxParents: 200,
+        maxNodes: 10_000,
+        maxDurationMs: 15_000,
+        concurrency: 6,
+        maxPagesPerParent: 50,
+      });
+      expect(handlers.handleSearchTags).not.to.have.been.called;
     });
 
     it('listModels routes to the subworkspace handler in subworkspace mode', async () => {
@@ -2348,6 +2722,41 @@ describe('SerenityController', () => {
       expect(updateBrandStub.firstCall.args[0].updates).to.include({
         status: 'active', baseSiteId: 'site-uuid-1',
       });
+    });
+
+    it('activate async generation: enqueues + annotates only the 201 market, skipping the 409 (already-live) one', async () => {
+      // First market is freshly created (201, carries geoTargetId → annotate + enqueue);
+      // second is already live (409 sliceExists → skipped, no enqueue).
+      handlers.handleCreateMarketSubworkspace.onFirstCall().resolves({
+        status: 201, body: { geoTargetId: 2840, languageCode: 'en', workspaceId: SUBWS },
+      });
+      handlers.handleCreateMarketSubworkspace.onSecondCall().resolves({
+        status: 409, body: { error: 'sliceExists', message: 'already live' },
+      });
+      maybeEnqueueMarketGenerationStub.resolves({ jobId: 'gen-a', status: 'provisioning', reused: false });
+      const brand = makeBrandModel({ getStatus: () => 'active' });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.activate(fakeContext({
+        brand,
+        env: { SERENITY_ASYNC_PROMPT_GEN: 'true' },
+        data: {
+          brandDomain: 'x.com',
+          brandNames: ['X'],
+          generatePrompts: true,
+          markets: [{ market: 'us', languageCode: 'en' }, { market: 'de', languageCode: 'de' }],
+        },
+      }));
+      expect(response.status).to.equal(200);
+      // Only the freshly-created (201) market is enqueued — not the 409.
+      expect(maybeEnqueueMarketGenerationStub).to.have.been.calledOnce;
+      // Async skips synchronous generateTopics on every market create in the batch.
+      const subwsOpts = handlers.handleCreateMarketSubworkspace.firstCall.args[7];
+      expect(subwsOpts.generateTopics).to.equal(false);
+      const body = await readBody(response);
+      const usMarket = body.markets.find((m) => m.market === 'us');
+      const deMarket = body.markets.find((m) => m.market === 'de');
+      expect(usMarket.body.promptGeneration).to.deep.equal({ jobId: 'gen-a', status: 'provisioning', reused: false });
+      expect(deMarket.body.promptGeneration).to.equal(undefined);
     });
 
     it('activate mirrors the brand domain as a Site once (not per market) when any market goes live', async () => {
@@ -3150,6 +3559,19 @@ describe('SerenityController', () => {
       expect(handlers.handleCreatePromptsSubworkspace).not.to.have.been.called;
     });
 
+    it('finalizePrompts routes to handleFinalizePrompts in flat mode and returns ok(result)', async () => {
+      handlers.handleFinalizePrompts.resolves({ slices: [] });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const response = await controller.finalizePrompts(fakeContext({
+        data: { slices: [{ geoTargetId: 2840, languageCode: 'en' }] },
+      }));
+      expect(response.status).to.equal(200);
+      expect(handlers.handleFinalizePrompts).to.have.been.calledOnce;
+      expect(handlers.handleFinalizePrompts.firstCall.args[2]).to.equal(BRAND);
+      expect(handlers.handleFinalizePrompts.firstCall.args[3]).to.equal(WORKSPACE);
+      expect(handlers.handleFinalizePromptsSubworkspace).not.to.have.been.called;
+    });
+
     it('passes ai origin to synchronous creates from a service principal', async () => {
       handlers.handleCreatePrompts.resolves({ created: 1, failed: [] });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
@@ -3177,6 +3599,8 @@ describe('SerenityController', () => {
         }];
         const response = await controller.createPrompts(fakeContext({
           data: { async: true, prompts },
+          promiseToken: 'promise-token-xyz',
+          promiseAudience: 'semrush',
         }));
 
         expect(response.status).to.equal(202);
@@ -3187,6 +3611,11 @@ describe('SerenityController', () => {
         expect(createAndEnqueueJobStub).to.have.been.calledOnce;
         const [, enqueueArgs] = createAndEnqueueJobStub.firstCall.args;
         expect(enqueueArgs.jobType).to.equal('serenity-classify-prompts');
+        // Regression guard for the async-500 bug: the controller forwards the
+        // caller's raw promise token + SEMRUSH pair to the worker instead of
+        // minting a new one via the (unprovisioned) EMITTER pair.
+        expect(enqueueArgs.promiseToken).to.deep.equal({ promise_token: 'promise-token-xyz' });
+        expect(enqueueArgs.promisePair).to.equal(getSemrushPair());
         expect(enqueueArgs.metadata).to.deep.equal({
           // callerId captured at enqueue time (LLMO-6289) — no auth profile on the
           // test context, so it resolves to the `unknown` sentinel. The default
@@ -3204,6 +3633,30 @@ describe('SerenityController', () => {
         });
         // The synchronous path never runs.
         expect(handlers.handleCreatePrompts).to.not.have.been.called;
+        expect(exchangePromiseTokenStub).to.not.have.been.called;
+      });
+
+      it('forwards the browser promise token and audience pair without exchanging it before enqueue', async () => {
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const prompts = [{
+          text: 'What is your return policy?', geoTargetId: 2840, languageCode: 'en', tagIds: ['tag-1'],
+        }];
+        const response = await controller.createPrompts(fakeContext({
+          authType: 'jwt',
+          bearer: 'spacecat-session-jwt',
+          data: { async: true, prompts },
+          promiseToken: 'browser%2Fpromise%2Btoken',
+          promiseAudience: 'semrush',
+        }));
+
+        expect(response.status).to.equal(202);
+        expect(exchangePromiseTokenStub).to.not.have.been.called;
+        expect(createAndEnqueueJobStub).to.have.been.calledOnce;
+        const [, enqueueArgs] = createAndEnqueueJobStub.firstCall.args;
+        expect(enqueueArgs.promiseToken).to.deep.equal({
+          promise_token: 'browser/promise+token',
+        });
+        expect(enqueueArgs.promisePair).to.equal(getSemrushPair());
       });
 
       it('enqueues a serenity-classify-prompts job and returns 202 for subworkspace-mode async import, carrying authMode + parentWorkspaceId', async () => {
@@ -3216,6 +3669,8 @@ describe('SerenityController', () => {
         }];
         const response = await controller.createPrompts(fakeContext({
           data: { async: true, prompts },
+          promiseToken: 'promise-token-xyz',
+          promiseAudience: 'semrush',
         }));
 
         expect(response.status).to.equal(202);
@@ -3226,6 +3681,8 @@ describe('SerenityController', () => {
         expect(createAndEnqueueJobStub).to.have.been.calledOnce;
         const [, enqueueArgs] = createAndEnqueueJobStub.firstCall.args;
         expect(enqueueArgs.jobType).to.equal('serenity-classify-prompts');
+        expect(enqueueArgs.promiseToken).to.deep.equal({ promise_token: 'promise-token-xyz' });
+        expect(enqueueArgs.promisePair).to.equal(getSemrushPair());
         expect(enqueueArgs.metadata).to.deep.equal({
           mode: 'create',
           brandId: BRAND,
@@ -3244,6 +3701,54 @@ describe('SerenityController', () => {
         // Neither synchronous create handler runs.
         expect(handlers.handleCreatePromptsSubworkspace).to.not.have.been.called;
         expect(handlers.handleCreatePrompts).to.not.have.been.called;
+      });
+
+      // Async classify writes to Semrush on the caller's behalf after the request
+      // returns, so it REQUIRES the caller's promise token + semrush audience to
+      // carry forward. These two guards are defense-in-depth (the UI always sends
+      // both) and, critically, prevent the async branch from falling through to the
+      // token-MINT path that shipped broken (unprovisioned EMITTER pair → 500).
+      it('400s without enqueueing when async is true but the x-promise-token header is absent', async () => {
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const response = await controller.createPrompts(fakeContext({
+          data: { async: true, prompts: [{ text: 'x', geoTargetId: 2840, languageCode: 'en' }] },
+          promiseAudience: 'semrush',
+        }));
+
+        expect(response.status).to.equal(400);
+        const body = await readBody(response);
+        expect(body.error).to.equal('invalidRequest');
+        expect(body.message).to.match(/requires a promise token/i);
+        expect(createAndEnqueueJobStub).to.not.have.been.called;
+      });
+
+      it('400s without enqueueing when async is true but the x-promise-audience: semrush header is absent', async () => {
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const response = await controller.createPrompts(fakeContext({
+          data: { async: true, prompts: [{ text: 'x', geoTargetId: 2840, languageCode: 'en' }] },
+          promiseToken: 'promise-token-xyz',
+        }));
+
+        expect(response.status).to.equal(400);
+        const body = await readBody(response);
+        expect(body.error).to.equal('invalidRequest');
+        expect(body.message).to.match(/x-promise-audience: semrush/);
+        expect(createAndEnqueueJobStub).to.not.have.been.called;
+      });
+
+      it('400s without enqueueing when async is true and the x-promise-audience is an unknown value', async () => {
+        const controller = SerenityController({ env: {} }, fakeLog(), {});
+        const response = await controller.createPrompts(fakeContext({
+          data: { async: true, prompts: [{ text: 'x', geoTargetId: 2840, languageCode: 'en' }] },
+          promiseToken: 'promise-token-xyz',
+          promiseAudience: 'bogus',
+        }));
+
+        expect(response.status).to.equal(400);
+        const body = await readBody(response);
+        expect(body.error).to.equal('invalidRequest');
+        expect(body.message).to.match(/Unknown promise audience: bogus/);
+        expect(createAndEnqueueJobStub).to.not.have.been.called;
       });
 
       // Regression guard for the #2 collision (the whole point of this fix):
@@ -3267,6 +3772,7 @@ describe('SerenityController', () => {
         await controller.createPrompts(fakeContext({
           authType: 'api-key',
           promiseToken: 'promise-token',
+          promiseAudience: 'semrush',
           data: {
             async: true,
             prompts: [{ text: 'generated prompt', geoTargetId: 2840, languageCode: 'en' }],

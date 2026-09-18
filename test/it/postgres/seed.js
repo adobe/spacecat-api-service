@@ -21,7 +21,9 @@ import { facsAccessMappings } from './seed-data/facs-access-mappings.js';
 import { sites } from './seed-data/sites.js';
 import { audits } from './seed-data/audits.js';
 import { opportunities } from './seed-data/opportunities.js';
+import { opportunityUrls } from './seed-data/opportunity-urls.js';
 import { suggestions } from './seed-data/suggestions.js';
+import { suggestionUrls } from './seed-data/suggestion-urls.js';
 import { fixes, fixEntitySuggestions } from './seed-data/fixes.js';
 import { experiments } from './seed-data/experiments.js';
 import { siteTopPages } from './seed-data/site-top-pages.js';
@@ -34,6 +36,7 @@ import { auditUrls } from './seed-data/audit-urls.js';
 import { trialUsers } from './seed-data/trial-users.js';
 import { trialUserActivities } from './seed-data/trial-user-activities.js';
 import { asyncJobs } from './seed-data/async-jobs.js';
+import { oaeValidations } from './seed-data/oae-validations.js';
 import { consumers } from './seed-data/consumers.js';
 import { plgOnboardings } from './seed-data/plg-onboardings.js';
 import { siteImsOrgAccesses } from './seed-data/site-ims-org-accesses.js';
@@ -282,12 +285,15 @@ async function seed() {
     insertRows('sentiment_guidelines', sentimentGuidelines),
     insertRows('brand_sites', brandSites),
     insertRows('tickets', tickets),
+    insertRows('opportunity_urls', opportunityUrls),
   ]);
 
   // Level 4: depend on fix_entities + suggestions + tickets
   await Promise.all([
     insertRows('fix_entity_suggestions', fixEntitySuggestions),
     insertRows('ticket_suggestions', ticketSuggestions),
+    insertRows('oae_validations', oaeValidations),
+    insertRows('suggestion_urls', suggestionUrls),
   ]);
 }
 

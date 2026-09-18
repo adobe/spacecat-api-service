@@ -10,14 +10,20 @@
  * governing permissions and limitations under the License.
  */
 
+import { createHmac } from 'node:crypto';
 import {
   badRequest, notFound, accepted, internalServerError, createResponse,
 } from '@adobe/spacecat-shared-http-utils';
-import { hasText } from '@adobe/spacecat-shared-utils';
+import { hasText, isValidUUID } from '@adobe/spacecat-shared-utils';
+import { Entitlement as EntitlementModel } from '@adobe/spacecat-shared-data-access';
 import { HeadObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
 import { cachedOk } from '../../support/cached-response.js';
 import { dateToIsoWeek } from '../../support/elements/week-utils.js';
+import { isValidLocale } from '../../utils/validations.js';
 import { postSlackMessage } from '../../utils/slack/base.js';
+import { getBrandById } from '../../support/brands-storage.js';
+import { redactFeedbackContent } from '../../support/feedback-redaction.js';
+import { resolveCallerImsUserId } from '../../support/utils.js';
 
 const CLAIMS_PREFIX = 'brand_claims/llmo';
 const WEEK_RE = /^\d{4}-W\d{2}$/;
@@ -27,6 +33,9 @@ const WEEK_RE = /^\d{4}-W\d{2}$/;
 // supplied `limit` (a year of weekly runs) without ever paging past one S3 list.
 const DEFAULT_WEEKS_LIMIT = 15;
 const MAX_WEEKS_LIMIT = 52;
+const PRODUCT_FEEDBACK_PREFIX = 'product_feedback/brand_claims';
+const PRODUCT_FEEDBACK_NOTE_MAX_LENGTH = 4000;
+const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 /**
  * List the ISO-week (`YYYY-Www`) run folders under a site's brand-claims prefix,
@@ -70,6 +79,10 @@ const BRAND_CLAIMS_REQUEST_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
 // dots, hyphens, underscores — no `/` — to prevent using HeadObject as an
 // object-existence probe across arbitrary key paths.
 const MODEL_RE = /^[\w.-]+$/;
+// `locale` is interpolated into the S3 key too, so it is validated with the shared
+// `isValidLocale` (strict `xx_yy` shape) before it can reach a key — one definition of
+// "valid locale" across the service, and it blocks `..`, slashes, and arbitrary path
+// segments (S3 key injection) just like MODEL_RE.
 
 /**
  * Latest run key for a site: the lexically-greatest `YYYY-Www` folder under the
@@ -106,7 +119,9 @@ async function latestWeekKey(s3, bucketName, siteId, log) {
 export async function handleBrandClaims(context) {
   const { log, s3 } = context;
   const { siteId } = context.params;
-  const { model, date, week } = context.data;
+  const {
+    model, date, week, locale,
+  } = context.data;
 
   if (!s3 || !s3.s3Client) {
     return badRequest('S3 storage is not configured for this environment');
@@ -119,6 +134,16 @@ export async function handleBrandClaims(context) {
 
   if (model !== undefined && !MODEL_RE.test(model)) {
     return badRequest('Invalid model parameter');
+  }
+
+  // `locale` selects a localized sibling of the default `data.json.gz`
+  // (`data.<locale>.json.gz`). It applies ONLY to the default `data` family, so
+  // it is ignored when `model` is set (model files are not localized) — model
+  // wins, keeping the two selectors from interacting. Validate strictly here,
+  // before it can reach an S3 key (trust boundary).
+  const useLocale = !model && hasText(locale);
+  if (useLocale && !isValidLocale(locale)) {
+    return badRequest('Invalid locale parameter: expected e.g. ja_jp');
   }
 
   // Model files are managed flat (not week-partitioned) and take precedence;
@@ -166,12 +191,46 @@ export async function handleBrandClaims(context) {
       }
     }
 
+    // Localization: when a valid `locale` is requested, prefer the localized
+    // sibling that mystique writes next to the resolved English file
+    // (`data.json.gz` -> `data.<locale>.json.gz`, in the same week/flat folder),
+    // and transparently fall back to English when that sibling does not exist.
+    // getSignedUrl never checks existence, so an explicit HeadObject is the only
+    // way to detect a missing localized file. `servedLocale` reports which one
+    // the caller actually got so the UI can tell whether it fell back.
+    let servedLocale = 'default';
+    let verified = false;
+    const localizedKey = useLocale ? s3Key.replace(/data\.json\.gz$/, `data.${locale}.json.gz`) : s3Key;
+    // The regex-replace only produces a distinct key when the resolved English key ends
+    // in `data.json.gz` (true for every default-family branch today). Guard on
+    // `localizedKey !== s3Key` so that if a future key shape ever breaks that invariant,
+    // the replace no-op can't make us HEAD the English object and then report
+    // `servedLocale = locale` for an English file — a silent misreport.
+    if (useLocale && localizedKey !== s3Key) {
+      try {
+        await s3.s3Client.send(new HeadObjectCommand({ Bucket: bucketName, Key: localizedKey }));
+        s3Key = localizedKey;
+        servedLocale = locale;
+        verified = true; // localized object confirmed present; no second HEAD needed
+      } catch (localeError) {
+        if (localeError.name === 'NotFound' || localeError.$metadata?.httpStatusCode === 404) {
+          log.info(`Localized brand claims not found for site ${siteId} locale ${locale}; falling back to English`);
+        } else {
+          throw localeError; // NoSuchBucket / transient faults -> shared handler below
+        }
+      }
+    }
+
     // Presigning a GetObject URL is an offline operation and never checks that
     // the object exists, so without this HeadObject the endpoint would happily
     // hand out a URL that 404s on fetch. Verify existence first and return a
-    // clean 404 otherwise (mirrors getFanoutReport). This also lets callers use
-    // the endpoint as a cheap availability probe (e.g. an "all brands" view).
-    await s3.s3Client.send(new HeadObjectCommand({ Bucket: bucketName, Key: s3Key }));
+    // clean 404 otherwise (mirrors getFanoutReport). Skipped only when the
+    // localized HEAD above already confirmed this exact key. This also lets
+    // callers use the endpoint as a cheap availability probe (e.g. an "all
+    // brands" view).
+    if (!verified) {
+      await s3.s3Client.send(new HeadObjectCommand({ Bucket: bucketName, Key: s3Key }));
+    }
 
     const command = new GetObjectCommand({
       Bucket: bucketName,
@@ -184,6 +243,8 @@ export async function handleBrandClaims(context) {
     return cachedOk({
       siteId,
       model: model || 'default',
+      requestedLocale: useLocale ? locale : null,
+      servedLocale,
       presignedUrl: url,
       expiresAt: new Date(Date.now() + expiresIn * 1000).toISOString(),
     });
@@ -194,11 +255,15 @@ export async function handleBrandClaims(context) {
     }
     if (s3Error.name === 'NoSuchBucket') {
       log.error(`S3 bucket ${bucketName} not found`);
-      return badRequest(`Storage bucket not found: ${bucketName}`);
+      return badRequest('S3 storage is not properly configured for this environment');
     }
 
+    // Keep the raw AWS error (message, bucket, key layout) in the log only — echoing it
+    // to the client leaks recon primitives (e.g. an AccessDenied surfaces account/role/
+    // bucket), and trial users can reach this endpoint. Return generic text + a 5xx, so a
+    // real S3 fault isn't mislabelled a 400 (mirrors handleBrandClaimsWeeks).
     log.error(`S3 error retrieving brand claims for site ${siteId}: ${s3Error.message}`);
-    return badRequest(`Error retrieving brand claims: ${s3Error.message}`);
+    return internalServerError('Unable to retrieve brand claims');
   }
 }
 
@@ -252,6 +317,187 @@ export async function handleBrandClaimsWeeks(context) {
     log.error(`S3 error listing brand claims weeks for site ${siteId}: ${s3Error.message}`);
     return internalServerError('Unable to list brand claims weeks');
   }
+}
+
+/**
+ * Persists an append-only Brand Claims product-feedback record in the shared
+ * ABV learning-data bucket. Tenant and identity context are derived server-side.
+ *
+ * @param {object} context - Request context.
+ * @param {object} site - Access-checked Site model.
+ * @returns {Promise<Response>} 202 when stored (or already stored).
+ */
+export async function handleBrandClaimsFeedback(context, site) {
+  const {
+    data = {}, dataAccess, env = {}, log, s3,
+  } = context;
+  const {
+    eventId, brandId, rating, comment,
+  } = data;
+
+  if (typeof eventId !== 'string' || !UUID_V4_RE.test(eventId)) {
+    return badRequest('eventId must be a valid UUID');
+  }
+  if (!isValidUUID(brandId)) {
+    return badRequest('brandId must be a valid UUID');
+  }
+  if (!['up', 'down'].includes(rating)) {
+    return badRequest('rating must be "up" or "down"');
+  }
+  if (comment !== undefined && typeof comment !== 'string') {
+    return badRequest('comment must be a string');
+  }
+
+  const trimmedComment = comment?.trim();
+  if (trimmedComment && trimmedComment.length > PRODUCT_FEEDBACK_NOTE_MAX_LENGTH) {
+    return createResponse({
+      message: `comment exceeds the ${PRODUCT_FEEDBACK_NOTE_MAX_LENGTH} character limit`,
+    }, 413);
+  }
+
+  const bucket = env.ABV_LEARNING_DATA_BUCKET;
+  const hashSalt = env.ABV_ID_HASH_SALT;
+  if (!hasText(bucket) || !hasText(hashSalt)
+    || !s3?.s3Client || !s3?.PutObjectCommand || !s3?.GetObjectCommand) {
+    log.error('Brand Claims feedback storage is not configured');
+    return internalServerError('Brand Claims feedback is temporarily unavailable');
+  }
+
+  const organizationId = site.getOrganizationId();
+  const postgrestClient = dataAccess?.services?.postgrestClient;
+  if (!postgrestClient?.from) {
+    log.error('Brand Claims feedback requires PostgREST brand lookup');
+    return internalServerError('Brand Claims feedback is temporarily unavailable');
+  }
+
+  const brand = await getBrandById(organizationId, brandId, postgrestClient);
+  if (!brand) {
+    return notFound(`Brand not found: ${brandId}`);
+  }
+  const siteId = site.getId();
+  const brandSiteIds = new Set([
+    brand.baseSiteId,
+    ...(Array.isArray(brand.siteIds) ? brand.siteIds : []),
+  ].filter(Boolean));
+  if (!brandSiteIds.has(siteId)) {
+    return badRequest('Brand does not belong to this site');
+  }
+
+  const organization = await dataAccess.Organization.findById(organizationId);
+  if (!organization) {
+    return notFound(`Organization not found: ${organizationId}`);
+  }
+
+  let tier = 'free';
+  try {
+    const entitlement = await dataAccess.Entitlement
+      .findByOrganizationIdAndProductCode(
+        organizationId,
+        EntitlementModel.PRODUCT_CODES.LLMO,
+      );
+    if (entitlement?.getTier?.() === EntitlementModel.TIERS.PAID) {
+      tier = 'paid';
+    }
+  } catch (error) {
+    log.error(`Failed to determine Brand Claims feedback tier for org ${organizationId}: ${error.message}`);
+    return internalServerError('Unable to submit Brand Claims feedback');
+  }
+
+  const rawUserId = resolveCallerImsUserId(context);
+  if (!rawUserId) {
+    log.error(`Brand Claims feedback caller identity is unavailable for org ${organizationId}`);
+    return internalServerError('Brand Claims feedback is temporarily unavailable');
+  }
+  const abvId = `abv_${createHmac('sha256', hashSalt).update(rawUserId).digest('hex').slice(0, 12)}`;
+  const timestamp = new Date().toISOString();
+  const { detailMarkdown: cleanComment, scrubHits } = redactFeedbackContent({
+    detailMarkdown: trimmedComment,
+  });
+  if (Object.keys(scrubHits).length > 0) {
+    log.info(`brand_claims_feedback.scrub_hit_total ${JSON.stringify(scrubHits)} event=${eventId}`);
+  }
+
+  const record = {
+    schemaVersion: 1,
+    recordType: 'product_feedback',
+    surface: 'brand_claims',
+    id: eventId,
+    timestamp,
+    rating,
+    ...(cleanComment ? { note: cleanComment } : {}),
+    abv_id: abvId,
+    organizationId,
+    customerName: organization.getName(),
+    imsOrgId: organization.getImsOrgId() ?? null,
+    siteId,
+    brandId: brand.id,
+    brand: brand.name,
+    tier,
+  };
+  const markerKey = `${PRODUCT_FEEDBACK_PREFIX}/idempotency/${eventId}.json`;
+  let recordToStore = record;
+  // Local S3 emulators used by integration tests do not configure a KMS backend
+  // for explicit SSE headers. AWS environments have no custom endpoint and must
+  // keep the bucket-policy-required AES256 header.
+  const encryption = env.AWS_ENDPOINT_URL_S3
+    ? {}
+    : { ServerSideEncryption: 'AES256' };
+
+  try {
+    await s3.s3Client.send(new s3.PutObjectCommand({
+      Bucket: bucket,
+      Key: markerKey,
+      Body: JSON.stringify(record),
+      ContentType: 'application/json',
+      ...encryption,
+      IfNoneMatch: '*',
+    }));
+  } catch (error) {
+    if (error?.name !== 'PreconditionFailed' && error?.$metadata?.httpStatusCode !== 412) {
+      log.error(`Failed to reserve Brand Claims product feedback event=${eventId}: ${error.message}`);
+      return internalServerError('Unable to submit Brand Claims feedback');
+    }
+    try {
+      const marker = await s3.s3Client.send(new s3.GetObjectCommand({
+        Bucket: bucket,
+        Key: markerKey,
+      }));
+      recordToStore = JSON.parse(await marker.Body.transformToString());
+      if (recordToStore?.id !== eventId
+        || !['up', 'down'].includes(recordToStore?.rating)
+        || !hasText(recordToStore?.timestamp)
+        || recordToStore.organizationId !== organizationId
+        || recordToStore.siteId !== siteId
+        || recordToStore.brandId !== brandId
+        || recordToStore.abv_id !== abvId) {
+        throw new Error('invalid idempotency marker');
+      }
+    } catch (markerError) {
+      log.error(`Failed to recover Brand Claims product feedback event=${eventId}: ${markerError.message}`);
+      return internalServerError('Unable to submit Brand Claims feedback');
+    }
+  }
+
+  const timestampKey = recordToStore.timestamp.replace(/[-:.TZ]/g, '');
+  const key = `${PRODUCT_FEEDBACK_PREFIX}/${recordToStore.rating}/${recordToStore.tier}/${recordToStore.timestamp.slice(0, 10)}/${timestampKey}_${eventId}.json`;
+  try {
+    await s3.s3Client.send(new s3.PutObjectCommand({
+      Bucket: bucket,
+      Key: key,
+      Body: JSON.stringify(recordToStore),
+      ContentType: 'application/json',
+      ...encryption,
+      IfNoneMatch: '*',
+    }));
+  } catch (error) {
+    if (error?.name === 'PreconditionFailed' || error?.$metadata?.httpStatusCode === 412) {
+      return accepted({ id: eventId });
+    }
+    log.error(`Failed to store Brand Claims product feedback event=${eventId}: ${error.message}`);
+    return internalServerError('Unable to submit Brand Claims feedback');
+  }
+  log.info(`Stored Brand Claims product feedback event=${eventId} org=${organizationId} site=${siteId} brand=${brandId}`);
+  return accepted({ id: eventId });
 }
 
 // Adobe corporate and test email domains (plus their subdomains) that mark a

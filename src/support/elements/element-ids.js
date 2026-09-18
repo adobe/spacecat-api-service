@@ -137,6 +137,10 @@ export const ELEMENT_IDS = Object.freeze({
   SOURCES: '553cd819-d507-460d-a8ff-e34486bad3e1',
   SOURCES_DATES: '404fb017-7e44-41ec-896f-7138f731da60',
 
+  // Combined Brand Claims execution feed: one row includes prompt, response, date, model,
+  // per-execution sources, response count, and tags.
+  BRAND_CLAIMS_RESPONSES: '55e89619-4b02-4319-be91-590e58da8815',
+
   // Prompt Details
   PROMPT_AI_ANSWERS: '45d6251f-15cd-4b33-a7f6-de97925e900e',
   PROMPT_SOURCES: '7db0df5c-6679-4495-8ea8-ef2dfd7e5251',

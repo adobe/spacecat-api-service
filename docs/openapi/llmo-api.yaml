@@ -1922,6 +1922,21 @@ llmo-brand-claims:
         type: string
         format: date
         example: '2026-04-22'
+    - name: locale
+      in: query
+      required: false
+      description: >
+        Locale of the report to retrieve (`xx_yy`, e.g. `ja_jp`). Selects the
+        localized sibling of the default `data.json.gz` (`data.<locale>.json.gz`)
+        in the same folder as the resolved run, falling back to the English
+        `data.json.gz` when that sibling does not exist. Applies only to the
+        default `data` family and is ignored when `model` is set. The response
+        `servedLocale` reports which locale was actually served, so callers can
+        detect a fallback.
+      schema:
+        type: string
+        pattern: '^[a-z]{2}_[a-z]{2}$'
+        example: 'ja_jp'
   get:
     tags:
       - llmo
@@ -1959,6 +1974,19 @@ llmo-brand-claims:
                   type: string
                   description: The AI model name, or 'default' if no model was specified
                   example: 'gpt-4.1'
+                requestedLocale:
+                  type: [string, 'null']
+                  description: >
+                    The locale requested by the caller (`xx_yy`), or null when no
+                    locale was applied (absent, or ignored because `model` was set).
+                  example: 'ja_jp'
+                servedLocale:
+                  type: string
+                  description: >
+                    The locale actually served: the requested locale when its file
+                    exists, or 'default' when the English file was served (no locale
+                    requested, or a fallback because the localized file was missing).
+                  example: 'ja_jp'
                 presignedUrl:
                   type: string
                   format: uri
@@ -1971,6 +1999,8 @@ llmo-brand-claims:
               required:
                 - siteId
                 - model
+                - requestedLocale
+                - servedLocale
                 - presignedUrl
                 - expiresAt
       '400':
@@ -2169,6 +2199,49 @@ llmo-brand-claims-request:
         $ref: './responses.yaml#/500'
     security:
       - api_key: [ ]
+
+llmo-brand-claims-feedback:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  post:
+    tags:
+      - llmo
+    summary: Submit Brand Claims product feedback
+    description: |
+      Stores an authenticated user's rating and optional comment for the currently
+      selected Brand Claims report in the shared ABV learning-data store.
+
+      Organization, site, brand, entitlement tier, and pseudonymous user context
+      are derived by the service. The client-supplied `eventId` is used as an
+      idempotency key, so retrying the same submission does not create a duplicate.
+    operationId: submitBrandClaimsFeedback
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/BrandClaimsFeedbackRequest'
+    responses:
+      '202':
+        description: Feedback accepted and stored
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/BrandClaimsFeedbackResponse'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '413':
+        description: Feedback comment exceeds the supported length
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - session_token: [ ]
 
 llmo-opportunity-workspace-demo-brand-presence:
   parameters:
@@ -5599,7 +5672,7 @@ llmo-referral-traffic-kpis:
         schema: { $ref: './schemas.yaml#/ReferralTrafficSource' }
       - { name: startDate, in: query, schema: { type: string, format: date } }
       - { name: endDate, in: query, schema: { type: string, format: date } }
-      - { name: platform, in: query, schema: { type: string } }
+      - $ref: './parameters.yaml#/referralPlatform'
       - { name: region, in: query, schema: { type: string } }
       - { name: pageIntent, in: query, description: 'Snake alias: page_intent', schema: { type: string } }
       - { name: deviceType, in: query, description: 'Aliases: device_type, device', schema: { type: string } }
@@ -5640,7 +5713,7 @@ llmo-referral-traffic-trend:
         schema: { $ref: './schemas.yaml#/ReferralTrafficSource' }
       - { name: startDate, in: query, schema: { type: string, format: date } }
       - { name: endDate, in: query, schema: { type: string, format: date } }
-      - { name: platform, in: query, schema: { type: string } }
+      - $ref: './parameters.yaml#/referralPlatform'
       - { name: region, in: query, schema: { type: string } }
       - { name: pageIntent, in: query, description: 'Snake alias: page_intent', schema: { type: string } }
       - { name: deviceType, in: query, description: 'Aliases: device_type, device', schema: { type: string } }
@@ -5680,7 +5753,7 @@ llmo-referral-traffic-by-platform:
         schema: { $ref: './schemas.yaml#/ReferralTrafficSource' }
       - { name: startDate, in: query, schema: { type: string, format: date } }
       - { name: endDate, in: query, schema: { type: string, format: date } }
-      - { name: platform, in: query, schema: { type: string } }
+      - $ref: './parameters.yaml#/referralPlatform'
       - { name: region, in: query, schema: { type: string } }
       - { name: pageIntent, in: query, description: 'Snake alias: page_intent', schema: { type: string } }
       - { name: deviceType, in: query, description: 'Aliases: device_type, device', schema: { type: string } }
@@ -5717,7 +5790,7 @@ llmo-referral-traffic-by-region:
         schema: { $ref: './schemas.yaml#/ReferralTrafficSource' }
       - { name: startDate, in: query, schema: { type: string, format: date } }
       - { name: endDate, in: query, schema: { type: string, format: date } }
-      - { name: platform, in: query, schema: { type: string } }
+      - $ref: './parameters.yaml#/referralPlatform'
       - { name: region, in: query, schema: { type: string } }
       - { name: pageIntent, in: query, description: 'Snake alias: page_intent', schema: { type: string } }
       - { name: deviceType, in: query, description: 'Aliases: device_type, device', schema: { type: string } }
@@ -5754,7 +5827,7 @@ llmo-referral-traffic-by-page-intent:
         schema: { $ref: './schemas.yaml#/ReferralTrafficSource' }
       - { name: startDate, in: query, schema: { type: string, format: date } }
       - { name: endDate, in: query, schema: { type: string, format: date } }
-      - { name: platform, in: query, schema: { type: string } }
+      - $ref: './parameters.yaml#/referralPlatform'
       - { name: region, in: query, schema: { type: string } }
       - { name: pageIntent, in: query, description: 'Snake alias: page_intent', schema: { type: string } }
       - { name: deviceType, in: query, description: 'Aliases: device_type, device', schema: { type: string } }
@@ -5805,7 +5878,7 @@ llmo-referral-traffic-by-url:
         in: query
         description: Range end (`YYYY-MM-DD`). Required if `startDate` is set; span with `startDate` must be <= 62 days.
         schema: { type: string, format: date }
-      - { name: platform, in: query, schema: { type: string } }
+      - $ref: './parameters.yaml#/referralPlatform'
       - { name: region, in: query, schema: { type: string } }
       - { name: pageIntent, in: query, description: 'Snake alias: page_intent', schema: { type: string } }
       - { name: deviceType, in: query, description: 'Aliases: device_type, device', schema: { type: string } }
@@ -5881,7 +5954,7 @@ llmo-referral-traffic-by-url-trend:
         in: query
         description: Range end (`YYYY-MM-DD`). Required if `startDate` is set; span with `startDate` must be <= 62 days.
         schema: { type: string, format: date }
-      - { name: platform, in: query, schema: { type: string } }
+      - $ref: './parameters.yaml#/referralPlatform'
       - { name: region, in: query, schema: { type: string } }
       - { name: pageIntent, in: query, description: 'Snake alias: page_intent', schema: { type: string } }
       - { name: deviceType, in: query, description: 'Aliases: device_type, device', schema: { type: string } }
@@ -5926,7 +5999,7 @@ llmo-referral-traffic-by-device:
         schema: { $ref: './schemas.yaml#/ReferralTrafficSource' }
       - { name: startDate, in: query, schema: { type: string, format: date } }
       - { name: endDate, in: query, schema: { type: string, format: date } }
-      - { name: platform, in: query, schema: { type: string } }
+      - $ref: './parameters.yaml#/referralPlatform'
       - { name: region, in: query, schema: { type: string } }
       - { name: pageIntent, in: query, description: 'Snake alias: page_intent', schema: { type: string } }
       - { name: deviceType, in: query, description: 'Aliases: device_type, device', schema: { type: string } }
@@ -5979,7 +6052,7 @@ llmo-referral-traffic-business-impact:
         in: query
         description: Range end (`YYYY-MM-DD`). Required if `startDate` is set; span with `startDate` must be <= 62 days.
         schema: { type: string, format: date }
-      - { name: platform, in: query, schema: { type: string } }
+      - $ref: './parameters.yaml#/referralPlatform'
       - { name: region, in: query, schema: { type: string } }
       - { name: pageIntent, in: query, description: 'Snake alias: page_intent', schema: { type: string } }
       - { name: deviceType, in: query, description: 'Aliases: device_type, device', schema: { type: string } }

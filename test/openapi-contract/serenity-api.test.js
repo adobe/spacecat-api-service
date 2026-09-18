@@ -21,6 +21,7 @@ import Ajv from 'ajv';
 import addFormats from 'ajv-formats';
 
 import { loadBundledSpec, operationsForTag } from './_lib/openapi-loader.js';
+import { ErrorWithStatusCode } from '../../src/support/utils.js';
 // Real class (not a mock) so the elements esmock block can pass it through without
 // adding a second class to this file (max-classes-per-file).
 import { SerenityTransportError } from '../../src/support/serenity/rest-transport.js';
@@ -31,6 +32,11 @@ use(sinonChai);
 const ORG = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
 const BRAND = '11111111-2222-3333-4444-555555555555';
 const WORKSPACE = '22222222-3333-4444-5555-666666666666';
+// The brand's linked base site — market-generation jobs carry this in metadata.siteId
+// (the producer resolves it from getBrandBaseSiteId). loadJobScopedToCaller, hardened
+// fail-closed in #3232, denies a resolver-supplied job with NO siteId, so the fixtures
+// must carry one and the Site lookup below must resolve.
+const SITE = '33333333-4444-5555-6666-777777777777';
 
 function fakeLog() {
   return {
@@ -47,9 +53,17 @@ function fakeContext({ params = {}, data = undefined, query = {} } = {}) {
     env: {},
     request: { url: `https://api.example.com/serenity${search ? `?${search}` : ''}` },
     pathInfo: { headers: { authorization: 'Bearer ims-token' } },
-    attributes: { authInfo: { getType: () => 'ims' } },
+    // getScopes → admin so the REAL AccessControlUtil inside loadJobScopedToCaller
+    // (the #3232 fail-closed site-ownership check; not the esmock-mocked instance the
+    // controller's own authorize uses) admits the legitimate owner for the two
+    // market-generation-job fixtures. Inert for every other fixture (they never reach
+    // the unmocked primitive).
+    attributes: { authInfo: { getType: () => 'ims', getScopes: () => [{ name: 'admin' }] } },
     dataAccess: {
       Organization: { findById: sinon.stub().resolves({ getId: () => ORG }) },
+      // The market-generation job's owning site — loadJobScopedToCaller resolves it
+      // (metadata.siteId) and enforces ownership via the mocked AccessControlUtil.
+      Site: { findById: sinon.stub().resolves({ getId: () => SITE }) },
       Brand: {
         findById: sinon.stub().resolves({
           getId: () => BRAND,
@@ -161,6 +175,31 @@ const FIXTURES = {
       }],
     },
   },
+  finalizeSerenityPrompts: {
+    expectedStatus: 200,
+    controllerMethod: 'finalizePrompts',
+    handlerName: 'handleFinalizePrompts',
+    handlerResult: {
+      slices: [
+        {
+          geoTargetId: 2840, languageCode: 'en', outcome: 'published', publishStatus: 'live',
+        },
+        {
+          geoTargetId: 2276,
+          languageCode: 'de',
+          outcome: 'failed',
+          error: 'No market for slice',
+          code: 'marketNotFound',
+        },
+      ],
+    },
+    data: {
+      slices: [
+        { geoTargetId: 2840, languageCode: 'en' },
+        { geoTargetId: 2276, languageCode: 'de' },
+      ],
+    },
+  },
   getSerenityPromptsJobStatus: {
     expectedStatus: 200,
     controllerMethod: 'getPromptsJobStatus',
@@ -186,6 +225,66 @@ const FIXTURES = {
       getError: () => null,
       getMetadata: () => ({ brandId: BRAND }),
     },
+  },
+  getSerenityMarketGenerationJobStatus: {
+    expectedStatus: 200,
+    controllerMethod: 'getSemrushMarketGenerationJobStatus',
+    // No handler: the controller loads the AsyncJob via loadJobScopedToCaller and
+    // projects the token-safe DTO. Pin a COMPLETED, brand-owned, SITELESS generation
+    // job so the documented { jobId, jobType, status, result, error } shape (ship
+    // verdict) is exercised. metadata.jobType MUST be in the endpoint's allowlist and
+    // metadata.brandId MUST match auth.brandUuid (BRAND) or the controller 404s.
+    params: { jobId: '00000000-0000-4000-8000-000000000001' },
+    asyncJob: {
+      getId: () => '00000000-0000-4000-8000-000000000001',
+      getStatus: () => 'COMPLETED',
+      getResult: () => ({
+        promptCount: 12,
+        projectId: 'proj-1',
+        published: true,
+        verdict: 'ship',
+      }),
+      getError: () => null,
+      getCreatedAt: () => '2026-09-10T00:00:00.000Z',
+      getUpdatedAt: () => '2026-09-10T00:05:00.000Z',
+      getMetadata: () => ({
+        jobType: 'serenity-generate-semrush-market',
+        brandId: BRAND,
+        siteId: SITE,
+      }),
+    },
+  },
+  reauthSerenityMarketGenerationJob: {
+    expectedStatus: 202,
+    controllerMethod: 'reauthSemrushMarketGenerationJob',
+    // Drives the full 202 happy path. loadJobScopedToCaller admits the job by its
+    // metadata.jobType; the STRICT identity check requires the caller's stable
+    // user_id claim to equal metadata.imsUserId (both pinned to 'ims-user-1' via the
+    // reauth wiring below). resolvePromisePair/getIMSPromiseToken/claimJobForReauth
+    // are stubbed in the shared esmock block (inert for every other fixture — only
+    // this reauth method calls them). The job flips FAILED+NEEDS_REAUTH → IN_PROGRESS
+    // so the documented { jobId, jobType, status: IN_PROGRESS } accepted shape is
+    // returned.
+    reauth: true,
+    params: { jobId: '00000000-0000-4000-8000-000000000002' },
+    asyncJob: (() => {
+      let status = 'FAILED';
+      return {
+        getId: () => '00000000-0000-4000-8000-000000000002',
+        getStatus: () => status,
+        setStatus: (s) => { status = s; },
+        getError: () => ({ code: 'NEEDS_REAUTH', message: 'token expired', retryable: true }),
+        setError: () => {},
+        getMetadata: () => ({
+          jobType: 'serenity-generate-semrush-market',
+          brandId: BRAND,
+          siteId: SITE,
+          imsUserId: 'ims-user-1',
+        }),
+        setMetadata: () => {},
+        save: () => Promise.resolve(),
+      };
+    })(),
   },
   updateSerenityPrompt: {
     expectedStatus: 200,
@@ -235,6 +334,9 @@ const FIXTURES = {
       tagIds: ['tag-1'],
       filter: { tagIds: [], tagFilterMode: 'faceted-v1' },
     },
+    promiseToken: 'raw-bulk-tags-token',
+    promiseAudience: 'semrush',
+    expectPromiseForwarding: true,
   },
   listSerenityMarkets: {
     expectedStatus: 200,
@@ -297,6 +399,26 @@ const FIXTURES = {
     handlerName: 'handleListTags',
     handlerResult: { items: [{ id: 't1', name: 'Topic A' }] },
     query: { geoTargetId: '2840', languageCode: 'en' },
+  },
+  searchSerenityTags: {
+    expectedStatus: 200,
+    controllerMethod: 'searchTags',
+    handlerName: 'handleSearchTags',
+    handlerResult: {
+      items: [{
+        id: 't1',
+        name: 'Campaign',
+        parentId: 'tag-root',
+        depth: 2,
+        path: ['Campaign'],
+        match: 'exact',
+      }],
+      cursor: null,
+      complete: true,
+    },
+    query: {
+      geoTargetId: '2840', languageCode: 'en', q: 'campaign', limit: '25',
+    },
   },
   createSerenityTag: {
     expectedStatus: 201,
@@ -563,31 +685,25 @@ const FIXTURES = {
     usesElementsController: true,
     controllerMethod: 'listResponseFeed',
     serviceMethod: 'getResponseFeed',
-    // from/to are optional (they default to the last 7 days ending yesterday), but are
-    // supplied here so the fixture is deterministic rather than clock-dependent.
-    query: { from: '2026-08-23', to: '2026-08-24' },
-    // getResponseFeed returns the joined shape; the controller maps it through
-    // ResponseFeedDto.toEnvelopeJSON before ok().
+    query: { geoTargetId: '2840', languageCode: 'en', date: '2026-08-24' },
     handlerResult: {
-      records: [{
-        projectId: 'cb4f6443-e01f-4075-a586-85511f136e31',
+      data: [{
+        projectId: 'proj-1',
         prompt: 'best running shoes for flat feet',
-        model: 'chatgpt-paid',
-        date: '2026-08-24',
         response: 'For flat feet, look for stability shoes with firm midsoles.',
-        sources: [{
-          url: 'https://www.runnersworld.com/gear/best-running-shoes',
-          source: 'runnersworld.com',
-          position: 1,
-          domainType: 'Earned',
-        }],
-        sourceRowCount: 1,
+        date: '2026-08-24',
+        model: 'search-gpt',
+        responses: 1,
+        sources: ['https://www.runnersworld.com/gear/best-running-shoes'],
+        tags: ['$abv_tags$intent__commercial'],
       }],
-      days: ['2026-08-23', '2026-08-24'],
-      projectIds: ['cb4f6443-e01f-4075-a586-85511f136e31'],
-      pageSize: 5000,
-      truncated: false,
-      unmatchedSourceKeyCount: 0,
+      page: {
+        offset: 0,
+        pageSize: 500,
+        returned: 1,
+        rowCount: 1,
+        nextOffset: null,
+      },
     },
   },
   listSerenityBrandPresenceSubreddits: {
@@ -819,6 +935,76 @@ const FIXTURES = {
       closestDate: '2026-07-26T00:00:00Z',
     }],
   },
+  // Served by ElementsController (listOwnedUrls). getOwnedUrls resolves a FLAT
+  // array of owned-URL rows (the controller paginates + traffic-joins them);
+  // no `siteId` in the query means the Postgres traffic join short-circuits
+  // to its 0/[] defaults, which the raw transform already sets on every row
+  // (see owned-urls.js), so the merge is a no-op here.
+  getSerenityUrlInspectorOwnedUrls: {
+    expectedStatus: 200,
+    usesElementsController: true,
+    controllerMethod: 'listOwnedUrls',
+    serviceMethod: 'getOwnedUrls',
+    query: { startDate: '2026-06-29', endDate: '2026-07-26' },
+    handlerResult: [{
+      urlId: '',
+      url: 'https://www.lovesac.com/sactionals',
+      citations: 42,
+      promptsCited: 11,
+      products: [],
+      regions: ['US'],
+      weeklyCitations: [{ week: '2026-W27', value: 6 }],
+      weeklyPromptsCited: [],
+      agenticHits: 0,
+      agenticHitsTrend: [],
+      referralHits: 0,
+      referralHitsTrend: [],
+    }],
+  },
+  // Served by ElementsController (listCitedDomains). getCitedDomains resolves
+  // the final { domains, totalCount } envelope directly; the controller
+  // passes it through via ok().
+  getSerenityUrlInspectorCitedDomains: {
+    expectedStatus: 200,
+    usesElementsController: true,
+    controllerMethod: 'listCitedDomains',
+    serviceMethod: 'getCitedDomains',
+    query: { startDate: '2026-06-29', endDate: '2026-07-26' },
+    handlerResult: {
+      domains: [{
+        domain: 'reddit.com',
+        totalCitations: 84,
+        totalUrls: 6,
+        promptsCited: 19,
+        contentType: 'Third Party',
+        categories: '',
+        regions: '',
+      }],
+      totalCount: 52,
+    },
+  },
+  // Served by ElementsController (listDomainUrls). getDomainUrls resolves the
+  // final { urls, totalCount } envelope directly; the controller passes it
+  // through via cachedOk().
+  getSerenityUrlInspectorDomainUrls: {
+    expectedStatus: 200,
+    usesElementsController: true,
+    controllerMethod: 'listDomainUrls',
+    serviceMethod: 'getDomainUrls',
+    query: { startDate: '2026-06-29', endDate: '2026-07-26' },
+    handlerResult: {
+      urls: [{
+        urlId: '',
+        url: 'https://www.reddit.com/r/BuyItForLife/comments/example/',
+        contentType: 'Third Party',
+        citations: 3,
+        promptsCited: 2,
+        categories: '',
+        regions: 'US,CA',
+      }],
+      totalCount: 8,
+    },
+  },
 };
 
 function makeAjv() {
@@ -904,6 +1090,7 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
             // the documented success shapes are exercised, not the inactive 404.
             '../../src/support/serenity/serenity-active.js': {
               isSerenityActiveForBrand: () => Promise.resolve(true),
+              isTagSearchActiveForBrand: () => Promise.resolve(true),
             },
             '../../src/support/access-control-util.js': {
               default: {
@@ -988,6 +1175,7 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
         handleCreateMarket: sinon.stub(),
         handleDeleteMarket: sinon.stub(),
         handleListTags: sinon.stub(),
+        handleSearchTags: sinon.stub(),
         handleCreateTag: sinon.stub(),
         handleUpdateTag: sinon.stub(),
         handleDeleteTag: sinon.stub(),
@@ -996,6 +1184,7 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
         handleUpdateModels: sinon.stub(),
         handleCreateMarketSubworkspace: sinon.stub(),
         handleListMarketsSubworkspace: sinon.stub(),
+        handleFinalizePrompts: sinon.stub(),
         ensureSubworkspace: sinon.stub().resolves(WORKSPACE),
         decommissionBrandWorkspace: sinon.stub(),
         listGlobalModelCatalog: sinon.stub(),
@@ -1014,6 +1203,25 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
           '../../src/support/serenity/rest-transport.js': {
             createSerenityTransport: () => ({}),
             SerenityTransportError: class extends Error {},
+          },
+          '../../src/support/utils.js': {
+            ErrorWithStatusCode,
+            resolveSemrushImsToken: () => Promise.resolve('ims-token'),
+            getRawPromiseToken: (ctx) => ctx?.pathInfo?.headers?.['x-promise-token'],
+            // resolvePromisePair returns the Semrush pair ('SEMRUSH') for both the
+            // browser-token exchange path and the reauth fixture (which 400s on the
+            // promise-pair guard otherwise).
+            resolvePromisePair: () => 'SEMRUSH',
+            getSemrushPair: () => 'SEMRUSH',
+            exchangePromiseTokenResponse: () => Promise.resolve({
+              access_token: 'ims-token',
+              promise_token: 'rotated-bulk-tags-token',
+              promise_token_expires_in: 14399,
+              token_type: 'bearer',
+            }),
+            // Reauth-only: reauthSemrushMarketGenerationJob mints a fresh token here
+            // (inert for every other fixture — nothing else calls getIMSPromiseToken).
+            getIMSPromiseToken: () => Promise.resolve({ token: 'fresh-promise-token' }),
           },
           '../../src/support/serenity/workspace-resolver.js': {
             resolveWorkspaceId: () => Promise.resolve(WORKSPACE),
@@ -1061,6 +1269,10 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
             handleTagImpact: handlerStubs.handleTagImpact,
             handleTagImpactSubworkspace: sinon.stub(),
           },
+          '../../src/support/serenity/handlers/tag-search.js': {
+            handleSearchTags: handlerStubs.handleSearchTags,
+            handleSearchTagsSubworkspace: sinon.stub(),
+          },
           '../../src/support/serenity/handlers/bulk-tags-job.js': {
             BULK_TAGS_JOB_TYPE: 'serenity-bulk-tags',
             BULK_TAGS_PUBLIC_JOB_TYPE: 'bulkTags',
@@ -1083,6 +1295,10 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
             handleUpdatePromptSubworkspace: sinon.stub(),
             handleBulkDeletePromptsSubworkspace: sinon.stub(),
           },
+          '../../src/support/serenity/handlers/prompts-finalize.js': {
+            handleFinalizePrompts: handlerStubs.handleFinalizePrompts,
+            handleFinalizePromptsSubworkspace: sinon.stub(),
+          },
           '../../src/support/serenity/workspace-lifecycle.js': {
             ensureSubworkspace: handlerStubs.ensureSubworkspace,
             decommissionBrandWorkspace: handlerStubs.decommissionBrandWorkspace,
@@ -1092,6 +1308,7 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
           // shapes are exercised rather than the inactive-brand 404.
           '../../src/support/serenity/serenity-active.js': {
             isSerenityActiveForBrand: () => Promise.resolve(true),
+            isTagSearchActiveForBrand: () => Promise.resolve(true),
           },
           // activate reads brand-level aliases/URLs/competitors once per batch, and
           // persists the active-flip + primary site (brands.site_id) via updateBrand;
@@ -1113,6 +1330,12 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
           '../../src/support/serenity/site-linkage.js': {
             ensureMarketSite: () => Promise.resolve('00000000-0000-4000-8000-000000000000'),
           },
+          // Reauth-only: the atomic CAS claim (inert for every other fixture — only
+          // reauthSemrushMarketGenerationJob calls claimJobForReauth). esmock passes
+          // through the unlisted exports of the module.
+          '../../src/support/serenity/job-lease.js': {
+            claimJobForReauth: () => Promise.resolve(true),
+          },
         },
       )).default;
 
@@ -1121,15 +1344,42 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
         data: fx.data,
         query: fx.query || {},
       });
+      if (fx.promiseToken) {
+        ctx.pathInfo.headers['x-promise-token'] = fx.promiseToken;
+        ctx.pathInfo.headers['x-promise-audience'] = fx.promiseAudience;
+      }
       // Ops that read an AsyncJob directly (no handler) get their job pinned here.
       if (fx.asyncJob) {
         ctx.dataAccess.AsyncJob = { findById: sinon.stub().resolves(fx.asyncJob) };
+      }
+      // Fixtures for endpoints that require a runtime secret/flag provision it here.
+      if (fx.env) {
+        ctx.env = { ...ctx.env, ...fx.env };
+      }
+      // Reauth drives the token-bearing 202 path: the STRICT identity check reads the
+      // caller's stable user_id claim (must equal the job's metadata.imsUserId), and
+      // the success path re-enqueues onto the dedicated market-jobs queue.
+      if (fx.reauth) {
+        ctx.attributes.authInfo.getProfile = () => ({ user_id: 'ims-user-1' });
+        ctx.sqs = { sendMessage: sinon.stub().resolves() };
+        ctx.env = { ...ctx.env, SERENITY_MARKET_JOBS_QUEUE_URL: 'https://sqs.example/market-jobs' };
       }
 
       const controller = SerenityController(ctx, fakeLog());
       const response = await controller[fx.controllerMethod](ctx);
 
       expect(response.status).to.equal(fx.expectedStatus);
+      if (fx.expectPromiseForwarding) {
+        expect(handlerStubs.handleBulkTags).to.have.been.calledOnce;
+        expect(handlerStubs.handleBulkTags.firstCall.args.slice(-2)).to.deep.equal([
+          {
+            promise_token: 'rotated-bulk-tags-token',
+            expires_in: 14399,
+            token_type: 'bearer',
+          },
+          'SEMRUSH',
+        ]);
+      }
 
       // 204 No Content → no body to validate. The contract is just the status.
       if (fx.expectedStatus === 204) {

@@ -97,9 +97,13 @@ function permittedValues(bindings, capability) {
 /**
  * True for an ASO opportunity-DERIVED COLLECTION route — the site-level list
  * (`GET …/opportunities`), `…/opportunities/by-status/:status`,
- * `…/opportunities/top-paid`, and the two site-level collections that expose
- * opportunity-derived data across ALL types: `…/fixes` (getAllForSite) and
- * `…/edge-deployed-urls`. None has a single opportunity to type-scope against;
+ * `…/opportunities/top-paid`, and the three site-level collections that expose
+ * opportunity-derived data across ALL types: `…/fixes` (getAllForSite),
+ * `…/edge-deployed-urls`, and `…/deployed-opportunities`
+ * (getDeployedOpportunitiesForSite) — plus the POST-for-read URL lookups
+ * (`POST …/opportunities/by-urls` and `POST …/suggestions/by-urls`), which return
+ * opportunity-derived data across ALL types in one call. None has a single
+ * opportunity to type-scope against;
  * each is result-filtered by its controller (D4) via
  * `filterOpportunitiesByFacsComposite`. Item routes (carrying `:opportunityId`,
  * incl. `…/opportunities/:opportunityId/fixes`) are handled earlier via their
@@ -115,7 +119,8 @@ function permittedValues(bindings, capability) {
  */
 export function isOpportunityDerivedCollectionRoute(routePattern) {
   return typeof routePattern === 'string'
-    && /^GET\s.*\/(opportunities(\/by-status\/[^/]+|\/top-paid)?|fixes|edge-deployed-urls)$/.test(routePattern);
+    && (/^GET\s.*\/(opportunities(\/by-status\/[^/]+|\/top-paid)?|fixes|edge-deployed-urls|deployed-opportunities)$/.test(routePattern)
+      || /^POST\s.*\/(opportunities|suggestions)\/by-urls$/.test(routePattern));
 }
 
 /**
@@ -142,8 +147,8 @@ function isOpportunityCreateRoute(routePattern) {
  *    OR a binding for the request body's opportunity type carries the capability — a type-scoped
  *    caller cannot create opportunities of another type.
  *  - **Opportunity-derived COLLECTION** route (`GET …/opportunities`, `…/by-status`, `…/top-paid`,
- *    `…/fixes`, `…/edge-deployed-urls`): returns `'defer'` — the controller ReBAC-filters the
- *    opportunity-derived results to the caller's permitted types.
+ *    `…/fixes`, `…/edge-deployed-urls`, `…/deployed-opportunities`): returns `'defer'` — the
+ *    controller ReBAC-filters the opportunity-derived results to the caller's permitted types.
  *  - **Any other ASO site route** (non-opportunity): grant iff ANY active site binding (regardless
  *    of qualifier) carries the capability — these routes are not opportunity-scoped.
  *
@@ -220,7 +225,7 @@ export async function asoOpportunityComposite(context, {
 
   if (isOpportunityDerivedCollectionRoute(routePattern)) {
     // Opportunity-derived COLLECTION (opportunity list / by-status / top-paid,
-    // site fixes, edge-deployed-urls): the wrapper can't type-scope a whole
+    // site fixes, edge-deployed-urls, deployed-opportunities): the wrapper can't type-scope a whole
     // collection, so stash the caller's permitted opportunity types for the
     // controller to result-filter by (D4). WILDCARD ('all') → unrestricted.
     context.attributes = context.attributes ?? {};

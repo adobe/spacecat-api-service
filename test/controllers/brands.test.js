@@ -5207,6 +5207,7 @@ describe('Brands Controller', () => {
           neq: sandbox.stub().returnsThis(),
           in: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           upsert: sandbox.stub().returnsThis(),
           delete: sandbox.stub().returnsThis(),
           single: sandbox.stub().resolves({
@@ -5365,6 +5366,32 @@ describe('Brands Controller', () => {
         expect(upsertArgs.semrushSubWorkspaceId).to.equal('ws-1');
       });
 
+      it('surfaces a duplicate-active-brand rejection as a 409 with its code (LLMO-7284 AC13)', async () => {
+        // End-to-end seam the missing IT would otherwise cover: a typed 409 thrown by
+        // upsertBrand must reach the client as a 409 body carrying brand_duplicate_active_name.
+        const provisionStub = sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-1' });
+        const dupErr = Object.assign(
+          new Error('An active brand named "Acme Inc" already exists in this organization'),
+          { status: 409, code: 'brand_duplicate_active_name' },
+        );
+        const upsertStub = sinon.stub().rejects(dupErr);
+        const controller = await buildController({
+          provisionBrandSubworkspace: provisionStub, upsertBrand: upsertStub,
+        });
+
+        const response = await controller.createBrandForOrg({
+          ...context,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: { ...semrushData },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+        });
+
+        expect(response.status).to.equal(409);
+        const body = await response.json();
+        expect(body.code).to.equal('brand_duplicate_active_name');
+      });
+
       it('writes the mapping row for the initial market after the brand row is persisted', async () => {
         const provisionStub = sinon.stub().resolves({
           semrushSubWorkspaceId: 'ws-1', projectId: 'proj-initial', geoTargetId: 2840, languageCode: 'en',
@@ -5420,6 +5447,95 @@ describe('Brands Controller', () => {
 
         expect(response.status).to.equal(201);
         expect(upsertMappingRowStub).to.not.have.been.called;
+      });
+
+      describe('async prompt generation (flag-gated)', () => {
+        async function buildAsyncController({
+          provisionBrandSubworkspace, maybeEnqueueMarketGeneration,
+        }) {
+          const Mocked = await esmock('../../src/controllers/brands.js', {
+            '../../src/support/serenity/brand-provisioning.js': {
+              provisionBrandSubworkspace,
+              provisionBrandSubworkspaceBare: sinon.stub().resolves({ semrushSubWorkspaceId: 'ws-bare' }),
+            },
+            '../../src/support/serenity/site-linkage.js': {
+              ensureMarketSite: sinon.stub().resolves('site-x'),
+            },
+            '../../src/support/serenity/serenity-active.js': {
+              isSerenityActiveForOrg: sinon.stub().resolves(true),
+            },
+            '../../src/support/brands-storage.js': {
+              upsertBrand: sinon.stub().resolves({ id: 'forced-id', name: 'New Brand' }),
+            },
+            '../../src/support/serenity/mapping-rows.js': {
+              upsertMappingRow: sinon.stub().resolves(),
+              linkSiteToLiveRows: sinon.stub().resolves(),
+            },
+            '../../src/support/serenity/async-prompt-gen.js': { maybeEnqueueMarketGeneration },
+            '../../src/support/utils.js': { resolveSemrushImsToken: sinon.stub().resolves('semrush-tok') },
+            '../../src/support/serenity/rest-transport.js': { createSerenityTransport: sinon.stub().returns({}) },
+          });
+          return Mocked.default(context, loggerStub, mockEnv);
+        }
+
+        const asyncReq = (env) => ({
+          ...context,
+          env,
+          params: { spaceCatId: ORGANIZATION_ID },
+          data: { ...semrushData, generatePrompts: true },
+          dataAccess: mockDataAccess,
+          attributes: { authInfo: { getType: () => 'ims', profile: { email: 'user@test.com' } } },
+        });
+
+        it('flag ON: skips synchronous generateTopics and annotates the 201 body with the handle', async () => {
+          const provisionStub = sinon.stub().resolves({
+            semrushSubWorkspaceId: 'ws-1', projectId: 'proj-1', geoTargetId: 2840, languageCode: 'en',
+          });
+          const enqueueStub = sinon.stub().resolves({ jobId: 'gen-b', status: 'provisioning', reused: false });
+          const controller = await buildAsyncController({
+            provisionBrandSubworkspace: provisionStub, maybeEnqueueMarketGeneration: enqueueStub,
+          });
+
+          const response = await controller.createBrandForOrg(asyncReq({ SERENITY_ASYNC_PROMPT_GEN: 'true' }));
+
+          expect(response.status).to.equal(201);
+          expect(provisionStub.firstCall.args[1].generateTopics).to.equal(false);
+          expect(enqueueStub).to.have.been.calledOnce;
+          const body = await response.json();
+          expect(body.promptGeneration).to.deep.equal({ jobId: 'gen-b', status: 'provisioning', reused: false });
+        });
+
+        it('flag ON: an enqueue failure is non-fatal — the brand still returns 201 without a handle', async () => {
+          const provisionStub = sinon.stub().resolves({
+            semrushSubWorkspaceId: 'ws-1', projectId: 'proj-1', geoTargetId: 2840, languageCode: 'en',
+          });
+          const enqueueStub = sinon.stub().rejects(new Error('sqs down'));
+          const controller = await buildAsyncController({
+            provisionBrandSubworkspace: provisionStub, maybeEnqueueMarketGeneration: enqueueStub,
+          });
+
+          const response = await controller.createBrandForOrg(asyncReq({ SERENITY_ASYNC_PROMPT_GEN: 'true' }));
+
+          expect(response.status).to.equal(201);
+          const body = await response.json();
+          expect(body.promptGeneration).to.equal(undefined);
+        });
+
+        it('flag OFF: preserves synchronous generateTopics and never enqueues', async () => {
+          const provisionStub = sinon.stub().resolves({
+            semrushSubWorkspaceId: 'ws-1', projectId: 'proj-1', geoTargetId: 2840, languageCode: 'en',
+          });
+          const enqueueStub = sinon.stub().resolves(null);
+          const controller = await buildAsyncController({
+            provisionBrandSubworkspace: provisionStub, maybeEnqueueMarketGeneration: enqueueStub,
+          });
+
+          const response = await controller.createBrandForOrg(asyncReq({}));
+
+          expect(response.status).to.equal(201);
+          expect(provisionStub.firstCall.args[1].generateTopics).to.equal(true);
+          expect(enqueueStub).to.not.have.been.called;
+        });
       });
 
       it('rejects a Semrush-mode create with 403 when serenity is inactive for the org (no provisioning, no row write)', async () => {
@@ -8195,8 +8311,11 @@ describe('Brands Controller', () => {
         data: { id: BRAND_UUID },
         error: null,
       });
-      // Second call: updateBrand returns null (brand update returns no data)
+      // Second call: LLMO-7284 pre-read of the current row for the rename (null → no
+      // dup scan; this brand is being treated as absent).
       maybeSingleStub.onSecondCall().resolves({ data: null, error: null });
+      // Third call: updateBrand's UPDATE returns null (brand update returns no data)
+      maybeSingleStub.onThirdCall().resolves({ data: null, error: null });
 
       mockDataAccess.services.postgrestClient = {
         from: sandbox.stub().callsFake(() => ({
@@ -8204,6 +8323,7 @@ describe('Brands Controller', () => {
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           update: sandbox.stub().returnsThis(),
           ilike: sandbox.stub().returnsThis(),
           maybeSingle: maybeSingleStub,
@@ -9807,6 +9927,7 @@ describe('Brands Controller', () => {
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           update: sandbox.stub().returnsThis(),
           ilike: sandbox.stub().returnsThis(),
           maybeSingle: maybeSingleStub,
@@ -10009,8 +10130,12 @@ describe('Brands Controller', () => {
       const maybeSingleStub = sandbox.stub();
       // resolveBrandUuid succeeds...
       maybeSingleStub.onFirstCall().resolves({ data: { id: BRAND_UUID }, error: null });
-      // ...but the status update is filtered out by .neq('status','deleted') → no row.
+      // LLMO-7284 pre-transition read (status→active): the soft-deleted brand is
+      // excluded by .neq('status','deleted'), so it reads back as null and the
+      // duplicate-active check is skipped.
       maybeSingleStub.onSecondCall().resolves({ data: null, error: null });
+      // ...then the status update is filtered out by .neq('status','deleted') → no row.
+      maybeSingleStub.onThirdCall().resolves({ data: null, error: null });
 
       mockDataAccess.services.postgrestClient = {
         from: sandbox.stub().callsFake(() => ({
@@ -10018,6 +10143,7 @@ describe('Brands Controller', () => {
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           update: sandbox.stub().returnsThis(),
           ilike: sandbox.stub().returnsThis(),
           maybeSingle: maybeSingleStub,
@@ -10063,8 +10189,11 @@ describe('Brands Controller', () => {
       const maybeSingleStub = sandbox.stub();
       // resolveBrandUuid resolves the UUID...
       maybeSingleStub.onFirstCall().resolves({ data: { id: BRAND_UUID }, error: null });
+      // LLMO-7284 pre-transition read (status→active): a pending brand with a
+      // unique name, so the duplicate-active check passes and the write proceeds.
+      maybeSingleStub.onSecondCall().resolves({ data: { name: 'Test Brand', status: 'pending' }, error: null });
       // ...then setBrandStatus hits the DB constraint on the update.
-      maybeSingleStub.onSecondCall().resolves({
+      maybeSingleStub.onThirdCall().resolves({
         data: null,
         error: {
           code: '23514',
@@ -10078,6 +10207,7 @@ describe('Brands Controller', () => {
           eq: sandbox.stub().returnsThis(),
           neq: sandbox.stub().returnsThis(),
           order: sandbox.stub().returnsThis(),
+          limit: sandbox.stub().returnsThis(),
           update: sandbox.stub().returnsThis(),
           ilike: sandbox.stub().returnsThis(),
           maybeSingle: maybeSingleStub,

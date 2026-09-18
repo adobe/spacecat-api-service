@@ -71,6 +71,7 @@ import TrafficController from './controllers/paid/traffic.js';
 import SuggestionsController from './controllers/suggestions.js';
 import BrandsController from './controllers/brands.js';
 import PreflightController from './controllers/preflight.js';
+import OaeValidationController from './controllers/oae-validation.js';
 import SiteDetectionController from './controllers/site-detection.js';
 import DemoController from './controllers/demo.js';
 import ConsentBannerController from './controllers/consentBanner.js';
@@ -104,6 +105,7 @@ import ImsOrgAccessController from './controllers/ims-org-access.js';
 import FeatureFlagsController from './controllers/feature-flags.js';
 import AutofixChecksController from './controllers/autofix-checks.js';
 import DrsBpPgAuditController from './controllers/drs-bp-pg-audit.js';
+import LaunchDarklyController from './controllers/launchdarkly.js';
 import routeRequiredCapabilities, { INTERNAL_ROUTES } from './routes/required-capabilities.js';
 import routeFacsCapabilities from './routes/facs-capabilities.js';
 import { secondaryResolvers } from './support/facs-secondary-resolvers.js';
@@ -166,7 +168,7 @@ function localCORSWrapper(fn) {
       response.headers.set(
         'Access-Control-Allow-Headers',
         'Content-Type, Authorization, x-api-key, x-ims-org-id, x-client-type, x-import-api-key, '
-        + 'x-trigger-audits, x-requested-with, origin, accept, x-view-as-trial, x-view-full-experience, x-product, x-promise-token, x-promise-audience',
+        + 'x-trigger-audits, x-requested-with, origin, accept, x-view-as-trial, x-view-full-experience, x-product, x-promise-token, x-promise-audience, if-match, idempotency-key',
       );
       response.headers.set('Access-Control-Max-Age', '86400');
     }
@@ -229,7 +231,7 @@ async function run(request, context) {
   if (method === 'OPTIONS') {
     return noContent({
       'access-control-allow-methods': 'GET, HEAD, PATCH, POST, OPTIONS, DELETE',
-      'access-control-allow-headers': 'x-api-key, authorization, origin, x-requested-with, content-type, accept, x-import-api-key, x-client-type, x-trigger-audits, x-view-as-trial, x-view-full-experience, x-promise-token, x-promise-audience',
+      'access-control-allow-headers': 'x-api-key, authorization, origin, x-requested-with, content-type, accept, x-import-api-key, x-client-type, x-trigger-audits, x-view-as-trial, x-view-full-experience, x-promise-token, x-promise-audience, if-match, idempotency-key',
       'access-control-max-age': '86400',
       'access-control-allow-origin': '*',
     });
@@ -258,6 +260,7 @@ async function run(request, context) {
     const topPaidOpportunitiesController = TopPaidOpportunitiesController(context, context.env);
     const trafficController = TrafficController(context, log, context.env);
     const preflightController = PreflightController(context, log, context.env);
+    const oaeValidationController = OaeValidationController(context, log, context.env);
     const siteDetectionController = SiteDetectionController(context, log, context.env);
     const demoController = DemoController(context);
     const consentBannerController = ConsentBannerController(context);
@@ -306,6 +309,7 @@ async function run(request, context) {
     const taskManagementController = TaskManagementController(context);
     const onboardingController = OnboardingController(context, log, context.env);
     const promptSuggestionSchedulesController = PromptSuggestionSchedulesController(context);
+    const launchDarklyController = LaunchDarklyController(context);
 
     const routeHandlers = getRouteHandlers(
       auditsController,
@@ -376,6 +380,8 @@ async function run(request, context) {
       redirectsController,
       auditPolicyController,
       promptSuggestionSchedulesController,
+      oaeValidationController,
+      launchDarklyController,
     );
 
     const routeMatch = matchPath(method, suffix, routeHandlers);

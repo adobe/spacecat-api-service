@@ -28,6 +28,7 @@ import {
   validateAsync,
   reconcilePublishErrors,
   listAllProjectPrompts,
+  listFacetedPrompts,
   normalizePromptTagSelection,
   resolveFacetedTagFilter,
   resolveCallerId,
@@ -36,6 +37,13 @@ import {
   resolveSort,
   validateTagIds,
   capUpdateTagIds,
+  parseUpdatePromptBody,
+  MAX_PROMPT_TEXT_LENGTH,
+  FACETED_PROMPT_LIST_MAX_PAGES,
+  buildTargetedPromptIndex,
+  buildExistingPromptIndex,
+  MAX_PAGE_LIMIT,
+  MAX_PROMPT_INDEX_PAGES,
 } from '../../../../src/support/serenity/handlers/prompts.js';
 import { ErrorWithStatusCode } from '../../../../src/support/utils.js';
 import { SerenityTransportError } from '../../../../src/support/serenity/rest-transport.js';
@@ -156,9 +164,148 @@ describe('faceted prompt guard helpers', () => {
     expect(listPromptsByTags).to.have.callCount(100);
   });
 
-  it('rejects unknown, root, read-only, and unsupported-depth facet ids', async () => {
+  it('fails closed after a caller-supplied maxPages instead of walking to 100 (issue #3283)', async () => {
+    const fullPage = Array.from({ length: 200 }, (_, index) => ({ id: `prompt-${index}` }));
+    const listPromptsByTags = sinon.stub().resolves({ items: fullPage });
+
+    await expect(listAllProjectPrompts(
+      { listPromptsByTags },
+      WORKSPACE,
+      'project-1',
+      { maxPages: FACETED_PROMPT_LIST_MAX_PAGES },
+      fakeLog(),
+    )).to.be.rejected.then((error) => {
+      expect(error.status).to.equal(503);
+      expect(error.code).to.equal(ERROR_CODES.PROMPT_CORPUS_INCOMPLETE);
+    });
+    expect(listPromptsByTags).to.have.callCount(FACETED_PROMPT_LIST_MAX_PAGES);
+  });
+
+  it('succeeds without hitting the ceiling when the corpus finishes exactly at maxPages', async () => {
+    const listPromptsByTags = sinon.stub().callsFake((_workspaceId, _projectId, { page }) => {
+      const isLastPage = page === FACETED_PROMPT_LIST_MAX_PAGES;
+      const size = isLastPage ? 50 : 200;
+      return Promise.resolve({
+        items: Array.from({ length: size }, (_, index) => ({ id: `p-${page}-${index}` })),
+      });
+    });
+
+    const items = await listAllProjectPrompts(
+      { listPromptsByTags },
+      WORKSPACE,
+      'project-1',
+      { maxPages: FACETED_PROMPT_LIST_MAX_PAGES },
+      fakeLog(),
+    );
+
+    expect(listPromptsByTags).to.have.callCount(FACETED_PROMPT_LIST_MAX_PAGES);
+    expect(items).to.have.lengthOf((FACETED_PROMPT_LIST_MAX_PAGES - 1) * 200 + 50);
+  });
+
+  it('walks the full 100-page/20K ceiling when no maxPages override is given (async callers, e.g. bulk-tags-job, are unaffected)', async () => {
+    const fullPage = Array.from({ length: 200 }, (_, index) => ({ id: `prompt-${index}` }));
+    const listPromptsByTags = sinon.stub().resolves({ items: fullPage });
+
+    await expect(listAllProjectPrompts(
+      { listPromptsByTags },
+      WORKSPACE,
+      'project-1',
+      undefined,
+      fakeLog(),
+    )).to.be.rejected.then((error) => {
+      expect(error.code).to.equal(ERROR_CODES.PROMPT_CORPUS_INCOMPLETE);
+    });
+    expect(listPromptsByTags).to.have.callCount(100);
+  });
+
+  it('listFacetedPrompts (the interactive search-as-you-type path) fails fast at FACETED_PROMPT_LIST_MAX_PAGES, not 100, when 2+ tag families are selected (issue #3283)', async () => {
+    const fullPage = Array.from({ length: 200 }, (_, index) => ({ id: `prompt-${index}` }));
+    const listProjectTags = makeListProjectTagsStub();
+    const listPromptsByTags = sinon.stub().resolves({ items: fullPage });
+    const transport = { listProjectTags, listPromptsByTags };
+
+    // Two distinct dimension roots (category, intent) -> two AND-across-family
+    // groups, which is the only case that still requires the full walk after
+    // the 0/1-group fast path was added.
+    await expect(listFacetedPrompts(
+      transport,
+      WORKSPACE,
+      'project-1',
+      {
+        geoTargetId: 2840,
+        languageCode: 'en',
+        page: 1,
+        limit: 50,
+        tagIds: [TAG_IDS.categoryRunningShoes, TAG_IDS.intentInformational],
+      },
+      fakeLog(),
+    )).to.be.rejected.then((error) => {
+      expect(error.status).to.equal(503);
+      expect(error.code).to.equal(ERROR_CODES.PROMPT_CORPUS_INCOMPLETE);
+    });
+    expect(listPromptsByTags).to.have.callCount(FACETED_PROMPT_LIST_MAX_PAGES);
+  });
+
+  it('listFacetedPrompts skips the full corpus walk and issues one upstream call when no tag facets are selected (0 groups)', async () => {
+    const listProjectTags = makeListProjectTagsStub();
+    const page = Array.from({ length: 30 }, (_, index) => ({ id: `prompt-${index}`, name: `Prompt ${index}`, tags: [] }));
+    const listPromptsByTags = sinon.stub().resolves({ items: page, total: 999999 });
+    const transport = { listProjectTags, listPromptsByTags };
+
+    const result = await listFacetedPrompts(
+      transport,
+      WORKSPACE,
+      'project-1',
+      {
+        geoTargetId: 2840,
+        languageCode: 'en',
+        page: 1,
+        limit: 50,
+        tagIds: [],
+      },
+      fakeLog(),
+    );
+
+    expect(listPromptsByTags).to.have.callCount(1);
+    expect(listPromptsByTags.firstCall.args[2]).to.include({ page: 1, limit: 50 });
+    expect(listPromptsByTags.firstCall.args[2].tag_ids).to.deep.equal([]);
+    expect(result.items).to.have.lengthOf(30);
+    // Fewer than `limit` returned -> provably the last (only) page -> exact
+    // count from page math, not the untrustworthy upstream `total`.
+    expect(result.total).to.equal(30);
+  });
+
+  it('listFacetedPrompts skips the full corpus walk and issues one upstream call when exactly one tag family is selected (1 group)', async () => {
+    const listProjectTags = makeListProjectTagsStub();
+    const fullPage = Array.from({ length: 50 }, (_, index) => ({ id: `prompt-${index}`, name: `Prompt ${index}`, tags: [] }));
+    const listPromptsByTags = sinon.stub().resolves({ items: fullPage, total: 500 });
+    const transport = { listProjectTags, listPromptsByTags };
+
+    const result = await listFacetedPrompts(
+      transport,
+      WORKSPACE,
+      'project-1',
+      {
+        geoTargetId: 2840,
+        languageCode: 'en',
+        page: 1,
+        limit: 50,
+        tagIds: [TAG_IDS.categoryRunningShoes],
+      },
+      fakeLog(),
+    );
+
+    expect(listPromptsByTags).to.have.callCount(1);
+    expect(listPromptsByTags.firstCall.args[2]).to.include({ page: 1, limit: 50 });
+    expect(listPromptsByTags.firstCall.args[2].tag_ids).to.include(TAG_IDS.categoryRunningShoes);
+    expect(result.items).to.have.lengthOf(50);
+    // A full page came back -> not provably the last page -> trust upstream's total.
+    expect(result.total).to.equal(500);
+  });
+
+  it('rejects unknown, root, and read-only facet ids while accepting deep tags', async () => {
     const snapshot = promptTagSnapshot();
-    for (const tagId of ['missing', 'tag-root', 'read-only', 'too-deep']) {
+    for (const tagId of ['missing', 'tag-root', 'read-only']) {
       // eslint-disable-next-line no-await-in-loop
       await expect(resolveFacetedTagFilter(
         {},
@@ -172,6 +319,15 @@ describe('faceted prompt guard helpers', () => {
         expect(error.code).to.equal(ERROR_CODES.INVALID_TAG_FILTER);
       });
     }
+    const deep = await resolveFacetedTagFilter(
+      {},
+      WORKSPACE,
+      'project-1',
+      ['too-deep'],
+      fakeLog(),
+      snapshot,
+    );
+    expect([...deep.groups[0]]).to.deep.equal(['too-deep']);
   });
 
   it('expands a selected family into OR alternatives and keeps families as AND groups', async () => {
@@ -195,7 +351,22 @@ describe('faceted prompt guard helpers', () => {
     ]);
   });
 
-  it('auto-adds a depth-3 plain tag parent on prompt replacement', async () => {
+  it('derives the first-level family and expands a selected deep ancestor', async () => {
+    const result = await resolveFacetedTagFilter(
+      {},
+      WORKSPACE,
+      'project-1',
+      ['middle-c'],
+      fakeLog(),
+      promptTagSnapshot(),
+    );
+
+    expect(result.groups).to.have.lengthOf(1);
+    expect([...result.groups[0]]).to.have.members(['middle-c', 'too-deep']);
+    expect(result.candidateIds).to.have.members(['middle-c', 'too-deep']);
+  });
+
+  it('auto-adds the complete plain-tag ancestor chain on prompt replacement', async () => {
     const result = await normalizePromptTagSelection(
       {},
       WORKSPACE,
@@ -206,6 +377,16 @@ describe('faceted prompt guard helpers', () => {
     );
 
     expect(result).to.have.members(['leaf-a-1', 'family-a']);
+
+    const deep = await normalizePromptTagSelection(
+      {},
+      WORKSPACE,
+      'project-1',
+      ['too-deep'],
+      fakeLog(),
+      promptTagSnapshot(),
+    );
+    expect(deep).to.have.members(['too-deep', 'middle-c', 'family-c']);
   });
 
   it('rejects dimension roots on prompt replacement', async () => {
@@ -608,6 +789,10 @@ describe('handlers/prompts.js — handleListPrompts', () => {
     };
     const log = fakeLog();
 
+    // Two distinct dimension families (category, intent) so the request still
+    // walks listAllProjectPrompts, and this test can keep verifying `log` is
+    // threaded through to it. A single family now takes the fast path added
+    // for issue #3283's follow-up and never reaches that walk.
     await handleListPrompts(
       transport,
       dataAccess,
@@ -616,7 +801,7 @@ describe('handlers/prompts.js — handleListPrompts', () => {
       {
         geoTargetId: 2840,
         languageCode: 'en',
-        tagIds: [TAG_IDS.categoryRunningShoes],
+        tagIds: [TAG_IDS.categoryRunningShoes, TAG_IDS.intentInformational],
         tagFilterMode: 'faceted-v1',
       },
       log,
@@ -626,6 +811,62 @@ describe('handlers/prompts.js — handleListPrompts', () => {
       'listAllProjectPrompts: faceted prompt page read',
       sinon.match({ projectId: 'proj-us-en', upstreamPromptsScanned: 1 }),
     );
+  });
+
+  it('loads one complete taxonomy and returns authoritative compatibility without selected facets', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-faceted-empty-tags', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(project);
+    const levels = dimensionTreeLevels();
+    levels[TAG_IDS.categoryRoot] = [
+      ...levels[TAG_IDS.categoryRoot],
+      {
+        id: 'read-only-category',
+        name: 'Read__Only',
+        parent_id: TAG_IDS.categoryRoot,
+        path: [{ id: TAG_IDS.categoryRoot, name: 'category' }],
+      },
+    ];
+    const listProjectTags = makeListProjectTagsStub(levels);
+    const transport = {
+      listProjectTags,
+      listPromptsByTags: sinon.stub().resolves({
+        items: [{
+          id: 'sem-1',
+          name: 'prompt',
+          tags: [
+            {
+              id: TAG_IDS.categoryRunningShoes,
+              name: 'Running Shoes',
+              parent_id: TAG_IDS.categoryRoot,
+              path: [{ id: TAG_IDS.categoryRoot, name: 'category' }],
+            },
+            {
+              id: 'read-only-category',
+              name: 'Read__Only',
+              parent_id: TAG_IDS.categoryRoot,
+              path: [{ id: TAG_IDS.categoryRoot, name: 'category' }],
+            },
+          ],
+        }],
+      }),
+    };
+
+    const result = await handleListPrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      geoTargetId: 2840,
+      languageCode: 'en',
+      tagFilterMode: 'faceted-v1',
+    });
+
+    expect(result.items[0].tags.map((tag) => tag.compatibility)).to.deep.equal([
+      { state: 'canonical', reason: null },
+      { state: 'readOnly', reason: 'separatorInName' },
+    ]);
+    // One complete snapshot walks each populated tree level once. The fixture
+    // has roots, category, intent, origin, type, and one category child level.
+    expect(listProjectTags).to.have.callCount(6);
   });
 
   it('buildTagsOf: skips null/non-object entries and objects without name; coerces numeric id', async () => {
@@ -3282,6 +3523,111 @@ describe('handlers/prompts.js — deferPublish (serenity-docs#32 CSV-chunking)',
   });
 });
 
+// LLMO-7533 / serenity-docs#472: mixed-result containment and publish
+// truthfulness for the CSV-import path.
+describe('handlers/prompts.js — mixed-result containment (LLMO-7533)', () => {
+  const projectA = () => makeProject({
+    semrushProjectId: 'proj-a', geoTargetId: 2840, languageCode: 'en',
+  });
+  const projectB = () => makeProject({
+    semrushProjectId: 'proj-b', geoTargetId: 2276, languageCode: 'de',
+  });
+
+  it('contains an existing-prompt index read failure to its own project — the other project\'s '
+    + 'inputs still process (serenity-docs#472 §2)', async () => {
+    const dataAccess = makeDataAccess([projectA(), projectB()]);
+    const transport = {
+      listProjectTags: makeListProjectTagsStub(),
+      listPromptsByTags: sinon.stub().callsFake(async (ws, projectId) => {
+        if (projectId === 'proj-a') {
+          throw Object.assign(new Error('upstream 502'), { status: 502 });
+        }
+        return { items: [] };
+      }),
+      createPromptsWithMetadata: sinon.stub().callsFake(async (ws, pid, items) => {
+        const { name } = items[0];
+        return { page: 1, total: 1, items: [{ id: `new-${name}`, name }] };
+      }),
+      publishProject: sinon.stub().resolves(),
+    };
+
+    const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      prompts: [
+        {
+          text: 'a-prompt', geoTargetId: 2840, languageCode: 'en', tagIds: ['tag-cat-1'],
+        },
+        {
+          text: 'b-prompt', geoTargetId: 2276, languageCode: 'de', tagIds: ['tag-cat-1'],
+        },
+      ],
+    }, fakeLog());
+
+    // proj-a's input is failed with the upstream status, NOT thrown — the whole
+    // request must not abort with a bare outer 502.
+    expect(result.failed).to.have.lengthOf(1);
+    expect(result.failed[0].text).to.equal('a-prompt');
+    expect(result.failed[0].status).to.equal(502);
+    // proj-b is unaffected and still creates normally.
+    expect(result.created).to.have.lengthOf(1);
+    expect(result.created[0].text).to.equal('b-prompt');
+  });
+
+  it('returns published:false when publishing one of the affected projects fails '
+    + '(serenity-docs#472 §6)', async () => {
+    const dataAccess = makeDataAccess([projectA(), projectB()]);
+    const transport = {
+      listProjectTags: makeListProjectTagsStub(),
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
+      createPromptsWithMetadata: sinon.stub().callsFake(async (ws, pid, items) => {
+        const { name } = items[0];
+        return { page: 1, total: 1, items: [{ id: `new-${name}`, name }] };
+      }),
+      publishProject: sinon.stub().callsFake(async (ws, projectId) => {
+        if (projectId === 'proj-b') {
+          throw Object.assign(new Error('publish failed'), { status: 500 });
+        }
+      }),
+    };
+
+    const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      prompts: [
+        {
+          text: 'a-prompt', geoTargetId: 2840, languageCode: 'en', tagIds: ['tag-cat-1'],
+        },
+        {
+          text: 'b-prompt', geoTargetId: 2276, languageCode: 'de', tagIds: ['tag-cat-1'],
+        },
+      ],
+    }, fakeLog());
+
+    // Both prompts were created (publish is a separate step from the write) —
+    // but the batch as a whole must NOT be reported as published, since one of
+    // the two affected projects failed to publish.
+    expect(result.created).to.have.lengthOf(2);
+    expect(result.published).to.equal(false);
+  });
+
+  it('reports published:true when every affected project publishes successfully', async () => {
+    const dataAccess = makeDataAccess([projectA()]);
+    const transport = {
+      listProjectTags: makeListProjectTagsStub(),
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
+      createPromptsWithMetadata: sinon.stub().resolves({
+        page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'a-prompt' }],
+      }),
+      publishProject: sinon.stub().resolves(),
+    };
+
+    const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      prompts: [{
+        text: 'a-prompt', geoTargetId: 2840, languageCode: 'en', tagIds: ['tag-cat-1'],
+      }],
+    }, fakeLog());
+
+    expect(result.published).to.equal(true);
+  });
+});
+
 // PR26: origin (authorship) and source (producing system) remain independent
 // live dimensions. A create writes both; an update preserves both from the
 // caller's complete replacement set.
@@ -3451,6 +3797,73 @@ describe('handlers/prompts.js — independent origin and source dimensions', () 
       // Same project + same values => served from the dimension caches.
       expect(transport.listProjectTags.callCount).to.equal(readsAfterFirst);
       expect(transport.createProjectTags).to.not.have.been.called;
+    });
+  });
+});
+
+// LLMO-7533 §6: prompt-text length/character validation, rejected into
+// skipped[] (create) / 400 (update) BEFORE any Semrush call. MAX_PROMPT_TEXT_LENGTH
+// is a placeholder pending the confirmed Semrush contract — see its definition.
+describe('handlers/prompts.js — prompt-text length/character validation (LLMO-7533 §6)', () => {
+  const base = {
+    languageCode: 'en', geoTargetId: 2840, tagIds: ['t1'],
+  };
+
+  describe('normalizePromptInput', () => {
+    it('accepts text at exactly MAX_PROMPT_TEXT_LENGTH', () => {
+      const text = 'x'.repeat(MAX_PROMPT_TEXT_LENGTH);
+      const { value, reason } = normalizePromptInput({ ...base, text });
+      expect(reason).to.equal(null);
+      expect(value.text).to.equal(text);
+    });
+
+    it('rejects text one character over MAX_PROMPT_TEXT_LENGTH, into skipped (no upstream call)', () => {
+      const text = 'x'.repeat(MAX_PROMPT_TEXT_LENGTH + 1);
+      const { value, reason } = normalizePromptInput({ ...base, text });
+      expect(value).to.equal(null);
+      expect(reason).to.match(/exceeds the maximum length/);
+    });
+
+    it('rejects a disallowed control character in the text', () => {
+      const { value, reason } = normalizePromptInput({
+        ...base, text: `hello${String.fromCharCode(1)}world`,
+      });
+      expect(value).to.equal(null);
+      expect(reason).to.match(/disallowed control characters/);
+    });
+
+    it('accepts ordinary whitespace (newline, tab) and unicode/emoji in the text', () => {
+      const text = 'line one\nline two\tcol — café 🎉';
+      const { value, reason } = normalizePromptInput({ ...base, text });
+      expect(reason).to.equal(null);
+      expect(value.text).to.equal(text);
+    });
+  });
+
+  describe('parseUpdatePromptBody', () => {
+    const updateBase = { geoTargetId: 2840, languageCode: 'en', tagIds: ['t1'] };
+
+    it('accepts text at exactly MAX_PROMPT_TEXT_LENGTH', () => {
+      const text = 'x'.repeat(MAX_PROMPT_TEXT_LENGTH);
+      const result = parseUpdatePromptBody({ ...updateBase, text });
+      expect(result.ok).to.equal(true);
+    });
+
+    it('400s text one character over MAX_PROMPT_TEXT_LENGTH', () => {
+      const text = 'x'.repeat(MAX_PROMPT_TEXT_LENGTH + 1);
+      const result = parseUpdatePromptBody({ ...updateBase, text });
+      expect(result.ok).to.equal(false);
+      expect(result.status).to.equal(400);
+      expect(result.body.message).to.match(/exceeds the maximum length/);
+    });
+
+    it('400s a disallowed control character in the text', () => {
+      const result = parseUpdatePromptBody({
+        ...updateBase, text: `hello${String.fromCharCode(1)}world`,
+      });
+      expect(result.ok).to.equal(false);
+      expect(result.status).to.equal(400);
+      expect(result.body.message).to.match(/disallowed control characters/);
     });
   });
 });
@@ -4075,17 +4488,268 @@ describe('handlers/prompts.js — create is an upsert (existing text replaces ta
     expect(result.failed[0].text).to.equal('best shoes');
   });
 
-  it('pages the index, so a prompt past the first page is still recognised', async () => {
-    // A project larger than one page would otherwise look empty from page 2 on, and
-    // every prompt there would fall back to the additive create path.
-    const firstPage = Array.from({ length: 1000 }, (_, i) => storedPrompt({ id: `p${i}`, name: `q${i}` }));
-    const listPromptsByTags = sinon.stub();
-    listPromptsByTags.onFirstCall().resolves({ items: firstPage });
-    listPromptsByTags.onSecondCall().resolves({ items: [storedPrompt({ id: 'sem-page2', name: 'on page two' })] });
+  // Targeted lookup (default, kill-switch ON): one `search` per distinct input
+  // text, exact-match only, cost independent of corpus size.
+  it('targeted lookup issues one search per distinct text and matches EXACTLY, not by substring', async () => {
+    const listPromptsByTags = sinon.stub().callsFake((_ws, _pid, { search }) => Promise.resolve({
+      // A substring over-match sits alongside the exact row; only the exact one upserts.
+      items: search === 'best shoes'
+        ? [
+          storedPrompt({ id: 'sem-substr', name: 'best shoes for running' }),
+          storedPrompt({ id: PROMPT_ID, name: 'best shoes' }),
+        ]
+        : [],
+    }));
     const { transport, dataAccess } = setup([], { listPromptsByTags });
 
-    const result = await runImport(transport, dataAccess, [importRow('on page two', ['cat-new'])]);
+    const result = await runImport(transport, dataAccess, [
+      importRow('best shoes', ['cat-a']), // exists -> upsert to the EXACT row
+      importRow('brand new', ['cat-b']), // absent -> create
+    ]);
+
+    // Cost scales with input, not corpus: one search per distinct (projectId, text).
+    expect(listPromptsByTags).to.have.callCount(2);
+    expect(listPromptsByTags.firstCall.args[2]).to.include({ page: 1, limit: 25 });
+    expect(listPromptsByTags.firstCall.args[2].tag_ids).to.deep.equal([]);
+    expect(result.updated).to.have.lengthOf(1);
+    expect(result.updated[0].semrushPromptId).to.equal(PROMPT_ID); // exact, not the substring row
+    expect(result.created).to.have.lengthOf(1);
+  });
+
+  it('targeted lookup matches case-INSENSITIVELY (stored "Best Shoes" upserts for input "best shoes", never create-as-new)', async () => {
+    // Upstream dedupe/search is case-insensitive; a case-sensitive === here would
+    // send the variant down the create path and re-attach the tag (the additive bug).
+    const listPromptsByTags = sinon.stub().callsFake((_ws, _pid, { search }) => Promise.resolve({
+      items: search === 'best shoes'
+        ? [storedPrompt({ id: PROMPT_ID, name: 'Best Shoes' })]
+        : [],
+    }));
+    const { transport, dataAccess } = setup([], { listPromptsByTags });
+
+    const result = await runImport(transport, dataAccess, [importRow('best shoes', ['cat-a'])]);
+
+    expect(transport.createPromptsWithMetadata).to.not.have.been.called;
+    expect(result.created).to.be.an('array').that.is.empty;
+    expect(result.updated).to.have.lengthOf(1);
+    expect(result.updated[0].semrushPromptId).to.equal(PROMPT_ID);
+  });
+
+  it('targeted lookup: a search failure degrades the WHOLE project (inputs fail itemized, never treated as new)', async () => {
+    const listPromptsByTags = sinon.stub().rejects(Object.assign(new Error('upstream 502'), { status: 502 }));
+    const { transport, dataAccess } = setup([], { listPromptsByTags });
+
+    const result = await runImport(transport, dataAccess, [importRow('best shoes', ['cat-a'])]);
+
+    // The dangerous direction — treating an existing prompt as new — must NOT happen.
+    expect(transport.createPromptsWithMetadata).to.not.have.been.called;
+    expect(result.created).to.be.an('array').that.is.empty;
+    expect(result.failed).to.have.lengthOf(1);
+    expect(result.failed[0].status).to.equal(502);
+  });
+
+  it('targeted lookup: a full page with no exact hit degrades the project (never a false "new")', async () => {
+    // 25 non-matching rows fill the page; the row could be on page 2, so "not found"
+    // is not safe to conclude — the project degrades rather than tag-stack.
+    const fullPage = Array.from({ length: 25 }, (_, i) => storedPrompt({ id: `x${i}`, name: `other ${i}` }));
+    const listPromptsByTags = sinon.stub().resolves({ items: fullPage });
+    const { transport, dataAccess } = setup([], { listPromptsByTags });
+
+    const result = await runImport(transport, dataAccess, [importRow('best shoes', ['cat-a'])]);
+
+    expect(transport.createPromptsWithMetadata).to.not.have.been.called;
+    expect(result.failed).to.have.lengthOf(1);
+    expect(result.failed[0].status).to.equal(502);
+  });
+
+  it('marks inputs failed (503) when the write budget is already exhausted (2xx partial, no half-write)', async () => {
+    const listPromptsByTags = sinon.stub().resolves({ items: [] });
+    const { transport, dataAccess } = setup([], { listPromptsByTags });
+    const pastDeadline = Date.now() - 1;
+
+    const result = await handleCreatePrompts(
+      transport,
+      dataAccess,
+      BRAND,
+      WORKSPACE,
+      { prompts: [importRow('anything', ['cat-a'])] },
+      fakeLog(),
+      undefined, // classifyPromptType
+      undefined, // env
+      pastDeadline, // writeDeadline
+    );
+
+    expect(transport.createPromptsWithMetadata).to.not.have.been.called;
+    expect(result.failed).to.have.lengthOf(1);
+    expect(result.failed[0].status).to.equal(503);
+  });
+
+  it('fixed walk (kill-switch off) pages the index concurrently, so a prompt past page 1 is still recognised', async () => {
+    // Kill-switch OFF -> bounded-concurrency corpus walk. A project larger than one
+    // page would otherwise look empty from page 2 on and tag-stack every later row.
+    const firstPage = Array.from({ length: 1000 }, (_, i) => storedPrompt({ id: `p${i}`, name: `q${i}` }));
+    const pageItems = {
+      1: firstPage,
+      2: [storedPrompt({ id: 'sem-page2', name: 'on page two' })],
+    };
+    const listPromptsByTags = sinon.stub()
+      .callsFake((_ws, _pid, { page }) => Promise.resolve({ items: pageItems[page] ?? [] }));
+    const { transport, dataAccess } = setup([], { listPromptsByTags });
+
+    const result = await handleCreatePrompts(
+      transport,
+      dataAccess,
+      BRAND,
+      WORKSPACE,
+      { prompts: [importRow('on page two', ['cat-new'])] },
+      fakeLog(),
+      undefined, // classifyPromptType
+      { SERENITY_TARGETED_CREATE_LOOKUP: 'false' }, // env: kill-switch off -> walk
+    );
 
     expect(result.updated[0].semrushPromptId).to.equal('sem-page2');
+    // One concurrency batch of BULK_CREATE_CONCURRENCY pages — page 2 is short, so
+    // the walk stops after the first batch (8 pages), never a serial page-at-a-time.
+    expect(listPromptsByTags).to.have.callCount(8);
+  });
+
+  it('targeted lookup: an exact-name match with no usable id degrades the project (never a false "new")', async () => {
+    // Exact name matches but the row carries no id — storing nothing would let the
+    // input fall through to create-as-new and tag-stack. It must degrade instead.
+    const listPromptsByTags = sinon.stub().resolves({ items: [{ name: 'best shoes' }] });
+    const { transport, dataAccess } = setup([], { listPromptsByTags });
+
+    const result = await runImport(transport, dataAccess, [importRow('best shoes', ['cat-a'])]);
+
+    expect(transport.createPromptsWithMetadata).to.not.have.been.called;
+    expect(result.failed).to.have.lengthOf(1);
+    expect(result.failed[0].status).to.equal(502);
+    // Redaction-safe client message — no page-size constant / internal wording.
+    expect(result.failed[0].message).to.equal('existing-prompt lookup unavailable');
+  });
+
+  it('targeted lookup: the full-page degrade surfaces a redaction-safe client message (no internal wording)', async () => {
+    const fullPage = Array.from({ length: 25 }, (_, i) => storedPrompt({ id: `x${i}`, name: `other ${i}` }));
+    const listPromptsByTags = sinon.stub().resolves({ items: fullPage });
+    const { transport, dataAccess } = setup([], { listPromptsByTags });
+
+    const result = await runImport(transport, dataAccess, [importRow('best shoes', ['cat-a'])]);
+
+    expect(result.failed[0].status).to.equal(502);
+    expect(result.failed[0].message).to.equal('existing-prompt lookup unavailable');
+  });
+
+  it('targeted lookup: collapses duplicate input texts to a single search (cost dedup)', async () => {
+    const listPromptsByTags = sinon.stub().resolves({ items: [] });
+    const { transport, dataAccess } = setup([], { listPromptsByTags });
+
+    await runImport(transport, dataAccess, [
+      importRow('same text', ['cat-a']),
+      importRow('same text', ['cat-b']),
+    ]);
+
+    // new Set over the project's texts -> one lookup for the two identical inputs.
+    expect(listPromptsByTags).to.have.callCount(1);
+  });
+
+  it('per-item deadline guard: budget crossed AFTER the index builds fails later items (never a half-write)', async () => {
+    // The index builds while the deadline is in the future; the deadline is then
+    // crossed before the create fan-out runs, so the per-item guard (not the
+    // build-phase guard) must fire and fail the input rather than create-as-new.
+    const clock = sinon.useFakeTimers({ now: 1_000_000, toFake: ['Date'] });
+    try {
+      const deadline = 1_000_050;
+      const listPromptsByTags = sinon.stub().callsFake(() => {
+        clock.tick(60); // advance PAST the deadline once the (clean) build has read
+        return Promise.resolve({ items: [] });
+      });
+      const { transport, dataAccess } = setup([], { listPromptsByTags });
+
+      const result = await handleCreatePrompts(
+        transport,
+        dataAccess,
+        BRAND,
+        WORKSPACE,
+        { prompts: [importRow('anything', ['cat-a'])] },
+        fakeLog(),
+        undefined, // classifyPromptType
+        undefined, // env
+        deadline, // writeDeadline: future at build, past at fan-out
+      );
+
+      expect(transport.createPromptsWithMetadata).to.not.have.been.called;
+      expect(result.failed).to.have.lengthOf(1);
+      expect(result.failed[0].status).to.equal(503);
+      // The later per-item guard, distinct from the build-phase 'during'/'before lookup' messages.
+      expect(result.failed[0].message).to.equal('write budget exhausted before processing');
+    } finally {
+      clock.restore();
+    }
+  });
+
+  it('buildTargetedPromptIndex throws 503 when the write budget is already spent (build-phase deadline guard)', async () => {
+    const listPromptsByTags = sinon.stub().resolves({ items: [] });
+    await expect(buildTargetedPromptIndex({ listPromptsByTags }, WORKSPACE, 'proj-us-en', ['a text'], fakeLog(), { writeDeadline: Date.now() - 1 })).to.be.rejectedWith(ErrorWithStatusCode, /write budget exhausted during existing-prompt lookup/);
+    expect(listPromptsByTags).to.not.have.been.called;
+  });
+
+  it('buildExistingPromptIndex (fixed walk) throws 503 when the write budget is already spent (build-phase deadline guard)', async () => {
+    const listPromptsByTags = sinon.stub().resolves({ items: [] });
+    await expect(buildExistingPromptIndex({ listPromptsByTags }, WORKSPACE, 'proj-us-en', fakeLog(), { writeDeadline: Date.now() - 1 })).to.be.rejectedWith(ErrorWithStatusCode, /write budget exhausted during existing-prompt lookup/);
+    expect(listPromptsByTags).to.not.have.been.called;
+  });
+
+  it('fixed walk (kill-switch off): recognises a prompt PAST the old 20-page cap (upsert, not tag-stack)', async () => {
+    // Old cap was 20 pages; the target lives on page 21. With the cap raised to 100
+    // the walk still reaches it, so it upserts instead of silently tag-stacking.
+    const fullPage = Array.from({ length: MAX_PAGE_LIMIT }, (_, i) => storedPrompt({ id: `p${i}`, name: `q${i}` }));
+    const target = [storedPrompt({ id: 'sem-page21', name: 'deep prompt' })];
+    const pageItems = (page) => {
+      if (page < 21) {
+        return fullPage;
+      }
+      return page === 21 ? target : [];
+    };
+    const listPromptsByTags = sinon.stub()
+      .callsFake((_ws, _pid, { page }) => Promise.resolve({ items: pageItems(page) }));
+    const { transport, dataAccess } = setup([], { listPromptsByTags });
+
+    const result = await handleCreatePrompts(
+      transport,
+      dataAccess,
+      BRAND,
+      WORKSPACE,
+      { prompts: [importRow('deep prompt', ['cat-x'])] },
+      fakeLog(),
+      undefined,
+      { SERENITY_TARGETED_CREATE_LOOKUP: 'false' },
+    );
+
+    expect(result.updated).to.have.lengthOf(1);
+    expect(result.updated[0].semrushPromptId).to.equal('sem-page21');
+    expect(transport.createPromptsWithMetadata).to.not.have.been.called;
+  });
+
+  it('fixed walk (kill-switch off): warns when the 100-page cap is hit (index incomplete)', async () => {
+    // Every page full -> the walk never sees a short page and runs to the cap.
+    const fullPage = Array.from({ length: MAX_PAGE_LIMIT }, (_, i) => storedPrompt({ id: `p${i}`, name: `q${i}` }));
+    const listPromptsByTags = sinon.stub().resolves({ items: fullPage });
+    const { transport, dataAccess } = setup([], { listPromptsByTags });
+    const log = fakeLog();
+
+    await handleCreatePrompts(
+      transport,
+      dataAccess,
+      BRAND,
+      WORKSPACE,
+      { prompts: [importRow('never found', ['cat-x'])] },
+      log,
+      undefined,
+      { SERENITY_TARGETED_CREATE_LOOKUP: 'false' },
+    );
+
+    expect(log.warn).to.have.been.calledWithMatch(
+      sinon.match(/prompt index hit the page cap/),
+    );
+    expect(listPromptsByTags).to.have.callCount(MAX_PROMPT_INDEX_PAGES);
   });
 });

@@ -13,6 +13,7 @@
 import { expect } from 'chai';
 import { createHash } from 'node:crypto';
 import sinon from 'sinon';
+import esmock from 'esmock';
 import {
   acceptBulkTags,
   applyBulkTagOperation,
@@ -29,6 +30,12 @@ import { readTagTreeSnapshot } from '../../../../src/support/serenity/tag-tree.j
 import { clearTagCache } from '../../../../src/support/serenity/handlers/markets.js';
 
 const SERVER_OWNED_DIMENSIONS = ['intent', 'type', 'source', 'origin'];
+const FORWARDED_PROMISE_TOKEN = {
+  promise_token: 'rotated-promise-token',
+  expires_in: 14399,
+  token_type: 'bearer',
+};
+const SEMRUSH_PROMISE_PAIR = 'SEMRUSH';
 
 function requestHash(body) {
   return createHash('sha256').update(JSON.stringify({
@@ -116,6 +123,12 @@ const snapshot = {
     ['other', {
       id: 'other', rootName: 'tag', depth: 2, fullPath: [{ id: 'tag', name: 'tag' }, { id: 'other', name: 'Other' }],
     }],
+    ['middle', {
+      id: 'middle', rootName: 'tag', depth: 3, fullPath: [{ id: 'tag', name: 'tag' }, { id: 'family', name: 'Family' }, { id: 'middle', name: 'Middle' }],
+    }],
+    ['deep', {
+      id: 'deep', rootName: 'tag', depth: 4, fullPath: [{ id: 'tag', name: 'tag' }, { id: 'family', name: 'Family' }, { id: 'middle', name: 'Middle' }, { id: 'deep', name: 'Deep' }],
+    }],
   ]),
   items: [],
 };
@@ -187,6 +200,17 @@ describe('bulk tags job request and tree semantics', () => {
       .to.have.members(['child', 'family']);
     expect(applyBulkTagOperation(['family', 'child', 'other'], 'remove', [snapshot.byId.get('family')], snapshot))
       .to.have.members(['other']);
+  });
+
+  it('assigns every deep ancestor and removes an arbitrary-depth subtree', () => {
+    expect(applyBulkTagOperation([], 'assign', [snapshot.byId.get('deep')], snapshot))
+      .to.have.members(['deep', 'middle', 'family']);
+    expect(applyBulkTagOperation(
+      ['family', 'middle', 'deep', 'other'],
+      'remove',
+      [snapshot.byId.get('middle')],
+      snapshot,
+    )).to.have.members(['family', 'other']);
   });
 
   it('uses OR within each facet family and AND across families', () => {
@@ -263,6 +287,8 @@ describe('acceptBulkTags idempotency', () => {
       callerId: 'caller',
       idempotencyKey: 'same-key',
       log: {},
+      promiseToken: FORWARDED_PROMISE_TOKEN,
+      promisePair: SEMRUSH_PROMISE_PAIR,
     });
     expect(replay).to.deep.equal({
       status: 200,
@@ -301,6 +327,8 @@ describe('acceptBulkTags idempotency', () => {
       callerId: 'caller',
       idempotencyKey: 'same-key',
       log: {},
+      promiseToken: FORWARDED_PROMISE_TOKEN,
+      promisePair: SEMRUSH_PROMISE_PAIR,
     });
 
     expect(replay.body).to.deep.include({
@@ -328,7 +356,145 @@ describe('acceptBulkTags idempotency', () => {
       callerId: 'caller',
       idempotencyKey: 'same-key',
       log: {},
+      promiseToken: FORWARDED_PROMISE_TOKEN,
+      promisePair: SEMRUSH_PROMISE_PAIR,
     })).to.be.rejected.then((error) => expect(error.code).to.equal('idempotencyConflict'));
+  });
+});
+
+describe('acceptBulkTags taxonomy freshness', () => {
+  it('bypasses a cached snapshot when validating a newly created mutation tag', async () => {
+    let familyExists = false;
+    const transport = {
+      listProjectTags: sinon.stub().callsFake((_, __, options = {}) => {
+        let items = [{ id: 'tag-root', name: 'tag', children_count: familyExists ? 1 : 0 }];
+        if (options.parentId === 'tag-root') {
+          items = familyExists ? [{
+            id: 'family',
+            name: 'Family',
+            parent_id: 'tag-root',
+            children_count: 0,
+            path: [{ id: 'tag-root', name: 'tag' }],
+          }] : [];
+        }
+        return Promise.resolve({ items });
+      }),
+    };
+    await readTagTreeSnapshot(transport, 'ws', 'project', {});
+    familyExists = true;
+
+    const job = {
+      getId: () => 'bulk-job',
+      getStatus: () => 'IN_PROGRESS',
+    };
+    const create = sinon.stub().resolves(job);
+    const sendMessage = sinon.stub().resolves();
+    const response = await acceptBulkTags({
+      context: {
+        dataAccess: { AsyncJob: { create } },
+        sqs: { sendMessage },
+        env: { SERENITY_JOB_RUNNER_QUEUE_URL: 'queue-url' },
+        log: { error: sinon.stub(), warn: sinon.stub() },
+      },
+      transport,
+      brandId: 'brand',
+      orgId: 'org',
+      workspaceId: 'ws',
+      projectId: 'project',
+      body: {
+        geoTargetId: 1,
+        languageCode: 'en',
+        operation: 'assign',
+        tagIds: ['family'],
+        filter: { tagFilterMode: 'faceted-v1' },
+      },
+      callerId: 'caller',
+      log: {},
+      promiseToken: FORWARDED_PROMISE_TOKEN,
+      promisePair: SEMRUSH_PROMISE_PAIR,
+    });
+
+    expect(response.status).to.equal(202);
+    expect(transport.listProjectTags).to.have.callCount(3);
+    expect(create).to.have.been.calledOnce;
+    expect(sendMessage).to.have.been.calledOnce;
+  });
+});
+
+describe('bulk tags promise credential forwarding', () => {
+  const body = {
+    geoTargetId: 1,
+    languageCode: 'en',
+    operation: 'assign',
+    tagIds: ['family'],
+    filter: { tagFilterMode: 'faceted-v1' },
+  };
+
+  it('forwards the pre-exchanged rotated token and SEMRUSH pair without emitter minting', async () => {
+    const createAndEnqueueJob = sinon.stub().resolves({
+      getId: () => 'bulk-job',
+      getStatus: () => 'IN_PROGRESS',
+    });
+    const { handleBulkTags: handleBulkTagsWithStubbedEnqueue } = await esmock(
+      '../../../../src/support/serenity/handlers/bulk-tags-job.js',
+      {
+        '../../../../src/support/serenity/async-job-runner.js': { createAndEnqueueJob },
+      },
+    );
+    const context = { dataAccess: { AsyncJob: {} } };
+    const dataAccess = {
+      BrandSemrushProject: {
+        findBySlice: sinon.stub().resolves({ getSemrushProjectId: () => 'project' }),
+      },
+    };
+
+    const response = await handleBulkTagsWithStubbedEnqueue(
+      context,
+      workerTransport([]),
+      dataAccess,
+      'brand',
+      'org',
+      'ws',
+      body,
+      'caller',
+      null,
+      {},
+      { promise_token: 'rotated-token', expires_in: 14399, token_type: 'bearer' },
+      'SEMRUSH',
+    );
+
+    expect(response.status).to.equal(202);
+    expect(createAndEnqueueJob).to.have.been.calledOnceWith(
+      context,
+      sinon.match({
+        jobType: 'serenity-bulk-tags',
+        promiseToken: {
+          promise_token: 'rotated-token',
+          expires_in: 14399,
+          token_type: 'bearer',
+        },
+        promisePair: 'SEMRUSH',
+      }),
+    );
+  });
+
+  it('rejects absent forwarded credentials instead of falling back to an emitter token', async () => {
+    const create = sinon.stub().throws(new Error('enqueue must not be reached'));
+    await expect(acceptBulkTags({
+      context: { dataAccess: { AsyncJob: { create } } },
+      transport: workerTransport([]),
+      brandId: 'brand',
+      orgId: 'org',
+      workspaceId: 'ws',
+      projectId: 'project',
+      body,
+      callerId: 'caller',
+      log: {},
+    })).to.be.rejected.then((error) => {
+      expect(error.status).to.equal(400);
+      expect(error.code).to.equal('invalidRequest');
+    });
+    expect(create).not.to.have.been.called;
   });
 });
 

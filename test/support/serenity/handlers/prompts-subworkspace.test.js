@@ -303,6 +303,153 @@ describe('prompts-subworkspace handlers', () => {
       expect(items[0].references).to.not.include(TAG_IDS.sourceConfig);
     });
 
+    // Lockstep with the flat twin: the DEFAULT targeted lookup issues one `search`
+    // per distinct input text (cost scales with input, not corpus) and matches the
+    // EXACT row only, never a substring over-match.
+    it('targeted lookup issues one search per distinct text and matches exactly', async () => {
+      const listPromptsByTags = sinon.stub().callsFake((_ws, _pid, { search }) => Promise.resolve({
+        items: search === 'p'
+          ? [{ id: 'sem-substr', name: 'p variant', tags: [] }, { id: 'sem-existing', name: 'p', tags: [] }]
+          : [],
+      }));
+      const transport = makeTransport({
+        listPromptsByTags,
+        updatePromptTagsByIds: sinon.stub().resolves(),
+        patchPromptsMetadataBatch: sinon.stub().resolves(),
+      });
+
+      const result = await handleCreatePromptsSubworkspace(transport, WS, {
+        prompts: [
+          {
+            text: 'p', tagIds: ['tag-a'], geoTargetId: 2840, languageCode: 'en',
+          },
+          {
+            text: 'brand new', tagIds: ['tag-b'], geoTargetId: 2840, languageCode: 'en',
+          },
+        ],
+      }, log);
+
+      expect(listPromptsByTags).to.have.callCount(2); // one search per distinct (projectId, text)
+      expect(listPromptsByTags.firstCall.args[2]).to.include({ page: 1, limit: 25 });
+      expect(listPromptsByTags.firstCall.args[2].tag_ids).to.deep.equal([]);
+      expect(result.updated).to.have.length(1);
+      expect(result.updated[0].semrushPromptId).to.equal('sem-existing'); // exact, not substring
+      expect(result.created).to.have.length(1);
+    });
+
+    it('targeted lookup matches case-insensitively (stored "Best Shoes" upserts for input "best shoes", never create-as-new)', async () => {
+      // Lockstep with the flat twin: case-insensitive match, mirroring the walk's byLower dedup.
+      const listPromptsByTags = sinon.stub().callsFake((_ws, _pid, { search }) => Promise.resolve({
+        items: search === 'best shoes'
+          ? [{ id: 'sem-existing', name: 'Best Shoes', tags: [] }]
+          : [],
+      }));
+      const transport = makeTransport({
+        listPromptsByTags,
+        updatePromptTagsByIds: sinon.stub().resolves(),
+        patchPromptsMetadataBatch: sinon.stub().resolves(),
+      });
+
+      const result = await handleCreatePromptsSubworkspace(transport, WS, {
+        prompts: [
+          {
+            text: 'best shoes', tagIds: ['tag-a'], geoTargetId: 2840, languageCode: 'en',
+          },
+        ],
+      }, log);
+
+      expect(transport.createPromptsWithMetadata).to.not.have.been.called;
+      expect(result.created).to.have.length(0);
+      expect(result.updated).to.have.length(1);
+      expect(result.updated[0].semrushPromptId).to.equal('sem-existing');
+    });
+
+    it('targeted lookup: a search failure degrades the whole project (inputs fail itemized, never treated as new)', async () => {
+      const transport = makeTransport({
+        listPromptsByTags: sinon.stub().rejects(Object.assign(new Error('upstream 502'), { status: 502 })),
+      });
+
+      const result = await handleCreatePromptsSubworkspace(transport, WS, {
+        prompts: [{
+          text: 'p', tagIds: ['tag-a'], geoTargetId: 2840, languageCode: 'en',
+        }],
+      }, log);
+
+      expect(transport.createPromptsWithMetadata).to.not.have.been.called;
+      expect(result.created).to.be.an('array').that.is.empty;
+      expect(result.failed).to.have.length(1);
+      expect(result.failed[0].status).to.equal(502);
+    });
+
+    // Lockstep with the flat twin's dangerous-path coverage — the subworkspace
+    // handler wires the same deadline/full-page/walk guards, and a copy-paste
+    // divergence in this twin would otherwise silently create-as-new.
+    it('targeted lookup: a full page with no exact hit degrades the project (never a false "new")', async () => {
+      const fullPage = Array.from({ length: 25 }, (_, i) => ({ id: `x${i}`, name: `other ${i}`, tags: [] }));
+      const transport = makeTransport({
+        listPromptsByTags: sinon.stub().resolves({ items: fullPage }),
+      });
+
+      const result = await handleCreatePromptsSubworkspace(transport, WS, {
+        prompts: [{
+          text: 'p', tagIds: ['tag-a'], geoTargetId: 2840, languageCode: 'en',
+        }],
+      }, log);
+
+      expect(transport.createPromptsWithMetadata).to.not.have.been.called;
+      expect(result.failed).to.have.length(1);
+      expect(result.failed[0].status).to.equal(502);
+      expect(result.failed[0].message).to.equal('existing-prompt lookup unavailable');
+    });
+
+    it('targeted lookup: an exact-name match with no usable id degrades the project (never a false "new")', async () => {
+      const transport = makeTransport({ listPromptsByTags: sinon.stub().resolves({ items: [{ name: 'p' }] }) });
+
+      const result = await handleCreatePromptsSubworkspace(transport, WS, {
+        prompts: [{
+          text: 'p', tagIds: ['tag-a'], geoTargetId: 2840, languageCode: 'en',
+        }],
+      }, log);
+
+      expect(transport.createPromptsWithMetadata).to.not.have.been.called;
+      expect(result.failed).to.have.length(1);
+      expect(result.failed[0].status).to.equal(502);
+    });
+
+    it('marks inputs failed (503) when the write budget is already exhausted (never a half-write)', async () => {
+      const transport = makeTransport();
+      const result = await handleCreatePromptsSubworkspace(transport, WS, {
+        prompts: [{
+          text: 'p', tagIds: ['tag-a'], geoTargetId: 2840, languageCode: 'en',
+        }],
+      }, log, undefined, undefined, Date.now() - 1);
+
+      expect(transport.createPromptsWithMetadata).to.not.have.been.called;
+      expect(result.failed).to.have.length(1);
+      expect(result.failed[0].status).to.equal(503);
+    });
+
+    it('fixed walk (kill-switch off): recognises a prompt past page 1 (upsert, not tag-stack)', async () => {
+      const firstPage = Array.from({ length: 1000 }, (_, i) => ({ id: `p${i}`, name: `q${i}`, tags: [] }));
+      const pageItems = { 1: firstPage, 2: [{ id: 'sem-page2', name: 'on page two', tags: [] }] };
+      const transport = makeTransport({
+        listPromptsByTags: sinon.stub()
+          .callsFake((_ws, _pid, { page }) => Promise.resolve({ items: pageItems[page] ?? [] })),
+        updatePromptTagsByIds: sinon.stub().resolves(),
+        patchPromptsMetadataBatch: sinon.stub().resolves(),
+      });
+
+      const result = await handleCreatePromptsSubworkspace(transport, WS, {
+        prompts: [{
+          text: 'on page two', tagIds: ['tag-x'], geoTargetId: 2840, languageCode: 'en',
+        }],
+      }, log, undefined, { SERENITY_TARGETED_CREATE_LOOKUP: 'false' });
+
+      expect(result.updated).to.have.length(1);
+      expect(result.updated[0].semrushPromptId).to.equal('sem-page2');
+      expect(transport.createPromptsWithMetadata).to.not.have.been.called;
+    });
+
     // Lockstep coverage for the flat twin's "moves updates into `failed` when the
     // batched tag write throws". The twin resolves its workspace id differently
     // (`workspaceId` vs `semrushWorkspaceId`), so a copy-paste divergence in this
@@ -592,6 +739,78 @@ describe('prompts-subworkspace handlers', () => {
       expect(result.failed[0].status).to.equal(409);
       expect(result.failed[0].error).to.equal(ERROR_CODES.QUOTA_EXCEEDED);
       expect(result.failed[0].text).to.equal('p');
+    });
+
+    // LLMO-7533 / serenity-docs#472: lockstep with the flat twin's mixed-result
+    // containment coverage.
+    it('contains an existing-prompt index read failure to its own project — the other '
+      + "project's inputs still process (serenity-docs#472 §2)", async () => {
+      const transport = makeTransport({
+        listProjects: sinon.stub().resolves({
+          items: [proj({ id: 'p-us-en', geo: 2840, lang: 'en' }),
+            proj({ id: 'p-de-de', geo: 2276, lang: 'de' })],
+        }),
+        listPromptsByTags: sinon.stub().callsFake(async (ws, projectId) => {
+          if (projectId === 'p-us-en') {
+            throw Object.assign(new Error('upstream 502'), { status: 502 });
+          }
+          return { items: [] };
+        }),
+        createPromptsWithMetadata: sinon.stub().callsFake(async (ws, pid, items) => {
+          const { name } = items[0];
+          return { page: 1, total: 1, items: [{ id: `new-${name}`, name }] };
+        }),
+      });
+
+      const result = await handleCreatePromptsSubworkspace(transport, WS, {
+        prompts: [
+          {
+            text: 'a-prompt', tagIds: ['tag-1'], geoTargetId: 2840, languageCode: 'en',
+          },
+          {
+            text: 'b-prompt', tagIds: ['tag-1'], geoTargetId: 2276, languageCode: 'de',
+          },
+        ],
+      }, log);
+
+      expect(result.failed).to.have.lengthOf(1);
+      expect(result.failed[0].text).to.equal('a-prompt');
+      expect(result.failed[0].status).to.equal(502);
+      expect(result.created).to.have.lengthOf(1);
+      expect(result.created[0].text).to.equal('b-prompt');
+    });
+
+    it('returns published:false when publishing one of the affected projects fails '
+      + '(serenity-docs#472 §6)', async () => {
+      const transport = makeTransport({
+        listProjects: sinon.stub().resolves({
+          items: [proj({ id: 'p-us-en', geo: 2840, lang: 'en' }),
+            proj({ id: 'p-de-de', geo: 2276, lang: 'de' })],
+        }),
+        createPromptsWithMetadata: sinon.stub().callsFake(async (ws, pid, items) => {
+          const { name } = items[0];
+          return { page: 1, total: 1, items: [{ id: `new-${name}`, name }] };
+        }),
+        publishProject: sinon.stub().callsFake(async (ws, projectId) => {
+          if (projectId === 'p-de-de') {
+            throw Object.assign(new Error('publish failed'), { status: 500 });
+          }
+        }),
+      });
+
+      const result = await handleCreatePromptsSubworkspace(transport, WS, {
+        prompts: [
+          {
+            text: 'a-prompt', tagIds: ['tag-1'], geoTargetId: 2840, languageCode: 'en',
+          },
+          {
+            text: 'b-prompt', tagIds: ['tag-1'], geoTargetId: 2276, languageCode: 'de',
+          },
+        ],
+      }, log);
+
+      expect(result.created).to.have.lengthOf(2);
+      expect(result.published).to.equal(false);
     });
   });
 

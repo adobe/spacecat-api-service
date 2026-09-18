@@ -28,12 +28,17 @@ import AccessControlUtil from './access-control-util.js';
  *     `allowedJobTypes` is reported as *not found* (404), never revealing that a job
  *     of a different type exists. An endpoint scoped to `['preflight']` therefore can
  *     never be used to read a `serenity-classify-prompts` (token-bearing) job.
- *  2. **owner scoping** — when `resolveOwnerSiteId` yields a siteId, the caller must
- *     hold access to that site (the same org-membership check `site:read` routes
- *     already enforce via {@link AccessControlUtil#hasAccess}). A caller without
- *     access gets 404 (again, no existence disclosure). Job types with no owning
- *     site (e.g. `site-detection`, whose metadata carries `{ domain, hlxVersion }`
- *     and no siteId) omit the resolver and are scoped by jobType only.
+ *  2. **owner scoping** — when a `resolveOwnerSiteId` resolver is supplied, the caller
+ *     must hold access to the site it yields (the same org-membership check `site:read`
+ *     routes already enforce via {@link AccessControlUtil#hasAccess}). A caller without
+ *     access gets 404 (again, no existence disclosure). This scoping is **fail-closed**:
+ *     if a resolver is supplied but yields no siteId (a job that should be owned but
+ *     carries no owner — a malformed or partially-written record), the job is denied
+ *     (404) rather than returned. Only job types with no owning site at all
+ *     (e.g. `site-detection`, whose metadata carries `{ domain, hlxVersion }` and no
+ *     siteId) omit the resolver entirely; those are intentionally scoped by jobType
+ *     only. "No resolver supplied" (ownerless, allowed) is thus distinct from "resolver
+ *     supplied but empty" (owned-but-unresolvable, denied).
  *
  * The caller projects a response DTO from the returned job — this primitive never
  * returns raw metadata to the client.
@@ -44,7 +49,10 @@ import AccessControlUtil from './access-control-util.js';
  * @param {string} params.jobId - The AsyncJob UUID (already format-validated by the caller).
  * @param {string[]} params.allowedJobTypes - Job types this endpoint may return.
  * @param {(job: object) => (string|undefined)} [params.resolveOwnerSiteId] - Resolves the
- *   owning siteId from the job; omit for ownerless job types.
+ *   owning siteId from the job. When SUPPLIED, it is authoritative and fail-closed:
+ *   a resolver that returns `undefined`/empty denies the job (404) rather than
+ *   skipping the ownership check. Omit it ONLY for job types that have no owning
+ *   site at all (scoped by jobType alone).
  * @returns {Promise<{ job?: object, error?: object }>} Exactly one of `job`
  *   (authorized) or `error` (an HTTP response to return as-is).
  */
@@ -63,16 +71,27 @@ export async function loadJobScopedToCaller(context, {
     return { error: notFound(`Job with ID ${jobId} not found`) };
   }
 
-  const siteId = resolveOwnerSiteId ? resolveOwnerSiteId(job) : undefined;
-  if (hasText(siteId)) {
+  // Distinguish "no resolver supplied" (ownerless job type — jobType-only scope,
+  // allowed) from "resolver supplied but empty" (a job that should be owned but
+  // resolves to no siteId — fail closed, deny). Returning the job in the latter case
+  // would be a fail-open default in a security primitive.
+  if (resolveOwnerSiteId) {
+    const siteId = resolveOwnerSiteId(job);
+    if (!hasText(siteId)) {
+      // The jobType is logged so a misconfigured resolver (wrong field path for
+      // this job type) is distinguishable from a data-quality issue (a legitimate
+      // record written without its owner siteId).
+      log?.warn?.(`[async-job-access] job ${jobId} (jobType=${jobType}) has an owner resolver but no resolvable siteId; denying`);
+      return { error: notFound(`Job with ID ${jobId} not found`) };
+    }
     const site = await dataAccess.Site.findById(siteId);
     if (!site) {
-      log?.warn?.(`[async-job-access] job ${jobId} references missing site ${siteId}; denying`);
+      log?.warn?.(`[async-job-access] job ${jobId} (jobType=${jobType}) references missing site ${siteId}; denying`);
       return { error: notFound(`Job with ID ${jobId} not found`) };
     }
     const accessControlUtil = AccessControlUtil.fromContext(context);
     if (!await accessControlUtil.hasAccess(site)) {
-      log?.warn?.(`[async-job-access] caller lacks access to site ${siteId} owning job ${jobId}; denying`);
+      log?.warn?.(`[async-job-access] caller lacks access to site ${siteId} owning job ${jobId} (jobType=${jobType}); denying`);
       return { error: notFound(`Job with ID ${jobId} not found`) };
     }
   }

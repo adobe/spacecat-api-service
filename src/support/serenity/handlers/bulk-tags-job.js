@@ -82,10 +82,12 @@ function buildBulkTagMutationIds(operation, selected, snapshot) {
   const ids = new Set();
   for (const item of selected) {
     ids.add(item.id);
-    if (operation === 'assign' && item.rootName === 'tag' && item.depth === 3) {
-      ids.add(item.fullPath[1].id);
+    if (operation === 'assign' && item.rootName === 'tag') {
+      for (const ancestor of item.fullPath.slice(1, -1)) {
+        ids.add(ancestor.id);
+      }
     }
-    if (operation === 'remove' && item.rootName === 'tag' && item.depth === 2) {
+    if (operation === 'remove' && item.rootName === 'tag') {
       for (const candidate of snapshot.items) {
         if (candidate.fullPath.some((part) => part.id === item.id)) {
           ids.add(candidate.id);
@@ -119,8 +121,10 @@ export function applyBulkTagOperation(currentIds, operation, selected, snapshot,
 
   for (const id of [...result]) {
     const item = snapshot.byId.get(id);
-    if (item?.rootName === 'tag' && item.depth === 3) {
-      result.add(item.fullPath[1].id);
+    if (item?.rootName === 'tag') {
+      for (const ancestor of item.fullPath.slice(1, -1)) {
+        result.add(ancestor.id);
+      }
     }
   }
   const ids = [...result];
@@ -335,6 +339,8 @@ export function parseBulkTagsBody(body) {
  * @param {string} options.callerId
  * @param {string | null} [options.idempotencyKey]
  * @param {object} [options.log]
+ * @param {{ promise_token: string, expires_in?: number, token_type?: string }} options.promiseToken
+ * @param {string} options.promisePair
  * @returns {Promise<{ status: number, body: object }>}
  */
 async function acceptParsedBulkTags({
@@ -348,6 +354,8 @@ async function acceptParsedBulkTags({
   callerId,
   idempotencyKey,
   log,
+  promiseToken,
+  promisePair,
 }) {
   const hash = canonicalHash(parsed);
   const key = idempotencyKey == null ? null : String(idempotencyKey).trim();
@@ -378,7 +386,15 @@ async function acceptParsedBulkTags({
       await existing.remove();
     }
   }
-  const snapshot = await readTagTreeSnapshot(transport, workspaceId, projectId, log);
+  // A create-tag request may have landed on another Lambda container moments
+  // earlier. Never validate a mutation against this container's cached taxonomy.
+  const snapshot = await readTagTreeSnapshot(
+    transport,
+    workspaceId,
+    projectId,
+    log,
+    { forceRefresh: true },
+  );
   /** @type {TagTreeItem[]} */
   const selected = [];
   for (const id of parsed.tagIds) {
@@ -424,9 +440,18 @@ async function acceptParsedBulkTags({
 
   let job;
   try {
+    if (!promiseToken?.promise_token || !promisePair) {
+      throw codedError(
+        'Bulk tag operations require caller promise credentials',
+        400,
+        ERROR_CODES.INVALID_REQUEST,
+      );
+    }
     job = await createAndEnqueueJob(context, {
       jobType: BULK_TAGS_JOB_TYPE,
       jobId: deterministicJobId,
+      promiseToken,
+      promisePair,
       metadata: {
         brandId,
         orgId,
@@ -476,6 +501,8 @@ async function acceptParsedBulkTags({
  * @param {string} options.callerId
  * @param {string | null} [options.idempotencyKey]
  * @param {object} [options.log]
+ * @param {{ promise_token: string, expires_in?: number, token_type?: string }} options.promiseToken
+ * @param {string} options.promisePair
  * @returns {Promise<{ status: number, body: object }>}
  */
 export async function acceptBulkTags({
@@ -489,6 +516,8 @@ export async function acceptBulkTags({
   callerId,
   idempotencyKey,
   log,
+  promiseToken,
+  promisePair,
 }) {
   const parsed = parseBulkTagsBody(body);
   return acceptParsedBulkTags({
@@ -502,6 +531,8 @@ export async function acceptBulkTags({
     callerId,
     idempotencyKey,
     log,
+    promiseToken,
+    promisePair,
   });
 }
 
@@ -514,8 +545,10 @@ export async function acceptBulkTags({
  * @param {string} workspaceId
  * @param {any} body
  * @param {string} callerId
- * @param {string | null} [idempotencyKey]
- * @param {object} [log]
+ * @param {string | null} idempotencyKey
+ * @param {object} log
+ * @param {{ promise_token: string, expires_in?: number, token_type?: string }} promiseToken
+ * @param {string} promisePair
  * @returns {Promise<{ status: number, body: object }>}
  */
 export async function handleBulkTags(
@@ -529,6 +562,8 @@ export async function handleBulkTags(
   callerId,
   idempotencyKey,
   log,
+  promiseToken,
+  promisePair,
 ) {
   const parsed = parseBulkTagsBody(body);
   const row = await dataAccess.BrandSemrushProject.findBySlice(
@@ -550,6 +585,8 @@ export async function handleBulkTags(
     callerId,
     idempotencyKey,
     log,
+    promiseToken,
+    promisePair,
   });
 }
 
@@ -561,8 +598,10 @@ export async function handleBulkTags(
  * @param {string} workspaceId
  * @param {any} body
  * @param {string} callerId
- * @param {string | null} [idempotencyKey]
- * @param {object} [log]
+ * @param {string | null} idempotencyKey
+ * @param {object} log
+ * @param {{ promise_token: string, expires_in?: number, token_type?: string }} promiseToken
+ * @param {string} promisePair
  * @returns {Promise<{ status: number, body: object }>}
  */
 export async function handleBulkTagsSubworkspace(
@@ -575,6 +614,8 @@ export async function handleBulkTagsSubworkspace(
   callerId,
   idempotencyKey,
   log,
+  promiseToken,
+  promisePair,
 ) {
   const parsed = parseBulkTagsBody(body);
   const project = await resolveProject(
@@ -598,6 +639,8 @@ export async function handleBulkTagsSubworkspace(
     callerId,
     idempotencyKey,
     log,
+    promiseToken,
+    promisePair,
   });
 }
 

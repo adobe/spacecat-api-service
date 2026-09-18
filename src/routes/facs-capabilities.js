@@ -160,6 +160,10 @@ const routeFacsCapabilities = {
     // Prompt-suggestion schedule (re-)provisioning — admin-or-S2S (dedicated
     // promptSuggestionSchedule:write capability); not a customer FACS surface.
     'POST /sites/:siteId/prompt-suggestion-schedules', // authorizeWrite (admin || S2S cap)
+    // OAE validation jobs — triggered internally (e.g. the edge-deploy flow) or by other
+    // spacecat services, not a customer-facing FACS surface.
+    'POST /sites/:siteId/llmo/oae-validation/jobs',
+    'GET /sites/:siteId/llmo/oae-validation/jobs/:jobId',
     'POST /projects', // hasAdminAccess
     'DELETE /projects/:projectId', // hasAdminAccess
     'POST /organizations', // hasAdminAccess
@@ -202,6 +206,9 @@ const routeFacsCapabilities = {
 
     // Internal proxy tool
     'GET /tools/proxy', // internal preview proxy (no external auth required)
+
+    // LaunchDarkly flags summary — admin-only, no site/org scope, not a FACS surface
+    'GET /tools/launchdarkly/flags',
 
     // Monitoring / admin telemetry
     'GET /monitoring/drs-bp-pg-audit', // internal monitoring
@@ -289,6 +296,7 @@ const routeFacsCapabilities = {
       'POST /sites/:siteId/llmo/config': 'llmo/can_configure',
       'PATCH /sites/:siteId/llmo/config': 'llmo/can_configure',
       'POST /sites/:siteId/llmo/brand-claims/request': 'llmo/can_configure',
+      'POST /sites/:siteId/llmo/brand-claims/feedback': 'llmo/can_view',
       // Site-level scraper config — a site write surfaced through the
       // generic /config namespace rather than under /llmo/, but
       // configuration nonetheless.
@@ -674,8 +682,10 @@ const routeFacsCapabilities = {
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts': 'llmo/can_configure',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/bulk-tags': 'llmo/can_configure',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/bulk-delete': 'llmo/can_configure',
+      'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/finalize': 'llmo/can_configure',
       'PATCH /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/:semrushPromptId': 'llmo/can_configure',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets': 'llmo/can_configure',
+      'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/generation/jobs/:jobId/reauth': 'llmo/can_configure',
       'DELETE /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode': 'llmo/can_configure',
       'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags': 'llmo/can_configure',
       'PATCH /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags/:tagId': 'llmo/can_configure',
@@ -750,6 +760,7 @@ const routeFacsCapabilities = {
       'GET /sites/:siteId/experiments': 'llmo/can_view',
       'GET /sites/:siteId/files': 'llmo/can_view',
       'GET /sites/:siteId/fixes': 'llmo/can_view',
+      'GET /sites/:siteId/deployed-opportunities': 'llmo/can_view',
       'GET /sites/:siteId/geo-experiments': 'llmo/can_view',
       'GET /sites/:siteId/geo-experiments/:geoExperimentId': 'llmo/can_view',
       'GET /sites/:siteId/geo-experiments/:geoExperimentId/results': 'llmo/can_view',
@@ -760,7 +771,11 @@ const routeFacsCapabilities = {
       'GET /sites/:siteId/metadata': 'llmo/can_view',
       'GET /sites/:siteId/metrics/:metric/:source': 'llmo/can_view',
       'GET /sites/:siteId/metrics/:metric/:source/by-url/:base64PageUrl': 'llmo/can_view',
+      'GET /sites/:siteId/keyword-cpc': 'llmo/can_view',
       'GET /sites/:siteId/opportunities': 'llmo/can_view',
+      // POST-for-read lookups (body carries the query); reads, not writes.
+      'POST /sites/:siteId/opportunities/by-urls': 'llmo/can_view',
+      'POST /sites/:siteId/suggestions/by-urls': 'llmo/can_view',
       'GET /sites/:siteId/opportunities/:opportunityId': 'llmo/can_view',
       'GET /sites/:siteId/opportunities/:opportunityId/fixes': 'llmo/can_view',
       'GET /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': 'llmo/can_view',
@@ -885,8 +900,10 @@ const routeFacsCapabilities = {
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/jobs/:jobId': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets': 'llmo/can_view',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/generation/jobs/:jobId': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags': 'llmo/can_view',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags/search': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags/:tagId/impact': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/models': 'llmo/can_view',
       // Org-level Serenity catalog reads (no brandId).
@@ -1063,6 +1080,7 @@ const routeFacsCapabilities = {
       'GET /sites/:siteId/metadata': 'aso/can_view',
       'GET /sites/:siteId/metrics/:metric/:source': 'aso/can_view',
       'GET /sites/:siteId/metrics/:metric/:source/by-url/:base64PageUrl': 'aso/can_view',
+      'GET /sites/:siteId/keyword-cpc': 'aso/can_view',
       'GET /sites/:siteId/page-citability/counts': 'aso/can_view',
       'GET /sites/:siteId/scraped-content/:type': 'aso/can_view',
       'GET /sites/:siteId/site-enrollments': 'aso/can_view',
@@ -1090,6 +1108,9 @@ const routeFacsCapabilities = {
       'GET /sites/:siteId/opportunities': 'aso/can_view',
       'GET /sites/:siteId/opportunities/top-paid': 'aso/can_view',
       'GET /sites/:siteId/opportunities/by-status/:status': 'aso/can_view',
+      // POST-for-read lookups (body carries the query); reads, not writes.
+      'POST /sites/:siteId/opportunities/by-urls': 'aso/can_view',
+      'POST /sites/:siteId/suggestions/by-urls': 'aso/can_view',
       'GET /sites/:siteId/opportunities/:opportunityId': 'aso/can_view',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions': 'aso/can_view',
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/paged/:limit': 'aso/can_view',
@@ -1102,6 +1123,7 @@ const routeFacsCapabilities = {
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/fixes': 'aso/can_view',
       'GET /sites/:siteId/edge-deployed-urls': 'aso/can_view',
       'GET /sites/:siteId/fixes': 'aso/can_view',
+      'GET /sites/:siteId/deployed-opportunities': 'aso/can_view',
       'GET /sites/:siteId/opportunities/:opportunityId/fixes': 'aso/can_view',
       'GET /sites/:siteId/opportunities/:opportunityId/fixes/by-status/:status': 'aso/can_view',
       'GET /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': 'aso/can_view',

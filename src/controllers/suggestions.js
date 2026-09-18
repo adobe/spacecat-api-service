@@ -47,10 +47,12 @@ import {
   isAllowedSuggestionTransition,
 } from '@adobe/spacecat-shared-data-access';
 import TierClient from '@adobe/spacecat-shared-tier-client';
-import TokowakaClient from '@adobe/spacecat-shared-tokowaka-client';
+import TokowakaClient, { ROUTING_VALIDATOR_TYPE } from '@adobe/spacecat-shared-tokowaka-client';
 import { SuggestionDto, SUGGESTION_VIEWS, SUGGESTION_SKIP_REASONS } from '../dto/suggestion.js';
 import { isValidLocale } from '../utils/validations.js';
 import { applyFieldProjection } from '../utils/field-projection.js';
+import { lookupByUrl } from '../support/lookup-by-url.js';
+import { requirePostgrestClient } from '../support/postgrest-availability.js';
 import {
   getScheduleParams,
   buildExperimentMetadata,
@@ -80,9 +82,16 @@ import { getImsTokenFromPromiseToken } from '../support/edge-routing-auth.js';
 import { isImsGroupMember } from '../support/ims-group.js';
 import { postSlackMessage } from '../utils/slack/base.js';
 import { createAtomicStrategy, deleteAtomicStrategy } from '../support/atomic-strategy-helper.js';
+import OaeValidationController from './oae-validation.js';
 import { PLG_OPPORTUNITY_TYPES } from './plg/plg-onboarding/displacement.js';
 
 const VALIDATION_ERROR_NAME = 'ValidationError';
+
+// TODO: switch to GeoExperimentModel.METADATA_KEYS.OAE_VALIDATION_JOBS once the
+// spacecat-shared release containing that key is pulled in (@adobe/spacecat-shared-data-access
+// version bump) -- kept as a literal for now so this doesn't silently write to an `undefined`
+// metadata key against the currently-pinned dependency version.
+const OAE_VALIDATION_JOBS_METADATA_KEY = 'oaeValidationJobs';
 
 // Freemium (PLG / FREE_TRIAL) orgs cannot be assigned per-user product profiles,
 // so EDS auto-fix is gated behind membership of this IMS group instead. Members
@@ -171,6 +180,12 @@ const getExperimentName = (opportunityType) => EXPERIMENT_NAME_BY_OPPORTUNITY_TY
 const VALIDATION_MESSAGE_TYPE_BY_OPPORTUNITY_TYPE = {
   [Audit.AUDIT_TYPES.PRERENDER]: 'optimize-at-edge-enabled-marking',
 };
+
+// Lightweight default projection for the by-urls lookup (omits the heavy `data` blob;
+// callers opt in via `fields=...,data`). `opportunityId` is force-included alongside `id`
+// since results span opportunities. See the Lookup Service architecture doc ("Offsite
+// Intelligence - Funneling"), section 4.2, in the gambit-ai-toolkit knowledge base.
+const SUGGESTION_BY_URL_LIGHTWEIGHT_FIELDS = ['id', 'opportunityId', 'type', 'status', 'rank', 'updatedAt'];
 
 async function isSitePlgTier(site, log) {
   try {
@@ -489,9 +504,16 @@ function SuggestionsController(ctx, sqs, env) {
    * @param {Object} site - Site entity.
    * @param {Array} suggestions - Suggestion entities to filter.
    * @param {Object} context - Request context.
+   * @param {Object} [opts]
+   * @param {boolean} [opts.failClosed=false] - On a grant-status lookup error, return `[]`
+   *   instead of the pre-existing fail-open default (`suggestions` unfiltered). Opt-in only -
+   *   every existing caller keeps the fail-open default. Intended for a caller whose blast
+   *   radius on a false pass-through is wider than a single opportunity's suggestions (e.g.
+   *   the site-wide by-urls lookup), where failing open would leak ungranted content across
+   *   every opportunity matched in that one call.
    * @returns {Promise<Array>} Filtered suggestion entities.
    */
-  const filterByGrantStatus = async (site, suggestions, context) => {
+  const filterByGrantStatus = async (site, suggestions, context, { failClosed = false } = {}) => {
     if (!await getIsSummitPlgEnabled(site, ctx, context, accessControlUtil)) {
       return suggestions;
     }
@@ -501,7 +523,7 @@ function SuggestionsController(ctx, sqs, env) {
       return suggestions.filter((s) => grantedIds.includes(s.getId()));
     } catch (err) {
       ctx.log?.error?.('Failed to filter suggestions by grant status', err?.message ?? err);
-      return suggestions;
+      return failClosed ? [] : suggestions;
     }
   };
 
@@ -2508,6 +2530,38 @@ function SuggestionsController(ctx, sqs, env) {
           ];
         }
 
+        // Best-effort: queue a routing-validation job for the high-impact measurement
+        // suggestions and record its jobId on the experiment so a future consumer can poll it.
+        // Only runs when highImpactSuggestionIds is actually present -- a plain (non-pattern)
+        // deploy has no discrete measurement target set to validate, so no job is created.
+        // A failure here must not block the deploy itself -- validation is an auxiliary check,
+        // not a gate.
+        // NOTE: this scoping is expected to change as the ROUTING_VALIDATION polling side
+        // (llmo-experimentation-engine) is finalized -- revisit together.
+        if (hasHighImpactIds) {
+          try {
+            const oaeValidationController = OaeValidationController(
+              { dataAccess, sqs },
+              context.log,
+              env,
+            );
+            const { jobId: oaeValidationJobId } = await oaeValidationController.createJob({
+              siteId,
+              opportunityId,
+              type: ROUTING_VALIDATOR_TYPE,
+              suggestionIds: metadataBase.highImpactSuggestionIds,
+            });
+            // Array (not a single id) so a future retry job (created by
+            // llmo-experimentation-engine's ROUTING_VALIDATION phase) can be appended, keeping a
+            // full history of every job run for this validation type rather than overwriting it.
+            metadataBase[OAE_VALIDATION_JOBS_METADATA_KEY] = {
+              [ROUTING_VALIDATOR_TYPE]: [oaeValidationJobId],
+            };
+          } catch (error) {
+            context.log.error(`[geo-experiment-failed] site: ${apexBaseUrl}, failed to queue OAE routing-validation job: ${error.message}`);
+          }
+        }
+
         const experimentName = context.data?.name || getExperimentName(opportunity.getType());
 
         geoExperiment = await GeoExperiment.create({
@@ -3729,8 +3783,103 @@ function SuggestionsController(ctx, sqs, env) {
     return createResponse(toReviewView(data), 201);
   };
 
+  /**
+   * Looks up suggestions backed by any of the supplied source URLs, across ALL of the site's
+   * opportunities in one call. POST body: `{ urls: [...], fields?, status?, limit?, cursor?,
+   * locale? }` (all parameters travel in the body, not as query params - this middleware stack
+   * only ever exposes `request.json()` as `context.data` for a JSON POST). Keyset-paginated
+   * over the immutable `(opportunityId, id)`.
+   * @param {Object} context of the request
+   * @returns {Promise<Response>} Normalized results + suggestions map + unmatchedUrls + pagination.
+   */
+  const getByUrl = async (context) => {
+    const siteId = context.params?.siteId;
+    const locale = context.data?.locale ?? null;
+
+    if (!isValidLocale(locale)) {
+      return badRequest('Invalid locale format');
+    }
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+    if (!await accessControlUtil.hasAccess(site)) {
+      return forbidden('User does not belong to the organization');
+    }
+
+    // requirePostgrestClient (not requirePostgrest) because this controller closes over
+    // `dataAccess` once per request rather than reading it off the per-call `context` argument.
+    const postgrestClient = dataAccess.services?.postgrestClient;
+    const guard = requirePostgrestClient(postgrestClient, {
+      errorMessage: 'URL lookup requires Postgres (DATA_SERVICE_PROVIDER=postgres)',
+    });
+    if (guard) {
+      return guard;
+    }
+
+    const { response, error } = await lookupByUrl(postgrestClient, {
+      table: 'suggestion_urls',
+      siteId,
+      rawUrls: context.data?.urls,
+      params: context.data ?? {},
+      log: ctx.log,
+      validStatuses: Object.values(SuggestionModel.STATUSES),
+      defaultExcludedStatuses: [
+        SuggestionModel.STATUSES.SKIPPED,
+        SuggestionModel.STATUSES.REJECTED,
+        SuggestionModel.STATUSES.OUTDATED,
+      ],
+      fetchEntities: async (ids) => {
+        const { data } = await Suggestion.batchGetByKeys(ids.map((id) => ({ suggestionId: id })));
+        return data ?? [];
+      },
+      // Narrow to suggestions whose opportunity the caller may see. Fetches only the
+      // opportunities actually referenced by the hydrated suggestions (not every opportunity
+      // on the site) - the same siteId re-check opportunities.getByUrl does explicitly, then
+      // the D4 composite gate, then the same Summit-PLG grant gating every other suggestion
+      // read path applies (getAllForOpportunity*, getByStatus*, getByID), so this endpoint
+      // cannot return ungranted suggestion content those endpoints deliberately withhold.
+      // failClosed: true because a false pass-through here would leak ungranted content across
+      // every opportunity matched in this one call, not just a single opportunity as elsewhere.
+      filterEntities: async (suggestions) => {
+        const opptyIds = [...new Set(suggestions.map((s) => s.getOpportunityId()))];
+        const { data: candidateOpptys } = await Opportunity.batchGetByKeys(
+          opptyIds.map((id) => ({ opportunityId: id })),
+        );
+        const owned = (candidateOpptys ?? []).filter((o) => o.getSiteId() === siteId);
+        if (owned.length !== (candidateOpptys ?? []).length) {
+          ctx.log?.warn?.(`[suggestions.getByUrl] dropped ${(candidateOpptys ?? []).length - owned.length} `
+            + `opportunity(ies) whose siteId did not match the requested site ${siteId} - the suggestion_urls index may be stale`);
+        }
+        const permitted = filterOpportunitiesByFacsComposite(context, owned);
+        const permittedOpptyIds = new Set(permitted.map((o) => o.getId()));
+        const scoped = suggestions.filter((s) => permittedOpptyIds.has(s.getOpportunityId()));
+        return filterByGrantStatus(site, scoped, context, { failClosed: true });
+      },
+      getId: (sugg) => sugg.getId(),
+      getStatus: (sugg) => sugg.getStatus(),
+      getSortKey: (sugg) => `${sugg.getOpportunityId()}|${sugg.getId()}`,
+      toFullDto: (sugg) => SuggestionDto.toJSON(sugg, 'full', null, locale),
+      lightweightFields: SUGGESTION_BY_URL_LIGHTWEIGHT_FIELDS,
+      forceFields: ['id', 'opportunityId'],
+      idListKey: 'suggestionIds',
+      mapKey: 'suggestions',
+      includeNoMatchInResults: false,
+    });
+    if (error) {
+      return badRequest(error);
+    }
+    return ok(response);
+  };
+
   return {
     createBackofficeReview,
+    getByUrl,
     autofixSuggestions,
     createSuggestions,
     deploySuggestionToEdge,

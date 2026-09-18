@@ -65,6 +65,10 @@
 import { createDataAccess } from '@adobe/spacecat-shared-data-access';
 import { parseArgs } from 'node:util';
 import { env, exit } from 'node:process';
+// Shared, single-source brand-name normalizer (LLMO-7284): the write-time guard in
+// src/support/brands-storage.js MUST use the identical key, so both import this one
+// definition rather than keeping copy-paste twins that could silently diverge.
+import { normalizeBrandName } from '../src/support/normalize-brand-name.js';
 
 const DEFAULT_PAGE_SIZE = 500;
 
@@ -176,11 +180,6 @@ async function fetchAllRows(table, select, applyFilter = (q) => q) {
     }
     lastId = data[data.length - 1].id;
   }
-}
-
-/** Whitespace-collapse + case-fold, matching the established LLMO-7117 normalization shape. */
-function normalizeBrandName(name) {
-  return String(name ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
 // ---------------------------------------------------------------------------

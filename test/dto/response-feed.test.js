@@ -13,128 +13,34 @@
 import { expect } from 'chai';
 import { ResponseFeedDto } from '../../src/dto/response-feed.js';
 
-const record = (over = {}) => ({
-  projectId: 'proj-1',
-  prompt: 'best running shoes',
-  model: 'chatgpt-paid',
-  date: '2026-08-24',
-  response: 'Some answer text',
-  tags: '$abv_tags$type__branded',
-  sources: [{
-    url: 'https://runnersworld.com/best',
-    source: 'runnersworld.com',
-    position: 1,
-    domainType: 'Earned',
-  }],
-  sourceRowCount: 1,
-  ...over,
-});
+const row = {
+  projectId: 'project-1',
+  prompt: 'Which shoes are best?',
+  response: 'A complete answer',
+  date: '2026-09-07',
+  model: 'search-gpt',
+  responses: 1,
+  sources: ['https://example.com/b', 'https://example.com/a'],
+  tags: ['$abv_tags$intent__commercial'],
+};
 
 describe('ResponseFeedDto', () => {
-  describe('toJSON', () => {
-    it('maps a joined record onto the API contract', () => {
-      expect(ResponseFeedDto.toJSON(record())).to.deep.equal({
-        projectId: 'proj-1',
-        prompt: 'best running shoes',
-        model: 'chatgpt-paid',
-        date: '2026-08-24',
-        response: 'Some answer text',
-        sources: [{
-          url: 'https://runnersworld.com/best',
-          domain: 'runnersworld.com',
-          rank: 1,
-          domainType: 'Earned',
-        }],
-        sourceCount: 1,
-      });
-    });
-
-    // The downstream consumer keys on (prompt, region) and carries no model or date
-    // dimension, so it cannot reconstruct either. Dropping them would silently collapse
-    // distinct executions into one.
-    it('always exposes model and date, which the consumer cannot reconstruct', () => {
-      const json = ResponseFeedDto.toJSON(record());
-      expect(json).to.have.property('model', 'chatgpt-paid');
-      expect(json).to.have.property('date', '2026-08-24');
-    });
-
-    it('never leaks upstream-only fields', () => {
-      const json = ResponseFeedDto.toJSON(record({
-        executionId: 'proj-1|2026-08-24|chatgpt-paid|best running shoes',
-        modelNameCbfValue: 'ChatGPT (paid)',
-      }));
-      expect(json).to.not.have.property('executionId');
-      expect(json).to.not.have.property('modelNameCbfValue');
-      expect(json).to.not.have.property('tags');
-    });
-
-    // Empty sources mean "cited nothing that day", which is routine and not an error.
-    it('renders an empty source list rather than omitting the field', () => {
-      const json = ResponseFeedDto.toJSON(record({ sources: [], sourceRowCount: 0 }));
-      expect(json.sources).to.deep.equal([]);
-      expect(json.sourceCount).to.equal(0);
-    });
-
-    it('defaults every field on a sparse record instead of emitting undefined', () => {
-      expect(ResponseFeedDto.toJSON({})).to.deep.equal({
-        projectId: '',
-        prompt: '',
-        model: '',
-        date: '',
-        response: '',
-        sources: [],
-        sourceCount: 0,
-      });
-    });
-
-    it('defaults missing fields on a sparse source row', () => {
-      const json = ResponseFeedDto.toJSON(record({ sources: [{}] }));
-      expect(json.sources[0]).to.deep.equal({
-        url: '', domain: '', rank: 0, domainType: '',
-      });
-    });
+  it('preserves the frozen normalized row, including source order', () => {
+    expect(ResponseFeedDto.toJSON(row)).to.deep.equal(row);
   });
 
-  describe('toEnvelopeJSON', () => {
-    it('wraps the records with the paging and integrity envelope', () => {
-      const envelope = ResponseFeedDto.toEnvelopeJSON({
-        records: [record()],
-        days: ['2026-08-24'],
-        projectIds: ['proj-1'],
-        pageSize: 5000,
-        truncated: false,
-        unmatchedSourceKeyCount: 0,
-      });
-
-      expect(envelope.totalCount).to.equal(1);
-      expect(envelope.days).to.deep.equal(['2026-08-24']);
-      expect(envelope.projectIds).to.deep.equal(['proj-1']);
-      expect(envelope.pageSize).to.equal(5000);
-      expect(envelope.truncated).to.equal(false);
-      expect(envelope.unmatchedSourceKeyCount).to.equal(0);
-      expect(envelope.records[0].prompt).to.equal('best running shoes');
-    });
-
-    // Truncation must be visible: it is what separates an incomplete read from a genuinely
-    // quiet day, and a missing tuple is normally legitimate.
-    it('surfaces truncation so a clipped window is not read as a quiet day', () => {
-      const envelope = ResponseFeedDto.toEnvelopeJSON({
-        records: [], days: ['2026-08-24'], truncated: true, unmatchedSourceKeyCount: 3,
-      });
-      expect(envelope.truncated).to.equal(true);
-      expect(envelope.unmatchedSourceKeyCount).to.equal(3);
-    });
-
-    it('renders an empty feed without throwing', () => {
-      expect(ResponseFeedDto.toEnvelopeJSON({})).to.deep.equal({
-        records: [],
-        totalCount: 0,
-        days: [],
-        projectIds: [],
-        pageSize: 0,
-        truncated: false,
-        unmatchedSourceKeyCount: 0,
-      });
+  it('wraps data with page and slice metadata', () => {
+    const page = {
+      offset: 0, pageSize: 500, returned: 1, rowCount: 1, nextOffset: null,
+    };
+    const slice = {
+      geoTargetId: 2840,
+      languageCode: 'en',
+      date: '2026-09-07',
+      model: 'search-gpt',
+    };
+    expect(ResponseFeedDto.toEnvelopeJSON({ data: [row], page, slice })).to.deep.equal({
+      data: [row], page, slice,
     });
   });
 });
