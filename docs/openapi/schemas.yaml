@@ -6777,7 +6777,7 @@ V2Prompt:
       description: Topic business key
     status:
       type: string
-      enum: [active, pending, deleted, expired]
+      enum: [active, pending, ignored, deleted, expired]
       default: active
     origin:
       type: string
@@ -6883,8 +6883,11 @@ V2PromptInput:
       type: string
     status:
       type: string
-      enum: [active, pending, deleted]
+      enum: [active, pending]
       default: active
+      description: >-
+        Client-writable creation status. `ignored`, `deleted`, and `expired` are
+        lifecycle-owned states and cannot be assigned through create/upsert.
     origin:
       type: string
       enum: [ai, human]

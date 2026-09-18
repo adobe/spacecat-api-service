@@ -256,6 +256,59 @@ v2-prompts-by-brand:
         $ref: './responses.yaml#/400'
       '404':
         description: Organization or brand not found
+      '409':
+        description: >-
+          Prompt writes completed, but stale-prompt reconciliation was refused
+          by the configured expiry-fraction guard.
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [created, updated, prompts, reconciliation]
+              properties:
+                created:
+                  type: integer
+                updated:
+                  type: integer
+                prompts:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                      prompt:
+                        type: string
+                      regions:
+                        type: array
+                        items:
+                          type: string
+                      status:
+                        type: string
+                      origin:
+                        type: string
+                      source:
+                        type: string
+                reconciliation:
+                  type: object
+                  required:
+                    - refused
+                    - candidateCount
+                    - expiredCount
+                    - activeAfter
+                    - expireFraction
+                  properties:
+                    refused:
+                      type: boolean
+                      enum: [true]
+                    candidateCount:
+                      type: integer
+                    expiredCount:
+                      type: integer
+                    activeAfter:
+                      type: integer
+                    expireFraction:
+                      type: number
       '503':
         description: PostgREST unavailable
       '500':

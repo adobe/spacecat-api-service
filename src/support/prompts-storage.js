@@ -31,6 +31,7 @@ export { INTENT_VALUES, normalizeIntent };
  */
 export const V2_PROMPT_ORIGINS = Object.freeze(['ai', 'human']);
 const DEFAULT_ORIGIN = 'human';
+const V2_PROMPT_WRITABLE_STATUSES = new Set(['active', 'pending']);
 
 /**
  * Derives the `origin` to store for a v2-prompts write, as a function of the
@@ -982,6 +983,11 @@ export async function upsertPrompts({
   // rejected. Fail the whole batch first, cleanly.
   for (const p of prompts) {
     assertPermittedSource(p.source || 'config');
+    if (p.status !== undefined && !V2_PROMPT_WRITABLE_STATUSES.has(p.status)) {
+      const error = new Error('Prompt status must be active or pending');
+      error.status = 400;
+      throw error;
+    }
   }
 
   const incomingIds = prompts

@@ -55,6 +55,7 @@ import {
   deriveV2PromptOrigin,
   isServicePrincipal,
 } from '../support/prompts-storage.js';
+import { assertPermittedSource } from '../support/prompt-sources.js';
 import {
   listBrands,
   upsertBrand,
@@ -131,11 +132,20 @@ function isPromptGenerationReconciliationEnabled(env) {
   return String(env?.[PROMPT_RECONCILIATION_FLAG] ?? '').trim().toLowerCase() === 'true';
 }
 
-function promptGenerationMaxExpireFraction(env) {
-  const configured = Number(env?.[PROMPT_RECONCILIATION_MAX_FRACTION]);
-  return Number.isFinite(configured) && configured > 0 && configured <= 1
-    ? configured
-    : 0.9;
+function promptGenerationMaxExpireFraction(env, log) {
+  const raw = env?.[PROMPT_RECONCILIATION_MAX_FRACTION];
+  if (raw === undefined || raw === null || String(raw).trim() === '') {
+    return 0.9;
+  }
+  const configured = Number(raw);
+  if (Number.isFinite(configured) && configured > 0 && configured <= 1) {
+    return configured;
+  }
+  log.warn('Invalid prompt generation max expire fraction; using default', {
+    configured: String(raw).slice(0, 64),
+    default: 0.9,
+  });
+  return 0.9;
 }
 
 /**
@@ -725,6 +735,9 @@ function BrandsController(ctx, log, env) {
       if (isGenerationEnvelope && !hasText(generationSource)) {
         return badRequest('Prompt source required for generation-aware writes');
       }
+      if (isGenerationEnvelope) {
+        assertPermittedSource(generationSource);
+      }
       if (isGenerationEnvelope && !isValidUUID(generationId)) {
         return badRequest('Generation ID must be a valid UUID');
       }
@@ -801,7 +814,7 @@ function BrandsController(ctx, log, env) {
           generationId,
           postgrestClient,
           updatedBy,
-          maxExpireFraction: promptGenerationMaxExpireFraction(context.env || env),
+          maxExpireFraction: promptGenerationMaxExpireFraction(context.env || env, log),
         });
 
         const metricDimensions = {
@@ -819,17 +832,19 @@ function BrandsController(ctx, log, env) {
             namespace: 'Mysticat/Prompts',
           },
         );
-        log.info('Prompt generation reconciliation completed', {
-          org: spaceCatId,
-          brand: brandUuid,
-          source: generationSource,
-          run_id: generationId,
-          expired_count: reconciliation.expiredCount,
-          active_after: reconciliation.activeAfter,
-          refused: reconciliation.refused,
-        });
 
         if (reconciliation.refused) {
+          emitMetric(
+            {
+              name: 'PromptGenerationReconciliationRefused',
+              value: 1,
+              dimensions: { Source: generationSource },
+            },
+            {
+              environment: resolveEnvironment(context.env || env),
+              namespace: 'Mysticat/Prompts',
+            },
+          );
           log.warn('Prompt generation reconciliation refused by fraction guard', {
             org: spaceCatId,
             brand: brandUuid,
@@ -841,6 +856,14 @@ function BrandsController(ctx, log, env) {
           });
           return createResponse({ ...upsertResult, reconciliation }, 409);
         }
+        log.info('Prompt generation reconciliation completed', {
+          org: spaceCatId,
+          brand: brandUuid,
+          source: generationSource,
+          run_id: generationId,
+          expired_count: reconciliation.expiredCount,
+          active_after: reconciliation.activeAfter,
+        });
       } else if (reconcile) {
         reconciliation = { skipped: true, reason: 'disabled' };
       }

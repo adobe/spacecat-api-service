@@ -22,9 +22,12 @@ api-service exposes the Serenity endpoint surface documented in OpenAPI and fron
 
 Deploy in dependency order: data-service schema and reconciliation function, api-service with
 `PROMPT_GENERATION_RECONCILIATION_ENABLED=false`, then the DRS caller. Enable the DRS and
-api-service flags in dev, stage, and prod in that order. The first generation or explicit backfill
-for a brand may produce the largest expiry, so verify the `Mysticat/Prompts` `ExpiredPromptCount`
-metric and the structured reconciliation log before widening.
+api-service flags in dev, stage, and prod in that order. Both flags are environment-wide rather
+than per-brand canaries: enabling an environment affects every eligible complete-source generation
+in that environment. The first complete generation for a brand and source may produce the largest
+expiry, so verify the `Mysticat/Prompts` `ExpiredPromptCount` and
+`PromptGenerationReconciliationRefused` metrics plus the structured reconciliation log before
+enabling the next environment.
 
 An HTTP `409` generation response means the fraction guard refused the expiry. The prompt writes
 have completed, but no stale prompt was expired. Identify the batch from `org`, `brand`, `source`,
@@ -48,7 +51,14 @@ WHERE organization_id = '<organization-uuid>'
 ```
 
 Run and review the matching `SELECT count(*)` before the update. `deleted`, `ignored`, human, and
-other-source prompts are outside both reconciliation and rollback.
+other-source prompts are outside both reconciliation and rollback. This rollback only reactivates
+rows removed by that reconciliation run; it does not restore historical prompt text, regions,
+category, topic, intent, or other mutable values changed by an upsert in the same generation.
+
+To reconcile a pre-existing backlog safely, rerun the owning source pipeline with a confirmed
+complete output set and a new generation ID after the flags are enabled. Do not bulk-expire rows
+with ad hoc SQL: reconciliation depends on seeing the source's complete current set, applies the
+fraction guard atomically, and records the run ID needed for incident recovery.
 
 ### Create-path dedup kill-switch (`SERENITY_TARGETED_CREATE_LOOKUP`)
 

@@ -1094,6 +1094,46 @@ describe('Brands Controller', () => {
       });
     });
 
+    it('rejects an unregistered generation source before organization lookup', async () => {
+      mockDataAccess.Organization.findById.rejects(new Error('must not query organization'));
+
+      const response = await brandsController.createPromptsByBrand({
+        ...context,
+        attributes: {
+          authInfo: {
+            getType: () => 'jwt',
+            isS2SConsumer: () => true,
+            isS2SAdmin: () => false,
+            profile: { email: 'drs@service' },
+          },
+        },
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: {
+          prompts: [{ prompt: 'P', regions: ['us'], origin: 'ai' }],
+          generationId: '22222222-2222-4222-b222-222222222222',
+          source: 'unregistered-source',
+          reconcile: true,
+        },
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(400);
+      expect((await response.json()).message).to.include('Unregistered prompt source');
+      expect(mockDataAccess.Organization.findById).to.not.have.been.called;
+    });
+
+    it('rejects lifecycle-only prompt statuses on create', async () => {
+      const response = await brandsController.createPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: [{ prompt: 'Hidden prompt', regions: ['us'], status: 'expired' }],
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(400);
+      expect((await response.json()).message).to.include('Prompt status must be active or pending');
+    });
+
     it('accepts a service generation envelope and reports disabled reconciliation', async () => {
       const thenable = (v) => ({ then: (resolve) => resolve(v), catch: () => thenable(v) });
       const insertStub = sandbox.stub()
@@ -1154,6 +1194,7 @@ describe('Brands Controller', () => {
     });
 
     it('returns 409 with reconciliation counts when the atomic fraction guard refuses', async () => {
+      const logSpy = sinon.stub(console, 'log');
       const thenable = (v) => ({ then: (resolve) => resolve(v), catch: () => thenable(v) });
       const insertStub = sandbox.stub()
         .returns({ select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }) });
@@ -1191,9 +1232,114 @@ describe('Brands Controller', () => {
       };
       const generationId = '22222222-2222-4222-b222-222222222222';
 
+      try {
+        const response = await brandsController.createPromptsByBrand({
+          ...context,
+          env: { ...mockEnv, PROMPT_GENERATION_RECONCILIATION_ENABLED: 'true' },
+          attributes: {
+            authInfo: {
+              getType: () => 'jwt',
+              isS2SConsumer: () => true,
+              isS2SAdmin: () => false,
+              profile: { email: 'drs@service' },
+            },
+          },
+          params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+          data: {
+            prompts: [{ prompt: 'P', regions: ['us'], origin: 'ai' }],
+            generationId,
+            source: 'gsc',
+            reconcile: true,
+          },
+          dataAccess: mockDataAccess,
+        });
+
+        expect(response.status).to.equal(409);
+        expect((await response.json()).reconciliation).to.deep.equal({
+          refused: true,
+          candidateCount: 10,
+          expiredCount: 0,
+          activeAfter: 10,
+          expireFraction: 1,
+        });
+        expect(loggerStub.warn).to.have.been.calledWith(
+          'Prompt generation reconciliation refused by fraction guard',
+        );
+        expect(loggerStub.info).to.not.have.been.calledWith(
+          'Prompt generation reconciliation completed',
+        );
+        const emfLine = logSpy.getCalls()
+          .map((call) => call.args[0])
+          .find((line) => typeof line === 'string'
+            && line.includes('PromptGenerationReconciliationRefused'));
+        expect(emfLine, 'expected a reconciliation refusal EMF line').to.be.a('string');
+        expect(JSON.parse(emfLine).PromptGenerationReconciliationRefused).to.equal(1);
+      } finally {
+        logSpy.restore();
+      }
+    });
+
+    it('reports successful enabled reconciliation and warns on an invalid fraction override', async () => {
+      const thenable = (v) => ({ then: (resolve) => resolve(v), catch: () => thenable(v) });
+      const updateStub = sandbox.stub().returns({ eq: () => thenable({ error: null }) });
+      const existing = [{
+        id: 'row-1',
+        prompt_id: 'existing-1',
+        text: 'Existing prompt',
+        regions: ['us'],
+        status: 'active',
+        source: 'gsc',
+        origin: 'ai',
+        generation_id: '11111111-1111-4111-b111-111111111111',
+      }];
+      const rpcStub = sandbox.stub().resolves({
+        data: [{
+          refused: false,
+          candidate_count: 1,
+          expired_count: 1,
+          active_after: 4,
+          expire_fraction: 0.2,
+        }],
+        error: null,
+      });
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake((table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    ...thenable({ data: existing, error: null }),
+                    in: () => thenable({ data: existing, error: null }),
+                  }),
+                }),
+              }),
+              insert: () => ({ select: () => thenable({ data: [], error: null }) }),
+              update: updateStub,
+            };
+          }
+          const chain = {
+            select: sandbox.stub().returnsThis(),
+            eq: sandbox.stub().returnsThis(),
+            maybeSingle: sandbox.stub().resolves({ data: { id: BRAND_UUID }, error: null }),
+          };
+          if (table === 'llmo_customer_config') {
+            chain.maybeSingle = sandbox.stub()
+              .resolves({ data: { config: { customer: { brands: [] } } }, error: null });
+          }
+          return chain;
+        }),
+        rpc: rpcStub,
+      };
+      const generationId = '22222222-2222-4222-b222-222222222222';
+
       const response = await brandsController.createPromptsByBrand({
         ...context,
-        env: { ...mockEnv, PROMPT_GENERATION_RECONCILIATION_ENABLED: 'true' },
+        env: {
+          ...mockEnv,
+          PROMPT_GENERATION_RECONCILIATION_ENABLED: 'true',
+          PROMPT_GENERATION_MAX_EXPIRE_FRACTION: 'invalid',
+        },
         attributes: {
           authInfo: {
             getType: () => 'jwt',
@@ -1204,7 +1350,12 @@ describe('Brands Controller', () => {
         },
         params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
         data: {
-          prompts: [{ prompt: 'P', regions: ['us'], origin: 'ai' }],
+          prompts: [{
+            id: 'existing-1',
+            prompt: 'Existing prompt',
+            regions: ['us'],
+            origin: 'ai',
+          }],
           generationId,
           source: 'gsc',
           reconcile: true,
@@ -1212,16 +1363,21 @@ describe('Brands Controller', () => {
         dataAccess: mockDataAccess,
       });
 
-      expect(response.status).to.equal(409);
+      expect(response.status).to.equal(201);
       expect((await response.json()).reconciliation).to.deep.equal({
-        refused: true,
-        candidateCount: 10,
-        expiredCount: 0,
-        activeAfter: 10,
-        expireFraction: 1,
+        refused: false,
+        candidateCount: 1,
+        expiredCount: 1,
+        activeAfter: 4,
+        expireFraction: 0.2,
       });
+      expect(updateStub.firstCall.args[0]).to.include({ generation_id: generationId });
+      expect(rpcStub.firstCall.args[1].p_max_expire_fraction).to.equal(0.9);
       expect(loggerStub.warn).to.have.been.calledWith(
-        'Prompt generation reconciliation refused by fraction guard',
+        'Invalid prompt generation max expire fraction; using default',
+      );
+      expect(loggerStub.info).to.have.been.calledWith(
+        'Prompt generation reconciliation completed',
       );
     });
 

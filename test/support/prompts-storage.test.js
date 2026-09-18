@@ -1691,6 +1691,57 @@ describe('prompts-storage', () => {
       });
     });
 
+    it('stamps an existing active prompt with the current generation', async () => {
+      const activeRow = {
+        id: 'row-uuid',
+        prompt_id: 'active-current',
+        text: 'Active text',
+        regions: [],
+        status: 'active',
+        source: 'gsc',
+        origin: 'ai',
+        generation_id: '11111111-1111-4111-b111-111111111110',
+      };
+      const existingData = { data: [activeRow], error: null };
+      const updateStub = sinon.stub().returns({ eq: () => thenable({ error: null }) });
+      const client = {
+        from: (table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    ...thenable(existingData),
+                    in: () => thenable(existingData),
+                  }),
+                }),
+              }),
+              insert: () => ({ select: () => thenable({ data: [], error: null }) }),
+              update: updateStub,
+            };
+          }
+          return makeChain({});
+        },
+      };
+      const generationId = '22222222-2222-4222-b222-222222222222';
+
+      const result = await upsertPrompts({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        prompts: [{
+          id: 'active-current', prompt: 'Active text', regions: [], source: 'gsc',
+        }],
+        postgrestClient: client,
+        generationId,
+      });
+
+      expect(result.updated).to.equal(1);
+      expect(updateStub.firstCall.args[0]).to.include({
+        status: 'active',
+        generation_id: generationId,
+      });
+    });
+
     it('touches a re-emitted pending prompt without changing its status', async () => {
       const pendingRow = {
         id: 'row-uuid',
