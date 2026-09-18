@@ -44,6 +44,9 @@ export const BULK_TAGS_PUBLIC_JOB_TYPE = 'bulkTags';
 export const BULK_FAILURE_PAGE_LIMIT = 100;
 export const MAX_BULK_TAG_SEARCH_LENGTH = 500;
 const MAX_PUBLISH_RECOVERY_DEPTH = 5;
+const BULK_TAGS_IDEMPOTENCY_ENDPOINT = 'POST /serenity/prompts/bulk-tags';
+const IDEMPOTENCY_REPLAY_ATTEMPTS = 100;
+const IDEMPOTENCY_REPLAY_DELAY_MS = 25;
 
 function codedError(message, status, code, details) {
   const error = new ErrorWithStatusCode(message, status);
@@ -132,8 +135,11 @@ export function applyBulkTagOperation(currentIds, operation, selected, snapshot,
   return ids;
 }
 
-function canonicalHash(body) {
+function canonicalHash(body, scope) {
   const canonical = {
+    scope,
+    geoTargetId: body.geoTargetId,
+    languageCode: body.languageCode,
     operation: body.operation,
     tagIds: [...new Set(body.tagIds)].sort(),
     filter: {
@@ -145,18 +151,10 @@ function canonicalHash(body) {
   return createHash('sha256').update(JSON.stringify(canonical)).digest('base64url');
 }
 
-function idempotencyJobId(scope) {
-  const hex = createHash('sha256').update(scope).digest('hex').slice(0, 32)
-    .split('');
-  hex[12] = '5';
-  hex[16] = ['8', '9', 'a', 'b'][Number.parseInt(hex[16], 16) % 4];
-  return [
-    hex.slice(0, 8).join(''),
-    hex.slice(8, 12).join(''),
-    hex.slice(12, 16).join(''),
-    hex.slice(16, 20).join(''),
-    hex.slice(20).join(''),
-  ].join('-');
+function idempotencyStorageKey(key) {
+  return createHash('sha256')
+    .update(`${BULK_TAGS_JOB_TYPE}:${key}`)
+    .digest('base64url');
 }
 
 function acceptedJobResponse(job, replayed) {
@@ -171,6 +169,202 @@ function acceptedJobResponse(job, replayed) {
       ...(['SUCCEEDED', 'PARTIAL_FAILURE'].includes(outcome) ? { outcome } : {}),
     },
   };
+}
+
+function isUniqueViolation(error) {
+  let current = error;
+  while (current) {
+    if (current.code === '23505') {
+      return true;
+    }
+    current = current.cause;
+  }
+  return false;
+}
+
+function assertSameIdempotentRequest(entry, hash) {
+  const response = entry?.getResponse?.() ?? {};
+  if (response.requestHash !== hash) {
+    throw codedError(
+      'Idempotency-Key was reused with a different bulk tag request',
+      409,
+      ERROR_CODES.IDEMPOTENCY_CONFLICT,
+    );
+  }
+  return response;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+async function replayIdempotentJob(
+  context,
+  entry,
+  key,
+  orgId,
+  hash,
+  attemptsRemaining = IDEMPOTENCY_REPLAY_ATTEMPTS,
+) {
+  const response = assertSameIdempotentRequest(entry, hash);
+  if (entry.getStatus() === 'completed') {
+    if (typeof response.jobId !== 'string') {
+      throw new Error('Completed bulk-tag idempotency record has no jobId');
+    }
+    const job = await context.dataAccess.AsyncJob.findById(response.jobId);
+    if (!job) {
+      throw new Error(`Bulk-tag idempotency record references missing job ${response.jobId}`);
+    }
+    return acceptedJobResponse(job, true);
+  }
+  if (entry.getStatus() === 'failed') {
+    // A failed claim means cleanup previously degraded after no job was accepted.
+    // Remove it so a fresh request can safely acquire and retry the operation.
+    await entry.remove();
+    return null;
+  }
+  if (attemptsRemaining > 1) {
+    // A concurrent winner only holds PROCESSING across AsyncJob create + SQS send.
+    // Wait briefly so the losing request can return the accepted job deterministically.
+    await sleep(IDEMPOTENCY_REPLAY_DELAY_MS);
+    const current = await context.dataAccess.IdempotencyKey.findActiveKey(key, orgId);
+    if (!current) {
+      return null;
+    }
+    return replayIdempotentJob(
+      context,
+      current,
+      key,
+      orgId,
+      hash,
+      attemptsRemaining - 1,
+    );
+  }
+  throw codedError(
+    'A request with this Idempotency-Key is still being accepted',
+    409,
+    ERROR_CODES.IDEMPOTENCY_CONFLICT,
+  );
+}
+
+async function removeExpiredIdempotencyKey(context, key, orgId) {
+  const postgrestClient = context.dataAccess?.services?.postgrestClient;
+  if (!postgrestClient?.from) {
+    throw new Error('PostgREST is required for bulk-tag idempotency');
+  }
+  // The shared model only exposes a global expired-record cleanup. Use an endpoint-scoped
+  // delete here so this request cannot remove another consumer's idempotency record.
+  const { error } = await postgrestClient
+    .from('idempotency_keys')
+    .delete()
+    .eq('key', key)
+    .eq('organization_id', orgId)
+    .eq('endpoint', BULK_TAGS_IDEMPOTENCY_ENDPOINT)
+    .lte('expires_at', new Date().toISOString());
+  if (error) {
+    throw new Error('Failed to remove expired bulk-tag idempotency record', { cause: error });
+  }
+}
+
+async function acquireIdempotencyKey(context, key, orgId, hash) {
+  const existing = await context.dataAccess.IdempotencyKey.findActiveKey(key, orgId);
+  if (existing) {
+    return { entry: existing, owned: false };
+  }
+
+  const create = () => context.dataAccess.IdempotencyKey.create({
+    key,
+    organizationId: orgId,
+    endpoint: BULK_TAGS_IDEMPOTENCY_ENDPOINT,
+    status: 'processing',
+    response: { requestHash: hash },
+    expiresAt: new Date(Date.now() + BULK_IDEMPOTENCY_TTL_SECONDS * 1000).toISOString(),
+  });
+
+  try {
+    return { entry: await create(), owned: true };
+  } catch (error) {
+    if (!isUniqueViolation(error)) {
+      throw error;
+    }
+    const raced = await context.dataAccess.IdempotencyKey.findActiveKey(key, orgId);
+    if (raced) {
+      return { entry: raced, owned: false };
+    }
+    await removeExpiredIdempotencyKey(context, key, orgId);
+    try {
+      return { entry: await create(), owned: true };
+    } catch (retryError) {
+      if (!isUniqueViolation(retryError)) {
+        throw retryError;
+      }
+      const retryRace = await context.dataAccess.IdempotencyKey.findActiveKey(key, orgId);
+      if (retryRace) {
+        return { entry: retryRace, owned: false };
+      }
+      throw codedError(
+        'Unable to reserve this bulk tag idempotency key',
+        409,
+        ERROR_CODES.IDEMPOTENCY_CONFLICT,
+        { cause: retryError.message },
+      );
+    }
+  }
+}
+
+async function reserveIdempotencyKey(context, key, orgId, hash, attemptsRemaining = 2) {
+  const acquired = await acquireIdempotencyKey(context, key, orgId, hash);
+  if (acquired.owned) {
+    return { entry: acquired.entry };
+  }
+  const replay = await replayIdempotentJob(context, acquired.entry, key, orgId, hash);
+  if (replay) {
+    return { replay };
+  }
+  if (attemptsRemaining > 1) {
+    return reserveIdempotencyKey(context, key, orgId, hash, attemptsRemaining - 1);
+  }
+  throw codedError(
+    'Unable to reserve this bulk tag idempotency key',
+    409,
+    ERROR_CODES.IDEMPOTENCY_CONFLICT,
+  );
+}
+
+/**
+ * @param {object} context
+ * @param {object} entry
+ * @param {string} hash
+ * @param {{ key?: string | null, orgId?: string }} [details]
+ */
+async function releaseIdempotencyKey(context, entry, hash, {
+  key,
+  orgId,
+} = {}) {
+  const claimId = entry.getId?.() ?? 'unknown';
+  const diagnostic = `claim=${claimId} key=${key ?? 'unknown'} org=${orgId ?? 'unknown'} `
+    + `endpoint="${BULK_TAGS_IDEMPOTENCY_ENDPOINT}"`;
+  try {
+    await entry.remove();
+  } catch (removeError) {
+    context.log?.warn?.(
+      `[serenity-bulk-tags] Failed to remove idempotency record (${diagnostic}): `
+      + `${removeError.message}`,
+    );
+    try {
+      await entry
+        .setStatus('failed')
+        .setResponse({ requestHash: hash })
+        .save();
+    } catch (saveError) {
+      context.log?.warn?.(
+        `[serenity-bulk-tags] Failed to mark idempotency record failed (${diagnostic}): `
+        + `${saveError.message}`,
+      );
+    }
+  }
 }
 
 /**
@@ -357,7 +551,12 @@ async function acceptParsedBulkTags({
   promiseToken,
   promisePair,
 }) {
-  const hash = canonicalHash(parsed);
+  const hash = canonicalHash(parsed, {
+    orgId,
+    brandId,
+    projectId,
+    callerId,
+  });
   const key = idempotencyKey == null ? null : String(idempotencyKey).trim();
   if (key && key.length > 256) {
     throw codedError(
@@ -366,24 +565,14 @@ async function acceptParsedBulkTags({
       ERROR_CODES.INVALID_REQUEST,
     );
   }
-  const scope = `${orgId}:${brandId}:${projectId}:${callerId}:${key ?? ''}`;
-  const now = Date.now();
-  const deterministicJobId = key ? idempotencyJobId(scope) : undefined;
+  const storageKey = key ? idempotencyStorageKey(key) : null;
   if (key) {
-    const existing = await context.dataAccess.AsyncJob.findById(deterministicJobId);
-    const existingMetadata = existing?.getMetadata?.() ?? {};
-    if (existing && Number(existingMetadata.idempotencyExpiresAt) > now) {
-      if (existingMetadata.requestHash !== hash) {
-        throw codedError(
-          'Idempotency-Key was reused with a different bulk tag request',
-          409,
-          ERROR_CODES.IDEMPOTENCY_CONFLICT,
-        );
-      }
-      return acceptedJobResponse(existing, true);
-    }
+    const existing = await context.dataAccess.IdempotencyKey.findActiveKey(storageKey, orgId);
     if (existing) {
-      await existing.remove();
+      const replay = await replayIdempotentJob(context, existing, storageKey, orgId, hash);
+      if (replay) {
+        return replay;
+      }
     }
   }
   // A create-tag request may have landed on another Lambda container moments
@@ -438,18 +627,27 @@ async function acceptParsedBulkTags({
     ...(parsed.filter.search ? { search: parsed.filter.search } : {}),
   };
 
+  if (!promiseToken?.promise_token || !promisePair) {
+    throw codedError(
+      'Bulk tag operations require caller promise credentials',
+      400,
+      ERROR_CODES.INVALID_REQUEST,
+    );
+  }
+
+  let idempotencyEntry;
+  if (storageKey) {
+    const reservation = await reserveIdempotencyKey(context, storageKey, orgId, hash);
+    if (reservation.replay) {
+      return reservation.replay;
+    }
+    idempotencyEntry = reservation.entry;
+  }
+
   let job;
   try {
-    if (!promiseToken?.promise_token || !promisePair) {
-      throw codedError(
-        'Bulk tag operations require caller promise credentials',
-        400,
-        ERROR_CODES.INVALID_REQUEST,
-      );
-    }
     job = await createAndEnqueueJob(context, {
       jobType: BULK_TAGS_JOB_TYPE,
-      jobId: deterministicJobId,
       promiseToken,
       promisePair,
       metadata: {
@@ -462,29 +660,31 @@ async function acceptParsedBulkTags({
         operation: parsed.operation,
         tagIds: parsed.tagIds,
         normalizedFilter,
-        ...(key ? {
-          requestHash: hash,
-          idempotencyExpiresAt: now + BULK_IDEMPOTENCY_TTL_SECONDS * 1000,
-        } : {}),
+        ...(key ? { requestHash: hash } : {}),
       },
     });
   } catch (error) {
-    if (!deterministicJobId) {
-      throw error;
+    if (idempotencyEntry) {
+      await releaseIdempotencyKey(context, idempotencyEntry, hash, {
+        key: storageKey,
+        orgId,
+      });
     }
-    const raced = await context.dataAccess.AsyncJob.findById(deterministicJobId);
-    const racedMetadata = raced?.getMetadata?.() ?? {};
-    if (!raced) {
-      throw error;
-    }
-    if (racedMetadata.requestHash !== hash) {
-      throw codedError(
-        'Idempotency-Key was reused with a different bulk tag request',
-        409,
-        ERROR_CODES.IDEMPOTENCY_CONFLICT,
+    throw error;
+  }
+  if (idempotencyEntry) {
+    idempotencyEntry
+      .setStatus('completed')
+      .setResponse({ requestHash: hash, jobId: job.getId() });
+    try {
+      await idempotencyEntry.save();
+    } catch (error) {
+      context.log?.warn?.(
+        `[serenity-bulk-tags] Accepted job ${job.getId()} but failed to complete idempotency `
+        + `claim=${idempotencyEntry.getId?.() ?? 'unknown'} key=${storageKey} org=${orgId} `
+        + `endpoint="${BULK_TAGS_IDEMPOTENCY_ENDPOINT}": ${error.message}`,
       );
     }
-    return acceptedJobResponse(raced, true);
   }
   return acceptedJobResponse(job, false);
 }
