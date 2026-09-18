@@ -12,7 +12,10 @@
 
 /* c8 ignore start */
 
-import { fromJson, toJson } from '@bufbuild/protobuf';
+import {
+  fromJson,
+  toJson,
+} from '@bufbuild/protobuf';
 import { COUNTRY_ENUM } from '@quazar/ai-seo-ts/common/types_pb.js';
 import {
   StatsByLLMRequestSchema,
@@ -24,10 +27,17 @@ import {
   responseFromGrpcError,
   PROTO_FROM_JSON,
   PROTO_TO_JSON,
+  normalizeAiVisibilityTarget,
 } from '../../../grpc-utils.js';
 
 export async function handleStatsByLLM(sp, clients) {
-  const domain = sp.get('domain');
+  const domain = normalizeAiVisibilityTarget(sp.get('domain'));
+  if (!domain) {
+    return {
+      status: 400,
+      body: { error: 'invalid_request', message: 'domain is required' },
+    };
+  }
   const country = resolveCountry(sp) || COUNTRY_ENUM.US;
   const dateFrom = sp.get('dateFrom');
   const dateTo = sp.get('dateTo');

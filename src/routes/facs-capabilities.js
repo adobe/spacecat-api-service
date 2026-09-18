@@ -296,6 +296,7 @@ const routeFacsCapabilities = {
       'POST /sites/:siteId/llmo/config': 'llmo/can_configure',
       'PATCH /sites/:siteId/llmo/config': 'llmo/can_configure',
       'POST /sites/:siteId/llmo/brand-claims/request': 'llmo/can_configure',
+      'POST /sites/:siteId/llmo/brand-claims/feedback': 'llmo/can_view',
       // Site-level scraper config — a site write surfaced through the
       // generic /config namespace rather than under /llmo/, but
       // configuration nonetheless.
@@ -759,6 +760,7 @@ const routeFacsCapabilities = {
       'GET /sites/:siteId/experiments': 'llmo/can_view',
       'GET /sites/:siteId/files': 'llmo/can_view',
       'GET /sites/:siteId/fixes': 'llmo/can_view',
+      'GET /sites/:siteId/deployed-opportunities': 'llmo/can_view',
       'GET /sites/:siteId/geo-experiments': 'llmo/can_view',
       'GET /sites/:siteId/geo-experiments/:geoExperimentId': 'llmo/can_view',
       'GET /sites/:siteId/geo-experiments/:geoExperimentId/results': 'llmo/can_view',
@@ -769,6 +771,7 @@ const routeFacsCapabilities = {
       'GET /sites/:siteId/metadata': 'llmo/can_view',
       'GET /sites/:siteId/metrics/:metric/:source': 'llmo/can_view',
       'GET /sites/:siteId/metrics/:metric/:source/by-url/:base64PageUrl': 'llmo/can_view',
+      'GET /sites/:siteId/keyword-cpc': 'llmo/can_view',
       'GET /sites/:siteId/opportunities': 'llmo/can_view',
       // POST-for-read lookups (body carries the query); reads, not writes.
       'POST /sites/:siteId/opportunities/by-urls': 'llmo/can_view',
@@ -900,6 +903,7 @@ const routeFacsCapabilities = {
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/generation/jobs/:jobId': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags': 'llmo/can_view',
+      'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags/search': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags/:tagId/impact': 'llmo/can_view',
       'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/models': 'llmo/can_view',
       // Org-level Serenity catalog reads (no brandId).
@@ -1076,6 +1080,7 @@ const routeFacsCapabilities = {
       'GET /sites/:siteId/metadata': 'aso/can_view',
       'GET /sites/:siteId/metrics/:metric/:source': 'aso/can_view',
       'GET /sites/:siteId/metrics/:metric/:source/by-url/:base64PageUrl': 'aso/can_view',
+      'GET /sites/:siteId/keyword-cpc': 'aso/can_view',
       'GET /sites/:siteId/page-citability/counts': 'aso/can_view',
       'GET /sites/:siteId/scraped-content/:type': 'aso/can_view',
       'GET /sites/:siteId/site-enrollments': 'aso/can_view',
@@ -1118,6 +1123,7 @@ const routeFacsCapabilities = {
       'GET /sites/:siteId/opportunities/:opportunityId/suggestions/:suggestionId/fixes': 'aso/can_view',
       'GET /sites/:siteId/edge-deployed-urls': 'aso/can_view',
       'GET /sites/:siteId/fixes': 'aso/can_view',
+      'GET /sites/:siteId/deployed-opportunities': 'aso/can_view',
       'GET /sites/:siteId/opportunities/:opportunityId/fixes': 'aso/can_view',
       'GET /sites/:siteId/opportunities/:opportunityId/fixes/by-status/:status': 'aso/can_view',
       'GET /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': 'aso/can_view',

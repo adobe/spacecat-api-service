@@ -10,7 +10,10 @@
  * governing permissions and limitations under the License.
  */
 
-import { fromJson, toJson } from '@bufbuild/protobuf';
+import {
+  fromJson,
+  toJson,
+} from '@bufbuild/protobuf';
 import {
   COUNTRY_ENUM,
   LLM_ENUM,
@@ -29,6 +32,7 @@ import {
   escapeQlString,
   PROTO_FROM_JSON,
   PROTO_TO_JSON,
+  normalizeAiVisibilityTarget,
 } from '../../../grpc-utils.js';
 
 /* c8 ignore start */
@@ -41,7 +45,19 @@ export function buildCitedSourcesDimensionFilterQl(sp) {
 }
 
 export async function handleCitedSources(sp, clients) {
-  const domain = sp.get('domain');
+  const domain = normalizeAiVisibilityTarget(sp.get('domain'));
+  if (!domain) {
+    return {
+      status: 400,
+      body: { error: 'invalid_request', message: 'domain is required' },
+    };
+  }
+  if (domain.includes('/')) {
+    return {
+      status: 400,
+      body: { error: 'unsupported_target', message: 'cited sources do not support subfolder (path) targets' },
+    };
+  }
   const engine = engineToLlm(sp.get('engine')) || LLM_ENUM.ALL;
   const country = resolveCountry(sp) || COUNTRY_ENUM.WORLDWIDE;
   const sortBy = sp.get('sortBy') || DOMAINS_REQUEST_ORDER_BY_ENUM.PROMPTS_COUNT;

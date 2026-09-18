@@ -15,9 +15,11 @@
  * FIX_1..FIX_3 are under OPPTY_1 (SITE_1, accessible).
  *
  * - FIX_1: CODE_CHANGE, PENDING — linked to SUGG_1 via junction
- * - FIX_2: CODE_CHANGE, DEPLOYED — different status for by-status filter
+ * - FIX_2: CODE_CHANGE, DEPLOYED — different status for by-status filter; carries a
+ *   deployed_at (2026-08-15) so it surfaces on the deployed-opportunities timeline
  * - FIX_3: CODE_CHANGE, DEPLOYED — NO junction entry; must still be returned
- *   with an empty suggestions array (the silent-drop bug this PR fixes)
+ *   with an empty suggestions array (the silent-drop bug this PR fixes); also carries a
+ *   deployed_at (2026-08-15) for the deployed-opportunities timeline
  * - FIX_4: CODE_CHANGE, FAILED — under OPPTY_4 (also SITE_1), for site-wide
  *   aggregation tests that need fixes spread across more than one opportunity
  *
@@ -42,6 +44,7 @@ export const fixes = [
     status: 'DEPLOYED',
     change_details: { file: '/blocks/footer/footer.js', diff: '-old +new' },
     origin: 'spacecat',
+    deployed_at: '2026-08-15T10:00:00.000Z',
   },
   {
     id: 'cc333333-3333-4333-b333-333333333333',
@@ -50,6 +53,7 @@ export const fixes = [
     status: 'DEPLOYED',
     change_details: { file: '/blocks/header/header.js', diff: '-a +b' },
     origin: 'spacecat',
+    deployed_at: '2026-08-15T14:00:00.000Z',
   },
   {
     id: 'cc444444-4444-4444-a444-444444444444',

@@ -14,6 +14,16 @@ api-service exposes the Serenity endpoint surface documented in OpenAPI and fron
 |---|---|---|---|
 | `SEMRUSH_PROJECTS_BASE_URL` | yes (no source default) | Vault `dx_mysticat/<env>/api-service`; locally `.env` | Upstream host for the Semrush AIO REST API. Must be `https://…`. Trailing slashes are stripped. Per-environment value so the production target can differ from the hackathon host without a code change. |
 | `PROMPT_INTENT_CLASSIFICATION_DEPLOYMENT_NAME` | no (falls back to `AZURE_OPEN_AI_API_DEPLOYMENT_NAME`) | Vault `dx_mysticat/<env>/api-service`; locally `.env` | Classifier-scoped Azure OpenAI deployment (model) name for server-side prompt-intent classification (serenity-docs#32). Takes precedence over the shared `AZURE_OPEN_AI_API_DEPLOYMENT_NAME` other Azure consumers use (e.g. `org-detector`), so intent classification can target a different model without affecting them. Unset ⇒ shared deployment; behavior unchanged until explicitly configured. |
+| `SERENITY_TARGETED_CREATE_LOOKUP` | no (**default ON**) | Vault `dx_mysticat/<env>/api-service`; locally `.env` | Kill-switch for the create/upsert-path existing-prompt dedup strategy. See the subsection below. |
+
+### Create-path dedup kill-switch (`SERENITY_TARGETED_CREATE_LOOKUP`)
+
+Prompt create/upsert (`POST /v2/orgs/:id/brands/:id/serenity/prompts`, flat and sub-workspace) must decide, per input, whether a prompt already exists so it upserts (reactivates / replaces tags) instead of re-creating — a re-create folds into the upstream `existing_count` but still attaches the given tags, silently stacking a tag on the live prompt.
+
+- **ON (default; unset, empty, or any value other than the literal `'false'`):** the dedup index is built with a **per-input `search` lookup** — one `by_tags` call per distinct input text. Cost scales with the *input*, not the brand's corpus, so large-corpus brands (e.g. Adobe Helpx, ~38k prompts) no longer time out at the Fastly edge.
+- **`'false'`:** falls back to a **bounded-concurrency, capped corpus walk** (`MAX_PROMPT_INDEX_PAGES` pages at `BULK_CREATE_CONCURRENCY`). This is a corrected walk — never the pre-fix serial-unbounded walk — so a flag flip is a safe revert, not a return to the incident.
+
+The flag is read **per request** from `context.env`, so it is a per-brand canary / instant-rollback lever: enable/verify on one brand before widening (see the per-brand rollout guidance for the activation flag below). **Observability:** the create-completed log line carries `targetedLookup` (which path ran) and `upstreamCallCount` (per-request `by_tags` calls) — watch both when canarying or rolling back. This is a temporary kill-switch; it (and the fallback walk) are slated for removal after a soak with `targetedLookup=true` across brands and zero degradation alerts.
 
 ### Vault writes (dev / stage / prod)
 
@@ -257,6 +267,185 @@ curl -X DELETE "${API_BASE}/organizations/${ORG_ID}/feature-flags/llmo/serenity_
   -H "x-api-key: ${SPACECAT_ADMIN_KEY}"
 ```
 
+## Multi-dimension custom tags (`LLMO/serenity_tag_multi_dimension`)
+
+One brand-level `feature_flags` row (`product='LLMO'`,
+`flag_name='serenity_tag_multi_dimension'`, resolved brand-override-first like
+`LLMO/serenity`) governs the whole multi-dimension custom-tag capability:
+
+- **arbitrary-depth `tag` authoring** — `POST /serenity/tags` and
+  `PATCH /serenity/tags/:tagId` beyond the legacy depth-2/depth-3 boundary;
+- **cross-level tag search** — `GET /serenity/tags/search`.
+
+It replaces the two flags that shipped earlier (`serenity_unbounded_tag_authoring`
+and `serenity_tag_search`). They were merged because they cannot be rolled out
+independently: deep authoring without search lets a customer create tags they
+cannot find again, and search without deep authoring pays for a complete-tree
+walk over a taxonomy that is still depth-capped. **Neither old name is read any
+more** — rows carrying them have no effect, so a brand/org already enrolled must
+be re-enrolled on the new name (and the stale rows deleted). That re-enrolment is
+a required **pre-deploy** step, not a manual follow-up: see "Pre-deploy migration
+off the two retired flags" below for the script and the exact commands.
+
+Default **OFF**: an absent or unreadable flag keeps the legacy authoring depth
+limits (a deeper create/re-parent returns `400 invalidRequest`) and keeps search
+unavailable (`404`). The gate is authoring-and-search only — existing deeper
+tags stay readable, searchable once search is on, assignable to prompts, and are
+never removed by turning the flag off. Baseline `LLMO/serenity` gating is
+unchanged and still decides whether the `/serenity/*` surface is served at all.
+
+The environment-wide `SERENITY_TAG_SEARCH_DISABLED=true` kill switch is
+**independent** of this flag and disables the search endpoint alone
+(`503 tagSearchUnavailable`); it never disables deep authoring.
+
+| `LLMO/serenity_tag_multi_dimension` | `SERENITY_TAG_SEARCH_DISABLED` | deep authoring | `GET /serenity/tags/search` |
+| --- | --- | --- | --- |
+| off / absent | any | `400 invalidRequest` beyond depth 2/3 | `404` (not active for brand) |
+| on | unset / `false` | allowed at any depth | served |
+| on | `true` | allowed at any depth | `503 tagSearchUnavailable` |
+
+Flip it with the same admin endpoint as the other LLMO flags. That endpoint
+writes the organization's own row — the default for every brand with no
+override of its own; a brand-scoped override row is written directly to
+`feature_flags` (`brand_id` set), exactly as for `LLMO/serenity`:
+
+```bash
+# Enrol an org in multi-dimension custom tags (deep authoring + search)
+curl -X PUT "${API_BASE}/organizations/${ORG_ID}/feature-flags/llmo/serenity_tag_multi_dimension" \
+  -H "x-api-key: ${SPACECAT_ADMIN_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{"value": true}'
+
+# Back out (existing deep tags are preserved and stay readable/assignable)
+curl -X DELETE "${API_BASE}/organizations/${ORG_ID}/feature-flags/llmo/serenity_tag_multi_dimension" \
+  -H "x-api-key: ${SPACECAT_ADMIN_KEY}"
+```
+
+### Pre-deploy migration off the two retired flags
+
+**The deploy that ships the merged flag makes every `serenity_unbounded_tag_authoring`
+and `serenity_tag_search` row inert**, at org scope and at brand scope alike, so
+every org/brand already enrolled loses deep authoring and search unless its
+enrollment is carried forward first. `scripts/serenity-tag-flag-migration.mjs` is
+that step. It **previews by default and writes nothing** without `--apply`.
+
+Mapping — OR over the **resolved** value of each old flag, per scope:
+
+```
+serenity_tag_multi_dimension(scope) := resolve(serenity_unbounded_tag_authoring, scope)
+                                    OR resolve(serenity_tag_search, scope)
+```
+
+where `resolve` is the brand-override-first rule above (brand row, else org row,
+else OFF). Resolving *before* OR-ing is the correctness argument: an org row
+`serenity_unbounded_tag_authoring=true` with a brand override
+`serenity_tag_search=false` must leave that brand **on** — a naive row-by-row OR
+would write the brand a `false` override and revoke authoring it has today. The
+script prints the derivation of every scope (`=true(org)` / `=false(brand)`) so
+that inheritance is auditable. A scope whose two old flags both resolve `false`
+is written as an explicit `false`, because dropping a brand's `false` override
+would let it inherit an enabled org row and switch the brand **on**.
+
+**Which scopes are evaluated.** Every scope carrying an old-flag row, plus every
+brand that carries *only* a pre-existing `serenity_tag_multi_dimension` override
+while its organization still has old rows — that brand inherits the
+organization's old state, so its merged value is checked against the derived one
+(reported `already-migrated` or `CONFLICT`, never `insert`, and it has nothing to
+delete). A scope with no old state anywhere — no rows of its own and no
+organization row to inherit — needs no migration and is deliberately absent from
+the plan.
+
+**Conflicts stop everything.** A scope that already carries a
+`serenity_tag_multi_dimension` row with a different value is **never
+overwritten**, and its presence aborts the whole run: `--apply` (with or without
+`--delete-stale`) reports every conflict, writes nothing, deletes nothing and
+exits 1. There is deliberately **no option to migrate "the rest"** — the scopes
+are not independent, so migrating and then deleting an organization's old rows
+would change what a still-unresolved brand scope derives on the next run, and the
+conflict would resolve itself against a value nobody reviewed. Resolve each
+conflicting row by hand (delete it, or correct its value to the derived one) and
+re-run; `--org-id` narrows a rehearsal to one organization without ever partially
+migrating one. Everything is idempotent, so **recovery from any interruption is
+re-running the same command**.
+
+PostgREST gives one transaction per request and no multi-statement one (the only
+transactional seam in this repo is a `wrpc_*` function in mysticat-data-service —
+see `src/support/slack/llmo-org-move.js`), so the script instead fails safe by
+ordering: every new row is re-read and value-checked **before any old row is
+deleted**, and a failed verification aborts the run with the old rows intact.
+Deletion is a separate opt-in for the same reason it runs *after* the deploy: old
+rows still present are what makes a rollback of the deploy a no-op.
+
+| step | command | effect if the deploy is rolled back |
+| --- | --- | --- |
+| 1 | preview (default) | nothing written |
+| 2 | `--apply` | new rows are ignored by the deployed code; old rows still govern |
+| 3 | deploy | merged flag governs |
+| 4 | `--apply --delete-stale` | old rows are already inert |
+
+```bash
+# 0) Credentials from the target env's Lambda config — never hard-code them.
+#    Reads work as postgrest_anon; --apply needs the postgrest_writer key.
+export POSTGREST_URL=$(aws lambda get-function-configuration \
+  --function-name spacecat-api-service-<env> \
+  --query 'Environment.Variables.POSTGREST_URL' --output text)
+export POSTGREST_API_KEY=$(aws lambda get-function-configuration \
+  --function-name spacecat-api-service-<env> \
+  --query 'Environment.Variables.POSTGREST_API_KEY' --output text)
+
+# 1) PREVIEW (writes nothing). Keep this output: the counts block plus the
+#    per-scope derivation lines are the pre-deploy evidence.
+node scripts/serenity-tag-flag-migration.mjs | tee /tmp/tag-flag-migration-preview.txt
+
+# 1b) Optional rehearsal on a single organization first
+node scripts/serenity-tag-flag-migration.mjs --org-id <org-uuid>
+
+# 2) APPLY — writes and verifies the merged rows, KEEPS the old ones.
+#    Safe before the deploy: the running code does not read the new flag name.
+node scripts/serenity-tag-flag-migration.mjs --apply | tee /tmp/tag-flag-migration-apply.txt
+
+# 3) VERIFY independently of the script, before deploying.
+#    Every scope from the preview must appear here with the derived value.
+curl -s "${POSTGREST_URL}/feature_flags?product=eq.LLMO\
+&flag_name=eq.serenity_tag_multi_dimension\
+&select=organization_id,brand_id,flag_value,updated_by" \
+  -H "apikey: ${POSTGREST_API_KEY}" -H "Authorization: Bearer ${POSTGREST_API_KEY}"
+
+#    Old rows are still present at this point (expected) — count them:
+curl -s -I "${POSTGREST_URL}/feature_flags?product=eq.LLMO\
+&flag_name=in.(serenity_unbounded_tag_authoring,serenity_tag_search)&select=id" \
+  -H "apikey: ${POSTGREST_API_KEY}" -H "Authorization: Bearer ${POSTGREST_API_KEY}" \
+  -H "Prefer: count=exact" -H "Range: 0-0" | grep -i content-range
+
+# 4) Deploy the merged-flag code.
+
+# 5) AFTER the deploy — delete the now-inert old rows. Re-verifies every scope
+#    first and only deletes the rows of scopes that verified.
+node scripts/serenity-tag-flag-migration.mjs --apply --delete-stale
+
+# 6) Post-deploy verification: zero old rows left, and a re-run is a clean no-op
+#    (0 scopes to migrate).
+curl -s -I "${POSTGREST_URL}/feature_flags?product=eq.LLMO\
+&flag_name=in.(serenity_unbounded_tag_authoring,serenity_tag_search)&select=id" \
+  -H "apikey: ${POSTGREST_API_KEY}" -H "Authorization: Bearer ${POSTGREST_API_KEY}" \
+  -H "Prefer: count=exact" -H "Range: 0-0" | grep -i content-range
+node scripts/serenity-tag-flag-migration.mjs
+```
+
+Exit status is `0` only when no scope conflicts; `1` covers conflicts, a failed
+verification, a bad invocation, or a read/write error. A conflict means nothing
+was written or deleted **anywhere**; a failed verification means no stale row of
+an unverified scope was deleted. The admin endpoint
+above cannot replace this: its `DELETE` sets the org row to `false` rather than
+removing it, and neither `PUT` nor `DELETE` can address a brand-scoped override.
+
+One production scope to sanity-check the preview against (an example, not a
+special case — the script is generic over every row and scope): org
+`a6286f15-86c3-4f18-b4ee-f5f37c894248` (PAT03) carries both old flags `true` at
+org scope today, so it must come out as a single
+`serenity_tag_multi_dimension=true` org row.
+
+
 ## Endpoint surface
 
 All `/serenity/*` endpoints require `Authorization: Bearer <ims_user_token>` and `organization:read` (GET) or `organization:write` (mutating) capability. (The S2S brand-markets read documented at the end of this section is the exception: it is reachable without an IMS user token, though it still requires `organization:read`.) The `:brandId` path param is UUID-only on this surface — name-based brand lookup is rejected with 400. The slice key for everything is `(brandId, geoTargetId, languageCode)`; the upstream workspace id and per-project upstream identifier are resolved server-side and never leak into request/response shapes.
@@ -277,6 +466,7 @@ All `/serenity/*` endpoints require `Authorization: Bearer <ims_user_token>` and
 | POST | `/serenity/tags` | Create/resolve a tag on one slice; body is `{ type, name, geoTargetId, languageCode, parentId? }`. `name` is always BARE — a `:` is rejected, as is a reserved dimension-root name. `category` and `tag` are customer-owned open dimensions. `source` is server-owned open. `intent`, `origin`, and `type` are server-owned closed dimensions with fixed enums. Server-owned values reject `parentId` and use idempotent resolve-before-create. | `createSerenityTag` |
 | PATCH | `/serenity/tags/:tagId` | Rename and/or re-parent a tag by its upstream id. `name` is a bare value. `parentId`: an id RE-PARENTS within the tag's own dimension, omitted preserves the current parent, and an explicit `null` is rejected — the root level is reserved for the six dimension roots. The new parent may be neither the tag itself nor one of its descendants (400): upstream stores a parent pointer rather than a tree and would accept the edge, leaving the tag's subtree reachable from no root, and so unreachable and unrepairable through this API. The proxy always re-sends a parent upstream, because a PATCH that omits one promotes the tag to a root. A dimension root (400), a closed dimension's value (400), and an unknown id (404 `tagNotFound`) are all refused. | `updateSerenityTag` |
 | GET | `/serenity/tags/:tagId/impact?geoTargetId=&languageCode=` | Return the complete subtree, distinct affected-prompt count, and quoted revision used by guarded delete. Roots, server-owned tags, and read-only taxonomy branches are refused. | `getSerenityTagImpact` |
+| GET | `/serenity/tags/search?geoTargetId=&languageCode=&q=&limit=&cursor=` | Search the plain `tag` dimension (never `category`/other dimensions) for names/paths containing `q` (NFKC-normalized, case-insensitive), ranked exact > prefix > substring > path. **Rollout:** default-off per brand behind `LLMO/serenity_tag_multi_dimension` — the SAME flag that unlocks arbitrary-depth custom `tag` authoring (create/rename/re-parent beyond depth 2/3), since cross-level search and deep authoring ship as one capability; the environment-wide `SERENITY_TAG_SEARCH_DISABLED=true` switch is an independent emergency backout for this endpoint alone and never disables deep authoring. **Cost profile:** every call — including each subsequent cursor page — re-walks the complete tag tree from Semrush with no caching (up to `SERENITY_TAG_TREE_MAX_PARENTS` parent reads and `SERENITY_TAG_TREE_MAX_PAGES_PER_PARENT` pages per parent at concurrency `SERENITY_TAG_TREE_CONCURRENCY`, bounded by `SERENITY_TAG_TREE_MAX_DURATION_MS`), so a type-ahead client MUST debounce. A `200` is never budget-truncated — budget exhaustion and traversal failures fail closed with `503` (`tagTreeLimitExceeded` for configured ceilings, `tagTreeReadIncomplete` when an upstream level cannot be proven complete, and `tagTreeDataIntegrity` for contradictory tree relationships) instead of returning partial matches — but it is a level-by-level read, not a point-in-time transaction: a tag created into an already-visited level mid-walk is simply absent until the next call, and `complete: true` asserts only "not truncated". Returns an opaque, versioned base64url JSON `cursor` for the next page (`null` once exhausted), bound to the normalized query and taxonomy revision. The cursor carries no organization, brand, workspace, project, or authorization authority: every page reauthenticates, resolves the project server-side, and re-reads the taxonomy; a revision change returns `409 tagSearchSnapshotChanged`. The emergency environment switch returns `503 tagSearchUnavailable` after normal org/brand authorization and before Semrush project resolution or traversal. | `searchSerenityTags` |
 | GET | `/serenity/models?geoTargetId=&languageCode=` | AI models for one slice (catalog mode when no params) | `listSerenityModels` |
 | PUT | `/serenity/models` | Replace the AI-model set for one slice (publishes after change) | `updateSerenityModels` |
 | POST | `/serenity/activate` | Activate into sub-workspace mode. A **pending** brand activates sub-workspace-only (ensure sub-workspace + flip active, no markets); an already-**active** brand's body-supplied markets are provisioned (reactivation) | `activateSerenityBrand` |

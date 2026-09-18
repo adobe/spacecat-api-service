@@ -182,6 +182,8 @@ paths:
     $ref: './serenity-api.yaml#/v2-serenity-market-by-slice'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/tags:
     $ref: './serenity-api.yaml#/v2-serenity-tags'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/tags/search:
+    $ref: './serenity-api.yaml#/v2-serenity-tag-search'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/tags/{tagId}:
     $ref: './serenity-api.yaml#/v2-serenity-tag-by-id'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/tags/{tagId}/impact:
@@ -230,6 +232,12 @@ paths:
     $ref: './serenity-api.yaml#/v2-serenity-url-inspector-prompts-count'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/url-inspector/url-prompts:
     $ref: './serenity-api.yaml#/v2-serenity-url-inspector-url-prompts'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/url-inspector/owned-urls:
+    $ref: './serenity-api.yaml#/v2-serenity-url-inspector-owned-urls'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/url-inspector/cited-domains:
+    $ref: './serenity-api.yaml#/v2-serenity-url-inspector-cited-domains'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/url-inspector/domain-urls:
+    $ref: './serenity-api.yaml#/v2-serenity-url-inspector-domain-urls'
   /organizations/{organizationId}/sites:
     $ref: './sites-api.yaml#/sites-for-organization'
   /organizations/{organizationId}/entitlements:
@@ -587,10 +595,14 @@ paths:
     $ref: './site-metrics-api.yaml#/site-metrics-by-source'
   /sites/{siteId}/metrics/{metric}/{source}/by-url/{base64PageUrl}:
     $ref: './site-metrics-api.yaml#/page-metrics-by-source'
+  /sites/{siteId}/keyword-cpc:
+    $ref: './site-metrics-api.yaml#/site-keyword-cpc'
   /sites/{siteId}/experiments:
     $ref: './experiments-api.yaml#/experiments'
   /sites/{siteId}/fixes:
     $ref: './site-opportunities.yaml#/site-fixes'
+  /sites/{siteId}/deployed-opportunities:
+    $ref: './site-opportunities.yaml#/site-deployed-opportunities'
   /sites/{siteId}/opportunities/{opportunityId}/fixes:
     $ref: './site-opportunities.yaml#/site-opportunity-fixes'
   /sites/{siteId}/opportunities/{opportunityId}/fixes/by-status/{status}:
@@ -752,6 +764,8 @@ paths:
     $ref: './llmo-api.yaml#/llmo-brand-claims-weeks'
   /sites/{siteId}/llmo/brand-claims/request:
     $ref: './llmo-api.yaml#/llmo-brand-claims-request'
+  /sites/{siteId}/llmo/brand-claims/feedback:
+    $ref: './llmo-api.yaml#/llmo-brand-claims-feedback'
   /sites/{siteId}/llmo/strategy/demo/brand-presence:
     $ref: './llmo-api.yaml#/llmo-opportunity-workspace-demo-brand-presence'
   /sites/{siteId}/llmo/strategy/demo/recommendations:

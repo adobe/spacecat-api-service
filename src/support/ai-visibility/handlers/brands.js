@@ -12,7 +12,10 @@
 
 /* eslint-disable max-statements-per-line, max-len -- AI Visibility handler surface */
 
-import { ConnectError, Code } from '@connectrpc/connect';
+import {
+  ConnectError,
+  Code,
+} from '@connectrpc/connect';
 import { BRAND_TOPICS_ORDER_BY_ENUM } from '@quazar/ai-seo-ts/v2/topic/enums_pb.js';
 import { PROMPTS_REQUEST_ORDER_BY_ENUM } from '@quazar/ai-seo-ts/v2/prompt/enums_pb.js';
 import { ORDER_DIRECTION_ENUM } from '@quazar/ai-seo-ts/common/types_pb.js';
@@ -20,6 +23,7 @@ import {
   SOURCES_REQUEST_ORDER_BY_ENUM,
   DOMAINS_REQUEST_ORDER_BY_ENUM,
   SOURCE_CATEGORY_ENUM,
+  SEARCH_TYPE_ENUM,
 } from '@quazar/ai-seo-ts/v2/source/enums_pb.js';
 import {
   num,
@@ -59,6 +63,7 @@ import {
   GAP_SOURCE_DOMAINS_MAX_RANGE_LIMIT,
   settledValueOrElse,
   settledFulfilledMap,
+  normalizeAiVisibilityTarget,
 } from '../grpc-utils.js';
 
 /* c8 ignore start -- branch fan-out / defensive paths; see test/support/ai-visibility/handlers/brands.test.js */
@@ -325,7 +330,7 @@ async function fetchTopicOpportunityRawPromptPoolForLlm(country, domain, llm, ma
 /* ------------------------------------------------------------------ */
 
 export async function handleBrandStats(sp, clients) {
-  const domain = sp.get('domain')?.trim();
+  const domain = normalizeAiVisibilityTarget(sp.get('domain'));
   if (!domain) { return { status: 400, body: { error: 'missing_domain', message: 'domain is required' } }; }
   const country = resolveCountry(sp);
   const target = brandTarget(domain);
@@ -359,7 +364,7 @@ export async function handleBrandStats(sp, clients) {
 }
 
 export async function handleBrandTopics(sp, clients) {
-  const domain = sp.get('domain')?.trim();
+  const domain = normalizeAiVisibilityTarget(sp.get('domain'));
   if (!domain) { return { status: 400, body: { error: 'missing_domain', message: 'domain is required' } }; }
   const country = resolveCountry(sp);
   const { limit, offset } = parseLimitOffset(sp);
@@ -404,7 +409,7 @@ export async function handleBrandTopics(sp, clients) {
 }
 
 export async function handleBrandPrompts(sp, clients) {
-  const domain = sp.get('domain')?.trim();
+  const domain = normalizeAiVisibilityTarget(sp.get('domain'));
   if (!domain) { return { status: 400, body: { error: 'missing_domain', message: 'domain is required' } }; }
   const country = resolveCountry(sp);
   const { limit, offset } = parseLimitOffset(sp);
@@ -491,7 +496,7 @@ export async function handleBrandPrompts(sp, clients) {
 }
 
 export async function handleBrandCitedPages(sp, clients) {
-  const domain = sp.get('domain')?.trim();
+  const domain = normalizeAiVisibilityTarget(sp.get('domain'));
   if (!domain) { return { status: 400, body: { error: 'missing_domain', message: 'domain is required' } }; }
   const country = resolveCountry(sp);
   const { limit, offset } = parseLimitOffset(sp);
@@ -524,21 +529,28 @@ export async function handleBrandCitedPages(sp, clients) {
     }
   }
 
+  // sourcesTotals (ai-vo) carries no search_type, so its count is whole-domain.
+  // Only use it as a DOMAIN-scope fallback; for a scoped (SUBDOMAIN/SUBFOLDER)
+  // target the primary scoped total is the statsByLLM month path, and if that
+  // is unavailable we floor to the fetched rows rather than leak a parent-domain
+  // count that makes the pager show phantom empty pages.
+  const totalsUnscopable = searchType !== SEARCH_TYPE_ENUM.DOMAIN;
+  const unscopedTotal = async () => {
+    if (totalsUnscopable) { return null; }
+    try {
+      const vo = await clients.voSourcesClient.sourcesTotals(totalsReq);
+      return voTotalCountForSourceCategory(vo, 'OWNED_BY_TARGET');
+    } catch { return null; }
+  };
   const fromTotalsPromise = (async () => {
     if (monthYm) {
       try {
         const s = await citedPagesOwnedCountFromStatsByLlmForMonth(country, target, monthYm, llmEnum, clients);
         if (s != null && Number.isFinite(s)) { return s; }
       } catch { /* fallback below */ }
-      try {
-        const vo = await clients.voSourcesClient.sourcesTotals(totalsReq);
-        return voTotalCountForSourceCategory(vo, 'OWNED_BY_TARGET');
-      } catch { return null; }
+      return unscopedTotal();
     }
-    try {
-      const vo = await clients.voSourcesClient.sourcesTotals(totalsReq);
-      return voTotalCountForSourceCategory(vo, 'OWNED_BY_TARGET');
-    } catch { return null; }
+    return unscopedTotal();
   })();
 
   const pair = await Promise.allSettled([fetchSourcesListBody(), fromTotalsPromise]);
@@ -560,7 +572,7 @@ export async function handleBrandCitedPages(sp, clients) {
 }
 
 export async function handleBrandTopicOpportunities(sp, clients) {
-  const domain = sp.get('domain')?.trim();
+  const domain = normalizeAiVisibilityTarget(sp.get('domain'));
   if (!domain) { return { status: 400, body: { error: 'missing_domain', message: 'domain is required' } }; }
   const country = resolveCountry(sp);
   const { limit, offset } = parseLimitOffset(sp);
@@ -619,7 +631,7 @@ export async function handleBrandTopicOpportunities(sp, clients) {
 }
 
 export async function handleBrandTopBrands(sp, clients) {
-  const domain = sp.get('domain')?.trim();
+  const domain = normalizeAiVisibilityTarget(sp.get('domain'));
   if (!domain) { return { status: 400, body: { error: 'missing_domain', message: 'domain is required' } }; }
   const country = resolveCountry(sp);
   const { limit, offset } = parseLimitOffset(sp);
@@ -631,8 +643,13 @@ export async function handleBrandTopBrands(sp, clients) {
   // regardless of offset/sort so `total` is stable across pages — a page-dependent window
   // makes the pager's page-count shift as the user pages forward.
   const fetchN = 1000;
-  const brandDomain = domain.replace(/^www\./, '').toLowerCase();
-  const listArgs = { country, brandDomain, limit: fetchN };
+  // TopBrandsByDomainRequest carries both brand_domain and search_type, so a subfolder
+  // target IS scopable — pass the full target and let search_type scope it (mirrors
+  // the v1 handler v1/brand/top-brands.js).
+  const brandDomain = domain.replace(/^www\./, '');
+  const listArgs = {
+    country, brandDomain, searchType: resolveSearchType(domain), limit: fetchN,
+  };
 
   let raw;
   if (llmSingle) {
@@ -678,8 +695,14 @@ export async function handleBrandTopBrands(sp, clients) {
 }
 
 export async function handleBrandCitedSources(sp, clients) {
-  const domain = sp.get('domain')?.trim();
+  const domain = normalizeAiVisibilityTarget(sp.get('domain'));
   if (!domain) { return { status: 400, body: { error: 'missing_domain', message: 'domain is required' } }; }
+  // SourceDomainsRequest / domainsTotals carry no search_type field, so this RPC
+  // cannot scope to a subfolder — reject a path-bearing target rather than return
+  // whole-domain rows (silently, under a 200) for a subfolder request.
+  if (domain.includes('/')) {
+    return { status: 400, body: { error: 'unsupported_target', message: 'cited sources do not support subfolder (path) targets' } };
+  }
   const country = resolveCountryForCitedSources(sp);
   const { limit, offset } = parseLimitOffset(sp);
   const llmEnum = optionalLlmFromQuery(sp) ?? LLM_ENUM.ALL;
@@ -710,7 +733,7 @@ export async function handleBrandCitedSources(sp, clients) {
 }
 
 export async function handleBrandSourceOpportunities(sp, clients) {
-  const domain = sp.get('domain')?.trim();
+  const domain = normalizeAiVisibilityTarget(sp.get('domain'));
   if (!domain) { return { status: 400, body: { error: 'missing_domain', message: 'domain is required' } }; }
   const country = resolveCountryForCompetitorsMetrics(sp);
   const { limit, offset } = parseLimitOffset(sp);
@@ -734,7 +757,7 @@ export async function handleBrandSourceOpportunities(sp, clients) {
   let competitors = [];
   try {
     const topRaw = await clients.brandClient.topBrandsByDomain({
-      country, brandDomain: domain.replace(/^www\./, '').toLowerCase(), llm, limit: 20,
+      country, brandDomain: domain.replace(/^www\./, ''), searchType: resolveSearchType(domain), llm, limit: 20,
     });
     competitors = (topRaw.brands || [])
       .map((b) => {
@@ -828,7 +851,7 @@ export async function handleBrandSourceOpportunities(sp, clients) {
 }
 
 export async function handleBrandCompetitors(sp, clients) {
-  const domain = sp.get('domain')?.trim();
+  const domain = normalizeAiVisibilityTarget(sp.get('domain'));
   if (!domain) { return { status: 400, body: { error: 'missing_domain', message: 'domain is required' } }; }
   const body = { target: brandTarget(domain), searchType: resolveSearchType(domain) };
   const countRaw = sp.get('count');

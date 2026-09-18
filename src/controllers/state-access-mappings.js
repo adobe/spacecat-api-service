@@ -57,6 +57,16 @@ const MAX_AUTHORITY_PAGES = 50;
 // crafted cursor producing a misleading empty page far past the data.
 const MAX_CURSOR_OFFSET = 1_000_000;
 
+// Site-level capabilities are stored under a dedicated, non-opportunity
+// qualifier so they occupy their OWN active row — never sharing the
+// (opportunity,'all') row with opportunity caps. This keeps the two tiers
+// independently editable (editing opportunity caps never re-sends a site cap
+// the caller can't grant) and makes a site-level grant invisible to
+// opportunity-type resolution (the resolver only matches values 'all'|<type>).
+// Reserved: no opportunity type may equal these values.
+export const SITE_SCOPE_TYPE = 'scope';
+export const SITE_SCOPE_VALUE = 'site';
+
 /**
  * Returns the catalog of capability strings declared for a given product
  * in `PRODUCTS_CAPABILITIES`. The catalog is the single source of truth
@@ -116,6 +126,24 @@ function resolveCompositeKeys(product, compositeKeyType1, compositeKeyValue1) {
     }
     return { compositeKeyType1: 'all', compositeKeyValue1: 'all' };
   }
+  // Site-level caps live on a dedicated non-opportunity qualifier
+  // (scope,'site'), so they get their own active row instead of sharing the
+  // opportunity 'all' row. Recognized alongside the opportunity slot.
+  if (compositeKeyType1 === SITE_SCOPE_TYPE) {
+    // Trim to match the opportunity path's normalization, so a padded DTO
+    // round-trip (`' site '`) doesn't 400 where an opportunity value wouldn't.
+    const siteValue = hasText(compositeKeyValue1)
+      ? compositeKeyValue1.trim()
+      : SITE_SCOPE_VALUE;
+    if (siteValue !== SITE_SCOPE_VALUE) {
+      return {
+        error: badRequest(
+          `compositeKeyType1 '${SITE_SCOPE_TYPE}' requires compositeKeyValue1 '${SITE_SCOPE_VALUE}'`,
+        ),
+      };
+    }
+    return { compositeKeyType1: SITE_SCOPE_TYPE, compositeKeyValue1: SITE_SCOPE_VALUE };
+  }
   const [slot1Type] = slots;
   if (compositeKeyType1 !== undefined && compositeKeyType1 !== slot1Type) {
     return { error: badRequest(`compositeKeyType1 for ${product} must be '${slot1Type}'`) };
@@ -123,12 +151,95 @@ function resolveCompositeKeys(product, compositeKeyType1, compositeKeyValue1) {
   if (compositeKeyValue1 !== undefined && !hasText(compositeKeyValue1)) {
     return { error: badRequest('compositeKeyValue1, when provided, must be a non-empty string') };
   }
-  return {
-    compositeKeyType1: slot1Type,
-    // Trim so trailing/leading whitespace can't produce a stored qualifier that
-    // silently matches no live Opportunity.type (enforcement is exact-match).
-    compositeKeyValue1: hasText(compositeKeyValue1) ? compositeKeyValue1.trim() : 'all',
-  };
+  // Trim so trailing/leading whitespace can't produce a stored qualifier that
+  // silently matches no live Opportunity.type (enforcement is exact-match).
+  const value = hasText(compositeKeyValue1) ? compositeKeyValue1.trim() : 'all';
+  // Reserve the site-scope sentinel so it can never masquerade as an opportunity
+  // type (which would put site-level access on an opportunity row).
+  if (value === SITE_SCOPE_VALUE) {
+    return {
+      error: badRequest(
+        `compositeKeyValue1 '${SITE_SCOPE_VALUE}' is reserved for site-level access; use compositeKeyType1 '${SITE_SCOPE_TYPE}'`,
+      ),
+    };
+  }
+  return { compositeKeyType1: slot1Type, compositeKeyValue1: value };
+}
+
+/**
+ * Capabilities whose enforcement is inherently resource(site)-level: the
+ * composite resolver's "non-opportunity route" branch grants them iff ANY active
+ * binding on the resource carries the capability, REGARDLESS of the row's
+ * composite qualifier (see support/facs-composite-resolvers.js). Scoping them to
+ * an opportunity type is therefore meaningless AND misleading — they live on the
+ * dedicated site-wide `(scope,'site')` row (see SITE_SCOPE_TYPE/_VALUE), never on
+ * an opportunity row. Currently `can_configure` (site config/settings) and
+ * `can_manage_users` (state-layer management).
+ *
+ * @param {string} product - Uppercase product code.
+ * @returns {Set<string>}
+ */
+export function siteLevelCapabilities(product) {
+  const p = product.toLowerCase();
+  return new Set([`${p}/can_configure`, `${p}/can_manage_users`]);
+}
+
+/**
+ * True when the product scopes grants with a composite qualifier (e.g. ASO's
+ * opportunity type). For non-composite products every row is the ('all','all')
+ * sentinel, so site-level-scope validation is a no-op and can be skipped.
+ *
+ * @param {string} product - Uppercase product code.
+ * @returns {boolean}
+ */
+export function productHasCompositeSlots(product) {
+  const slots = routeFacsCapabilities
+    .PRODUCTS_FACS_COMPOSITE_RESOURCE?.[product]?.compositeKeySlots ?? [];
+  return slots.length > 0;
+}
+
+/**
+ * Enforces the two-tier storage invariant:
+ *  - Site-level caps (configure/manage_users) may ONLY live on the dedicated
+ *    site-wide row (scope,'site'); reject them on any opportunity row.
+ *  - The (scope,'site') row may ONLY carry site-level caps; reject opportunity
+ *    caps (view/edit/deploy) there.
+ * Returns an error message string, or null when the (key, capabilities) pair is
+ * valid. A no-op for opportunity caps on an opportunity row.
+ *
+ * @param {string} product
+ * @param {string} compositeKeyType1  - Resolved qualifier type ('opportunity' or 'scope').
+ * @param {string} compositeKeyValue1 - Resolved qualifier value ('all' | a type | 'site').
+ * @param {string[]} capabilities
+ * @returns {string|null}
+ */
+function validateSiteLevelCapabilityScope(
+  product,
+  compositeKeyType1,
+  compositeKeyValue1,
+  capabilities,
+) {
+  // Non-composite products keep every capability on the single ('all','all')
+  // row — there is no opportunity/site tiering to enforce.
+  if (!productHasCompositeSlots(product)) {
+    return null;
+  }
+  const siteCaps = siteLevelCapabilities(product);
+  const isSiteRow = compositeKeyType1 === SITE_SCOPE_TYPE
+    && compositeKeyValue1 === SITE_SCOPE_VALUE;
+  if (isSiteRow) {
+    // The site-wide row carries only site-level caps (no opportunity tier).
+    const offending = capabilities.filter((c) => !siteCaps.has(c));
+    if (offending.length === 0) {
+      return null;
+    }
+    return `The site-level row (${SITE_SCOPE_TYPE}/${SITE_SCOPE_VALUE}) may only carry site-level capabilities; [${offending.join(', ')}] are opportunity-scoped and must be granted on an opportunity row`;
+  }
+  const offending = capabilities.filter((c) => siteCaps.has(c));
+  if (offending.length === 0) {
+    return null;
+  }
+  return `Site-level capabilities [${offending.join(', ')}] cannot be scoped to an opportunity qualifier ('${compositeKeyValue1}'); grant them on the '${SITE_SCOPE_TYPE}/${SITE_SCOPE_VALUE}' (site-wide) row instead`;
 }
 
 function encodeCursor(offset) {
@@ -345,7 +456,21 @@ function StateAccessMappingsController(context) {
     // Case-sensitive match is safe: validateGrantedCapabilities already rejects
     // any capability whose prefix is not the lowercase product code, so every
     // entry here is lowercase.
-    return capabilities.includes(canView) ? capabilities : [...capabilities, canView];
+    if (capabilities.includes(canView)) {
+      return capabilities;
+    }
+    // For a COMPOSITE product, a grant of ONLY site-level caps
+    // (configure/manage_users) lands on the dedicated site-wide row
+    // (scope,'site'); can_view is an opportunity-tier cap that doesn't belong
+    // there, so don't force it on. Non-composite products keep everything on the
+    // single ('all','all') row, so view is still injected there.
+    const siteCaps = siteLevelCapabilities(product);
+    if (productHasCompositeSlots(product)
+      && capabilities.length > 0
+      && capabilities.every((c) => siteCaps.has(c))) {
+      return capabilities;
+    }
+    return [...capabilities, canView];
   }
 
   function buildListFilters(ctx, imsOrgId, product) {
@@ -635,21 +760,31 @@ function StateAccessMappingsController(context) {
 
   /**
    * Guards the *grant* of `can_manage_users`: only a FACS-layer manager (or
-   * admin) may include `<product>/can_manage_users` in `grantedCapabilities`
-   * (hybrid-model §8.3 — a state-layer manager assigns every other capability
-   * but cannot mint new managers). Returns a `forbidden` Response when the grant
-   * is disallowed, else null.
+   * admin) may NEWLY grant `<product>/can_manage_users` (hybrid-model §8.3 — a
+   * state-layer manager assigns every other capability but cannot mint new
+   * managers).
+   *
+   * Evaluates the TRANSITION, not the resulting state: the guard fires only when
+   * `can_manage_users` is being *added* — present in the request but not already
+   * on the row. This matters for a full-replace PATCH, where the client re-sends
+   * an existing `can_manage_users` to preserve it (a full-replace would otherwise
+   * drop it); re-sending an unchanged manager cap is not a new grant and must not
+   * 403 a state-layer manager editing the row's OTHER capabilities. On create,
+   * `existingCapabilities` defaults to `[]`, so any present manager cap counts as
+   * added — unchanged create-time behavior.
    *
    * @param {object} ctx
    * @param {string} product
-   * @param {string[]} grantedCapabilities
+   * @param {string[]} grantedCapabilities - The capabilities to be stored.
+   * @param {string[]} [existingCapabilities] - Caps already on the target row.
    * @returns {Response|null}
    */
-  function requireFacsManageToGrant(ctx, product, grantedCapabilities) {
+  function requireFacsManageToGrant(ctx, product, grantedCapabilities, existingCapabilities = []) {
     const manageCap = `${product.toLowerCase()}/can_manage_users`;
-    if (Array.isArray(grantedCapabilities)
+    const addingManage = Array.isArray(grantedCapabilities)
       && grantedCapabilities.includes(manageCap)
-      && !callerHasFacsManageUsers(ctx, product)) {
+      && !existingCapabilities.includes(manageCap);
+    if (addingManage && !callerHasFacsManageUsers(ctx, product)) {
       return forbidden(`Granting ${manageCap} requires FACS-layer ${manageCap}`);
     }
     return null;
@@ -718,6 +853,19 @@ function StateAccessMappingsController(context) {
     compositeKeyType1,
     compositeKeyValue1,
   }) {
+    // Site-level capabilities enforce site-wide regardless of the qualifier, so
+    // they may only be stored on the dedicated (scope,'site') row — reject an
+    // opportunity-scoped grant that carries them, and reject opportunity caps on
+    // the site row (keeps the persisted data honest about what enforces).
+    const scopeErr = validateSiteLevelCapabilityScope(
+      product,
+      compositeKeyType1,
+      compositeKeyValue1,
+      capabilitiesToStore,
+    );
+    if (scopeErr) {
+      return badRequest(scopeErr);
+    }
     try {
       const { postgrestClient } = ctx.dataAccess.services;
       const result = await createFacsAccessMappings(postgrestClient, {
@@ -1221,30 +1369,61 @@ function StateAccessMappingsController(context) {
     if (capErr) {
       return badRequest(capErr);
     }
-    const grantGuard = requireFacsManageToGrant(ctx, product, grantedCapabilities);
-    if (grantGuard) {
-      return grantGuard;
-    }
     // De-dupe, then guarantee the baseline `<product>/can_view` (see create).
     const capabilitiesToStore = ensureBaselineCanView(
       [...new Set(grantedCapabilities)],
       product,
     );
+    const requestHasManageCap = capabilitiesToStore.includes(
+      `${product.toLowerCase()}/can_manage_users`,
+    );
 
     try {
       const { postgrestClient } = ctx.dataAccess.services;
-      // A state-layer manager may only edit bindings on resources they manage
-      // (hybrid-model §8.3). Authorize against the target row's resource before
-      // mutating; org-wide managers skip this fetch.
-      if (!authority.orgWide) {
+      // Fetch the target row only when a check needs its CURRENT state:
+      //  - per-resource authorization (non-org-wide managers, hybrid-model §8.3),
+      //  - the two-tier scope invariant (composite products), or
+      //  - the FACS-manage grant guard when the request carries
+      //    can_manage_users (gated on the DELTA — see below).
+      const needsExisting = productHasCompositeSlots(product)
+        || !authority.orgWide
+        || requestHasManageCap;
+      if (needsExisting) {
         const existing = await getFacsAccessMappingById(postgrestClient, { id, imsOrgId, product });
         if (!existing) {
           return notFound('Mapping not found');
         }
-        if (!canActOnResource(authority, existing.resource_id)) {
+        // Grant guard on the DELTA: only a NEWLY added can_manage_users (present
+        // in the request but not already on the row) needs FACS-manage authority.
+        // A full-replace PATCH re-sends an existing one to preserve it — that is
+        // not a new grant, so a state-layer manager editing the row's OTHER caps
+        // is not blocked.
+        if (requestHasManageCap) {
+          const grantGuard = requireFacsManageToGrant(
+            ctx,
+            product,
+            capabilitiesToStore,
+            existing.granted_capabilities ?? [],
+          );
+          if (grantGuard) {
+            return grantGuard;
+          }
+        }
+        if (!authority.orgWide && !canActOnResource(authority, existing.resource_id)) {
           return forbidden(
             `Caller may only manage resources where they hold ${product.toLowerCase()}/can_manage_users`,
           );
+        }
+        if (productHasCompositeSlots(product)) {
+          const scopeErr = validateSiteLevelCapabilityScope(
+            product,
+            existing.composite_key_type_1 ?? 'all',
+            existing.composite_key_value_1 ?? 'all',
+            capabilitiesToStore,
+          );
+          if (scopeErr) {
+            return badRequest(scopeErr);
+          }
         }
       }
       // The table grants no UPDATE to any REST role (mutation is RPC-only by
@@ -1467,11 +1646,34 @@ function StateAccessMappingsController(context) {
       }
     }
 
+    // Two-tier view (alongside the flat provenance above): opportunity caps are
+    // resolved per composite qualifier value; site-level caps enforce site-wide
+    // regardless of qualifier, so they collapse into one bucket. Lets a caller
+    // answer "can I edit THIS opportunity type?" without the flat set's
+    // type-blindness. See rebac-composite-resource-key.md.
+    const siteCaps = siteLevelCapabilities(product);
+    const siteCapabilities = new Set();
+    const opportunityCapabilities = {};
+
+    function bucketCap(compositeValue, cap) {
+      if (siteCaps.has(cap)) {
+        siteCapabilities.add(cap);
+        return;
+      }
+      if (!opportunityCapabilities[compositeValue]) {
+        opportunityCapabilities[compositeValue] = new Set();
+      }
+      opportunityCapabilities[compositeValue].add(cap);
+    }
+
     // 1. JWT facs_permissions for the product.
     const jwtPermissions = ctx.attributes?.authInfo?.getFacsPermissions?.() ?? [];
     for (const perm of jwtPermissions) {
       if (typeof perm === 'string' && perm.startsWith(`${productLower}/`)) {
         addProvenance(perm, 'jwt');
+        // JWT grants carry no composite qualifier → treat as the 'all' wildcard
+        // (every opportunity type on the resource).
+        bucketCap('all', perm);
       }
     }
 
@@ -1503,8 +1705,10 @@ function StateAccessMappingsController(context) {
       const results = await Promise.all(queries);
       for (const { tag, rows } of results) {
         for (const row of rows) {
+          const compositeValue = row.composite_key_value_1 ?? 'all';
           for (const cap of row.granted_capabilities ?? []) {
             addProvenance(cap, tag);
+            bucketCap(compositeValue, cap);
           }
         }
       }
@@ -1522,6 +1726,19 @@ function StateAccessMappingsController(context) {
       resourceId,
       capabilities: Object.keys(provenance).sort(),
       provenance,
+      // Additive two-tier view — existing consumers keep reading `capabilities`.
+      // Only emitted for composite products (e.g. ASO): non-composite products
+      // have no opportunity-type qualifier, so the buckets would be misleading.
+      ...(productHasCompositeSlots(product)
+        ? {
+          siteCapabilities: [...siteCapabilities].sort(),
+          opportunityCapabilities: Object.fromEntries(
+            Object.entries(opportunityCapabilities).map(
+              ([value, caps]) => [value, [...caps].sort()],
+            ),
+          ),
+        }
+        : {}),
     });
   }
 

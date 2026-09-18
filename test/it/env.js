@@ -48,6 +48,8 @@ export function buildEnv(publicKeyB64) {
     AWS_SESSION_TOKEN: '',
     AWS_ENDPOINT_URL_S3: `http://localhost:${process.env.IT_MINIO_PORT || '9100'}`,
     S3_BUCKET_NAME: 'spacecat-it-test',
+    ABV_LEARNING_DATA_BUCKET: 'spacecat-it-test',
+    ABV_ID_HASH_SALT: 'it-shared-abv-hash-salt',
 
     // ASO redirect overlay endpoint (GET /config/:service/redirects.txt). The
     // bucket name encodes the deployment env (dev); the controller reads from it

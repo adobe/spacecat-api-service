@@ -461,7 +461,14 @@ v2-serenity-prompts-bulk-tags:
           application/json:
             schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
       '503':
-        description: The complete taxonomy required to validate mutation/filter ids could not be established.
+        description: |
+          The complete taxonomy required to validate mutation/filter ids could
+          not be established: `tagTreeLimitExceeded` when the walk exhausts a
+          safety budget (`details.budget` names `parents`, `nodes`, or
+          `duration`), `tagTreeReadIncomplete` from the legacy single-cap
+          lookup walks. Unbounded nesting replaced the parent-budget breach's
+          former `tagTreeReadIncomplete` with `tagTreeLimitExceeded`, so a
+          consumer keying on the old token for that case must be updated.
         content:
           application/json:
             schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
@@ -883,7 +890,11 @@ v2-serenity-tags:
           application/json:
             schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
       '503':
-        description: The complete requested tag level could not be established.
+        description: |
+          The complete requested tag level could not be established:
+          `tagTreeLimitExceeded` on a safety-budget breach (`details.budget` is
+          `parents`, `nodes`, or `duration`), or `tagTreeReadIncomplete` from
+          the legacy single-cap lookup walks.
         content:
           application/json:
             schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
@@ -916,6 +927,14 @@ v2-serenity-tags:
 
       The dimension roots are provisioned on demand, so a project that predates
       this taxonomy is brought forward by the first write to it.
+
+      Custom `tag` authoring remains limited to depth 2 and depth 3 unless the
+      brand resolves the `LLMO/serenity_tag_multi_dimension` feature flag to
+      `true`. That one flag governs both arbitrary-depth tag authoring and
+      `GET /serenity/tags/search` — they roll out together, per brand. The gate
+      affects authoring only; existing deeper tags remain readable, searchable,
+      assignable, and preserved when the flag is off. A deeper create while
+      disabled returns `400 invalidRequest`.
     operationId: createSerenityTag
     security:
       - session_token: []
@@ -1011,6 +1030,136 @@ v2-serenity-tags:
         content:
           application/json:
             schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '503':
+        description: |
+          The taxonomy read backing this mutation could not be completed:
+          `tagTreeLimitExceeded` on a safety-budget breach (`details.budget` is
+          `parents`, `nodes`, or `duration` — the node and duration budgets are
+          new with unbounded nesting and are tunable per environment), or
+          `tagTreeReadIncomplete` from the legacy single-cap lookup walks.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '500': { $ref: './responses.yaml#/500' }
+
+# ─── Complete custom-tag search ──────────────────────────────────────
+
+v2-serenity-tag-search:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema: { type: string, format: uuid }
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID-only on the /serenity/* surface)
+      schema: { type: string, format: uuid }
+  get:
+    tags: [serenity]
+    summary: Search the complete custom-tag tree for one market
+    description: |
+      Rebuilds the complete authoritative draft `tag` subtree from Semrush and
+      searches every customer-authored level locally. Results are ordered by
+      exact label, label prefix, label substring, then full-path substring,
+      followed by normalized full path and tag id.
+
+      **Rollout.** Search is default-off per brand behind the
+      `LLMO/serenity_tag_multi_dimension` feature flag — the same flag that
+      unlocks arbitrary-depth custom `tag` authoring, because cross-level search
+      and deep authoring ship as one capability. An environment-wide emergency
+      switch can additionally take only this endpoint dark without disabling
+      deep authoring or any other Serenity feature.
+
+      **Cost profile — design your client around it.** There is no cache: every
+      call, including every subsequent `cursor` page, re-walks the entire tag
+      subtree upstream (bounded per request by a parent-expansion budget, a node
+      budget, a per-parent page budget, a fan-out concurrency cap, and a
+      traversal-wide deadline of a few seconds, all tunable per environment).
+      A request can therefore take
+      seconds, and pagination costs one full traversal per page. A type-ahead
+      integration MUST debounce keystrokes and SHOULD prefer a larger `limit`
+      over paging.
+
+      **What "complete" means.** A `200` is never budget-truncated: traversal
+      failures, integrity disagreements, and budget exhaustion return an error
+      instead of partial matches, and `complete: true` records exactly that. It
+      is not a point-in-time consistency guarantee — the walk spans many
+      upstream reads, so a tag created into an already-visited level while the
+      walk is in progress is simply absent from that response and appears on the
+      next call. Results are eventually consistent, never truncated.
+
+      **Cursor authority.** The opaque cursor is versioned base64url-encoded
+      pagination state, bound to the normalized query and taxonomy revision. It
+      carries no organization, brand, workspace, project, or authorization
+      authority. Every page authenticates and authorizes the caller, resolves
+      the workspace and project server-side, re-reads the complete taxonomy,
+      and rejects a changed revision with `409`.
+    operationId: searchSerenityTags
+    security:
+      - session_token: []
+    parameters:
+      - name: geoTargetId
+        in: query
+        required: true
+        schema: { type: integer, minimum: 1 }
+      - name: languageCode
+        in: query
+        required: true
+        schema: { type: string, pattern: '^[a-z]{2,3}(-[a-z]{2,4})?$' }
+      - name: q
+        in: query
+        required: true
+        description: Unicode-normalized, case-insensitive substring query.
+        schema: { type: string, minLength: 1, maxLength: 200 }
+      - name: limit
+        in: query
+        required: false
+        schema: { type: integer, minimum: 1, maximum: 100, default: 25 }
+      - name: cursor
+        in: query
+        required: false
+        description: |
+          Opaque, versioned base64url pagination state from the preceding page.
+          It is query- and revision-bound and carries no tenant or project
+          authority.
+        schema: { type: string, minLength: 1 }
+    responses:
+      '200':
+        description: A search page that is complete (never budget-truncated).
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityTagSearchResponse' }
+      '400':
+        description: Invalid selectors, query, limit, or cursor.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '404':
+        description: Organization, brand, workspace, or market not found, or search is not enabled for this brand.
+      '409':
+        description: The taxonomy changed between cursor pages; restart at page one.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '502':
+        description: Semrush returned a non-success response.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '503':
+        description: |
+          `tagTreeLimitExceeded` — the complete tree could not be established
+          within the safety budgets (`details.budget` names `parents`, `nodes`,
+          `pages`, or `duration`);           `tagTreeReadIncomplete` — an upstream page
+          was malformed, inconsistent, or could not prove the level complete;
+          `tagTreeDataIntegrity` — upstream returned a connected tree this
+          endpoint refuses to interpret; or `tagSearchUnavailable` — search is
+          switched off for this environment.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
       '500': { $ref: './responses.yaml#/500' }
 
 # ─── Nested-tag edit (rename / re-parent) ─────────────────────────────
@@ -1065,6 +1214,13 @@ v2-serenity-tag-by-id:
       (400) — doing so would leave their whole subtree without a dimension. A
       closed dimension's value cannot be renamed or re-parented either: its
       vocabulary is fixed.
+
+      Custom `tag` rename/re-parent operations remain limited to existing
+      depth-2/depth-3 nodes and destinations producing those depths unless the
+      brand resolves the `LLMO/serenity_tag_multi_dimension` feature flag to
+      `true` (the same flag that enables `GET /serenity/tags/search`). Disabling
+      the flag does not hide or remove existing deeper tags; an
+      unsupported-depth mutation returns `400 invalidRequest`.
     operationId: updateSerenityTag
     security:
       - session_token: []
@@ -1139,6 +1295,16 @@ v2-serenity-tag-by-id:
           tag's current parent there is no request body that preserves it.
       '502':
         description: Upstream returned a non-2xx response.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '503':
+        description: |
+          The taxonomy read backing this mutation could not be completed:
+          `tagTreeLimitExceeded` on a safety-budget breach (`details.budget` is
+          `parents`, `nodes`, or `duration` — the node and duration budgets are
+          new with unbounded nesting and are tunable per environment), or
+          `tagTreeReadIncomplete` from the legacy single-cap lookup walks.
         content:
           application/json:
             schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
@@ -3178,6 +3344,516 @@ v2-serenity-url-inspector-url-prompts:
         description: Caller lacks access to the organization.
       '404':
         description: Organization not found, brand not found for this organization, the brand has no resolvable Semrush workspace, or (when no `projectId` is given) the brand has no Semrush projects configured at all.
+      '502':
+        description: Upstream returned a non-2xx response.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '503':
+        description: PostgREST client not configured for this deployment.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '500': { $ref: './responses.yaml#/500' }
+
+v2-serenity-url-inspector-owned-urls:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID-only on the /serenity/* surface)
+      schema:
+        type: string
+        format: uuid
+  get:
+    tags: [serenity]
+    summary: URL Inspector "Your cited URLs" table (owned URLs)
+    description: |
+      Elements-backed equivalent of the Postgres-RPC
+      `/brand-presence/url-inspector/owned-urls` endpoint. Hybrid: per-URL
+      citations, regions, and weekly citation trend come from the Semrush
+      Stats-per-URL element (owned URLs only, `domain_type='Owned'`);
+      `agenticHits`/`agenticHitsTrend`/`referralHits`/`referralHitsTrend` are
+      joined server-side from the Adobe Postgres traffic pipeline by
+      `(site_id, url_path)` — the only non-Semrush data on this endpoint. The
+      traffic join is best-effort: it degrades to `0`/`[]` (never fails the
+      request) when `siteId` is omitted, the join RPC errors, or a URL has no
+      matching Postgres traffic in range.
+
+      Pagination is client-side: Semrush has no server-side pagination for
+      this element, so the full owned-URL set is fetched, sliced by
+      `page`/`pageSize`, and only the resulting page's URLs are sent into the
+      traffic join (keeps the join's URL list small).
+    operationId: getSerenityUrlInspectorOwnedUrls
+    security:
+      - session_token: []
+    parameters:
+      - *tagPathParameter
+      - *tagFilterModeParameter
+      - name: startDate
+        in: query
+        required: true
+        description: Range start (YYYY-MM-DD). Required. The `[startDate, endDate]` span must not exceed 366 days.
+        schema: { type: string, format: date }
+      - name: start_date
+        in: query
+        required: false
+        description: Snake_case alias for `startDate`.
+        schema: { type: string, format: date }
+      - name: endDate
+        in: query
+        required: true
+        description: Range end (YYYY-MM-DD). Required. Must not be before `startDate`.
+        schema: { type: string, format: date }
+      - name: end_date
+        in: query
+        required: false
+        description: Snake_case alias for `endDate`.
+        schema: { type: string, format: date }
+      - name: model
+        in: query
+        required: false
+        description: |
+          AI model to scope citations to. Accepts a Semrush Elements model
+          name directly, or a SpaceCat/UI platform code (translated
+          server-side). Defaults to `search-gpt` when omitted or unrecognized.
+          Unlike `/url-prompts`, the `all` sentinel is NOT supported here —
+          it resolves to the default single model.
+        schema:
+          type: string
+          x-canonical-values:
+            - google-ai-mode
+            - grok-3
+            - google-ai-overview
+            - microsoft-copilot
+            - open-evidence
+            - gemini-2.5-flash
+            - claude-sonnet-4
+            - gpt-5
+            - deepseek
+            - search-gpt
+            - perplexity
+          x-known-aliases:
+            copilot: microsoft-copilot
+            gemini: gemini-2.5-flash
+            openai: gpt-5
+            chatgpt: search-gpt
+      - name: platform
+        in: query
+        required: false
+        description: Legacy alias for `model`; `model` takes precedence when both are given.
+        schema: { type: string }
+      - name: siteId
+        in: query
+        required: false
+        description: |
+          SpaceCat site UUID. OPTIONAL and semantically different from the
+          same-named parameter on `/url-inspector/stats`: citations come from
+          Semrush (brand-scoped, no site concept), so `siteId` here feeds
+          ONLY the Postgres agentic/referral traffic join. Must resolve to
+          this brand (400 otherwise, mirrors `/brand-presence/weeks`).
+          Omitted → `agenticHits`/`referralHits` degrade to `0`/`[]`.
+        schema: { type: string, format: uuid }
+      - name: site_id
+        in: query
+        required: false
+        description: Snake_case alias for `siteId`.
+        schema: { type: string, format: uuid }
+      - $ref: './parameters.yaml#/agentTypes'
+      - name: agent_types
+        in: query
+        required: false
+        description: |
+          Snake_case alias for `agentTypes`. Scopes the Postgres agentic side
+          of THIS endpoint's traffic join ONLY (citations are unaffected —
+          they come from Semrush). Mirrors the PG
+          `/brand-presence/url-inspector/owned-urls` endpoint's `agentTypes`
+          handling one-for-one, including the fail-open-to-unfiltered
+          behaviour when every supplied token is unrecognized.
+        schema: { type: string }
+      - name: referralSource
+        in: query
+        required: false
+        description: |
+          Which `referral_traffic_<source>` table the Postgres traffic join
+          reads for `referralHits`/`referralHitsTrend`. Recognized values are
+          `optel`, `cdn`, `ga4`, `adobe_analytics`, `cja`; any other value is
+          dropped and the join's own default (`optel`) applies.
+        schema:
+          type: string
+          enum: [optel, cdn, ga4, adobe_analytics, cja]
+      - name: referral_source
+        in: query
+        required: false
+        description: Snake_case alias for `referralSource`.
+        schema: { type: string }
+      - name: projectId
+        in: query
+        required: false
+        description: |
+          Comma-separated Semrush project UUIDs to scope to (e.g.
+          `projectId=<uuid1>,<uuid2>`). Alias `project_id`. Omitted
+          aggregates across every project the brand owns. Maximum 8 ids; each must be a valid UUID (400 otherwise).
+        schema: { type: string, pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(,[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}){0,7}$' }
+      - name: project_id
+        in: query
+        required: false
+        description: Snake_case alias for `projectId`.
+        schema: { type: string }
+      - name: categoryId
+        in: query
+        required: false
+        description: Full `category__<label>` tag value (caller includes the prefix), sent as-is. Both the current root-name spelling and the bare `category` slug are recognized for the prefix (tag-display-names.md §1 item 6).
+        schema: { type: string }
+      - name: category
+        in: query
+        required: false
+        description: Alias for `categoryId`.
+        schema: { type: string }
+      - name: page
+        in: query
+        required: false
+        description: 0-based page index over the full (client-paginated) owned-URL set. Defaults to 0.
+        schema: { type: integer, minimum: 0, default: 0 }
+      - name: pageSize
+        in: query
+        required: false
+        description: Page size (1..1000). Defaults to 50.
+        schema: { type: integer, minimum: 1, maximum: 1000, default: 50 }
+    responses:
+      '200':
+        description: Owned URLs retrieved.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityOwnedUrlsResponse' }
+      '400': { $ref: './responses.yaml#/400' }
+      '403':
+        description: Caller lacks access to the organization, or a supplied projectId is not owned by the brand.
+      '404':
+        description: Organization not found, brand not found for this organization, the brand has no resolvable Semrush workspace, or (when no `projectId` is given) the brand has no Semrush projects configured at all.
+      '502':
+        description: Upstream returned a non-2xx response.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '503':
+        description: PostgREST client not configured for this deployment.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '500': { $ref: './responses.yaml#/500' }
+
+v2-serenity-url-inspector-cited-domains:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID-only on the /serenity/* surface)
+      schema:
+        type: string
+        format: uuid
+  get:
+    tags: [serenity]
+    summary: Domains most frequently cited alongside owned URLs (Cited Domains panel)
+    description: |
+      Elements-backed equivalent of the Postgres-RPC
+      `/brand-presence/url-inspector/cited-domains` endpoint, backed by the
+      Semrush Cited Domains element. A multi-project selection fans out one
+      call per project and merges rows for the same domain (summing
+      `totalCitations`/`totalUrls`/`promptsCited`) before sorting/paginating
+      once over the merged set. Pagination and the `channel` content-type
+      filter are both applied client-side — the element has no server-side
+      equivalent for either.
+    operationId: getSerenityUrlInspectorCitedDomains
+    security:
+      - session_token: []
+    parameters:
+      - *tagPathParameter
+      - *tagFilterModeParameter
+      - name: startDate
+        in: query
+        required: true
+        description: Range start (YYYY-MM-DD). Required.
+        schema: { type: string, format: date }
+      - name: start_date
+        in: query
+        required: false
+        description: Snake_case alias for `startDate`.
+        schema: { type: string, format: date }
+      - name: endDate
+        in: query
+        required: true
+        description: Range end (YYYY-MM-DD). Required. Must not be before `startDate`.
+        schema: { type: string, format: date }
+      - name: end_date
+        in: query
+        required: false
+        description: Snake_case alias for `endDate`.
+        schema: { type: string, format: date }
+      - name: model
+        in: query
+        required: false
+        description: |
+          AI model to scope citations to. Accepts a Semrush Elements model
+          name directly, or a SpaceCat/UI platform code (translated
+          server-side). Defaults to `search-gpt` when omitted or unrecognized.
+          The `all` sentinel is NOT supported — it resolves to the default
+          single model.
+        schema:
+          type: string
+          x-canonical-values:
+            - google-ai-mode
+            - grok-3
+            - google-ai-overview
+            - microsoft-copilot
+            - open-evidence
+            - gemini-2.5-flash
+            - claude-sonnet-4
+            - gpt-5
+            - deepseek
+            - search-gpt
+            - perplexity
+          x-known-aliases:
+            copilot: microsoft-copilot
+            gemini: gemini-2.5-flash
+            openai: gpt-5
+            chatgpt: search-gpt
+      - name: platform
+        in: query
+        required: false
+        description: Legacy alias for `model`; `model` takes precedence when both are given.
+        schema: { type: string }
+      - name: projectId
+        in: query
+        required: false
+        description: |
+          Comma-separated Semrush project UUIDs to scope to (e.g.
+          `projectId=<uuid1>,<uuid2>`). Alias `project_id`. Omitted
+          aggregates across every project the brand owns (each fetched
+          independently and merged — see the operation description). Each id
+          must be a valid UUID (400 otherwise).
+        schema: { type: string, pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(,[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}){0,7}$' }
+      - name: project_id
+        in: query
+        required: false
+        description: Snake_case alias for `projectId`.
+        schema: { type: string }
+      - name: categoryId
+        in: query
+        required: false
+        description: Full `category__<label>` tag value (caller includes the prefix), sent as-is. Both the current root-name spelling and the bare `category` slug are recognized for the prefix (tag-display-names.md §1 item 6).
+        schema: { type: string }
+      - name: category
+        in: query
+        required: false
+        description: Alias for `categoryId`.
+        schema: { type: string }
+      - name: channel
+        in: query
+        required: false
+        description: Content-type filter applied client-side against each domain's `contentType` (case-insensitive exact match). The element itself ignores it server-side.
+        schema: { type: string }
+      - name: selectedChannel
+        in: query
+        required: false
+        description: Alias for `channel`.
+        schema: { type: string }
+      - name: page
+        in: query
+        required: false
+        description: 0-based page index over the full (client-paginated) domain set. Defaults to 0.
+        schema: { type: integer, minimum: 0, default: 0 }
+      - name: pageSize
+        in: query
+        required: false
+        description: Page size (1..1000). Defaults to 50.
+        schema: { type: integer, minimum: 1, maximum: 1000, default: 50 }
+    responses:
+      '200':
+        description: Cited domains retrieved.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityCitedDomainsResponse' }
+      '400': { $ref: './responses.yaml#/400' }
+      '403':
+        description: Caller lacks access to the organization, or a supplied projectId is not owned by the brand.
+      '404':
+        description: Organization not found, brand not found for this organization, or the brand has no resolvable Semrush workspace.
+      '502':
+        description: Upstream returned a non-2xx response.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '503':
+        description: PostgREST client not configured for this deployment.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityErrorResponse' }
+      '500': { $ref: './responses.yaml#/500' }
+
+v2-serenity-url-inspector-domain-urls:
+  parameters:
+    - name: spaceCatId
+      in: path
+      required: true
+      description: SpaceCat Organization ID (UUID)
+      schema:
+        type: string
+        format: uuid
+    - name: brandId
+      in: path
+      required: true
+      description: Brand ID (UUID-only on the /serenity/* surface)
+      schema:
+        type: string
+        format: uuid
+  get:
+    tags: [serenity]
+    summary: URLs under a cited domain (Cited Third-Party drilldown)
+    description: |
+      Phase 2 of the Cited Third-Party tree: expand a cited domain into its
+      URLs. Same Semrush element as `/url-inspector/owned-urls` (Stats-per-URL)
+      minus the weekly-trend element and the Postgres traffic hybrid — this
+      endpoint never returns agentic/referral data. `hostname` optionally
+      filters to one domain client-side, instead of the owned-urls endpoint's
+      server-side `domain_type='Owned'` filter.
+    operationId: getSerenityUrlInspectorDomainUrls
+    security:
+      - session_token: []
+    parameters:
+      - *tagPathParameter
+      - *tagFilterModeParameter
+      - name: hostname
+        in: query
+        required: false
+        description: Restrict to URLs on this domain (client-side, exact host match). Alias `domain`. Whitespace-only collapses to "no filter". Omitted returns URLs across every cited domain.
+        schema: { type: string }
+      - name: domain
+        in: query
+        required: false
+        description: Alias for `hostname`.
+        schema: { type: string }
+      - name: startDate
+        in: query
+        required: true
+        description: Range start (YYYY-MM-DD). Required. The `[startDate, endDate]` span must not exceed 366 days.
+        schema: { type: string, format: date }
+      - name: start_date
+        in: query
+        required: false
+        description: Snake_case alias for `startDate`.
+        schema: { type: string, format: date }
+      - name: endDate
+        in: query
+        required: true
+        description: Range end (YYYY-MM-DD). Required. Must not be before `startDate`.
+        schema: { type: string, format: date }
+      - name: end_date
+        in: query
+        required: false
+        description: Snake_case alias for `endDate`.
+        schema: { type: string, format: date }
+      - name: model
+        in: query
+        required: false
+        description: |
+          AI model to scope citations to. Accepts a Semrush Elements model
+          name directly, or a SpaceCat/UI platform code (translated
+          server-side). Defaults to `search-gpt` when omitted or unrecognized.
+          The `all` sentinel is NOT supported — it resolves to the default
+          single model.
+        schema:
+          type: string
+          x-canonical-values:
+            - google-ai-mode
+            - grok-3
+            - google-ai-overview
+            - microsoft-copilot
+            - open-evidence
+            - gemini-2.5-flash
+            - claude-sonnet-4
+            - gpt-5
+            - deepseek
+            - search-gpt
+            - perplexity
+          x-known-aliases:
+            copilot: microsoft-copilot
+            gemini: gemini-2.5-flash
+            openai: gpt-5
+            chatgpt: search-gpt
+      - name: platform
+        in: query
+        required: false
+        description: Legacy alias for `model`; `model` takes precedence when both are given.
+        schema: { type: string }
+      - name: channel
+        in: query
+        required: false
+        description: Content-type filter (see `/url-inspector/cited-domains`'s `channel` for the matching semantics).
+        schema: { type: string }
+      - name: selectedChannel
+        in: query
+        required: false
+        description: Alias for `channel`.
+        schema: { type: string }
+      - name: projectId
+        in: query
+        required: false
+        description: |
+          Comma-separated Semrush project UUIDs to scope to (e.g.
+          `projectId=<uuid1>,<uuid2>`). Alias `project_id`. Omitted
+          aggregates across every project the brand owns. Maximum 8 ids; each must be a valid UUID (400 otherwise).
+        schema: { type: string, pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(,[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}){0,7}$' }
+      - name: project_id
+        in: query
+        required: false
+        description: Snake_case alias for `projectId`.
+        schema: { type: string }
+      - name: categoryId
+        in: query
+        required: false
+        description: Full `category__<label>` tag value (caller includes the prefix), sent as-is. Both the current root-name spelling and the bare `category` slug are recognized for the prefix (tag-display-names.md §1 item 6).
+        schema: { type: string }
+      - name: category
+        in: query
+        required: false
+        description: Alias for `categoryId`.
+        schema: { type: string }
+      - name: page
+        in: query
+        required: false
+        description: 0-based page index over the full (client-paginated) URL set. Defaults to 0.
+        schema: { type: integer, minimum: 0, default: 0 }
+      - name: pageSize
+        in: query
+        required: false
+        description: Page size (1..1000). Defaults to 50.
+        schema: { type: integer, minimum: 1, maximum: 1000, default: 50 }
+    responses:
+      '200':
+        description: Domain URLs retrieved.
+        content:
+          application/json:
+            schema: { $ref: './schemas.yaml#/SerenityDomainUrlsResponse' }
+      '400': { $ref: './responses.yaml#/400' }
+      '403':
+        description: Caller lacks access to the organization, or a supplied projectId is not owned by the brand.
+      '404':
+        description: Organization not found, brand not found for this organization, or the brand has no resolvable Semrush workspace.
       '502':
         description: Upstream returned a non-2xx response.
         content:

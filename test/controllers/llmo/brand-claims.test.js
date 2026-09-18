@@ -10,6 +10,7 @@
  * governing permissions and limitations under the License.
  */
 
+import { createHmac } from 'node:crypto';
 import { expect, use } from 'chai';
 import sinon from 'sinon';
 import sinonChai from 'sinon-chai';
@@ -945,5 +946,464 @@ describe('handleRequestBrandClaims (on-demand, LLMO-7263)', () => {
     expect(result.status).to.equal(202);
     expect(sqsSend).to.have.been.calledOnce;
     expect(context.log.warn).to.have.been.called;
+  });
+});
+
+describe('handleBrandClaimsFeedback', () => {
+  const EVENT_ID = '11111111-1111-4111-8111-111111111111';
+  const BRAND_ID = '22222222-2222-4222-8222-222222222222';
+  const ORG_ID = '33333333-3333-4333-8333-333333333333';
+  const SITE_ID = '44444444-4444-4444-8444-444444444444';
+
+  let handleBrandClaimsFeedback;
+  let sandbox;
+  let s3Send;
+  let getBrandById;
+  let context;
+  let site;
+  let MockPutObjectCommand;
+  let MockGetObjectCommand;
+
+  const httpUtils = {
+    accepted: (body) => ({ status: 202, json: async () => body }),
+    badRequest: (message) => ({ status: 400, json: async () => ({ message }) }),
+    notFound: (message) => ({ status: 404, json: async () => ({ message }) }),
+    internalServerError: (message) => ({ status: 500, json: async () => ({ message }) }),
+    createResponse: (body, status) => ({ status, json: async () => body }),
+  };
+
+  beforeEach(async () => {
+    sandbox = sinon.createSandbox();
+    s3Send = sandbox.stub().resolves({});
+    getBrandById = sandbox.stub().resolves({
+      id: BRAND_ID,
+      name: 'Acme',
+      baseSiteId: SITE_ID,
+      siteIds: [SITE_ID],
+    });
+
+    const mod = await esmock('../../../src/controllers/llmo/brand-claims.js', {
+      '@adobe/spacecat-shared-http-utils': httpUtils,
+      '../../../src/support/brands-storage.js': { getBrandById },
+    });
+    handleBrandClaimsFeedback = mod.handleBrandClaimsFeedback;
+    MockPutObjectCommand = function PutObjectCommand(input) {
+      this.input = input;
+      this.type = 'put';
+    };
+    MockGetObjectCommand = function GetObjectCommand(input) {
+      this.input = input;
+      this.type = 'get';
+    };
+
+    site = {
+      getId: () => SITE_ID,
+      getOrganizationId: () => ORG_ID,
+    };
+    context = {
+      data: {
+        eventId: EVENT_ID,
+        brandId: BRAND_ID,
+        rating: 'down',
+        comment: 'The recommendations need more context.',
+      },
+      dataAccess: {
+        Organization: {
+          findById: sandbox.stub().resolves({
+            getName: () => 'Acme Corp',
+            getImsOrgId: () => 'ABC@AdobeOrg',
+          }),
+        },
+        Entitlement: {
+          findByOrganizationIdAndProductCode: sandbox.stub().resolves({
+            getTier: () => 'PAID',
+          }),
+        },
+        services: {
+          postgrestClient: { from: sandbox.stub() },
+        },
+      },
+      attributes: {
+        authInfo: {
+          getProfile: () => ({
+            user_id: 'user-123@AdobeID',
+            email: 'user-123@AdobeID',
+            sub: 'user-123@AdobeID',
+          }),
+        },
+      },
+      env: {
+        ABV_LEARNING_DATA_BUCKET: 'learning-bucket',
+        ABV_ID_HASH_SALT: 'shared-secret',
+      },
+      log: {
+        info: sandbox.stub(),
+        warn: sandbox.stub(),
+        error: sandbox.stub(),
+      },
+      s3: {
+        s3Client: { send: s3Send },
+        PutObjectCommand: MockPutObjectCommand,
+        GetObjectCommand: MockGetObjectCommand,
+      },
+    };
+  });
+
+  afterEach(() => sandbox.restore());
+
+  it('writes an encrypted, contextual product-feedback record and returns 202', async () => {
+    const result = await handleBrandClaimsFeedback(context, site);
+
+    expect(result.status).to.equal(202);
+    expect(s3Send).to.have.been.calledTwice;
+    const markerCommand = s3Send.firstCall.args[0];
+    expect(markerCommand.input.Key).to.equal(
+      `product_feedback/brand_claims/idempotency/${EVENT_ID}.json`,
+    );
+    const command = s3Send.secondCall.args[0];
+    expect(command.input).to.include({
+      Bucket: 'learning-bucket',
+      ContentType: 'application/json',
+      ServerSideEncryption: 'AES256',
+      IfNoneMatch: '*',
+    });
+    expect(command.input.Key).to.match(
+      new RegExp(`^product_feedback/brand_claims/down/paid/\\d{4}-\\d{2}-\\d{2}/\\d{17}_${EVENT_ID}\\.json$`),
+    );
+    const record = JSON.parse(command.input.Body);
+    expect(record).to.include({
+      schemaVersion: 1,
+      recordType: 'product_feedback',
+      surface: 'brand_claims',
+      feedbackScope: 'report',
+      entryPoint: 'report_overview',
+      id: EVENT_ID,
+      rating: 'down',
+      note: 'The recommendations need more context.',
+      organizationId: ORG_ID,
+      customerName: 'Acme Corp',
+      imsOrgId: 'ABC@AdobeOrg',
+      siteId: SITE_ID,
+      brandId: BRAND_ID,
+      brand: 'Acme',
+      tier: 'paid',
+    });
+    const expectedAbvId = `abv_${createHmac('sha256', 'shared-secret')
+      .update('user-123@AdobeID')
+      .digest('hex')
+      .slice(0, 12)}`;
+    expect(record.abv_id).to.equal(expectedAbvId);
+  });
+
+  it('stores claim-cluster feedback under the claim-specific prefix', async () => {
+    const result = await handleBrandClaimsFeedback({
+      ...context,
+      data: {
+        ...context.data,
+        feedbackScope: 'claim_cluster',
+        entryPoint: 'claim_inline',
+        clusterId: 'cluster-123',
+        claimText: 'Lovesac products are modular.',
+        model: 'chatgpt',
+        sourceFile: 'brand_claims/llmo/site/week/data.json.gz',
+      },
+    }, site);
+
+    expect(result.status).to.equal(202);
+    const command = s3Send.secondCall.args[0];
+    expect(command.input.Key).to.match(
+      new RegExp(`^product_feedback/brand_claims/claim_cluster/down/paid/\\d{4}-\\d{2}-\\d{2}/\\d{17}_${EVENT_ID}\\.json$`),
+    );
+    expect(JSON.parse(command.input.Body)).to.include({
+      feedbackScope: 'claim_cluster',
+      entryPoint: 'claim_inline',
+      clusterId: 'cluster-123',
+      claimText: 'Lovesac products are modular.',
+      model: 'chatgpt',
+      sourceFile: 'brand_claims/llmo/site/week/data.json.gz',
+    });
+  });
+
+  it('defaults legacy claim-cluster feedback to the claim-details entry point', async () => {
+    const result = await handleBrandClaimsFeedback({
+      ...context,
+      data: {
+        ...context.data,
+        feedbackScope: 'claim_cluster',
+        clusterId: 'cluster-123',
+        claimText: 'Lovesac products are modular.',
+      },
+    }, site);
+
+    expect(result.status).to.equal(202);
+    expect(JSON.parse(s3Send.secondCall.args[0].input.Body)).to.include({
+      feedbackScope: 'claim_cluster',
+      entryPoint: 'claim_details',
+    });
+  });
+
+  it('omits the explicit encryption header for a local S3 emulator', async () => {
+    const result = await handleBrandClaimsFeedback({
+      ...context,
+      env: {
+        ...context.env,
+        AWS_ENDPOINT_URL_S3: 'http://localhost:9100',
+      },
+    }, site);
+
+    expect(result.status).to.equal(202);
+    expect(s3Send.firstCall.args[0].input).not.to.have.property('ServerSideEncryption');
+    expect(s3Send.secondCall.args[0].input).not.to.have.property('ServerSideEncryption');
+  });
+
+  it('rejects invalid ids, rating, and comment shape before writing', async () => {
+    const results = await Promise.all([
+      { ...context.data, eventId: 'bad' },
+      { ...context.data, eventId: '00000000-0000-0000-0000-000000000000' },
+      { ...context.data, eventId: '6ba7b810-9dad-11d1-80b4-00c04fd430c8' },
+      { ...context.data, brandId: 'bad' },
+      { ...context.data, rating: 'neutral' },
+      { ...context.data, comment: 42 },
+      { ...context.data, feedbackScope: 'other' },
+      { ...context.data, entryPoint: 'other' },
+      { ...context.data, entryPoint: null },
+      { ...context.data, entryPoint: 'claim_inline' },
+      {
+        ...context.data,
+        feedbackScope: 'claim_cluster',
+        entryPoint: 'report_overview',
+        clusterId: 'cluster-1',
+        claimText: 'Claim',
+      },
+      { ...context.data, clusterId: 'cluster-1' },
+      {
+        ...context.data,
+        feedbackScope: 'claim_cluster',
+        clusterId: '',
+        claimText: 'Claim',
+      },
+      {
+        ...context.data,
+        feedbackScope: 'claim_cluster',
+        clusterId: 'cluster-1',
+        claimText: '',
+      },
+    ].map((data) => handleBrandClaimsFeedback({ ...context, data }, site)));
+    expect(results.map((result) => result.status)).to.deep.equal([
+      400, 400, 400, 400, 400, 400, 400, 400, 400, 400, 400, 400, 400, 400,
+    ]);
+    expect(s3Send).not.to.have.been.called;
+  });
+
+  it('rejects comments over 4000 characters', async () => {
+    const result = await handleBrandClaimsFeedback({
+      ...context,
+      data: { ...context.data, comment: 'x'.repeat(4001) },
+    }, site);
+
+    expect(result.status).to.equal(413);
+    expect(s3Send).not.to.have.been.called;
+  });
+
+  it('returns 404 when the brand does not belong to the site organization', async () => {
+    getBrandById.resolves(null);
+    const result = await handleBrandClaimsFeedback(context, site);
+
+    expect(result.status).to.equal(404);
+    expect(s3Send).not.to.have.been.called;
+  });
+
+  it('rejects a brand that is not linked to the report site', async () => {
+    getBrandById.resolves({
+      id: BRAND_ID,
+      name: 'Acme',
+      baseSiteId: '55555555-5555-4555-8555-555555555555',
+      siteIds: [],
+    });
+
+    const result = await handleBrandClaimsFeedback(context, site);
+
+    expect(result.status).to.equal(400);
+    expect((await result.json()).message).to.equal('Brand does not belong to this site');
+    expect(s3Send).not.to.have.been.called;
+  });
+
+  it('fails closed when the shared bucket or hash salt is not configured', async () => {
+    const result = await handleBrandClaimsFeedback({
+      ...context,
+      env: { ...context.env, ABV_ID_HASH_SALT: undefined },
+    }, site);
+
+    expect(result.status).to.equal(500);
+    expect(s3Send).not.to.have.been.called;
+  });
+
+  it('fails closed when the caller has no stable identity', async () => {
+    context.attributes.authInfo.getProfile = () => ({});
+
+    const result = await handleBrandClaimsFeedback(context, site);
+
+    expect(result.status).to.equal(500);
+    expect(s3Send).not.to.have.been.called;
+  });
+
+  it('treats a duplicate event id as an idempotent success', async () => {
+    const markerRecord = {
+      schemaVersion: 1,
+      recordType: 'product_feedback',
+      surface: 'brand_claims',
+      feedbackScope: 'report',
+      id: EVENT_ID,
+      timestamp: '2026-09-15T23:59:59.000Z',
+      rating: 'up',
+      abv_id: `abv_${createHmac('sha256', 'shared-secret')
+        .update('user-123@AdobeID')
+        .digest('hex')
+        .slice(0, 12)}`,
+      organizationId: ORG_ID,
+      customerName: 'Acme Corp',
+      imsOrgId: 'ABC@AdobeOrg',
+      siteId: SITE_ID,
+      brandId: BRAND_ID,
+      brand: 'Acme',
+      tier: 'paid',
+    };
+    s3Send.callsFake((command) => {
+      if (command.type === 'put' && command.input.Key.includes('/idempotency/')) {
+        const error = new Error('already exists');
+        error.name = 'PreconditionFailed';
+        return Promise.reject(error);
+      }
+      if (command.type === 'get') {
+        return Promise.resolve({
+          Body: {
+            transformToString: () => Promise.resolve(JSON.stringify(markerRecord)),
+          },
+        });
+      }
+      return Promise.resolve({});
+    });
+
+    const result = await handleBrandClaimsFeedback(context, site);
+
+    expect(result.status).to.equal(202);
+    expect((await result.json()).id).to.equal(EVENT_ID);
+    const recordCommand = s3Send.thirdCall.args[0];
+    expect(recordCommand.input.Key).to.equal(
+      `product_feedback/brand_claims/up/paid/2026-09-15/20260915235959000_${EVENT_ID}.json`,
+    );
+    expect(JSON.parse(recordCommand.input.Body)).to.deep.equal(markerRecord);
+  });
+
+  it('rejects an idempotency marker from a different feedback entry point', async () => {
+    const markerRecord = {
+      schemaVersion: 1,
+      recordType: 'product_feedback',
+      surface: 'brand_claims',
+      feedbackScope: 'claim_cluster',
+      entryPoint: 'claim_details',
+      id: EVENT_ID,
+      timestamp: '2026-09-15T23:59:59.000Z',
+      rating: 'down',
+      abv_id: `abv_${createHmac('sha256', 'shared-secret')
+        .update('user-123@AdobeID')
+        .digest('hex')
+        .slice(0, 12)}`,
+      organizationId: ORG_ID,
+      customerName: 'Acme Corp',
+      imsOrgId: 'ABC@AdobeOrg',
+      siteId: SITE_ID,
+      brandId: BRAND_ID,
+      brand: 'Acme',
+      tier: 'paid',
+      clusterId: 'cluster-123',
+      claimText: 'Lovesac products are modular.',
+    };
+    s3Send.callsFake((command) => {
+      if (command.type === 'put' && command.input.Key.includes('/idempotency/')) {
+        const error = new Error('already exists');
+        error.name = 'PreconditionFailed';
+        return Promise.reject(error);
+      }
+      if (command.type === 'get') {
+        return Promise.resolve({
+          Body: {
+            transformToString: () => Promise.resolve(JSON.stringify(markerRecord)),
+          },
+        });
+      }
+      return Promise.resolve({});
+    });
+
+    const result = await handleBrandClaimsFeedback({
+      ...context,
+      data: {
+        ...context.data,
+        feedbackScope: 'claim_cluster',
+        entryPoint: 'claim_inline',
+        clusterId: 'cluster-123',
+        claimText: 'Lovesac products are modular.',
+      },
+    }, site);
+
+    expect(result.status).to.equal(500);
+  });
+
+  it('rejects an idempotency marker owned by another tenant', async () => {
+    const markerRecord = {
+      schemaVersion: 1,
+      recordType: 'product_feedback',
+      surface: 'brand_claims',
+      id: EVENT_ID,
+      timestamp: '2026-09-15T23:59:59.000Z',
+      rating: 'up',
+      abv_id: 'abv_other',
+      organizationId: '99999999-9999-4999-8999-999999999999',
+      customerName: 'Other',
+      imsOrgId: null,
+      siteId: '88888888-8888-4888-8888-888888888888',
+      brandId: '77777777-7777-4777-8777-777777777777',
+      brand: 'Other',
+      tier: 'paid',
+    };
+    s3Send.callsFake((command) => {
+      if (command.type === 'put' && command.input.Key.includes('/idempotency/')) {
+        const error = new Error('already exists');
+        error.name = 'PreconditionFailed';
+        return Promise.reject(error);
+      }
+      if (command.type === 'get') {
+        return Promise.resolve({
+          Body: {
+            transformToString: () => Promise.resolve(JSON.stringify(markerRecord)),
+          },
+        });
+      }
+      return Promise.resolve({});
+    });
+
+    const result = await handleBrandClaimsFeedback(context, site);
+
+    expect(result.status).to.equal(500);
+    expect(s3Send).to.have.been.calledTwice;
+  });
+
+  it('returns a generic 500 when the S3 write fails', async () => {
+    s3Send.rejects(new Error('secret bucket detail'));
+
+    const result = await handleBrandClaimsFeedback(context, site);
+
+    expect(result.status).to.equal(500);
+    expect((await result.json()).message).to.equal('Unable to submit Brand Claims feedback');
+  });
+
+  it('does not write a false free tier when entitlement lookup fails', async () => {
+    context.dataAccess.Entitlement.findByOrganizationIdAndProductCode
+      .rejects(new Error('entitlement unavailable'));
+
+    const result = await handleBrandClaimsFeedback(context, site);
+
+    expect(result.status).to.equal(500);
+    expect(s3Send).not.to.have.been.called;
   });
 });

@@ -2200,6 +2200,64 @@ llmo-brand-claims-request:
     security:
       - api_key: [ ]
 
+llmo-brand-claims-feedback:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  post:
+    tags:
+      - llmo
+    summary: Submit Brand Claims product feedback
+    description: |
+      Stores an authenticated user's rating and optional comment for the currently
+      selected Brand Claims report or visible claim cluster in the shared ABV
+      learning-data store. Claim-cluster submissions include an immutable snapshot
+      of the representative claim text and optional model/source-file context.
+
+      Organization, site, brand, entitlement tier, and pseudonymous user context
+      are derived by the service. The client-supplied `eventId` is used as an
+      idempotency key, so retrying the same submission does not create a duplicate.
+      Existing clients may omit `feedbackScope`; the service treats it as `report`.
+      Existing clients may also omit `entryPoint`; the service infers
+      `report_overview` for report feedback and `claim_details` for claim feedback.
+    operationId: submitBrandClaimsFeedback
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/BrandClaimsFeedbackRequest'
+          examples:
+            report:
+              $ref: './examples.yaml#/BrandClaimsReportFeedbackRequest'
+            claim-cluster:
+              $ref: './examples.yaml#/BrandClaimsClaimFeedbackRequest'
+            claim-inline:
+              $ref: './examples.yaml#/BrandClaimsInlineFeedbackRequest'
+    responses:
+      '202':
+        description: Feedback accepted and stored
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/BrandClaimsFeedbackResponse'
+            examples:
+              accepted:
+                $ref: './examples.yaml#/BrandClaimsFeedbackResponse'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '413':
+        description: Feedback comment exceeds the supported length
+      '500':
+        $ref: './responses.yaml#/500'
+    security:
+      - session_token: [ ]
+
 llmo-opportunity-workspace-demo-brand-presence:
   parameters:
     - $ref: './parameters.yaml#/siteId'

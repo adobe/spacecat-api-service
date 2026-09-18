@@ -400,6 +400,26 @@ const FIXTURES = {
     handlerResult: { items: [{ id: 't1', name: 'Topic A' }] },
     query: { geoTargetId: '2840', languageCode: 'en' },
   },
+  searchSerenityTags: {
+    expectedStatus: 200,
+    controllerMethod: 'searchTags',
+    handlerName: 'handleSearchTags',
+    handlerResult: {
+      items: [{
+        id: 't1',
+        name: 'Campaign',
+        parentId: 'tag-root',
+        depth: 2,
+        path: ['Campaign'],
+        match: 'exact',
+      }],
+      cursor: null,
+      complete: true,
+    },
+    query: {
+      geoTargetId: '2840', languageCode: 'en', q: 'campaign', limit: '25',
+    },
+  },
   createSerenityTag: {
     expectedStatus: 201,
     controllerMethod: 'createTag',
@@ -915,6 +935,76 @@ const FIXTURES = {
       closestDate: '2026-07-26T00:00:00Z',
     }],
   },
+  // Served by ElementsController (listOwnedUrls). getOwnedUrls resolves a FLAT
+  // array of owned-URL rows (the controller paginates + traffic-joins them);
+  // no `siteId` in the query means the Postgres traffic join short-circuits
+  // to its 0/[] defaults, which the raw transform already sets on every row
+  // (see owned-urls.js), so the merge is a no-op here.
+  getSerenityUrlInspectorOwnedUrls: {
+    expectedStatus: 200,
+    usesElementsController: true,
+    controllerMethod: 'listOwnedUrls',
+    serviceMethod: 'getOwnedUrls',
+    query: { startDate: '2026-06-29', endDate: '2026-07-26' },
+    handlerResult: [{
+      urlId: '',
+      url: 'https://www.lovesac.com/sactionals',
+      citations: 42,
+      promptsCited: 11,
+      products: [],
+      regions: ['US'],
+      weeklyCitations: [{ week: '2026-W27', value: 6 }],
+      weeklyPromptsCited: [],
+      agenticHits: 0,
+      agenticHitsTrend: [],
+      referralHits: 0,
+      referralHitsTrend: [],
+    }],
+  },
+  // Served by ElementsController (listCitedDomains). getCitedDomains resolves
+  // the final { domains, totalCount } envelope directly; the controller
+  // passes it through via ok().
+  getSerenityUrlInspectorCitedDomains: {
+    expectedStatus: 200,
+    usesElementsController: true,
+    controllerMethod: 'listCitedDomains',
+    serviceMethod: 'getCitedDomains',
+    query: { startDate: '2026-06-29', endDate: '2026-07-26' },
+    handlerResult: {
+      domains: [{
+        domain: 'reddit.com',
+        totalCitations: 84,
+        totalUrls: 6,
+        promptsCited: 19,
+        contentType: 'Third Party',
+        categories: '',
+        regions: '',
+      }],
+      totalCount: 52,
+    },
+  },
+  // Served by ElementsController (listDomainUrls). getDomainUrls resolves the
+  // final { urls, totalCount } envelope directly; the controller passes it
+  // through via cachedOk().
+  getSerenityUrlInspectorDomainUrls: {
+    expectedStatus: 200,
+    usesElementsController: true,
+    controllerMethod: 'listDomainUrls',
+    serviceMethod: 'getDomainUrls',
+    query: { startDate: '2026-06-29', endDate: '2026-07-26' },
+    handlerResult: {
+      urls: [{
+        urlId: '',
+        url: 'https://www.reddit.com/r/BuyItForLife/comments/example/',
+        contentType: 'Third Party',
+        citations: 3,
+        promptsCited: 2,
+        categories: '',
+        regions: 'US,CA',
+      }],
+      totalCount: 8,
+    },
+  },
 };
 
 function makeAjv() {
@@ -998,8 +1088,11 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
             },
             // Both authorizers gate on the brand resolving serenity-active; ON so
             // the documented success shapes are exercised, not the inactive 404.
+            // The merged LLMO/serenity_tag_multi_dimension flag gates tag search
+            // AND deep tag authoring — ON for the documented shapes.
             '../../src/support/serenity/serenity-active.js': {
               isSerenityActiveForBrand: () => Promise.resolve(true),
+              isTagMultiDimensionActiveForBrand: () => Promise.resolve(true),
             },
             '../../src/support/access-control-util.js': {
               default: {
@@ -1084,6 +1177,7 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
         handleCreateMarket: sinon.stub(),
         handleDeleteMarket: sinon.stub(),
         handleListTags: sinon.stub(),
+        handleSearchTags: sinon.stub(),
         handleCreateTag: sinon.stub(),
         handleUpdateTag: sinon.stub(),
         handleDeleteTag: sinon.stub(),
@@ -1177,6 +1271,10 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
             handleTagImpact: handlerStubs.handleTagImpact,
             handleTagImpactSubworkspace: sinon.stub(),
           },
+          '../../src/support/serenity/handlers/tag-search.js': {
+            handleSearchTags: handlerStubs.handleSearchTags,
+            handleSearchTagsSubworkspace: sinon.stub(),
+          },
           '../../src/support/serenity/handlers/bulk-tags-job.js': {
             BULK_TAGS_JOB_TYPE: 'serenity-bulk-tags',
             BULK_TAGS_PUBLIC_JOB_TYPE: 'bulkTags',
@@ -1212,6 +1310,7 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
           // shapes are exercised rather than the inactive-brand 404.
           '../../src/support/serenity/serenity-active.js': {
             isSerenityActiveForBrand: () => Promise.resolve(true),
+            isTagMultiDimensionActiveForBrand: () => Promise.resolve(true),
           },
           // activate reads brand-level aliases/URLs/competitors once per batch, and
           // persists the active-flip + primary site (brands.site_id) via updateBrand;
@@ -1254,6 +1353,10 @@ describe('OpenAPI contract — /serenity/* endpoints', function specSuite() {
       // Ops that read an AsyncJob directly (no handler) get their job pinned here.
       if (fx.asyncJob) {
         ctx.dataAccess.AsyncJob = { findById: sinon.stub().resolves(fx.asyncJob) };
+      }
+      // Fixtures for endpoints that require a runtime secret/flag provision it here.
+      if (fx.env) {
+        ctx.env = { ...ctx.env, ...fx.env };
       }
       // Reauth drives the token-bearing 202 path: the STRICT identity check reads the
       // caller's stable user_id claim (must equal the job's metadata.imsUserId), and

@@ -10,7 +10,7 @@
  * governing permissions and limitations under the License.
  */
 import { expect } from 'chai';
-import { isValidDateInterval } from '../../src/utils/date-utils.js';
+import { isValidDateInterval, isYmdDate } from '../../src/utils/date-utils.js';
 
 describe('isValidDateInterval', () => {
   it('returns true for valid date interval within 2 years', () => {
@@ -50,5 +50,31 @@ describe('isValidDateInterval', () => {
 
   it('returns false when end date cannot be parsed into a valid Date object', () => {
     expect(isValidDateInterval('2023-01-01', '2024-13-01')).to.be.false;
+  });
+});
+
+describe('isYmdDate', () => {
+  it('returns true for a valid YYYY-MM-DD date', () => {
+    expect(isYmdDate('2026-08-15')).to.be.true;
+    expect(isYmdDate('2024-02-29')).to.be.true; // leap day
+  });
+
+  it('returns false for impossible dates', () => {
+    expect(isYmdDate('2026-13-45')).to.be.false;
+    expect(isYmdDate('2026-02-30')).to.be.false;
+    expect(isYmdDate('2025-02-29')).to.be.false; // non-leap year
+  });
+
+  it('returns false for non-YMD or full-datetime strings', () => {
+    expect(isYmdDate('2026-08-15T00:00:00.000Z')).to.be.false;
+    expect(isYmdDate('2026/08/15')).to.be.false;
+    expect(isYmdDate('08-15-2026')).to.be.false;
+    expect(isYmdDate('not-a-date')).to.be.false;
+  });
+
+  it('returns false for non-string input', () => {
+    expect(isYmdDate(null)).to.be.false;
+    expect(isYmdDate(undefined)).to.be.false;
+    expect(isYmdDate(20260815)).to.be.false;
   });
 });

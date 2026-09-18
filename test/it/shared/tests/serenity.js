@@ -12,7 +12,7 @@
 
 import { expect } from 'chai';
 import {
-  ORG_1_ID, BRAND_1_ID, SITE_1_ID, SITE_2_ID,
+  ORG_1_ID, ORG_3_ID, BRAND_1_ID, SITE_1_ID, SITE_2_ID,
 } from '../seed-ids.js';
 import { INTENT_ROOT_NAME } from '../../../../src/support/serenity/prompt-tags.js';
 import { SERENITY_CLASSIFY_JOB_ID } from '../../postgres/seed-data/async-jobs.js';
@@ -91,6 +91,13 @@ export default function serenityTests(
       );
       expect(res.status).to.equal(400);
     });
+
+    it('400s on non-UUID brandId for GET /serenity/tags/search', async () => {
+      const res = await getHttpClient().admin.get(
+        `/v2/orgs/${ORG_1_ID}/brands/not-a-uuid/serenity/tags/search?geoTargetId=2840&languageCode=en&q=tag`,
+      );
+      expect(res.status).to.equal(400);
+    });
   });
 
   describe('Serenity API — org-level catalog (live via Project Engine mock)', () => {
@@ -144,6 +151,24 @@ export default function serenityTests(
       );
       expect(res.status).to.equal(404);
       expect(res.body.message).to.match(/brand not found/i);
+    });
+
+    // A third brand-level route: GET /serenity/tags/search reaches its own
+    // controller method (searchTags), separate from listPrompts/listMarkets —
+    // the relaxed-auth path plus 404-on-unknown-brand generalizes to it too.
+    it('brand-level GET tags/search returns 404 for an unknown brand (not 401)', async () => {
+      const res = await getHttpClient().admin.get(
+        `/v2/orgs/${ORG_1_ID}/brands/${unknownBrand}/serenity/tags/search?geoTargetId=2840&languageCode=en&q=tag`,
+      );
+      expect(res.status).to.equal(404);
+      expect(res.body.message).to.match(/brand not found/i);
+    });
+
+    it('brand-level GET tags/search returns 403 without organization:read access', async () => {
+      const res = await getHttpClient().user.get(
+        `/v2/orgs/${ORG_3_ID}/brands/${BRAND_1_ID}/serenity/tags/search?geoTargetId=2840&languageCode=en&q=tag`,
+      );
+      expect(res.status).to.equal(403);
     });
   });
 
@@ -505,6 +530,123 @@ export default function serenityTests(
       expect(children.status).to.equal(200);
       expect(children.body.items.map((t) => t.id)).to.include(child.body.id);
       expect(children.body.items.find((t) => t.id === child.body.id).parentId).to.equal(parentId);
+    });
+
+    it('authors a depth-4+ plain tag and GET /serenity/tags/search finds it with full ancestry '
+      + '(real request lifecycle)', async () => {
+      await createUsMarket();
+      const createOpenTag = (name, parentId) => getHttpClient().admin.post(`${base}/tags`, {
+        type: 'tag',
+        name,
+        geoTargetId: US_GEO,
+        languageCode: 'en',
+        ...(parentId ? { parentId } : {}),
+      });
+
+      // tag-root(depth1, provisioned) -> Campaign(depth2) -> Spring(depth3)
+      //   -> Running Shoes Launch Needle(depth4): a depth-4+ leaf under the
+      // `tag` (not `category`) dimension — the only root search is scoped to.
+      const family = await createOpenTag('Campaign');
+      expect(family.status).to.equal(201);
+      const branch = await createOpenTag('Spring', family.body.id);
+      expect(branch.status).to.equal(201);
+      const leaf = await createOpenTag('Running Shoes Launch Needle', branch.body.id);
+      expect(leaf.status).to.equal(201);
+      expect(leaf.body.parentId).to.equal(branch.body.id);
+
+      // Full ancestry via the plain read path: drilling parentId=branch.id lists
+      // the leaf as branch's child, proving the depth-4 nesting landed for reads
+      // too, not only for search.
+      const branchChildren = await getHttpClient().admin.get(
+        `${base}/tags?geoTargetId=${US_GEO}&languageCode=en&parentId=${branch.body.id}`,
+      );
+      expect(branchChildren.status).to.equal(200);
+      expect(branchChildren.body.items.map((t) => t.id)).to.include(leaf.body.id);
+
+      // GET /serenity/tags/search: full request lifecycle (auth -> brand
+      // resolution -> transport -> mock -> cacheless complete-tree traversal ->
+      // in-process match/rank), asserting the ancestry the search result reports.
+      const search = await getHttpClient().admin.get(
+        `${base}/tags/search?geoTargetId=${US_GEO}&languageCode=en&q=needle`,
+      );
+      expect(search.status).to.equal(200);
+      expect(search.body.items).to.be.an('array').with.length(1);
+      const [match] = search.body.items;
+      expect(match.id).to.equal(leaf.body.id);
+      expect(match.parentId).to.equal(branch.body.id);
+      expect(match.depth).to.equal(4);
+      expect(match.path).to.deep.equal(['Campaign', 'Spring', 'Running Shoes Launch Needle']);
+    });
+
+    it('GET /serenity/tags/search pages a cursor round-trip through the real request lifecycle', async () => {
+      await createUsMarket();
+      const createOpenTag = (name, parentId) => getHttpClient().admin.post(`${base}/tags`, {
+        type: 'tag',
+        name,
+        geoTargetId: US_GEO,
+        languageCode: 'en',
+        ...(parentId ? { parentId } : {}),
+      });
+
+      // Three siblings all matching `q`, so limit=2 forces a second page.
+      const family = await createOpenTag('Paging Family');
+      expect(family.status).to.equal(201);
+      const created = [];
+      for (const name of ['Paging Alpha', 'Paging Beta', 'Paging Gamma']) {
+        // eslint-disable-next-line no-await-in-loop
+        const child = await createOpenTag(name, family.body.id);
+        expect(child.status).to.equal(201);
+        created.push(child.body.id);
+      }
+
+      const first = await getHttpClient().admin.get(
+        `${base}/tags/search?geoTargetId=${US_GEO}&languageCode=en&q=paging&limit=2`,
+      );
+      expect(first.status).to.equal(200);
+      expect(first.body.complete).to.equal(true);
+      expect(first.body.items).to.have.length(2);
+      expect(first.body.cursor).to.be.a('string');
+      expect(first.body.cursor).to.match(/^[A-Za-z0-9_-]+$/);
+      const cursorState = JSON.parse(
+        Buffer.from(first.body.cursor, 'base64url').toString('utf8'),
+      );
+      expect(cursorState).to.have.all.keys('v', 'q', 'offset', 'revision');
+      expect(cursorState).to.deep.include({ v: 1, q: 'paging', offset: 2 });
+      expect(cursorState).not.to.have.any.keys('project', 'workspace', 'tenant', 'brandId');
+
+      const second = await getHttpClient().admin.get(
+        `${base}/tags/search?geoTargetId=${US_GEO}&languageCode=en&q=paging&limit=2`
+        + `&cursor=${encodeURIComponent(first.body.cursor)}`,
+      );
+      expect(second.status).to.equal(200);
+      expect(second.body.complete).to.equal(true);
+      expect(second.body.cursor).to.equal(null);
+
+      // The two pages partition the match set: no repeats, nothing dropped, and
+      // every authored sibling is reachable by paging (the parent matches `q`
+      // too, hence >= the three children).
+      const paged = [...first.body.items, ...second.body.items].map((item) => item.id);
+      expect(new Set(paged).size).to.equal(paged.length);
+      for (const id of created) {
+        expect(paged).to.include(id);
+      }
+    });
+
+    it('GET /serenity/tags/search 400s a malformed cursor', async () => {
+      await createUsMarket();
+      const res = await getHttpClient().admin.get(
+        `${base}/tags/search?geoTargetId=${US_GEO}&languageCode=en&q=paging&cursor=not.acursor`,
+      );
+      expect(res.status).to.equal(400);
+      expect(res.body.error).to.equal('tagSearchCursorInvalid');
+    });
+
+    it('GET /serenity/tags/search 400s without a (geoTargetId, languageCode, q) query (error envelope)', async () => {
+      await createUsMarket();
+      const res = await getHttpClient().admin.get(`${base}/tags/search?geoTargetId=${US_GEO}&languageCode=en`);
+      expect(res.status).to.equal(400);
+      expect(res.body).to.include.keys('error', 'message');
+      expect(res.body.error).to.equal('invalidRequest');
     });
 
     // The parent is validated by ANCESTRY, so declaring the open dimension while
