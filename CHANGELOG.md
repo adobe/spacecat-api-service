@@ -1,3 +1,10 @@
+# [1.825.0](https://github.com/adobe/spacecat-api-service/compare/v1.824.4...v1.825.0) (2026-09-18)
+
+
+### Features
+
+* add claim-scoped Brand Claims feedback | LLMO-7665 ([#3315](https://github.com/adobe/spacecat-api-service/issues/3315)) ([86bd569](https://github.com/adobe/spacecat-api-service/commit/86bd569d441d161348fa9731965a883d2b65e294)), closes [adobe/project-elmo-ui#3193](https://github.com/adobe/project-elmo-ui/issues/3193)
+
 ## [1.824.4](https://github.com/adobe/spacecat-api-service/compare/v1.824.3...v1.824.4) (2026-09-18)
 
 
