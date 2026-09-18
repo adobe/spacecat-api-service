@@ -1018,6 +1018,377 @@ describe('Brands Controller', () => {
       expect(body).to.have.property('prompts');
     });
 
+    it('rejects generation-aware writes from an end-user principal', async () => {
+      const response = await brandsController.createPromptsByBrand({
+        ...context,
+        attributes: {
+          authInfo: {
+            getType: () => 'jwt',
+            isS2SConsumer: () => false,
+            isS2SAdmin: () => false,
+            profile: { email: 'user@test.com' },
+          },
+        },
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: {
+          prompts: [{ prompt: 'P', regions: ['us'] }],
+          generationId: '22222222-2222-4222-b222-222222222222',
+          source: 'gsc',
+          reconcile: true,
+        },
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(400);
+      expect((await response.json()).message).to.include('service principals only');
+    });
+
+    [
+      {
+        label: 'source is missing',
+        data: {
+          prompts: [{ prompt: 'P', regions: ['us'] }],
+          generationId: '22222222-2222-4222-b222-222222222222',
+          reconcile: true,
+        },
+        message: 'Prompt source required',
+      },
+      {
+        label: 'generation ID is missing',
+        data: {
+          prompts: [{ prompt: 'P', regions: ['us'] }],
+          source: 'gsc',
+          reconcile: true,
+        },
+        message: 'Generation ID must be a valid UUID',
+      },
+      {
+        label: 'reconciliation is not requested',
+        data: {
+          prompts: [{ prompt: 'P', regions: ['us'] }],
+          generationId: '22222222-2222-4222-b222-222222222222',
+          source: 'gsc',
+          reconcile: false,
+        },
+        message: 'must request reconciliation',
+      },
+    ].forEach(({ label, data, message }) => {
+      it(`rejects a service generation envelope when ${label}`, async () => {
+        const response = await brandsController.createPromptsByBrand({
+          ...context,
+          attributes: {
+            authInfo: {
+              getType: () => 'jwt',
+              isS2SConsumer: () => true,
+              isS2SAdmin: () => false,
+              profile: { email: 'drs@service' },
+            },
+          },
+          params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+          data,
+          dataAccess: mockDataAccess,
+        });
+
+        expect(response.status).to.equal(400);
+        expect((await response.json()).message).to.include(message);
+      });
+    });
+
+    it('rejects an unregistered generation source before organization lookup', async () => {
+      mockDataAccess.Organization.findById.rejects(new Error('must not query organization'));
+
+      const response = await brandsController.createPromptsByBrand({
+        ...context,
+        attributes: {
+          authInfo: {
+            getType: () => 'jwt',
+            isS2SConsumer: () => true,
+            isS2SAdmin: () => false,
+            profile: { email: 'drs@service' },
+          },
+        },
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: {
+          prompts: [{ prompt: 'P', regions: ['us'], origin: 'ai' }],
+          generationId: '22222222-2222-4222-b222-222222222222',
+          source: 'unregistered-source',
+          reconcile: true,
+        },
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(400);
+      expect((await response.json()).message).to.include('Unregistered prompt source');
+      expect(mockDataAccess.Organization.findById).to.not.have.been.called;
+    });
+
+    it('rejects lifecycle-only prompt statuses on create', async () => {
+      const response = await brandsController.createPromptsByBrand({
+        ...context,
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: [{ prompt: 'Hidden prompt', regions: ['us'], status: 'expired' }],
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(400);
+      expect((await response.json()).message).to.include('Prompt status must be active or pending');
+    });
+
+    it('accepts a service generation envelope and reports disabled reconciliation', async () => {
+      const thenable = (v) => ({ then: (resolve) => resolve(v), catch: () => thenable(v) });
+      const insertStub = sandbox.stub()
+        .returns({ select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }) });
+      mockDataAccess.services.postgrestClient.from = sandbox.stub().callsFake((table) => {
+        if (table === 'prompts') {
+          return {
+            select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+            insert: insertStub,
+            update: () => ({ eq: () => thenable({ error: null }) }),
+          };
+        }
+        const chain = {
+          select: sandbox.stub().returnsThis(),
+          eq: sandbox.stub().returnsThis(),
+          maybeSingle: sandbox.stub().resolves({ data: { id: BRAND_UUID }, error: null }),
+        };
+        if (table === 'llmo_customer_config') {
+          chain.maybeSingle = sandbox.stub()
+            .resolves({ data: { config: { customer: { brands: [] } } }, error: null });
+        }
+        return chain;
+      });
+      const generationId = '22222222-2222-4222-b222-222222222222';
+
+      const response = await brandsController.createPromptsByBrand({
+        ...context,
+        env: { ...mockEnv, PROMPT_GENERATION_RECONCILIATION_ENABLED: 'false' },
+        attributes: {
+          authInfo: {
+            getType: () => 'jwt',
+            isS2SConsumer: () => true,
+            isS2SAdmin: () => false,
+            profile: { email: 'drs@service' },
+          },
+        },
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: {
+          prompts: [{ prompt: 'P', regions: ['us'], origin: 'ai' }],
+          generationId,
+          source: 'gsc',
+          reconcile: true,
+        },
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(201);
+      const inserted = insertStub.firstCall.args[0];
+      expect(inserted[0]).to.include({
+        origin: 'ai',
+        source: 'gsc',
+        generation_id: generationId,
+      });
+      expect((await response.json()).reconciliation).to.deep.equal({
+        skipped: true,
+        reason: 'disabled',
+      });
+    });
+
+    it('returns 409 with reconciliation counts when the atomic fraction guard refuses', async () => {
+      const logSpy = sinon.stub(console, 'log');
+      const thenable = (v) => ({ then: (resolve) => resolve(v), catch: () => thenable(v) });
+      const insertStub = sandbox.stub()
+        .returns({ select: () => thenable({ data: [{ prompt_id: 'new-1' }], error: null }) });
+      const rpcStub = sandbox.stub().resolves({
+        data: [{
+          refused: true,
+          candidate_count: 10,
+          expired_count: 0,
+          active_after: 10,
+          expire_fraction: 1,
+        }],
+        error: null,
+      });
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake((table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({ eq: () => ({ eq: () => thenable({ data: [], error: null }) }) }),
+              insert: insertStub,
+              update: () => ({ eq: () => thenable({ error: null }) }),
+            };
+          }
+          const chain = {
+            select: sandbox.stub().returnsThis(),
+            eq: sandbox.stub().returnsThis(),
+            maybeSingle: sandbox.stub().resolves({ data: { id: BRAND_UUID }, error: null }),
+          };
+          if (table === 'llmo_customer_config') {
+            chain.maybeSingle = sandbox.stub()
+              .resolves({ data: { config: { customer: { brands: [] } } }, error: null });
+          }
+          return chain;
+        }),
+        rpc: rpcStub,
+      };
+      const generationId = '22222222-2222-4222-b222-222222222222';
+
+      try {
+        const response = await brandsController.createPromptsByBrand({
+          ...context,
+          env: { ...mockEnv, PROMPT_GENERATION_RECONCILIATION_ENABLED: 'true' },
+          attributes: {
+            authInfo: {
+              getType: () => 'jwt',
+              isS2SConsumer: () => true,
+              isS2SAdmin: () => false,
+              profile: { email: 'drs@service' },
+            },
+          },
+          params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+          data: {
+            prompts: [{ prompt: 'P', regions: ['us'], origin: 'ai' }],
+            generationId,
+            source: 'gsc',
+            reconcile: true,
+          },
+          dataAccess: mockDataAccess,
+        });
+
+        expect(response.status).to.equal(409);
+        expect((await response.json()).reconciliation).to.deep.equal({
+          refused: true,
+          candidateCount: 10,
+          expiredCount: 0,
+          activeAfter: 10,
+          expireFraction: 1,
+        });
+        expect(loggerStub.warn).to.have.been.calledWith(
+          'Prompt generation reconciliation refused by fraction guard',
+        );
+        expect(loggerStub.info).to.not.have.been.calledWith(
+          'Prompt generation reconciliation completed',
+        );
+        const emfLine = logSpy.getCalls()
+          .map((call) => call.args[0])
+          .find((line) => typeof line === 'string'
+            && line.includes('PromptGenerationReconciliationRefused'));
+        expect(emfLine, 'expected a reconciliation refusal EMF line').to.be.a('string');
+        expect(JSON.parse(emfLine).PromptGenerationReconciliationRefused).to.equal(1);
+      } finally {
+        logSpy.restore();
+      }
+    });
+
+    it('reports successful enabled reconciliation and warns on an invalid fraction override', async () => {
+      const logSpy = sandbox.stub(console, 'log');
+      const thenable = (v) => ({ then: (resolve) => resolve(v), catch: () => thenable(v) });
+      const updateStub = sandbox.stub().returns({ eq: () => thenable({ error: null }) });
+      const existing = [{
+        id: 'row-1',
+        prompt_id: 'existing-1',
+        text: 'Existing prompt',
+        regions: ['us'],
+        status: 'active',
+        source: 'gsc',
+        origin: 'ai',
+        generation_id: '11111111-1111-4111-b111-111111111111',
+      }];
+      const rpcStub = sandbox.stub().resolves({
+        data: [{
+          refused: false,
+          candidate_count: 1,
+          expired_count: 1,
+          active_after: 4,
+          expire_fraction: 0.2,
+        }],
+        error: null,
+      });
+      mockDataAccess.services.postgrestClient = {
+        from: sandbox.stub().callsFake((table) => {
+          if (table === 'prompts') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    ...thenable({ data: existing, error: null }),
+                    in: () => thenable({ data: existing, error: null }),
+                  }),
+                }),
+              }),
+              insert: () => ({ select: () => thenable({ data: [], error: null }) }),
+              update: updateStub,
+            };
+          }
+          const chain = {
+            select: sandbox.stub().returnsThis(),
+            eq: sandbox.stub().returnsThis(),
+            maybeSingle: sandbox.stub().resolves({ data: { id: BRAND_UUID }, error: null }),
+          };
+          if (table === 'llmo_customer_config') {
+            chain.maybeSingle = sandbox.stub()
+              .resolves({ data: { config: { customer: { brands: [] } } }, error: null });
+          }
+          return chain;
+        }),
+        rpc: rpcStub,
+      };
+      const generationId = '22222222-2222-4222-b222-222222222222';
+
+      const response = await brandsController.createPromptsByBrand({
+        ...context,
+        env: {
+          ...mockEnv,
+          PROMPT_GENERATION_RECONCILIATION_ENABLED: 'true',
+          PROMPT_GENERATION_MAX_EXPIRE_FRACTION: 'invalid',
+        },
+        attributes: {
+          authInfo: {
+            getType: () => 'jwt',
+            isS2SConsumer: () => true,
+            isS2SAdmin: () => false,
+            profile: { email: 'drs@service' },
+          },
+        },
+        params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
+        data: {
+          prompts: [{
+            id: 'existing-1',
+            prompt: 'Existing prompt',
+            regions: ['us'],
+            origin: 'ai',
+          }],
+          generationId,
+          source: 'gsc',
+          reconcile: true,
+        },
+        dataAccess: mockDataAccess,
+      });
+
+      expect(response.status).to.equal(201);
+      expect((await response.json()).reconciliation).to.deep.equal({
+        refused: false,
+        candidateCount: 1,
+        expiredCount: 1,
+        activeAfter: 4,
+        expireFraction: 0.2,
+      });
+      expect(updateStub.firstCall.args[0]).to.include({ generation_id: generationId });
+      expect(rpcStub.firstCall.args[1].p_max_expire_fraction).to.equal(0.9);
+      expect(loggerStub.warn).to.have.been.calledWith(
+        'Invalid prompt generation max expire fraction; using default',
+      );
+      expect(loggerStub.info).to.have.been.calledWith(
+        'Prompt generation reconciliation completed',
+      );
+      const emfLine = logSpy.getCalls()
+        .map((call) => call.args[0])
+        .find((line) => typeof line === 'string' && line.includes('ExpiredPromptCount'));
+      expect(emfLine, 'expected a successful reconciliation EMF line').to.be.a('string');
+      const envelope = JSON.parse(emfLine);
+      expect(envelope.ExpiredPromptCount).to.equal(1);
+      expect(envelope.Outcome).to.equal('completed');
+    });
+
     it('createPromptsByBrand honours an S2S consumer\'s origin: ai (DRS contract, origin-dimension.md §3)', async () => {
       // An S2S consumer (e.g. DRS) authenticates with a JWT — authType is `jwt`,
       // identical to an end-user session — but is a SERVICE principal, identified
@@ -1313,12 +1684,17 @@ describe('Brands Controller', () => {
       const response = await brandsController.createPromptsByBrand({
         ...serviceContext,
         params: { spaceCatId: ORGANIZATION_ID, brandId: BRAND_UUID },
-        data: [{ prompt: 'P', regions: ['us'], origin: 'ai' }],
+        data: [{
+          prompt: 'P', regions: ['us'], origin: 'ai', source: 'gsc',
+        }],
         dataAccess: mockDataAccess,
       });
 
       expect(response.status).to.equal(201);
-      expect(insertStub.firstCall.args[0][0].origin).to.equal('ai');
+      expect(insertStub.firstCall.args[0][0]).to.include({
+        origin: 'ai',
+        source: 'config',
+      });
     });
 
     // FIX (MysticatBot nit): direct controller coverage of the fail-safe branch

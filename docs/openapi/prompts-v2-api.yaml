@@ -53,8 +53,8 @@ v2-prompts-by-brand:
       required: false
       schema:
         type: string
-        enum: [active, pending, deleted]
-      description: Filter by status; default excludes deleted
+        enum: [active, pending, deleted, expired]
+      description: Filter by status; default excludes deleted and, when reconciliation is enabled, expired
     - name: search
       in: query
       required: false
@@ -88,8 +88,7 @@ v2-prompts-by-brand:
         `base-url`, `config`. Matched on the canonical form, so `citation-attempt`
         also finds rows stored as `citation_attempt` (drift spellings fold
         together, case-insensitive). Free-form string — sources are open-ended and
-        added by upstream producers (e.g. DRS) without API changes, so no enum is
-        enforced.
+        registered by the server.
     - name: sort
       in: query
       required: false
@@ -140,9 +139,17 @@ v2-prompts-by-brand:
     summary: Create or upsert prompts (bulk)
     description: |
       Upserts prompts. Match by id or by (text, regions). If match found, update; else insert.
-      If a matched prompt has status `deleted`, it is reactivated to `active` and counted as
-      updated. Prompts with status `pending` or other non-active statuses are left unchanged
-      (counted as skipped, not returned in the response).
+      The legacy request body is a prompt array. Service principals may instead send a
+      generation envelope with `prompts`, `generationId`, `source`, and `reconcile: true`.
+      After every prompt in the generation is written successfully, the server expires stale
+      active/pending AI prompts for the same organization, brand, and canonical source. If the
+      write fails, reconciliation does not run. If the configured fraction guard refuses the
+      expiry, the prompt writes remain committed and the endpoint returns 409 with reconciliation
+      counts so the service retry/alert path can stop the batch safely.
+
+      If a matched prompt has status `deleted` or `expired`, it is reactivated to `active` and
+      counted as updated. Prompts with status `ignored` remain unchanged. A generation-aware
+      write touches a matched `pending` prompt's generation marker without changing its status.
     operationId: createPromptsByBrand
     security:
       - session_token: [ ]
@@ -152,11 +159,32 @@ v2-prompts-by-brand:
       content:
         application/json:
           schema:
-            type: array
-            minItems: 1
-            maxItems: 3000
-            items:
-              $ref: './schemas.yaml#/V2PromptInput'
+            oneOf:
+              - type: array
+                minItems: 1
+                maxItems: 3000
+                items:
+                  $ref: './schemas.yaml#/V2PromptInput'
+              - type: object
+                required: [prompts, generationId, source, reconcile]
+                properties:
+                  prompts:
+                    type: array
+                    minItems: 1
+                    maxItems: 3000
+                    items:
+                      $ref: './schemas.yaml#/V2PromptInput'
+                  generationId:
+                    type: string
+                    format: uuid
+                    description: Service-generated identifier shared by every current prompt in this run.
+                  source:
+                    type: string
+                    description: Registered generating pipeline source.
+                  reconcile:
+                    type: boolean
+                    enum: [true]
+                    description: Request stale-prompt reconciliation after the full write succeeds.
     responses:
       '201':
         description: Prompts created/updated
@@ -206,10 +234,81 @@ v2-prompts-by-brand:
                         type:
                           - string
                           - 'null'
+                reconciliation:
+                  type: object
+                  description: Present for generation-envelope requests.
+                  properties:
+                    refused:
+                      type: boolean
+                    candidateCount:
+                      type: integer
+                    expiredCount:
+                      type: integer
+                    activeAfter:
+                      type: integer
+                    expireFraction:
+                      type: number
+                    skipped:
+                      type: boolean
+                    reason:
+                      type: string
       '400':
         $ref: './responses.yaml#/400'
       '404':
         description: Organization or brand not found
+      '409':
+        description: >-
+          Prompt writes completed, but stale-prompt reconciliation was refused
+          by the configured expiry-fraction guard.
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [created, updated, prompts, reconciliation]
+              properties:
+                created:
+                  type: integer
+                updated:
+                  type: integer
+                prompts:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                      prompt:
+                        type: string
+                      regions:
+                        type: array
+                        items:
+                          type: string
+                      status:
+                        type: string
+                      origin:
+                        type: string
+                      source:
+                        type: string
+                reconciliation:
+                  type: object
+                  required:
+                    - refused
+                    - candidateCount
+                    - expiredCount
+                    - activeAfter
+                    - expireFraction
+                  properties:
+                    refused:
+                      type: boolean
+                      enum: [true]
+                    candidateCount:
+                      type: integer
+                    expiredCount:
+                      type: integer
+                    activeAfter:
+                      type: integer
+                    expireFraction:
+                      type: number
       '503':
         description: PostgREST unavailable
       '500':

@@ -31,6 +31,7 @@ export { INTENT_VALUES, normalizeIntent };
  */
 export const V2_PROMPT_ORIGINS = Object.freeze(['ai', 'human']);
 const DEFAULT_ORIGIN = 'human';
+const V2_PROMPT_WRITABLE_STATUSES = new Set(['active', 'pending']);
 
 /**
  * Derives the `origin` to store for a v2-prompts write, as a function of the
@@ -118,24 +119,18 @@ export function isServicePrincipal(authInfo) {
  * version >= v5.27.0 that includes the `intent` column. Tracked in SITES-39521.
  */
 const intentColumnSupported = new WeakMap();
+const generationIdColumnSupported = new WeakMap();
 
 /**
- * Detects a PostgREST/Postgres error that indicates the `intent` column is
- * absent. Covers the insert/upsert error (`PGRST204`, "Could not find the
- * 'intent' column of 'prompts' in the schema cache") and the select error
- * (`42703`, "column prompts.intent does not exist").
+ * Detects a PostgREST/Postgres error that indicates an optional prompts column
+ * is absent. Covers the insert/upsert error (`PGRST204`, schema cache miss) and
+ * the select error (`42703`, column does not exist).
  *
- * Gated on the two specific error codes first, THEN on the column being
- * `intent`. This deliberately avoids broad message matching: an error that
- * merely mentions "intent" and "column" (e.g. a future check-constraint
- * violation "column intent violates check constraint") must NOT be treated as
- * a missing column, or the fallback would latch off and silently drop the
- * intent the caller sent — the exact data-loss bug this code exists to fix.
- *
- * @param {*} error - Error object from a PostgREST response (`{ message, details, hint, code }`)
- * @returns {boolean} true when the error is specifically about a missing `intent` column
+ * @param {*} error - Error object from a PostgREST response
+ * @param {string} column - Exact optional column name
+ * @returns {boolean} true when the error is specifically about the missing column
  */
-export function isMissingIntentColumnError(error) {
+function isMissingPromptColumnError(error, column) {
   if (!error) {
     return false;
   }
@@ -147,7 +142,27 @@ export function isMissingIntentColumnError(error) {
     .filter((v) => v != null)
     .join(' ')
     .toLowerCase();
-  return haystack.includes('intent');
+  return haystack.includes(column.toLowerCase());
+}
+
+/**
+ * Detects a missing `prompts.intent` column without swallowing other errors.
+ *
+ * @param {*} error - Error object from a PostgREST response (`{ message, details, hint, code }`)
+ * @returns {boolean} true when the error is specifically about a missing `intent` column
+ */
+export function isMissingIntentColumnError(error) {
+  return isMissingPromptColumnError(error, 'intent');
+}
+
+/**
+ * Detects a missing `prompts.generation_id` column without swallowing other errors.
+ *
+ * @param {*} error - Error object from a PostgREST response
+ * @returns {boolean} true when the error is specifically about a missing generation column
+ */
+export function isMissingGenerationIdColumnError(error) {
+  return isMissingPromptColumnError(error, 'generation_id');
 }
 
 /**
@@ -170,14 +185,32 @@ function stripIntent(row) {
  * @param {(includeIntent: boolean) => Promise<object>} run - builds+executes the op
  * @returns {Promise<object>} the PostgREST result
  */
-async function withMissingIntentFallback(postgrestClient, run) {
-  const includeIntent = intentColumnSupported.get(postgrestClient) !== false;
-  const result = await run(includeIntent);
-  if (includeIntent && result?.error && isMissingIntentColumnError(result.error)) {
-    intentColumnSupported.set(postgrestClient, false);
+async function withMissingColumnFallback(postgrestClient, supportCache, isMissing, run) {
+  const includeColumn = supportCache.get(postgrestClient) !== false;
+  const result = await run(includeColumn);
+  if (includeColumn && result?.error && isMissing(result.error)) {
+    supportCache.set(postgrestClient, false);
     return run(false);
   }
   return result;
+}
+
+async function withMissingIntentFallback(postgrestClient, run) {
+  return withMissingColumnFallback(
+    postgrestClient,
+    intentColumnSupported,
+    isMissingIntentColumnError,
+    run,
+  );
+}
+
+async function withMissingGenerationIdFallback(postgrestClient, run) {
+  return withMissingColumnFallback(
+    postgrestClient,
+    generationIdColumnSupported,
+    isMissingGenerationIdColumnError,
+    run,
+  );
 }
 
 // Bound the number of ids per `id=in.(...)` PostgREST GET so the query string
@@ -217,6 +250,7 @@ function chunkArray(arr, size) {
  * @param {Array<string>} params.promptIds - prompts.id (uuid) values; nullish/dupes are ignored
  * @param {string} [params.organizationId] - scopes the lookup to this org (defense-in-depth)
  * @param {object} params.postgrestClient - PostgREST client
+ * @param {boolean} [params.excludeExpired=false] - Exclude expired prompts with deleted
  * @param {object} [params.log] - logger; `debug` for benign missing-column, `warn` otherwise
  * @returns {Promise<Map<string, string>>} Map of promptId -> intent (only non-empty intents)
  */
@@ -510,6 +544,7 @@ function mapRowToPrompt(row) {
     // null: the grid must still show the operator what is stored. `?? 'config'` only
     // guards a nullish column (in-memory/test rows); the DB column is NOT NULL.
     source: canonicalizeSource(row.source) ?? row.source ?? 'config',
+    generationId: row.generation_id ?? null,
     intent: row.intent ?? null,
     createdAt: row.created_at,
     createdBy: row.created_by,
@@ -543,6 +578,80 @@ function mapRowToPrompt(row) {
 }
 
 /**
+ * Expires stale AI prompts after a generation has been written successfully.
+ *
+ * @param {object} params
+ * @param {string} params.organizationId - SpaceCat organization UUID
+ * @param {string} params.brandUuid - brands.id UUID
+ * @param {string} params.source - Registered prompt source
+ * @param {string} params.generationId - Current generation UUID
+ * @param {object} params.postgrestClient - PostgREST client
+ * @param {string} params.updatedBy - Service identity performing reconciliation
+ * @param {number} [params.maxExpireFraction=0.9] - Maximum stale/live fraction
+ * @returns {Promise<{
+ *   refused:boolean,
+ *   candidateCount:number,
+ *   expiredCount:number,
+ *   activeAfter:number,
+ *   expireFraction:number
+ * }>}
+ */
+export async function reconcilePromptGeneration({
+  organizationId,
+  brandUuid,
+  source,
+  generationId,
+  postgrestClient,
+  updatedBy = 'system',
+  maxExpireFraction = 0.9,
+}) {
+  if (!postgrestClient?.rpc) {
+    throw new Error('PostgREST client is required for prompt reconciliation');
+  }
+  if (!hasText(source)) {
+    const error = new Error('Prompt source required for reconciliation');
+    error.status = 400;
+    throw error;
+  }
+  assertPermittedSource(source);
+  if (!isValidUUID(generationId)) {
+    const error = new Error('Generation ID must be a valid UUID');
+    error.status = 400;
+    throw error;
+  }
+  if (!Number.isFinite(maxExpireFraction)
+    || maxExpireFraction <= 0
+    || maxExpireFraction > 1) {
+    throw new Error('Maximum expire fraction must be greater than 0 and at most 1');
+  }
+
+  const { data, error } = await postgrestClient.rpc('wrpc_reconcile_prompt_generation', {
+    p_organization_id: organizationId,
+    p_brand_id: brandUuid,
+    p_source_canonical: foldSourceValue(source),
+    p_generation_id: generationId,
+    p_max_expire_fraction: maxExpireFraction,
+    p_updated_by: updatedBy,
+  });
+  if (error) {
+    throw new Error(`Failed to reconcile prompt generation: ${error.message}`);
+  }
+
+  const result = Array.isArray(data) ? data[0] : data;
+  if (!result) {
+    throw new Error('Prompt reconciliation returned no result');
+  }
+
+  return {
+    refused: result.refused === true,
+    candidateCount: Number(result.candidate_count) || 0,
+    expiredCount: Number(result.expired_count) || 0,
+    activeAfter: Number(result.active_after) || 0,
+    expireFraction: Number(result.expire_fraction) || 0,
+  };
+}
+
+/**
  * Lists prompts for an organization with optional filters and sorting.
  * Joins brands, categories, topics for enrichment.
  *
@@ -551,7 +660,7 @@ function mapRowToPrompt(row) {
  * @param {string} [params.brandId] - Filter by brand (uuid or config id)
  * @param {string} [params.categoryId] - Filter by category UUID (categories.id)
  * @param {string} [params.topicId] - Filter by topic business key or UUID
- * @param {string} [params.status] - Filter by status (active, pending, deleted)
+ * @param {string} [params.status] - Filter by status (active, pending, deleted, expired)
  * @param {string} [params.search] - Free-text search across prompt text, name,
  * topic name, category name
  * @param {string} [params.region] - Filter by region (array containment)
@@ -565,6 +674,7 @@ function mapRowToPrompt(row) {
  * @param {number} [params.limit] - Page size (default 100, max 5000)
  * @param {number} [params.page] - Page number, 1-based (default 1)
  * @param {object} params.postgrestClient - PostgREST client
+ * @param {boolean} [params.excludeExpired=false] - Exclude expired prompts by default
  * @returns {Promise<{items:object[],total:number,limit:number,page:number}>}
  */
 export async function listPrompts({
@@ -582,6 +692,7 @@ export async function listPrompts({
   limit = 100,
   page = 1,
   postgrestClient,
+  excludeExpired = false,
 }) {
   if (!postgrestClient?.from) {
     return [];
@@ -628,7 +739,7 @@ export async function listPrompts({
     }
   }
 
-  const buildSelect = (includeIntent) => `
+  const buildSelect = (includeIntent, includeGenerationId) => `
     id,
     prompt_id,
     name,
@@ -637,6 +748,7 @@ export async function listPrompts({
     status,
     origin,
     source,${includeIntent ? '\n    intent,' : ''}
+    ${includeGenerationId ? 'generation_id,' : ''}
     category_id,
     topic_id,
     brand_id,
@@ -652,10 +764,10 @@ export async function listPrompts({
   // Best-effort against environments where `prompts.intent` is absent (see
   // intentColumnSupported): try with intent, and on a missing-column error
   // remember it for this client and re-run the select without intent.
-  const run = (includeIntent) => {
+  const run = (includeIntent, includeGenerationId) => {
     let baseQuery = postgrestClient
       .from('prompts')
-      .select(buildSelect(includeIntent), { count: 'exact' })
+      .select(buildSelect(includeIntent, includeGenerationId), { count: 'exact' })
       .eq('organization_id', organizationId);
 
     // Sorting
@@ -680,6 +792,8 @@ export async function listPrompts({
     }
     if (hasText(status)) {
       baseQuery = baseQuery.eq('status', status);
+    } else if (excludeExpired) {
+      baseQuery = baseQuery.not('status', 'in', '("deleted","expired")');
     } else {
       baseQuery = baseQuery.neq('status', 'deleted');
     }
@@ -720,7 +834,13 @@ export async function listPrompts({
     return baseQuery.range(offset, offset + limitNum - 1);
   };
 
-  const { data: rows, error, count } = await withMissingIntentFallback(postgrestClient, run);
+  const { data: rows, error, count } = await withMissingGenerationIdFallback(
+    postgrestClient,
+    (includeGenerationId) => withMissingIntentFallback(
+      postgrestClient,
+      (includeIntent) => run(includeIntent, includeGenerationId),
+    ),
+  );
 
   if (error) {
     throw new Error(`Failed to list prompts: ${error.message}`);
@@ -760,9 +880,8 @@ export async function getPromptById({
     return null;
   }
 
-  // Best-effort against environments where `prompts.intent` is absent: try with
-  // intent, and on a missing-column error remember it and re-run without intent.
-  const run = (includeIntent) => postgrestClient
+  // Best-effort against environments where optional prompt columns are absent.
+  const run = (includeIntent, includeGenerationId) => postgrestClient
     .from('prompts')
     .select(`
       id,
@@ -773,6 +892,7 @@ export async function getPromptById({
       status,
       origin,
       source,${includeIntent ? '\n      intent,' : ''}
+      ${includeGenerationId ? 'generation_id,' : ''}
       category_id,
       topic_id,
       brand_id,
@@ -789,7 +909,13 @@ export async function getPromptById({
     .eq('prompt_id', promptId)
     .maybeSingle();
 
-  const { data, error } = await withMissingIntentFallback(postgrestClient, run);
+  const { data, error } = await withMissingGenerationIdFallback(
+    postgrestClient,
+    (includeGenerationId) => withMissingIntentFallback(
+      postgrestClient,
+      (includeIntent) => run(includeIntent, includeGenerationId),
+    ),
+  );
 
   if (error) {
     throw new Error(`Failed to get prompt: ${error.message}`);
@@ -828,6 +954,7 @@ function buildPromptKey({ text, regions, source }) {
  * categoryId, topicId, ... }
  * @param {object} params.postgrestClient - PostgREST client
  * @param {string} params.updatedBy - User performing the update
+ * @param {string} [params.generationId] - Current generation UUID for AI prompt runs
  * @param {((text: string) => Promise<string|null>)} [params.classifyIntent] -
  *   Optional best-effort intent classifier; applied only to prompts that change
  *   text without an explicit intent. Non-fatal: a null result leaves intent unset.
@@ -841,6 +968,7 @@ export async function upsertPrompts({
   prompts,
   postgrestClient,
   updatedBy = 'system',
+  generationId,
   classifyIntent,
   classifyIntentBatchTimeoutMs = 8000,
 }) {
@@ -855,6 +983,11 @@ export async function upsertPrompts({
   // rejected. Fail the whole batch first, cleanly.
   for (const p of prompts) {
     assertPermittedSource(p.source || 'config');
+    if (p.status !== undefined && !V2_PROMPT_WRITABLE_STATUSES.has(p.status)) {
+      const error = new Error('Prompt status must be active or pending');
+      error.status = 400;
+      throw error;
+    }
   }
 
   const incomingIds = prompts
@@ -863,9 +996,10 @@ export async function upsertPrompts({
 
   const [{ data: existing }, lookups] = await Promise.all([
     withMissingIntentFallback(postgrestClient, (includeIntent) => {
+      const generationColumn = generationId ? ',generation_id' : '';
       const cols = includeIntent
-        ? 'id,prompt_id,text,regions,status,source,intent'
-        : 'id,prompt_id,text,regions,status,source';
+        ? `id,prompt_id,text,regions,status,source,origin${generationColumn},intent`
+        : `id,prompt_id,text,regions,status,source,origin${generationColumn}`;
       const baseQuery = () => postgrestClient
         .from('prompts')
         .select(cols)
@@ -954,6 +1088,7 @@ export async function upsertPrompts({
       status: p.status || 'active',
       origin: p.origin || 'human',
       source,
+      ...(generationId ? { generation_id: generationId } : {}),
       intent: normalizeIntent(p.intent),
       updated_by: updatedBy,
     };
@@ -970,7 +1105,7 @@ export async function upsertPrompts({
     // just keeps an in-memory/test row without a source from becoming `undefined`;
     // it is NOT a backfill path.
     if (match && match.status !== 'active') {
-      if (match.status === 'deleted') {
+      if (match.status === 'deleted' || match.status === 'expired') {
         const reactivated = {
           ...row,
           id: match.id,
@@ -986,6 +1121,18 @@ export async function upsertPrompts({
         };
         toUpdate.push(reactivated);
         processed.push({ ...reactivated, prompt_id: promptId });
+      } else if (match.status === 'pending' && generationId) {
+        const touched = {
+          id: match.id,
+          generation_id: generationId,
+          updated_by: updatedBy,
+        };
+        toUpdate.push(touched);
+        processed.push({
+          ...match,
+          generation_id: generationId,
+          updated_by: updatedBy,
+        });
       }
       // eslint-disable-next-line no-continue
       continue;
@@ -1141,6 +1288,7 @@ export async function upsertPrompts({
     status: r.status,
     origin: r.origin,
     source: r.source,
+    generationId: r.generation_id ?? null,
     intent: r.intent,
     createdAt: r.created_at,
     createdBy: r.created_by,
@@ -1286,6 +1434,7 @@ function normalizeRegionsForCompare(regions) {
  * @param {string[]} params.newRegions - brand regions AFTER the update
  * @param {object} params.postgrestClient - PostgREST client
  * @param {object} [params.log] - Logger
+ * @param {boolean} [params.excludeExpired=false] - Exclude expired prompts with deleted
  * @returns {Promise<Record<string, number>>} map of removed region (lowercase)
  *   → count of prompts still using it; empty when nothing blocks the change
  */
@@ -1296,6 +1445,7 @@ export async function findPromptsBlockingRegionRemoval({
   newRegions,
   postgrestClient,
   log = console,
+  excludeExpired = false,
 }) {
   if (!postgrestClient?.from) {
     throw new Error('PostgREST client is required');
@@ -1311,13 +1461,15 @@ export async function findPromptsBlockingRegionRemoval({
   // hundred prompts in practice; cap the read and warn (never silently truncate)
   // if a brand somehow exceeds it so the operator knows the check was partial.
   const READ_CAP = 5000;
-  const { data, error } = await postgrestClient
+  let query = postgrestClient
     .from('prompts')
     .select('id, regions')
     .eq('organization_id', organizationId)
-    .eq('brand_id', brandUuid)
-    .neq('status', 'deleted')
-    .limit(READ_CAP);
+    .eq('brand_id', brandUuid);
+  query = excludeExpired
+    ? query.not('status', 'in', '("deleted","expired")')
+    : query.neq('status', 'deleted');
+  const { data, error } = await query.limit(READ_CAP);
 
   if (error) {
     throw new Error(`Failed to read prompts for region consistency check: ${error.message}`);
