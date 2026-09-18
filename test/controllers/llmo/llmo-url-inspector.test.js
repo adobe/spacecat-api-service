@@ -1293,6 +1293,66 @@ describe('URL Inspector Handlers', () => {
       expect(rpcCall.args[1]).to.not.have.property('p_brand_id');
       expect(rpcCall.args[1].p_channel).to.equal('earned');
     });
+
+    it('forwards promptIds (array) as p_prompt_ids, filtering out invalid UUIDs', async () => {
+      const promptId1 = '11111111-1111-1111-1111-111111111111';
+      const promptId2 = '22222222-2222-2222-2222-222222222222';
+      const { context, rpcStub } = createContext(
+        {},
+        { promptIds: [promptId1, promptId2, 'not-a-uuid'] },
+        { rpcResults: { rpc_url_inspector_cited_domains: { data: [], error: null } } },
+      );
+
+      const handler = createUrlInspectorCitedDomainsHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+
+      expect(response.status).to.equal(200);
+      expect(rpcStub.firstCall.args[1].p_prompt_ids).to.deep.equal([promptId1, promptId2]);
+    });
+
+    it('accepts promptIds as a CSV string', async () => {
+      const promptId1 = '11111111-1111-1111-1111-111111111111';
+      const promptId2 = '22222222-2222-2222-2222-222222222222';
+      const { context, rpcStub } = createContext(
+        {},
+        { promptIds: `${promptId1}, ${promptId2}` },
+        { rpcResults: { rpc_url_inspector_cited_domains: { data: [], error: null } } },
+      );
+
+      const handler = createUrlInspectorCitedDomainsHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+
+      expect(response.status).to.equal(200);
+      expect(rpcStub.firstCall.args[1].p_prompt_ids).to.deep.equal([promptId1, promptId2]);
+    });
+
+    it('omits p_prompt_ids entirely when promptIds is omitted (unchanged default behavior)', async () => {
+      const { context, rpcStub } = createContext(
+        {},
+        {},
+        { rpcResults: { rpc_url_inspector_cited_domains: { data: [], error: null } } },
+      );
+
+      const handler = createUrlInspectorCitedDomainsHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+
+      expect(response.status).to.equal(200);
+      expect(rpcStub.firstCall.args[1]).to.not.have.property('p_prompt_ids');
+    });
+
+    it('omits p_prompt_ids entirely when every supplied promptId is invalid', async () => {
+      const { context, rpcStub } = createContext(
+        {},
+        { promptIds: ['not-a-uuid', 'also-bad'] },
+        { rpcResults: { rpc_url_inspector_cited_domains: { data: [], error: null } } },
+      );
+
+      const handler = createUrlInspectorCitedDomainsHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+
+      expect(response.status).to.equal(200);
+      expect(rpcStub.firstCall.args[1]).to.not.have.property('p_prompt_ids');
+    });
   });
 
   describe('createUrlInspectorDomainUrlsHandler', () => {

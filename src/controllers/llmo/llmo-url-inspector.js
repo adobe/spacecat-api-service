@@ -13,6 +13,7 @@
 import {
   badRequest, forbidden, internalServerError,
 } from '@adobe/spacecat-shared-http-utils';
+import { isValidUUID } from '@adobe/spacecat-shared-utils';
 
 import {
   withBrandPresenceAuth,
@@ -474,7 +475,21 @@ export function createUrlInspectorCitedDomainsHandler(getOrgAndValidateAccess) {
       const channel = q.channel || q.selectedChannel;
       const offset = pagination.page * pagination.pageSize;
 
-      const { data, error } = await client.rpc('rpc_url_inspector_cited_domains', {
+      // Optional: scope the aggregation to a specific set of tracked prompts (e.g. a cohort
+      // that survived across two comparison windows) instead of the brand's whole corpus.
+      // Omitted/empty means "no prompt filter" -- the RPC's unchanged default behavior.
+      const rawPromptIds = q.promptIds;
+      let promptIds = [];
+      if (Array.isArray(rawPromptIds)) {
+        promptIds = rawPromptIds;
+      } else if (typeof rawPromptIds === 'string') {
+        promptIds = rawPromptIds.split(',').map((s) => s.trim());
+      } else if (rawPromptIds != null) {
+        promptIds = [String(rawPromptIds)];
+      }
+      promptIds = promptIds.filter((id) => id != null && isValidUUID(String(id)));
+
+      const rpcParams = {
         p_site_id: params.siteId,
         p_start_date: params.startDate || defaults.startDate,
         p_end_date: params.endDate || defaults.endDate,
@@ -484,7 +499,16 @@ export function createUrlInspectorCitedDomainsHandler(getOrgAndValidateAccess) {
         p_platform: model,
         p_limit: pagination.pageSize,
         p_offset: offset,
-      });
+      };
+      // Only forward p_prompt_ids when actually filtering: PostgREST rejects the whole
+      // call with an unrecognized-argument error against the RPC's pre-migration
+      // signature, so always sending it (even as null) would break every caller of this
+      // endpoint until the DB migration adding p_prompt_ids has landed.
+      if (promptIds.length > 0) {
+        rpcParams.p_prompt_ids = promptIds;
+      }
+
+      const { data, error } = await client.rpc('rpc_url_inspector_cited_domains', rpcParams);
 
       if (error) {
         ctx.log.error(`URL Inspector cited domains RPC error: ${error.message}`);
