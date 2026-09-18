@@ -1,3 +1,17 @@
+## [1.824.3](https://github.com/adobe/spacecat-api-service/compare/v1.824.2...v1.824.3) (2026-09-18)
+
+
+### Bug Fixes
+
+* make Serenity bulk tag idempotency atomic ([#3311](https://github.com/adobe/spacecat-api-service/issues/3311)) ([dd02d06](https://github.com/adobe/spacecat-api-service/commit/dd02d06dbf06b14558acfa7d30c44477ee463ea5))
+
+## [1.824.2](https://github.com/adobe/spacecat-api-service/compare/v1.824.1...v1.824.2) (2026-09-17)
+
+
+### Bug Fixes
+
+* **redirects:** fall back to deliveryConfig JSONB lookup when external look up misses ([#3316](https://github.com/adobe/spacecat-api-service/issues/3316)) ([32692ac](https://github.com/adobe/spacecat-api-service/commit/32692ac6162d50ed156b1b8d429b7f5260e6c011))
+
 ## [1.824.1](https://github.com/adobe/spacecat-api-service/compare/v1.824.0...v1.824.1) (2026-09-17)
 
 

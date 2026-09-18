@@ -112,6 +112,7 @@ function clearData() {
     + 'DELETE FROM site_ims_org_accesses;'
     + 'DELETE FROM plg_onboardings;'
     + 'DELETE FROM consumers;'
+    + 'DELETE FROM idempotency_keys;'
     + 'DELETE FROM async_jobs;'
     + 'DELETE FROM projection_audit;'
     + 'DELETE FROM blackboard_fact;'
