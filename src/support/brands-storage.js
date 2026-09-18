@@ -332,6 +332,10 @@ function mapDbBrandToV2(row) {
     description: row.description || null,
     brandContext: row.brand_context ?? null,
     mentionSentimentGuidance: row.mention_sentiment_guidance ?? null,
+    // Mined prompt-generation preferences (structure/phrasing/topic/branding/products/
+    // prompt_examples), written wholesale by the prompt-preference mining job via
+    // updateBrand() below. Defaults to '{}' at the DB layer.
+    promptPreferences: row.prompt_preferences ?? {},
     vertical: row.vertical || null,
     // Internal ops gate (LLMO-5741): opt-in flag the mystique Brand Claims
     // consumer reads back to decide whether a BP-sheet-ready event becomes a
@@ -1555,6 +1559,9 @@ export async function updateBrand({
   }
   if (updates.vertical !== undefined) {
     patch.vertical = updates.vertical;
+  }
+  if (updates.promptPreferences !== undefined) {
+    patch.prompt_preferences = updates.promptPreferences;
   }
 
   // Fetch the persisted row once when baseSiteId or status is changing — it feeds

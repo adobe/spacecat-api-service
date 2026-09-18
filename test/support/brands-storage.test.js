@@ -260,6 +260,25 @@ describe('brands-storage', () => {
       expect(result[0].mentionSentimentGuidance).to.equal('');
     });
 
+    it('maps prompt_preferences to promptPreferences', async () => {
+      const dbRow = makeBrandRow({
+        prompt_preferences: { topic: { preferred_topics: ['pricing'] } },
+      });
+      const query = createChainableQuery({ data: [dbRow], error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+
+      const result = await listBrands(ORG_ID, postgrestClient);
+      expect(result[0].promptPreferences).to.deep.equal({ topic: { preferred_topics: ['pricing'] } });
+    });
+
+    it('defaults promptPreferences to {} when the column is absent', async () => {
+      const query = createChainableQuery({ data: [makeBrandRow()], error: null });
+      const postgrestClient = { from: sinon.stub().returns(query) };
+
+      const result = await listBrands(ORG_ID, postgrestClient);
+      expect(result[0].promptPreferences).to.deep.equal({});
+    });
+
     it('maps brand_claims_enabled to brandClaimsEnabled', async () => {
       const dbRow = makeBrandRow({ brand_claims_enabled: true });
       const query = createChainableQuery({ data: [dbRow], error: null });
@@ -2880,6 +2899,38 @@ describe('brands-storage', () => {
         updates: { mentionSentimentGuidance: ['wrong'] },
         postgrestClient: { from: () => {} },
       })).to.be.rejectedWith('mentionSentimentGuidance must be a string or null');
+    });
+
+    it('sets prompt_preferences when provided', async () => {
+      const client = createCapturingClient({
+        brands: { data: { id: BRAND_ID }, error: null },
+      });
+
+      await updateBrand({
+        organizationId: ORG_ID,
+        brandId: BRAND_ID,
+        updates: { promptPreferences: { topic: { preferred_topics: ['pricing'] } } },
+        postgrestClient: client,
+      });
+
+      const brandsUpdate = client.capturedCalls.update.find((c) => c.table === 'brands');
+      expect(brandsUpdate.row.prompt_preferences).to.deep.equal({ topic: { preferred_topics: ['pricing'] } });
+    });
+
+    it('leaves prompt_preferences untouched when not provided', async () => {
+      const client = createCapturingClient({
+        brands: { data: { id: BRAND_ID }, error: null },
+      });
+
+      await updateBrand({
+        organizationId: ORG_ID,
+        brandId: BRAND_ID,
+        updates: { name: 'NewName' },
+        postgrestClient: client,
+      });
+
+      const brandsUpdate = client.capturedCalls.update.find((c) => c.table === 'brands');
+      expect(brandsUpdate.row).to.not.have.property('prompt_preferences');
     });
 
     it('throws when update query fails', async () => {
