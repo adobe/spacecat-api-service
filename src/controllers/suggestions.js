@@ -3260,65 +3260,24 @@ function SuggestionsController(ctx, sqs, env) {
       }
     }
 
-    context.log.info(`[geo-experiment-cancel] rollback-gate-check: isDeployed=${isDeployed} (${typeof isDeployed}), opportunity=${!!opportunity} (${typeof opportunity}), experimentSuggestions.length=${experimentSuggestions.length}, gate=${isDeployed && !!opportunity && isNonEmptyArray(experimentSuggestions)}`);
-
     if (isDeployed && opportunity && isNonEmptyArray(experimentSuggestions)) {
-      context.log.info(`[geo-experiment-cancel] rollback-gate-check: entering rollback block for GeoExperiment ${geoExperimentId}`);
       try {
         const tokowakaClient = TokowakaClient.createFrom(context);
-        context.log.info(`[geo-experiment-cancel] rollback-gate-check: tokowakaClient=${!!tokowakaClient} (${typeof tokowakaClient}), rollbackSuggestions=${typeof tokowakaClient?.rollbackSuggestions}`);
-        // eslint-disable-next-line max-len
-        context.log.info(`[geo-experiment-cancel-diag] rollbackSuggestions request: ${JSON.stringify({
-          siteId,
-          opportunityId,
-          updatedBy,
-          allSuggestionsCount: allSuggestions.length,
-          suggestions: experimentSuggestions.map((s) => ({
-            id: s.getId(),
-            isDomainWide: s.getData()?.isDomainWide === true,
-            allowedRegexPatterns: s.getData()?.allowedRegexPatterns,
-            edgeDeployed: s.getData()?.edgeDeployed,
-            tokowakaDeployed: s.getData()?.tokowakaDeployed,
-            edgeOptimizeStatus: s.getData()?.edgeOptimizeStatus,
-          })),
-        })}`);
         const rollbackResult = await tokowakaClient.rollbackSuggestions(
           site,
           opportunity,
           experimentSuggestions,
           { allSuggestions, updatedBy },
         );
-        context.log.info(`[geo-experiment-cancel] rollback-gate-check: rollbackSuggestions returned, succeeded=${(rollbackResult.succeededSuggestions || []).length}, failed=${(rollbackResult.failedSuggestions || []).length}`);
-        // eslint-disable-next-line max-len
-        context.log.info(`[geo-experiment-cancel-diag] rollbackResult detail: ${JSON.stringify({
-          s3Paths: rollbackResult.s3Paths,
-          removedPatchesCount: rollbackResult.removedPatchesCount,
-          succeeded: (rollbackResult.succeededSuggestions || []).map((s) => ({
-            id: s.getId(),
-            isDomainWide: s.getData()?.isDomainWide === true,
-            edgeDeployed: s.getData()?.edgeDeployed,
-            tokowakaDeployed: s.getData()?.tokowakaDeployed,
-          })),
-          failed: (rollbackResult.failedSuggestions || []).map((item) => {
-            const s = item.suggestion || item;
-            return {
-              id: s.getId(),
-              isDomainWide: s.getData?.()?.isDomainWide === true,
-              reason: item.reason,
-              statusCode: item.statusCode,
-            };
-          }),
-        })}`);
         rolledBackSuggestionIds = (rollbackResult.succeededSuggestions || [])
           .map((suggestion) => suggestion.getId());
         failedRollbackSuggestionIds = (rollbackResult.failedSuggestions || [])
           .map((item) => (item.suggestion || item).getId());
+        context.log.info(`[geo-experiment-cancel] site: ${siteId}, GeoExperiment ${geoExperimentId}, rolled back ${rolledBackSuggestionIds.length} suggestion(s), ${failedRollbackSuggestionIds.length} failed`);
       } catch (error) {
         context.log.error(`[geo-experiment-cancel-failed] site: ${siteId}, GeoExperiment ${geoExperimentId}, Error rolling back suggestions from edge: ${error.message}`, error);
         failedRollbackSuggestionIds = experimentSuggestions.map((suggestion) => suggestion.getId());
       }
-    } else {
-      context.log.info(`[geo-experiment-cancel] rollback-gate-check: SKIPPED rollback block for GeoExperiment ${geoExperimentId}`);
     }
 
     const drsClient = DrsClient.createFrom(context);
