@@ -605,6 +605,9 @@ const routeFacsCapabilities = {
       'POST /sites/:siteId/opportunities/:opportunityId/suggestions/edge-rollback': 'llmo/can_deploy',
       'POST /sites/:siteId/opportunities/:opportunityId/fixes/:fixId/actions/rolled_back': 'llmo/can_deploy',
       'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/auto-fix': 'llmo/can_deploy',
+      // Cancel can trigger the same edge rollback as edge-rollback for an IN_PROGRESS
+      // experiment, so it needs the same capability, not can_configure.
+      'POST /sites/:siteId/geo-experiments/:geoExperimentId/cancel': 'llmo/can_deploy',
 
       // ---- Configure (default for writes that aren't onboard/deploy) -----
       // Admin-only writes live in INTERNAL_ROUTES above and bypass FACS entirely.
@@ -991,6 +994,9 @@ const routeFacsCapabilities = {
       'POST /sites/:siteId/opportunities/:opportunityId/fixes/:fixId/actions/rolled_back': 'aso/can_deploy',
       'PATCH /sites/:siteId/opportunities/:opportunityId/suggestions/auto-fix': 'aso/can_deploy',
       'PATCH /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': 'aso/can_deploy',
+      // Cancel can trigger the same edge rollback as edge-rollback for an IN_PROGRESS
+      // experiment, so it needs the same capability, not can_edit.
+      'POST /sites/:siteId/geo-experiments/:geoExperimentId/cancel': 'aso/can_deploy',
 
       // ---- Edit (opportunity / suggestion / fix / report / sentiment / url-store content) ----
       'POST /sites/:siteId/opportunities': 'aso/can_edit',

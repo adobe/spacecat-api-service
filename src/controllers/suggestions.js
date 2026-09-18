@@ -48,6 +48,7 @@ import {
 } from '@adobe/spacecat-shared-data-access';
 import TierClient from '@adobe/spacecat-shared-tier-client';
 import TokowakaClient, { ROUTING_VALIDATOR_TYPE } from '@adobe/spacecat-shared-tokowaka-client';
+import DrsClient from '@adobe/spacecat-shared-drs-client';
 import { SuggestionDto, SUGGESTION_VIEWS, SUGGESTION_SKIP_REASONS } from '../dto/suggestion.js';
 import { isValidLocale } from '../utils/validations.js';
 import { applyFieldProjection } from '../utils/field-projection.js';
@@ -3153,6 +3154,175 @@ function SuggestionsController(ctx, sqs, env) {
   };
 
   /**
+   * Cancels an in-progress GeoExperiment: rolls back any deployed suggestions from the edge,
+   * disables its DRS schedule(s), and marks the GeoExperiment CANCELLED (not removed — kept
+   * for audit/history; GeoExperiment.allActive(), the IME cron's active-experiment query, only
+   * matches GENERATING_BASELINE/IN_PROGRESS, so a CANCELLED experiment is naturally excluded).
+   * The experiment's atomic strategy entry is likewise retained (not deleted) for audit
+   * visibility. Terminal experiments (COMPLETED or FAILED) cannot be cancelled.
+   *
+   * DRS schedule disable and suggestion cleanup are best-effort: a failure to disable a schedule
+   * or unblock a suggestion is logged but does not prevent the experiment from being cancelled,
+   * matching the fail-open pattern used elsewhere in this file (e.g. the edge-geo-exp creation
+   * failure cleanup path).
+   */
+  const cancelGeoExperiment = async (context) => {
+    const { siteId, geoExperimentId } = context.params;
+    const { authInfo: { profile } } = context.attributes;
+    const updatedBy = profile?.email || 'geo-experiment-cancel';
+
+    context.log.info('[geo-experiment-cancel] request', {
+      siteId,
+      geoExperimentId,
+      userId: profile?.email,
+    });
+
+    if (!isValidUUID(siteId)) {
+      return badRequest('Site ID required');
+    }
+    if (!isValidUUID(geoExperimentId)) {
+      return badRequest('GeoExperiment ID required');
+    }
+
+    const site = await Site.findById(siteId);
+    if (!site) {
+      return notFound('Site not found');
+    }
+
+    // Same three-layer gate as deploySuggestionToEdge: org membership, LLMO admin, and site
+    // ownership. Cancelling is the inverse of deploying, so it needs the same authority.
+    if (!await accessControlUtil.hasAccess(site)) {
+      context.log.warn(`[geo-experiment-cancel-failed] site: ${siteId}, user does not have access to the site`);
+      return forbidden('User does not belong to the organization');
+    }
+
+    if (!accessControlUtil.isLLMOAdministrator()) {
+      context.log.warn(`[geo-experiment-cancel-failed] site: ${siteId}, user is not an LLMO administrator`);
+      return forbidden('Only LLMO administrators can cancel geo experiments');
+    }
+
+    if (!await accessControlUtil.isOwnerOfSite(site)) {
+      context.log.warn(`[geo-experiment-cancel-failed] site: ${siteId}, user is not the owner of the site`);
+      return forbidden('User does not have access to cancel geo experiments for this site');
+    }
+
+    const geoExperiment = await GeoExperiment.findById(geoExperimentId);
+    if (!geoExperiment || geoExperiment.getSiteId() !== siteId) {
+      return notFound('GeoExperiment not found');
+    }
+
+    const status = geoExperiment.getStatus();
+    const cancellableStatuses = new Set([
+      GeoExperimentModel.STATUSES.GENERATING_BASELINE,
+      GeoExperimentModel.STATUSES.IN_PROGRESS,
+    ]);
+    if (!cancellableStatuses.has(status)) {
+      context.log.warn(`[geo-experiment-cancel-failed] site: ${siteId}, GeoExperiment ${geoExperimentId} is ${status} and cannot be cancelled`);
+      return badRequest(`GeoExperiment ${geoExperimentId} is ${status} and cannot be cancelled`);
+    }
+
+    // Keyed on status, not phase: the engine sets IN_PROGRESS exactly once, at deploy, so it
+    // already means "deployed" without tracking individual phases.
+    const isDeployed = status === GeoExperimentModel.STATUSES.IN_PROGRESS;
+
+    const opportunityId = geoExperiment.getOpportunityId();
+    const opportunity = opportunityId ? await Opportunity.findById(opportunityId) : null;
+    const allSuggestions = opportunity
+      ? await Suggestion.allByOpportunityId(opportunityId)
+      : [];
+    const experimentSuggestionIds = geoExperiment.getSuggestionIds() || [];
+    const experimentSuggestions = allSuggestions.filter(
+      (s) => experimentSuggestionIds.includes(s.getId()),
+    );
+
+    context.log.info(`[geo-experiment-cancel] site: ${siteId}, GeoExperiment ${geoExperimentId}, status: ${status}, isDeployed: ${isDeployed}, suggestions: ${experimentSuggestions.length}`);
+
+    let rolledBackSuggestionIds = [];
+    let failedRollbackSuggestionIds = [];
+    let unblockedSuggestionIds = [];
+    let failedUnblockSuggestionIds = [];
+
+    // Clear the blocking flag BEFORE attempting rollback (rollbackSuggestions doesn't touch
+    // edgeOptimizeStatus itself). If the process dies between the two steps, we'd rather leave
+    // a suggestion unblocked-but-not-yet-rolled-back than blocked-but-already-rolled-back
+    if (isNonEmptyArray(experimentSuggestions)) {
+      experimentSuggestions.forEach((suggestion) => {
+        const { edgeOptimizeStatus: _, ...rest } = suggestion.getData();
+        suggestion.setData(rest);
+        suggestion.setUpdatedBy(updatedBy);
+      });
+      try {
+        await Suggestion.saveMany(experimentSuggestions);
+        unblockedSuggestionIds = experimentSuggestions.map((suggestion) => suggestion.getId());
+      } catch (error) {
+        context.log.error(`[geo-experiment-cancel-failed] site: ${siteId}, GeoExperiment ${geoExperimentId}, Failed to clear EXPERIMENT_IN_PROGRESS from suggestion(s) ${JSON.stringify(experimentSuggestions.map((suggestion) => suggestion.getId()))}: ${error.message}`, error);
+        failedUnblockSuggestionIds = experimentSuggestions.map((suggestion) => suggestion.getId());
+      }
+    }
+
+    if (isDeployed && opportunity && isNonEmptyArray(experimentSuggestions)) {
+      try {
+        // Re-fetch rather than reusing experimentSuggestions: those entities already went
+        // through one Suggestion.saveMany() above (the unblock step). A model instance that's
+        // been through saveMany once and then has setData() called on it again (as
+        // rollbackSuggestions does, to strip edgeDeployed/tokowakaDeployed) can silently fail to
+        // persist that second change (spacecat-shared-data-access's BaseCollection#_saveMany
+        // reassigns model.record after a save, orphaning the model's Patcher from the object
+        // its getters read from). Fetching fresh instances here sidesteps it by handing
+        // rollbackSuggestions entities that have never been saved before.
+        const rollbackSuggestions = (await Suggestion.allByOpportunityId(opportunityId))
+          .filter((s) => experimentSuggestionIds.includes(s.getId()));
+        const tokowakaClient = TokowakaClient.createFrom(context);
+        const rollbackResult = await tokowakaClient.rollbackSuggestions(
+          site,
+          opportunity,
+          rollbackSuggestions,
+          { allSuggestions, updatedBy },
+        );
+        rolledBackSuggestionIds = (rollbackResult.succeededSuggestions || [])
+          .map((suggestion) => suggestion.getId());
+        failedRollbackSuggestionIds = (rollbackResult.failedSuggestions || [])
+          .map((item) => (item.suggestion || item).getId());
+        context.log.info(`[geo-experiment-cancel] site: ${siteId}, GeoExperiment ${geoExperimentId}, rolled back ${rolledBackSuggestionIds.length} suggestion(s), ${failedRollbackSuggestionIds.length} failed`);
+      } catch (error) {
+        context.log.error(`[geo-experiment-cancel-failed] site: ${siteId}, GeoExperiment ${geoExperimentId}, Error rolling back suggestions from edge: ${error.message}`, error);
+        failedRollbackSuggestionIds = experimentSuggestions.map((suggestion) => suggestion.getId());
+      }
+    }
+
+    const drsClient = DrsClient.createFrom(context);
+    const scheduleIds = [geoExperiment.getPostScheduleId(), geoExperiment.getPreScheduleId()]
+      .filter(Boolean);
+    await Promise.allSettled(scheduleIds.map(async (scheduleId) => {
+      try {
+        await drsClient.disableSchedule(siteId, scheduleId);
+      } catch (error) {
+        context.log.error(`[geo-experiment-cancel-failed] site: ${siteId}, GeoExperiment ${geoExperimentId}, Failed to disable DRS schedule ${scheduleId}: ${error.message}`, error);
+      }
+    }));
+
+    // Marked CANCELLED, not removed: GeoExperiment.allActive() (the IME cron's active-experiment
+    // query) only matches GENERATING_BASELINE/IN_PROGRESS, so a cancelled experiment naturally
+    // stops being picked up — while the record itself stays queryable for audit/history.
+    geoExperiment.setStatus(GeoExperimentModel.STATUSES.CANCELLED);
+    geoExperiment.setUpdatedBy(updatedBy);
+    try {
+      await geoExperiment.save();
+    } catch (error) {
+      context.log.error(`[geo-experiment-cancel-failed] site: ${siteId}, GeoExperiment ${geoExperimentId}, status: ${status}, isDeployed: ${isDeployed}, rolledBackSuggestionIds: ${JSON.stringify(rolledBackSuggestionIds)}, failedRollbackSuggestionIds: ${JSON.stringify(failedRollbackSuggestionIds)}, unblockedSuggestionIds: ${JSON.stringify(unblockedSuggestionIds)}, failedUnblockSuggestionIds: ${JSON.stringify(failedUnblockSuggestionIds)}, Failed to persist CANCELLED status: ${error.message}`, error);
+      return internalServerError('Failed to cancel geo experiment');
+    }
+
+    context.log.info(`[geo-experiment-cancel] Successfully cancelled GeoExperiment ${geoExperimentId} for site ${siteId} by ${updatedBy}, unblockedSuggestionIds: ${JSON.stringify(unblockedSuggestionIds)}, failedUnblockSuggestionIds: ${JSON.stringify(failedUnblockSuggestionIds)}`);
+
+    return ok({
+      status: GeoExperimentModel.STATUSES.CANCELLED,
+      rolledBackSuggestionIds,
+      failedRollbackSuggestionIds,
+    });
+  };
+
+  /**
    * Manually (re-)triggers Mystique impact measurement for a GeoExperiment. Only allowed once
    * the experiment has reached post-analysis, with status in_progress or completed (see
    * isImpactMeasurementEligible). Sends a TRIGGER_IMPACT_MEASUREMENT message to the
@@ -3889,6 +4059,7 @@ function SuggestionsController(ctx, sqs, env) {
     getGeoExperimentResults,
     patchGeoExperiment,
     deleteGeoExperiment,
+    cancelGeoExperiment,
     triggerImpactMeasurement,
     triggerGeoExperimentValidation,
     rollbackSuggestionFromEdge,

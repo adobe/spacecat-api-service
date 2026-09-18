@@ -994,6 +994,65 @@ site-geo-experiment-validate:
     security:
       - ims_key: [ ]
 
+site-geo-experiment-cancel:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+    - name: geoExperimentId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: The GeoExperiment ID
+  post:
+    operationId: cancelGeoExperiment
+    summary: Cancel an in-progress geo experiment
+    description: |
+      Cancels a GeoExperiment that has not yet reached a terminal status. If suggestions were
+      already deployed to the edge, rolls them back; disables the experiment's DRS schedule(s);
+      and marks the experiment `CANCELLED` (kept, not deleted, for audit history — the
+      experiment's atomic strategy entry is likewise retained for audit visibility). Only
+      `GENERATING_BASELINE` and `IN_PROGRESS` experiments can be cancelled — `COMPLETED` or
+      `FAILED` experiments return 400.
+    tags:
+      - geo-experiments
+    responses:
+      '200':
+        description: Experiment cancelled
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status:
+                  type: string
+                  enum: [CANCELLED]
+                rolledBackSuggestionIds:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+                  description: IDs of suggestions whose deployed changes were successfully rolled back
+                failedRollbackSuggestionIds:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+                  description: IDs of suggestions that were deployed but failed to roll back
+            examples:
+              geo-experiment-cancel-response:
+                $ref: './examples.yaml#/geo-experiment-cancel-response'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+    security:
+      - ims_key: [ ]
+
 EdgeDeployedUrl:
   type: object
   required:

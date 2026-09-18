@@ -411,6 +411,8 @@ paths:
     $ref: './site-opportunities.yaml#/site-geo-experiment-trigger-impact-measurement'
   /sites/{siteId}/geo-experiments/{geoExperimentId}/validate:
     $ref: './site-opportunities.yaml#/site-geo-experiment-validate'
+  /sites/{siteId}/geo-experiments/{geoExperimentId}/cancel:
+    $ref: './site-opportunities.yaml#/site-geo-experiment-cancel'
   /sites/{siteId}/site-enrollments:
     $ref: './site-enrollments-api.yaml#/site-enrollments-by-site'
   /sites/{siteId}/user-activities:

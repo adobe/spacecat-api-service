@@ -1172,6 +1172,13 @@ suggestions-by-urls-response:
       limit: 100
       cursor: null
       hasMore: false
+geo-experiment-cancel-response:
+  description: Example for a successful geo experiment cancellation with a partially rolled back deployment
+  value:
+    status: 'CANCELLED'
+    rolledBackSuggestionIds:
+      - '213e4567-f543-12d3-a456-426614174000'
+    failedRollbackSuggestionIds: []
 deployed-opportunities-timeline:
   description: |
     A site's deployed opportunities grouped by UTC deploy date (ascending). Two deploys on
