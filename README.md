@@ -220,6 +220,18 @@ RUM_DOMAIN_KEY=global domain key for the rum api
 SLACK_BOT_TOKEN=slack bot's token,
 ```
 
+Brand Claims product feedback requires:
+
+```plaintext
+ABV_LEARNING_DATA_BUCKET=shared ABV learning-data S3 bucket
+ABV_ID_HASH_SALT=shared HMAC salt used to derive stable pseudonymous ABV user ids
+```
+
+Report-level records are stored under `product_feedback/brand_claims/{rating}/{tier}/...`.
+Claim-cluster records use the separate
+`product_feedback/brand_claims/claim_cluster/{rating}/{tier}/...` prefix and include a
+snapshot of the visible cluster identifier and claim text.
+
 Fulfillment worker requires the following env variable:
 
 ```plaintext

@@ -1075,6 +1075,8 @@ describe('handleBrandClaimsFeedback', () => {
       schemaVersion: 1,
       recordType: 'product_feedback',
       surface: 'brand_claims',
+      feedbackScope: 'report',
+      entryPoint: 'report_overview',
       id: EVENT_ID,
       rating: 'down',
       note: 'The recommendations need more context.',
@@ -1091,6 +1093,53 @@ describe('handleBrandClaimsFeedback', () => {
       .digest('hex')
       .slice(0, 12)}`;
     expect(record.abv_id).to.equal(expectedAbvId);
+  });
+
+  it('stores claim-cluster feedback under the claim-specific prefix', async () => {
+    const result = await handleBrandClaimsFeedback({
+      ...context,
+      data: {
+        ...context.data,
+        feedbackScope: 'claim_cluster',
+        entryPoint: 'claim_inline',
+        clusterId: 'cluster-123',
+        claimText: 'Lovesac products are modular.',
+        model: 'chatgpt',
+        sourceFile: 'brand_claims/llmo/site/week/data.json.gz',
+      },
+    }, site);
+
+    expect(result.status).to.equal(202);
+    const command = s3Send.secondCall.args[0];
+    expect(command.input.Key).to.match(
+      new RegExp(`^product_feedback/brand_claims/claim_cluster/down/paid/\\d{4}-\\d{2}-\\d{2}/\\d{17}_${EVENT_ID}\\.json$`),
+    );
+    expect(JSON.parse(command.input.Body)).to.include({
+      feedbackScope: 'claim_cluster',
+      entryPoint: 'claim_inline',
+      clusterId: 'cluster-123',
+      claimText: 'Lovesac products are modular.',
+      model: 'chatgpt',
+      sourceFile: 'brand_claims/llmo/site/week/data.json.gz',
+    });
+  });
+
+  it('defaults legacy claim-cluster feedback to the claim-details entry point', async () => {
+    const result = await handleBrandClaimsFeedback({
+      ...context,
+      data: {
+        ...context.data,
+        feedbackScope: 'claim_cluster',
+        clusterId: 'cluster-123',
+        claimText: 'Lovesac products are modular.',
+      },
+    }, site);
+
+    expect(result.status).to.equal(202);
+    expect(JSON.parse(s3Send.secondCall.args[0].input.Body)).to.include({
+      feedbackScope: 'claim_cluster',
+      entryPoint: 'claim_details',
+    });
   });
 
   it('omits the explicit encryption header for a local S3 emulator', async () => {
@@ -1115,8 +1164,34 @@ describe('handleBrandClaimsFeedback', () => {
       { ...context.data, brandId: 'bad' },
       { ...context.data, rating: 'neutral' },
       { ...context.data, comment: 42 },
+      { ...context.data, feedbackScope: 'other' },
+      { ...context.data, entryPoint: 'other' },
+      { ...context.data, entryPoint: null },
+      { ...context.data, entryPoint: 'claim_inline' },
+      {
+        ...context.data,
+        feedbackScope: 'claim_cluster',
+        entryPoint: 'report_overview',
+        clusterId: 'cluster-1',
+        claimText: 'Claim',
+      },
+      { ...context.data, clusterId: 'cluster-1' },
+      {
+        ...context.data,
+        feedbackScope: 'claim_cluster',
+        clusterId: '',
+        claimText: 'Claim',
+      },
+      {
+        ...context.data,
+        feedbackScope: 'claim_cluster',
+        clusterId: 'cluster-1',
+        claimText: '',
+      },
     ].map((data) => handleBrandClaimsFeedback({ ...context, data }, site)));
-    expect(results.map((result) => result.status)).to.deep.equal([400, 400, 400, 400, 400, 400]);
+    expect(results.map((result) => result.status)).to.deep.equal([
+      400, 400, 400, 400, 400, 400, 400, 400, 400, 400, 400, 400, 400, 400,
+    ]);
     expect(s3Send).not.to.have.been.called;
   });
 
@@ -1177,6 +1252,7 @@ describe('handleBrandClaimsFeedback', () => {
       schemaVersion: 1,
       recordType: 'product_feedback',
       surface: 'brand_claims',
+      feedbackScope: 'report',
       id: EVENT_ID,
       timestamp: '2026-09-15T23:59:59.000Z',
       rating: 'up',
@@ -1217,6 +1293,60 @@ describe('handleBrandClaimsFeedback', () => {
       `product_feedback/brand_claims/up/paid/2026-09-15/20260915235959000_${EVENT_ID}.json`,
     );
     expect(JSON.parse(recordCommand.input.Body)).to.deep.equal(markerRecord);
+  });
+
+  it('rejects an idempotency marker from a different feedback entry point', async () => {
+    const markerRecord = {
+      schemaVersion: 1,
+      recordType: 'product_feedback',
+      surface: 'brand_claims',
+      feedbackScope: 'claim_cluster',
+      entryPoint: 'claim_details',
+      id: EVENT_ID,
+      timestamp: '2026-09-15T23:59:59.000Z',
+      rating: 'down',
+      abv_id: `abv_${createHmac('sha256', 'shared-secret')
+        .update('user-123@AdobeID')
+        .digest('hex')
+        .slice(0, 12)}`,
+      organizationId: ORG_ID,
+      customerName: 'Acme Corp',
+      imsOrgId: 'ABC@AdobeOrg',
+      siteId: SITE_ID,
+      brandId: BRAND_ID,
+      brand: 'Acme',
+      tier: 'paid',
+      clusterId: 'cluster-123',
+      claimText: 'Lovesac products are modular.',
+    };
+    s3Send.callsFake((command) => {
+      if (command.type === 'put' && command.input.Key.includes('/idempotency/')) {
+        const error = new Error('already exists');
+        error.name = 'PreconditionFailed';
+        return Promise.reject(error);
+      }
+      if (command.type === 'get') {
+        return Promise.resolve({
+          Body: {
+            transformToString: () => Promise.resolve(JSON.stringify(markerRecord)),
+          },
+        });
+      }
+      return Promise.resolve({});
+    });
+
+    const result = await handleBrandClaimsFeedback({
+      ...context,
+      data: {
+        ...context.data,
+        feedbackScope: 'claim_cluster',
+        entryPoint: 'claim_inline',
+        clusterId: 'cluster-123',
+        claimText: 'Lovesac products are modular.',
+      },
+    }, site);
+
+    expect(result.status).to.equal(500);
   });
 
   it('rejects an idempotency marker owned by another tenant', async () => {

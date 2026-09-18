@@ -35,6 +35,12 @@ const DEFAULT_WEEKS_LIMIT = 15;
 const MAX_WEEKS_LIMIT = 52;
 const PRODUCT_FEEDBACK_PREFIX = 'product_feedback/brand_claims';
 const PRODUCT_FEEDBACK_NOTE_MAX_LENGTH = 4000;
+const PRODUCT_FEEDBACK_CLAIM_TEXT_MAX_LENGTH = 4000;
+const PRODUCT_FEEDBACK_CLUSTER_ID_MAX_LENGTH = 200;
+const PRODUCT_FEEDBACK_MODEL_MAX_LENGTH = 100;
+const PRODUCT_FEEDBACK_SOURCE_FILE_MAX_LENGTH = 1024;
+const PRODUCT_FEEDBACK_SCOPES = ['report', 'claim_cluster'];
+const PRODUCT_FEEDBACK_ENTRY_POINTS = ['report_overview', 'claim_details', 'claim_inline'];
 const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 /**
@@ -332,7 +338,16 @@ export async function handleBrandClaimsFeedback(context, site) {
     data = {}, dataAccess, env = {}, log, s3,
   } = context;
   const {
-    eventId, brandId, rating, comment,
+    eventId,
+    brandId,
+    rating,
+    comment,
+    feedbackScope = 'report',
+    entryPoint,
+    clusterId,
+    claimText,
+    model,
+    sourceFile,
   } = data;
 
   if (typeof eventId !== 'string' || !UUID_V4_RE.test(eventId)) {
@@ -346,6 +361,44 @@ export async function handleBrandClaimsFeedback(context, site) {
   }
   if (comment !== undefined && typeof comment !== 'string') {
     return badRequest('comment must be a string');
+  }
+  if (!PRODUCT_FEEDBACK_SCOPES.includes(feedbackScope)) {
+    return badRequest('feedbackScope must be "report" or "claim_cluster"');
+  }
+  if (entryPoint !== undefined && !PRODUCT_FEEDBACK_ENTRY_POINTS.includes(entryPoint)) {
+    return badRequest('entryPoint must be "report_overview", "claim_details", or "claim_inline"');
+  }
+  const resolvedEntryPoint = entryPoint
+    ?? (feedbackScope === 'report' ? 'report_overview' : 'claim_details');
+  if ((feedbackScope === 'report' && resolvedEntryPoint !== 'report_overview')
+    || (feedbackScope === 'claim_cluster' && resolvedEntryPoint === 'report_overview')) {
+    return badRequest('entryPoint is not valid for the selected feedbackScope');
+  }
+  const claimFields = [clusterId, claimText, model, sourceFile];
+  if (feedbackScope === 'report' && claimFields.some((value) => value !== undefined)) {
+    return badRequest('claim context is only allowed for claim_cluster feedback');
+  }
+  const trimmedClusterId = typeof clusterId === 'string' ? clusterId.trim() : undefined;
+  const trimmedClaimText = typeof claimText === 'string' ? claimText.trim() : undefined;
+  const trimmedModel = typeof model === 'string' ? model.trim() : undefined;
+  const trimmedSourceFile = typeof sourceFile === 'string' ? sourceFile.trim() : undefined;
+  if (feedbackScope === 'claim_cluster') {
+    if (typeof clusterId !== 'string' || !trimmedClusterId
+      || trimmedClusterId.length > PRODUCT_FEEDBACK_CLUSTER_ID_MAX_LENGTH) {
+      return badRequest('clusterId must be a non-empty string of at most 200 characters');
+    }
+    if (typeof claimText !== 'string' || !trimmedClaimText
+      || trimmedClaimText.length > PRODUCT_FEEDBACK_CLAIM_TEXT_MAX_LENGTH) {
+      return badRequest('claimText must be a non-empty string of at most 4000 characters');
+    }
+    if (model !== undefined && (typeof model !== 'string' || !trimmedModel
+      || trimmedModel.length > PRODUCT_FEEDBACK_MODEL_MAX_LENGTH)) {
+      return badRequest('model must be a non-empty string of at most 100 characters');
+    }
+    if (sourceFile !== undefined && (typeof sourceFile !== 'string' || !trimmedSourceFile
+      || trimmedSourceFile.length > PRODUCT_FEEDBACK_SOURCE_FILE_MAX_LENGTH)) {
+      return badRequest('sourceFile must be a non-empty string of at most 1024 characters');
+    }
   }
 
   const trimmedComment = comment?.trim();
@@ -421,6 +474,8 @@ export async function handleBrandClaimsFeedback(context, site) {
     schemaVersion: 1,
     recordType: 'product_feedback',
     surface: 'brand_claims',
+    feedbackScope,
+    entryPoint: resolvedEntryPoint,
     id: eventId,
     timestamp,
     rating,
@@ -433,6 +488,12 @@ export async function handleBrandClaimsFeedback(context, site) {
     brandId: brand.id,
     brand: brand.name,
     tier,
+    ...(feedbackScope === 'claim_cluster' ? {
+      clusterId: trimmedClusterId,
+      claimText: trimmedClaimText,
+      ...(trimmedModel ? { model: trimmedModel } : {}),
+      ...(trimmedSourceFile ? { sourceFile: trimmedSourceFile } : {}),
+    } : {}),
   };
   const markerKey = `${PRODUCT_FEEDBACK_PREFIX}/idempotency/${eventId}.json`;
   let recordToStore = record;
@@ -463,13 +524,19 @@ export async function handleBrandClaimsFeedback(context, site) {
         Key: markerKey,
       }));
       recordToStore = JSON.parse(await marker.Body.transformToString());
+      const storedFeedbackScope = recordToStore?.feedbackScope ?? 'report';
+      const storedEntryPoint = recordToStore?.entryPoint
+        ?? (storedFeedbackScope === 'report' ? 'report_overview' : 'claim_details');
       if (recordToStore?.id !== eventId
         || !['up', 'down'].includes(recordToStore?.rating)
         || !hasText(recordToStore?.timestamp)
         || recordToStore.organizationId !== organizationId
         || recordToStore.siteId !== siteId
         || recordToStore.brandId !== brandId
-        || recordToStore.abv_id !== abvId) {
+        || recordToStore.abv_id !== abvId
+        || storedFeedbackScope !== feedbackScope
+        || storedEntryPoint !== resolvedEntryPoint
+        || (feedbackScope === 'claim_cluster' && recordToStore.clusterId !== trimmedClusterId)) {
         throw new Error('invalid idempotency marker');
       }
     } catch (markerError) {
@@ -479,7 +546,10 @@ export async function handleBrandClaimsFeedback(context, site) {
   }
 
   const timestampKey = recordToStore.timestamp.replace(/[-:.TZ]/g, '');
-  const key = `${PRODUCT_FEEDBACK_PREFIX}/${recordToStore.rating}/${recordToStore.tier}/${recordToStore.timestamp.slice(0, 10)}/${timestampKey}_${eventId}.json`;
+  const recordPrefix = (recordToStore.feedbackScope ?? 'report') === 'claim_cluster'
+    ? `${PRODUCT_FEEDBACK_PREFIX}/claim_cluster`
+    : PRODUCT_FEEDBACK_PREFIX;
+  const key = `${recordPrefix}/${recordToStore.rating}/${recordToStore.tier}/${recordToStore.timestamp.slice(0, 10)}/${timestampKey}_${eventId}.json`;
   try {
     await s3.s3Client.send(new s3.PutObjectCommand({
       Bucket: bucket,
