@@ -489,7 +489,7 @@ export function createUrlInspectorCitedDomainsHandler(getOrgAndValidateAccess) {
       }
       promptIds = promptIds.filter((id) => id != null && isValidUUID(String(id)));
 
-      const { data, error } = await client.rpc('rpc_url_inspector_cited_domains', {
+      const rpcParams = {
         p_site_id: params.siteId,
         p_start_date: params.startDate || defaults.startDate,
         p_end_date: params.endDate || defaults.endDate,
@@ -499,8 +499,16 @@ export function createUrlInspectorCitedDomainsHandler(getOrgAndValidateAccess) {
         p_platform: model,
         p_limit: pagination.pageSize,
         p_offset: offset,
-        p_prompt_ids: promptIds.length > 0 ? promptIds : null,
-      });
+      };
+      // Only forward p_prompt_ids when actually filtering: PostgREST rejects the whole
+      // call with an unrecognized-argument error against the RPC's pre-migration
+      // signature, so always sending it (even as null) would break every caller of this
+      // endpoint until the DB migration adding p_prompt_ids has landed.
+      if (promptIds.length > 0) {
+        rpcParams.p_prompt_ids = promptIds;
+      }
+
+      const { data, error } = await client.rpc('rpc_url_inspector_cited_domains', rpcParams);
 
       if (error) {
         ctx.log.error(`URL Inspector cited domains RPC error: ${error.message}`);

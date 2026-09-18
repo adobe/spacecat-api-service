@@ -1326,7 +1326,7 @@ describe('URL Inspector Handlers', () => {
       expect(rpcStub.firstCall.args[1].p_prompt_ids).to.deep.equal([promptId1, promptId2]);
     });
 
-    it('sends p_prompt_ids as null when promptIds is omitted (unchanged default behavior)', async () => {
+    it('omits p_prompt_ids entirely when promptIds is omitted (unchanged default behavior)', async () => {
       const { context, rpcStub } = createContext(
         {},
         {},
@@ -1337,10 +1337,10 @@ describe('URL Inspector Handlers', () => {
       const response = await handler(context);
 
       expect(response.status).to.equal(200);
-      expect(rpcStub.firstCall.args[1].p_prompt_ids).to.equal(null);
+      expect(rpcStub.firstCall.args[1]).to.not.have.property('p_prompt_ids');
     });
 
-    it('sends p_prompt_ids as null when every supplied promptId is invalid', async () => {
+    it('omits p_prompt_ids entirely when every supplied promptId is invalid', async () => {
       const { context, rpcStub } = createContext(
         {},
         { promptIds: ['not-a-uuid', 'also-bad'] },
@@ -1351,7 +1351,7 @@ describe('URL Inspector Handlers', () => {
       const response = await handler(context);
 
       expect(response.status).to.equal(200);
-      expect(rpcStub.firstCall.args[1].p_prompt_ids).to.equal(null);
+      expect(rpcStub.firstCall.args[1]).to.not.have.property('p_prompt_ids');
     });
   });
 
