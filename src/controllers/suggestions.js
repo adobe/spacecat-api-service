@@ -3267,6 +3267,21 @@ function SuggestionsController(ctx, sqs, env) {
       try {
         const tokowakaClient = TokowakaClient.createFrom(context);
         context.log.info(`[geo-experiment-cancel] rollback-gate-check: tokowakaClient=${!!tokowakaClient} (${typeof tokowakaClient}), rollbackSuggestions=${typeof tokowakaClient?.rollbackSuggestions}`);
+        // eslint-disable-next-line max-len
+        context.log.info(`[geo-experiment-cancel-diag] rollbackSuggestions request: ${JSON.stringify({
+          siteId,
+          opportunityId,
+          updatedBy,
+          allSuggestionsCount: allSuggestions.length,
+          suggestions: experimentSuggestions.map((s) => ({
+            id: s.getId(),
+            isDomainWide: s.getData()?.isDomainWide === true,
+            allowedRegexPatterns: s.getData()?.allowedRegexPatterns,
+            edgeDeployed: s.getData()?.edgeDeployed,
+            tokowakaDeployed: s.getData()?.tokowakaDeployed,
+            edgeOptimizeStatus: s.getData()?.edgeOptimizeStatus,
+          })),
+        })}`);
         const rollbackResult = await tokowakaClient.rollbackSuggestions(
           site,
           opportunity,
@@ -3274,6 +3289,26 @@ function SuggestionsController(ctx, sqs, env) {
           { allSuggestions, updatedBy },
         );
         context.log.info(`[geo-experiment-cancel] rollback-gate-check: rollbackSuggestions returned, succeeded=${(rollbackResult.succeededSuggestions || []).length}, failed=${(rollbackResult.failedSuggestions || []).length}`);
+        // eslint-disable-next-line max-len
+        context.log.info(`[geo-experiment-cancel-diag] rollbackResult detail: ${JSON.stringify({
+          s3Paths: rollbackResult.s3Paths,
+          removedPatchesCount: rollbackResult.removedPatchesCount,
+          succeeded: (rollbackResult.succeededSuggestions || []).map((s) => ({
+            id: s.getId(),
+            isDomainWide: s.getData()?.isDomainWide === true,
+            edgeDeployed: s.getData()?.edgeDeployed,
+            tokowakaDeployed: s.getData()?.tokowakaDeployed,
+          })),
+          failed: (rollbackResult.failedSuggestions || []).map((item) => {
+            const s = item.suggestion || item;
+            return {
+              id: s.getId(),
+              isDomainWide: s.getData?.()?.isDomainWide === true,
+              reason: item.reason,
+              statusCode: item.statusCode,
+            };
+          }),
+        })}`);
         rolledBackSuggestionIds = (rollbackResult.succeededSuggestions || [])
           .map((suggestion) => suggestion.getId());
         failedRollbackSuggestionIds = (rollbackResult.failedSuggestions || [])
