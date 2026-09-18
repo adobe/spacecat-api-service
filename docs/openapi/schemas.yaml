@@ -15456,6 +15456,51 @@ LookupByUrlRequest:
       type: string
       description: Optional locale for the returned DTOs, same as the sibling read endpoints.
 
+LookupByTopicRequest:
+  type: object
+  additionalProperties: false
+  required:
+    - topics
+  properties:
+    topics:
+      type: array
+      description: >
+        Topic strings to match semantically, up to 100 entries (each at most 2048 characters).
+        Each topic is embedded and compared by cosine similarity against the site's stored
+        opportunity-topic vectors. Non-string, empty, or oversized entries are dropped; an empty
+        array, or a list where every entry is dropped, returns an empty result set, not a 400.
+      items:
+        type: string
+      maxItems: 100
+    k:
+      type: integer
+      minimum: 1
+      maximum: 100
+      default: 10
+      description: Max opportunities returned per topic (best-first by similarity).
+    minScore:
+      type: number
+      minimum: 0
+      maximum: 1
+      default: 0.1
+      description: >
+        Cosine-similarity floor; matches scoring below it are dropped. Defaults to the
+        deployment's `LOOKUP_TOPIC_MIN_SCORE` (0.1 if unset).
+    fields:
+      type: string
+      description: >
+        Optional comma-separated sparse-fieldset projection (e.g. `id,type,status,data`).
+        Omitted → a lightweight default projection that omits the heavy `data` blob. `id` is
+        always included. A non-string value is a 400.
+    status:
+      type: string
+      description: >
+        Optional status filter - a single value, or multiple as a comma-separated string.
+        Omitted → `IGNORED` opportunities are hidden by default. A non-string value is a 400.
+    locale:
+      type: string
+      description: Optional locale for the returned DTOs, same as the sibling read endpoints.
+
 LookupPagination:
   type: object
   properties:
@@ -15501,6 +15546,38 @@ OpportunitiesByUrlResponse:
         type: string
     pagination:
       $ref: '#/LookupPagination'
+
+OpportunitiesByTopicResponse:
+  type: object
+  properties:
+    results:
+      type: array
+      description: >
+        One entry per requested topic (input order; includes duplicates). `matches` is the
+        topic's opportunities ranked best-first by cosine similarity, each with its `score`,
+        restricted to opportunities the caller may see and that pass the status filter.
+      items:
+        type: object
+        properties:
+          topic:
+            type: string
+          matches:
+            type: array
+            items:
+              type: object
+              properties:
+                opportunityId:
+                  type: string
+                score:
+                  type: number
+                  description: Cosine similarity in [0, 1]; higher is closer.
+    opportunities:
+      type: object
+      description: >
+        Map keyed by opportunity id; each distinct matched opportunity appears once, projected
+        to `fields` or the lightweight default.
+      additionalProperties:
+        $ref: '#/Opportunity'
 
 SuggestionsByUrlResponse:
   type: object

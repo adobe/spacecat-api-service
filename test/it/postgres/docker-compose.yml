@@ -9,12 +9,16 @@ name: spacecat-api-service-it
 
 services:
   db:
-    image: postgres:16-alpine
+    # pgvector-enabled Postgres (LLMO-7445): the semantic index (`opportunity_semantic_embedding`,
+    # `semantic_query_embedding`) needs `CREATE EXTENSION vector`, absent from postgres:16-alpine.
+    # `--lc-collate=C` matches the data-service's own compose (glibc-vs-musl collation parity).
+    image: pgvector/pgvector:pg16
     container_name: spacecat-it-db
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: mysticat
+      POSTGRES_INITDB_ARGS: "--lc-collate=C"
     ports:
       - "${IT_POSTGRES_PORT:-55432}:5432"
     tmpfs:
@@ -44,6 +48,11 @@ services:
       retries: 10
 
   data-service:
+    # ⚠️ LLMO-7445: bump this tag to the mysticat-data-service release that contains the semantic
+    # migrations (opportunity_semantic_embedding, semantic_query_embedding,
+    # rpc_opportunity_semantic_search + `CREATE EXTENSION vector`) BEFORE the by-topics IT can pass.
+    # That release must merge first (plan §9.1: step 1 before step 5). Until then, v5.128.0 lacks
+    # those objects and opportunities-by-topics.test.js will fail.
     image: 682033462621.dkr.ecr.us-east-1.amazonaws.com/mysticat-data-service:v5.128.0
     container_name: spacecat-it-data-service
     depends_on:

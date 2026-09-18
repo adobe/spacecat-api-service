@@ -2197,6 +2197,61 @@ site-opportunities-by-urls:
     security:
       - session_token: [ ]
 
+site-opportunities-by-topics:
+  parameters:
+    - $ref: './parameters.yaml#/siteId'
+  post:
+    operationId: getSiteOpportunitiesByTopics
+    summary: |
+      Look up opportunities semantically related to the supplied topics
+    description: |
+      Returns opportunities across all of the site's opportunity types that are semantically
+      related to any topic in the request body, via a pgvector nearest-neighbour search. This is
+      a POST used for reading: all parameters (`topics`, `k`, `minScore`, `fields`, `status`,
+      `locale`) travel in the JSON body - this endpoint accepts no query parameters. Each topic
+      is embedded and the top-`k` opportunities above `minScore` are returned, ranked by cosine
+      similarity, restricted to opportunities the caller may see and passing the status filter.
+      The response is normalized (results carry ranked id+score matches; each opportunity appears
+      once in `opportunities`). Returns `503` when this deployment has no Postgres-backed semantic
+      index or no embedding deployment configured.
+    tags:
+      - opportunities
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: './schemas.yaml#/LookupByTopicRequest'
+          examples:
+            opportunities-by-topics-request:
+              $ref: './examples.yaml#/opportunities-by-topics-request'
+    responses:
+      '200':
+        description: Normalized per-topic ranked results and an opportunities map keyed by id.
+        content:
+          application/json:
+            schema:
+              $ref: './schemas.yaml#/OpportunitiesByTopicResponse'
+            examples:
+              opportunities-by-topics-response:
+                $ref: './examples.yaml#/opportunities-by-topics-response'
+      '400':
+        $ref: './responses.yaml#/400'
+      '401':
+        $ref: './responses.yaml#/401'
+      '403':
+        $ref: './responses.yaml#/403'
+      '404':
+        $ref: './responses.yaml#/404'
+      '429':
+        $ref: './responses.yaml#/429'
+      '500':
+        $ref: './responses.yaml#/500'
+      '503':
+        $ref: './responses.yaml#/503'
+    security:
+      - session_token: [ ]
+
 site-suggestions-by-urls:
   parameters:
     - $ref: './parameters.yaml#/siteId'

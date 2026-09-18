@@ -22,6 +22,8 @@ import { sites } from './seed-data/sites.js';
 import { audits } from './seed-data/audits.js';
 import { opportunities } from './seed-data/opportunities.js';
 import { opportunityUrls } from './seed-data/opportunity-urls.js';
+import { opportunitySemanticEmbedding } from './seed-data/opportunity-semantic-embedding.js';
+import { semanticQueryEmbedding } from './seed-data/semantic-query-embedding.js';
 import { suggestions } from './seed-data/suggestions.js';
 import { suggestionUrls } from './seed-data/suggestion-urls.js';
 import { fixes, fixEntitySuggestions } from './seed-data/fixes.js';
@@ -116,6 +118,7 @@ function clearData() {
     + 'DELETE FROM async_jobs;'
     + 'DELETE FROM projection_audit;'
     + 'DELETE FROM blackboard_fact;'
+    + 'DELETE FROM semantic_query_embedding;'
     + 'DELETE FROM organizations;'
     + '"',
     { stdio: 'pipe', timeout: 10_000 },
@@ -287,7 +290,12 @@ async function seed() {
     insertRows('brand_sites', brandSites),
     insertRows('tickets', tickets),
     insertRows('opportunity_urls', opportunityUrls),
+    insertRows('opportunity_semantic_embedding', opportunitySemanticEmbedding),
   ]);
+
+  // Global query-embedding cache (no FK to organizations, so it is cleared explicitly in
+  // clearData rather than via the organizations cascade).
+  await insertRows('semantic_query_embedding', semanticQueryEmbedding);
 
   // Level 4: depend on fix_entities + suggestions + tickets
   await Promise.all([

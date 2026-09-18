@@ -179,6 +179,7 @@ describe('Opportunities Controller', () => {
     'getAllForSite',
     'getByStatus',
     'getByUrl',
+    'getByTopic',
     'getByID',
     'createOpportunity',
     'patchOpportunity',

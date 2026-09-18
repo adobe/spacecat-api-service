@@ -1147,6 +1147,33 @@ opportunities-by-urls-response:
       cursor: null
       hasMore: false
 
+opportunities-by-topics-request:
+  description: Look up opportunities related to two topics, k=5 per topic
+  value:
+    topics:
+      - 'online banking security'
+      - 'mobile app performance'
+    k: 5
+    minScore: 0.2
+
+opportunities-by-topics-response:
+  description: Ranked matches per topic and the matched opportunities, projected lightweight
+  value:
+    results:
+      - topic: 'online banking security'
+        matches:
+          - opportunityId: '123e4567-e89b-12d3-a456-426614174000'
+            score: 0.87
+      - topic: 'mobile app performance'
+        matches: []
+    opportunities:
+      '123e4567-e89b-12d3-a456-426614174000':
+        id: '123e4567-e89b-12d3-a456-426614174000'
+        type: 'cited-analysis'
+        status: 'NEW'
+        title: 'Authoritative domains are linking to invalid SecurBank URLs. This could impact your SEO.'
+        updatedAt: '2026-01-15T10:30:00.000Z'
+
 suggestions-by-urls-request:
   description: Look up suggestions backed by one source URL
   value:

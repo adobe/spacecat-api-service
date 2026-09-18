@@ -409,6 +409,7 @@ export default function getRouteHandlers(
     'GET /sites/:siteId/opportunities/top-paid': topPaidOpportunitiesController.getTopPaidOpportunities,
     'GET /sites/:siteId/opportunities/by-status/:status': opportunitiesController.getByStatus,
     'POST /sites/:siteId/opportunities/by-urls': opportunitiesController.getByUrl,
+    'POST /sites/:siteId/opportunities/by-topics': opportunitiesController.getByTopic,
     'POST /sites/:siteId/suggestions/by-urls': suggestionsController.getByUrl,
     'GET /sites/:siteId/opportunities/:opportunityId': opportunitiesController.getByID,
     'POST /sites/:siteId/page-relationships/search': pageRelationshipsController.search,
