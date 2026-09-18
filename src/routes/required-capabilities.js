@@ -64,8 +64,8 @@ export const INTERNAL_ROUTES = [
   'POST /sites/:siteId/geo-experiments/:geoExperimentId/trigger-impact-measurement',
   'POST /sites/:siteId/geo-experiments/:geoExperimentId/validate',
 
-  // Slack - event subscriptions and commands use Slack's signature verification
-  'GET /slack/events',
+  // Slack - event subscriptions and commands are authenticated by the Slack request
+  // signature (slackSignatureWrapper), not by a SpaceCat capability.
   'POST /slack/events',
   'POST /slack/channels/invite-by-user-id',
 
@@ -180,6 +180,9 @@ export const INTERNAL_ROUTES = [
   'GET /tools/api-keys',
   // URL preview proxy - UI-only utility for iframe rendering; not for S2S consumers
   'GET /tools/proxy',
+  // LaunchDarkly flags summary - admin-only via hasAdminAccess(); internal tooling
+  // endpoint, not for S2S consumers
+  'GET /tools/launchdarkly/flags',
   // Insights orchestration - admin-only via hasAdminAccess(); not for S2S consumers
   'POST /ephemeral-run/batch',
   'GET /ephemeral-run/batch/:batchId/status',
@@ -320,15 +323,21 @@ const routeRequiredCapabilities = {
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts': 'organization:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/jobs/:jobId': 'organization:read',
   'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts': 'organization:write',
+  'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/bulk-tags': 'organization:write',
   'PATCH /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/:semrushPromptId': 'organization:write',
   'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/bulk-delete': 'organization:write',
+  'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/prompts/finalize': 'organization:write',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets': 'organization:read',
   'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets': 'organization:write',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode': 'organization:read',
   'DELETE /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/:geoTargetId/:languageCode': 'organization:write',
+  'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/generation/jobs/:jobId': 'organization:read',
+  'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/markets/generation/jobs/:jobId/reauth': 'organization:write',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags': 'organization:read',
+  'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags/search': 'organization:read',
   'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags': 'organization:write',
   'PATCH /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags/:tagId': 'organization:write',
+  'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags/:tagId/impact': 'organization:read',
   'DELETE /v2/orgs/:spaceCatId/brands/:brandId/serenity/tags/:tagId': 'organization:write',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/models': 'organization:read',
   'PUT /v2/orgs/:spaceCatId/brands/:brandId/serenity/models': 'organization:write',
@@ -336,12 +345,16 @@ const routeRequiredCapabilities = {
   // access enforced in the controller (listOrgModels / listOrgLanguages).
   'GET /v2/orgs/:spaceCatId/serenity/models': 'organization:read',
   'GET /v2/orgs/:spaceCatId/serenity/languages': 'organization:read',
-  'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/filter-dimensions': 'organization:read',
-  'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/weeks': 'organization:read',
-  'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/access': 'organization:read',
-  'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/prompts': 'organization:read',
+  // Elements/brand-presence routes - all are :brandId-scoped, so S2S consumers need
+  // brand:read (matching the entity:action convention), scoped in the controller
+  // (authorizeOrgAccess) to the consumer's own registered IMS org, not readAll.
+  'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/filter-dimensions': 'brand:read',
+  'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/weeks': 'brand:read',
+  'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/access': 'brand:read',
+  'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/prompts': 'brand:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/cited-domains': 'brand:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/sentiment-overview': 'brand:read',
+  'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/responses': 'brand:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/subreddits': 'brand:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/reddit-threads': 'brand:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/youtube-videos': 'brand:read',
@@ -357,7 +370,6 @@ const routeRequiredCapabilities = {
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/url-inspector/prompts/count': 'brand:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/competitor-summary': 'brand:read',
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/kpi-headlines': 'brand:read',
-  // eslint-disable-next-line max-len
   'GET /v2/orgs/:spaceCatId/brands/:brandId/serenity/brand-presence/source-visibility-headline': 'brand:read',
   'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/activate': 'organization:write',
   'POST /v2/orgs/:spaceCatId/brands/:brandId/serenity/deactivate': 'organization:write',
@@ -409,7 +421,9 @@ const routeRequiredCapabilities = {
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/domain-urls': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/url-prompts': 'brand:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/url-prompts': 'brand:read',
-  'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/prompts-by-url': 'brand:read',
+  // The 'all' variant returns org-wide (cross-brand) data, so it's gated on organization:read
+  // rather than brand:read, unlike its :brandId-scoped sibling below.
+  'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/prompts-by-url': 'organization:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/prompts-by-url': 'brand:read',
   'GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/filter-dimensions': 'brand:read',
   'GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/filter-dimensions': 'brand:read',
@@ -436,6 +450,9 @@ const routeRequiredCapabilities = {
   // preflight jobs (legacy)
   'POST /preflight/jobs': 'site:write',
   'GET /preflight/jobs/:jobId': 'site:read',
+  // OAE validation jobs
+  'POST /sites/:siteId/llmo/oae-validation/jobs': 'site:write',
+  'GET /sites/:siteId/llmo/oae-validation/jobs/:jobId': 'site:read',
   // Preflight checks - proxies user's Bearer token to AEM Author; end-user UI only
   'POST /sites/:siteId/autofix-checks': 'site:read',
 
@@ -535,6 +552,7 @@ const routeRequiredCapabilities = {
   'GET /sites/:siteId/geo-experiments/:geoExperimentId/results': 'site:read', // impact-measurement insights
   'GET /sites/:siteId/metrics/:metric/:source': 'site:read',
   'GET /sites/:siteId/metrics/:metric/:source/by-url/:base64PageUrl': 'site:read',
+  'GET /sites/:siteId/keyword-cpc': 'site:read',
   'GET /sites/:siteId/latest-metrics': 'site:read',
   'GET /sites/by-base-url/:baseURL': 'site:read',
   'GET /sites/by-delivery-type/:deliveryType': 'site:read',
@@ -546,6 +564,8 @@ const routeRequiredCapabilities = {
   'GET /sites/:siteId/opportunities/top-paid': 'opportunity:read',
   'GET /sites/:siteId/opportunities/by-status/:status': 'opportunity:read',
   'GET /sites/:siteId/opportunities/:opportunityId': 'opportunity:read',
+  'POST /sites/:siteId/opportunities/by-urls': 'opportunity:read',
+  'POST /sites/:siteId/suggestions/by-urls': 'suggestion:read',
   'POST /sites/:siteId/opportunities': 'opportunity:write',
   'PATCH /sites/:siteId/opportunities/:opportunityId': 'opportunity:write',
   'DELETE /sites/:siteId/opportunities/:opportunityId': 'opportunity:write',
@@ -683,6 +703,7 @@ const routeRequiredCapabilities = {
 
   // Fixes
   'GET /sites/:siteId/fixes': 'fixEntity:read',
+  'GET /sites/:siteId/deployed-opportunities': 'fixEntity:read',
   'GET /sites/:siteId/opportunities/:opportunityId/fixes': 'fixEntity:read',
   'GET /sites/:siteId/opportunities/:opportunityId/fixes/by-status/:status': 'fixEntity:read',
   'GET /sites/:siteId/opportunities/:opportunityId/fixes/:fixId': 'fixEntity:read',
@@ -731,7 +752,9 @@ const routeRequiredCapabilities = {
   'GET /sites/:siteId/llmo/edge-optimize-status': 'site:read',
   'GET /sites/:siteId/llmo/probes/edge-optimize': 'site:read',
   'GET /sites/:siteId/llmo/brand-claims': 'site:read',
+  'GET /sites/:siteId/llmo/brand-claims/weeks': 'site:read',
   'POST /sites/:siteId/llmo/brand-claims/request': 'site:write',
+  'POST /sites/:siteId/llmo/brand-claims/feedback': 'site:read',
   'GET /sites/:siteId/llmo/strategy/demo/brand-presence': 'site:read',
   'GET /sites/:siteId/llmo/strategy/demo/recommendations': 'site:read',
   'GET /llmo/agentic-traffic/global': 'report:read',

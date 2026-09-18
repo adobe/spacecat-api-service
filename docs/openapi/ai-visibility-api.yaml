@@ -7,7 +7,15 @@ x-ai-vis-domain: &domainParam
   name: domain
   in: query
   required: true
-  description: The brand domain to query (e.g. `adobe.com`)
+  description: >-
+    The brand target to query. Accepts a bare host (`adobe.com`), a subdomain
+    (`quickbooks.intuit.com`), or a host with a subfolder path
+    (`coca-cola.com/us/en/brands/smartwater`, URL-encode the `/`). The value
+    determines `search_type` scoping (see the per-endpoint description). An
+    empty or malformed value returns `400`.
+    Subfolder (path) targets are supported on most endpoints, but **rejected with
+    `400 unsupported_target`** by `competitors/metrics` and the `cited-sources`
+    endpoints, whose upstream RPCs cannot scope below a registrable domain.
   schema:
     type: string
     example: adobe.com
@@ -1501,9 +1509,10 @@ ai-visibility-v1-brand-competitors-stats:
       `CompetitorService.Stats` (v2). The response is native protobuf JSON (camelCase) without
       additional field mapping.
       Optional `engine` selects one LLM.
-      Results are scoped by `search_type`, resolved from `domain`: a non-`www` subdomain is
-      scoped to that subdomain, while an apex domain or a bare `www` host is scoped to the
-      registrable domain.
+      Results are scoped by `search_type`, resolved from `domain` by precedence: a non-empty
+      subfolder path (`coca-cola.com/us/en`) is scoped to that subfolder (`SUBFOLDER`); else a
+      non-`www` subdomain is scoped to that subdomain (`SUBDOMAIN`); else an apex domain or a
+      bare `www` host is scoped to the registrable domain (`DOMAIN`).
       Each `byDate` row carries an additive `isoDate` field that the previous v1
       `CompetitorsMetrics.Stats` response did not return.
     operationId: getAiVisibilityV1BrandCompetitorsStats

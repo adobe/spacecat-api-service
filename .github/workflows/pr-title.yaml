@@ -1,0 +1,25 @@
+name: PR Title
+
+# Re-validates the PR title on `edited` events only. The main CI workflow
+# (ci.yaml) dropped `edited` from its `pull_request` trigger because a title/body
+# edit fired the entire reusable service-ci workflow (~23 billable job-min, ~5
+# org-shared runner slots) just to re-run the title check. This runs only that
+# check -- one sub-minute job, one slot -- so a title fixed via edit (no new
+# commit) is still validated. Title validation on opened/synchronize/reopened/
+# ready_for_review continues to run inside ci.yaml's reusable `validate-pr-title`
+# job; this workflow deliberately covers only the `edited` gap (no overlap).
+on:
+  pull_request:
+    types: [edited]
+
+permissions:
+  pull-requests: read
+
+jobs:
+  validate-pr-title:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate PR title
+        uses: amannn/action-semantic-pull-request@v6
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -21,7 +21,9 @@ import {
 import { cleanupHeaderValue } from '@adobe/helix-shared-utils';
 
 import { createSerenityTransport } from '../support/serenity/rest-transport.js';
-import { isSemrushTransportError, unwrapTransportCause } from '../support/serenity/errors.js';
+import {
+  ERROR_CODES, isSemrushTransportError, unwrapTransportCause,
+} from '../support/serenity/errors.js';
 import {
   resolveBrandWorkspace,
   clearBrandWorkspaceCache,
@@ -34,9 +36,29 @@ import {
   validateAsync,
   BULK_PROMPTS_MAX_ITEMS,
   resolveCallerId,
+  assertCreatePromptTagLimits,
 } from '../support/serenity/handlers/prompts.js';
-import { createAndEnqueueJob } from '../support/serenity/async-job-runner.js';
+import { createAndEnqueueJob, PROMISE_PAIR_SEMRUSH } from '../support/serenity/async-job-runner.js';
 import { CLASSIFY_PROMPTS_JOB_TYPE } from '../support/serenity/handlers/classify-prompts-job.js';
+import { SEMRUSH_MARKET_GENERATION_JOB_TYPE } from '../support/serenity/handlers/semrush-market-generation-job.js';
+import {
+  isAsyncPromptGenEnabled,
+  resolveStableImsUserId,
+  callerMayReauth,
+  toGenerationJobDto,
+  maybeEnqueueMarketGeneration,
+} from '../support/serenity/async-prompt-gen.js';
+import { loadJobScopedToCaller } from '../support/async-job-access.js';
+import { claimJobForReauth } from '../support/serenity/job-lease.js';
+import { collectAliasNames } from '../support/serenity/brand-aliases.js';
+import { ORIGIN_VALUE } from '../support/serenity/prompt-tags.js';
+import {
+  BULK_TAGS_JOB_TYPE,
+  BULK_TAGS_PUBLIC_JOB_TYPE,
+  handleBulkTags,
+  handleBulkTagsSubworkspace,
+  pageBulkFailures,
+} from '../support/serenity/handlers/bulk-tags-job.js';
 import {
   handleListMarkets,
   handleGetMarket,
@@ -64,26 +86,52 @@ import {
   handleBulkDeletePromptsSubworkspace,
 } from '../support/serenity/handlers/prompts-subworkspace.js';
 import {
+  handleFinalizePrompts,
+  handleFinalizePromptsSubworkspace,
+} from '../support/serenity/handlers/prompts-finalize.js';
+import {
   handleCreateTag,
   handleCreateTagSubworkspace,
   handleUpdateTag,
   handleUpdateTagSubworkspace,
   handleDeleteTag,
   handleDeleteTagSubworkspace,
+  handleTagImpact,
+  handleTagImpactSubworkspace,
 } from '../support/serenity/handlers/tags.js';
+import {
+  handleSearchTags,
+  handleSearchTagsSubworkspace,
+  tagSearchUnavailableError,
+} from '../support/serenity/handlers/tag-search.js';
+import {
+  isTagSearchDisabled,
+  resolveTagTreeBudgets,
+} from '../support/serenity/tag-search-constants.js';
 import { ensureSubworkspace, decommissionBrandWorkspace } from '../support/serenity/workspace-lifecycle.js';
-import { isSerenityActiveForBrand } from '../support/serenity/serenity-active.js';
+import {
+  isSerenityActiveForBrand,
+  isTagMultiDimensionActiveForBrand,
+} from '../support/serenity/serenity-active.js';
 import { MAX_TOPICS_ON_CREATE } from '../support/serenity/brand-provisioning.js';
 import { resolveDefaultModelIds } from '../support/serenity/default-models.js';
 import { marketForGeoTargetId } from '../support/serenity/locations.js';
 import { brandNeedles, classifyBrandedTag } from '../support/serenity/branded-classifier.js';
 import { computeWriteDeadline } from '../support/serenity/intent-classification.js';
 import AccessControlUtil from '../support/access-control-util.js';
-import { resolveBrandUuid } from '../support/prompts-storage.js';
+import { isServicePrincipal, resolveBrandUuid } from '../support/prompts-storage.js';
 import {
   getBrandAliases, getBrandUrlSources, getBrandCompetitors, updateBrand, getBrandBaseSiteId,
 } from '../support/brands-storage.js';
-import { ErrorWithStatusCode, resolveSemrushImsToken as resolveImsTokenViaPromise } from '../support/utils.js';
+import {
+  ErrorWithStatusCode,
+  resolveSemrushImsToken as resolveImsTokenViaPromise,
+  getIMSPromiseToken,
+  resolvePromisePair,
+  getRawPromiseToken,
+  getSemrushPair,
+  exchangePromiseTokenResponse,
+} from '../support/utils.js';
 import {
   ensureMarketSite,
   resolveSiteIdentity,
@@ -112,6 +160,30 @@ const MAX_MARKETS = 50;
  */
 function safeError(msg) {
   return cleanupHeaderValue(String(msg || '')).slice(0, MAX_ERR_MSG_LEN);
+}
+
+/**
+ * The brand's display name for a generation request: the explicit
+ * `brandDisplayName`, else the first `brandNames` entry, else empty.
+ */
+function resolveBrandName(body) {
+  if (hasText(body?.brandDisplayName)) {
+    return body.brandDisplayName;
+  }
+  return Array.isArray(body?.brandNames) ? (body.brandNames[0] ?? '') : '';
+}
+
+function headerValue(headers, name) {
+  if (!headers || typeof headers !== 'object') {
+    return undefined;
+  }
+  if (typeof headers.get === 'function') {
+    return headers.get(name) ?? undefined;
+  }
+  const wanted = name.toLowerCase();
+  const entry = Object.entries(headers)
+    .find(([key]) => key.toLowerCase() === wanted);
+  return entry?.[1];
 }
 
 /**
@@ -158,7 +230,38 @@ function parsedQuery(context) {
     const n = parseInt(raw.limit, 10);
     out.limit = Number.isFinite(n) ? n : null;
   }
+  if (raw.failureLimit !== undefined) {
+    const n = parseInt(raw.failureLimit, 10);
+    out.failureLimit = Number.isFinite(n) ? n : null;
+  }
   return out;
+}
+
+const PUBLIC_JOB_ERROR_CODES = new Set([
+  ERROR_CODES.INVALID_REQUEST,
+  ERROR_CODES.PROMPT_NOT_FOUND,
+  ERROR_CODES.SERENITY_UPSTREAM_ERROR,
+  ERROR_CODES.TAG_LIMIT_EXCEEDED,
+  ERROR_CODES.INCOMPATIBLE_TAG_TAXONOMY,
+  ERROR_CODES.PROMPT_CORPUS_INCOMPLETE,
+]);
+
+function publicJobError(error) {
+  if (!error || typeof error !== 'object') {
+    return null;
+  }
+  const code = PUBLIC_JOB_ERROR_CODES.has(error.code) ? error.code : ERROR_CODES.JOB_FAILED;
+  let message = 'The background job failed';
+  if (code === ERROR_CODES.SERENITY_UPSTREAM_ERROR) {
+    message = 'Upstream request failed';
+  } else if (code !== ERROR_CODES.JOB_FAILED && typeof error.message === 'string') {
+    message = safeError(error.message).slice(0, 256) || message;
+  }
+  return {
+    code,
+    message,
+    retryable: error.retryable === true,
+  };
 }
 
 function errorTokenForStatus(status) {
@@ -172,13 +275,41 @@ function errorTokenForStatus(status) {
   }
 }
 
+/** @param {string} code @param {unknown} details @returns {object | undefined} */
+function publicErrorDetails(code, details) {
+  if (!details || typeof details !== 'object') {
+    return undefined;
+  }
+  const value = /** @type {any} */ (details);
+  if (code === ERROR_CODES.TAG_LIMIT_EXCEEDED
+    && Number.isInteger(value.attemptedCount)
+    && Number.isInteger(value.maxPromptTagIds)) {
+    return {
+      attemptedCount: value.attemptedCount,
+      maxPromptTagIds: value.maxPromptTagIds,
+    };
+  }
+  if (code === ERROR_CODES.TAG_FILTER_TOO_LARGE
+    && Number.isInteger(value.attemptedCount)
+    && Number.isInteger(value.maxTagFilterValues)) {
+    return {
+      attemptedCount: value.attemptedCount,
+      maxTagFilterValues: value.maxTagFilterValues,
+    };
+  }
+  if (code === ERROR_CODES.TAG_TREE_LIMIT_EXCEEDED
+    && ['parents', 'nodes', 'pages', 'duration'].includes(value.budget)
+    && Number.isInteger(value.maximum)
+    && value.maximum > 0) {
+    return {
+      budget: value.budget,
+      maximum: value.maximum,
+    };
+  }
+  return undefined;
+}
+
 /**
- * Request-context ids for the structured upstream-error log line
- * (SITES-49993): the tenant ids from the route plus the resolved Semrush
- * workspace from `authorize` — the latter is what attributes a
- * ProjectEngineApiError (which carries no ids of its own) to a tenant.
- * `auth` is the hoisted `authorize` result and may still be undefined (or its
- * `{error}` variant) when the throw happened before/inside authorization.
  * @param {object} [ctx]
  * @param {{ brandUuid?: string, workspaceId?: string | null }} [auth]
  * @returns {Record<string, unknown>}
@@ -199,8 +330,28 @@ function mapError(e, log, reqCtx = {}) {
     // error token in the response envelope; falls back to the status-based
     // default for plain throws.
     const errorToken = e.code && hasText(e.code) ? e.code : errorTokenForStatus(status);
+    const details = publicErrorDetails(errorToken, /** @type {any} */ (e).details);
+    // `serenityLogged` is set ad hoc by project-provisioning.js's
+    // cleanupAndRethrow, not declared on ErrorWithStatusCode itself.
+    const alreadyLogged = /** @type {{ serenityLogged?: boolean }} */ (e).serenityLogged;
+    if (e.code === ERROR_CODES.MAIN_BRAND_BENCHMARK_INVARIANT && !alreadyLogged) {
+      // The client-facing message is deliberately generic (LLMO-7421 review) —
+      // log the workspace/project/count detail server-side only, via the
+      // error's own properties. Skipped when `e.serenityLogged` is already set
+      // (project-provisioning.js's cleanupAndRethrow logged this exact failure
+      // on the flat provisioning path) so both provisioning paths log the
+      // invariant exactly once, not twice on one path and once on the other.
+      // reqCtx passed as a structured field, not string-interpolated into the
+      // message, so it can't be mistaken for (or exploit) log-format control
+      // characters in a caller-controlled value (MysticatBot review).
+      log?.error?.('Serenity controller error', { reqCtx, error: e });
+    }
     return createResponse(
-      { error: errorToken, message: safeError(e.message) },
+      {
+        error: errorToken,
+        message: safeError(e.message),
+        ...(details ? { details } : {}),
+      },
       status,
     );
   }
@@ -238,9 +389,11 @@ function mapError(e, log, reqCtx = {}) {
       message: 'Upstream request failed',
     }, 502);
   }
-  // Not an upstream error: keep the Error as the second argument — the stack
-  // is the useful part here — and carry the tenant ids in the message.
-  log.error(`Serenity controller error ${JSON.stringify(reqCtx)}`, err);
+  // Not an upstream error: reqCtx passed as a structured field (not
+  // JSON.stringify'd into the message string), matching the benchmark
+  // invariant branch above — a caller-controlled reqCtx value can't be
+  // mistaken for log-format control characters this way (MysticatBot review).
+  log.error('Serenity controller error', { reqCtx, error: err });
   return createResponse(
     { error: 'internalServerError', message: 'Internal server error' },
     500,
@@ -550,9 +703,10 @@ function SerenityController(context, log, env) {
         : await handleListPrompts(
           transport,
           ctx.dataAccess,
-          auth.brandUuid,
-          auth.workspaceId,
+          /** @type {string} */ (auth.brandUuid),
+          /** @type {string} */ (auth.workspaceId),
           parsedQuery(ctx),
+          log,
         );
       return createResponse(result, 200);
     } catch (e) {
@@ -563,7 +717,6 @@ function SerenityController(context, log, env) {
   const createPrompts = async (ctx) => {
     let auth;
     try {
-      const imsToken = await resolveSemrushImsToken(ctx);
       auth = await authorize(ctx);
       if (auth.error) {
         return auth.error;
@@ -581,6 +734,20 @@ function SerenityController(context, log, env) {
       // `workspaceId`/`parentWorkspaceId` give it the sub-workspace and org parent
       // it needs.
       const body = ctx.data || {};
+      // Deliberately diverges from the v2/Postgres path's `deriveV2PromptOrigin`
+      // (prompts-storage.js), which reuses this SAME `isServicePrincipal`
+      // classifier but then honours a service principal's declared body
+      // `origin` (defaulting to `human` when absent/invalid). This proxy route
+      // has no such body-origin write surface — `origin` is a closed,
+      // server-owned dimension here (see makePromptTagInjector) — so a service
+      // principal is unconditionally `ai`, matching origin-dimension.md §3's
+      // "Serenity AI generation, service, ai" row. That is safe only because no
+      // non-AI service principal is expected to front this route; if one ever
+      // does (e.g. an S2S integration proxying human-authored prompts), it
+      // would be silently mislabeled `ai` with no way to declare `human`.
+      const originValue = isServicePrincipal(ctx?.attributes?.authInfo)
+        ? ORIGIN_VALUE.AI
+        : ORIGIN_VALUE.HUMAN;
       if (validateAsync(body)) {
         const prompts = Array.isArray(body.prompts) ? body.prompts : [];
         if (prompts.length === 0) {
@@ -595,8 +762,36 @@ function SerenityController(context, log, env) {
             400,
           );
         }
+        assertCreatePromptTagLimits(prompts);
+        // Async classification writes to Semrush in the background on the caller's
+        // behalf, so it REQUIRES the caller's promise token + semrush audience — there
+        // is no other way to carry the caller's auth forward to a job that outlives
+        // the request. Forward it as-is (do NOT exchange it here): the worker's own
+        // exchangeAndPersistPromiseToken does the first real exchange when it picks
+        // up the job. Minting a NEW token via the EMITTER pair here was the bug this
+        // fixes — it required IMS_PROMISE_SEMRUSH_EMITTER_* config that was never
+        // provisioned since no other path ever needed it (every other serenity path
+        // only EXCHANGES the caller's token via the CONSUMER pair, which is provisioned).
+        const rawPromiseToken = getRawPromiseToken(ctx);
+        if (!rawPromiseToken) {
+          return createResponse(
+            { error: 'invalidRequest', message: `Async prompt classification requires a promise token; send the ${X_PROMISE_TOKEN_HEADER} header` },
+            400,
+          );
+        }
+        // resolvePromisePair throws ErrorWithStatusCode(400) on an unknown audience —
+        // let it propagate to the outer catch/mapError, which maps it to the same 400.
+        const promisePair = resolvePromisePair(ctx);
+        if (promisePair !== getSemrushPair()) {
+          return createResponse(
+            { error: 'invalidRequest', message: 'Async prompt classification requires the x-promise-audience: semrush header' },
+            400,
+          );
+        }
         const job = await createAndEnqueueJob(ctx, {
           jobType: CLASSIFY_PROMPTS_JOB_TYPE,
+          promiseToken: { promise_token: rawPromiseToken },
+          promisePair,
           metadata: {
             mode: 'create',
             brandId: auth.brandUuid,
@@ -613,14 +808,22 @@ function SerenityController(context, log, env) {
             workspaceId: auth.workspaceId,
             parentWorkspaceId: auth.parentWorkspaceId,
             prompts,
+            originValue,
             // Authorship (LLMO-6289): capture the caller id at enqueue time — from
             // the auth profile, never the forwarded upstream bearer — so the async
             // classify-on-create job stamps the submitter, not the job runner.
             callerId: resolveCallerId(ctx),
           },
         });
-        return accepted({ jobId: job.getId(), status: job.getStatus() });
+        return accepted({
+          jobId: job.getId(), jobType: 'classifyPrompts', status: job.getStatus(),
+        });
       }
+      // Sync branch only: resolve (and thereby EXCHANGE) the caller's promise token
+      // into an IMS access token for the immediate upstream write. The async branch
+      // above never reaches here — it forwards the raw token to the worker instead,
+      // so the token is exchanged at most once (avoiding a wasted first exchange).
+      const imsToken = await resolveSemrushImsToken(ctx);
       const transport = buildTransport(ctx, imsToken);
       const classifyPromptType = await buildPromptTypeClassifier(ctx, auth.brandUuid);
       // serenity-docs#32: one shared write-budget deadline for classify + create
@@ -645,6 +848,7 @@ function SerenityController(context, log, env) {
             // SERENITY_QUOTA_ALERTS_ENABLED) — never required, a no-op when unset.
             orgId: ctx?.params?.spaceCatId,
             brandId: auth.brandUuid,
+            originValue,
           },
         )
         : await handleCreatePrompts(
@@ -658,7 +862,47 @@ function SerenityController(context, log, env) {
           ctx.env,
           writeDeadline,
           callerId,
-          { orgId: ctx?.params?.spaceCatId },
+          { orgId: ctx?.params?.spaceCatId, originValue },
+        );
+      return createResponse(result, 200);
+    } catch (e) {
+      return mapError(e, log, reqCtxOf(ctx, auth));
+    }
+  };
+
+  /**
+   * POST .../serenity/prompts/finalize (serenity-docs#472 §4 / LLMO-7533).
+   *
+   * Short-term recovery surface for the browser-orchestrated CSV-import path:
+   * publishes whatever draft state is currently owed for a set of
+   * (geoTargetId, languageCode) slices, independent of how the import that
+   * staged those drafts ended. The project for each slice is resolved through
+   * the SAME org/brand/workspace authorization `createPrompts` uses — the body
+   * carries only slices, never a caller-supplied project or workspace id.
+   */
+  const finalizePrompts = async (ctx) => {
+    let auth;
+    try {
+      auth = await authorize(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const imsToken = await resolveSemrushImsToken(ctx);
+      const transport = buildTransport(ctx, imsToken);
+      const result = auth.mode === 'subworkspace'
+        ? await handleFinalizePromptsSubworkspace(
+          transport,
+          /** @type {string} */ (auth.workspaceId),
+          ctx.data || {},
+          log,
+        )
+        : await handleFinalizePrompts(
+          transport,
+          ctx.dataAccess,
+          /** @type {string} */ (auth.brandUuid),
+          /** @type {string} */ (auth.workspaceId),
+          ctx.data || {},
+          log,
         );
       return createResponse(result, 200);
     } catch (e) {
@@ -749,6 +993,81 @@ function SerenityController(context, log, env) {
           { orgId: ctx?.params?.spaceCatId, env: ctx.env || env, callerId },
         );
       return createResponse(result, 200);
+    } catch (e) {
+      return mapError(e, log, reqCtxOf(ctx, auth));
+    }
+  };
+
+  const bulkTagPrompts = async (ctx) => {
+    let auth;
+    try {
+      auth = await authorize(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      // Bulk tags need an access token during acceptance to validate the
+      // taxonomy/filter, and the worker needs the rotated token produced by
+      // that same exchange. Do not let the generic enqueue path mint a new
+      // emitter token from the Spacecat session.
+      const rawPromiseToken = getRawPromiseToken(ctx);
+      if (!rawPromiseToken) {
+        return createResponse(
+          { error: 'invalidRequest', message: `Bulk tag operations require a promise token; send the ${X_PROMISE_TOKEN_HEADER} header` },
+          400,
+        );
+      }
+      const promisePair = resolvePromisePair(ctx);
+      if (promisePair !== getSemrushPair()) {
+        return createResponse(
+          { error: 'invalidRequest', message: 'Bulk tag operations require the x-promise-audience: semrush header' },
+          400,
+        );
+      }
+      let exchangeResult;
+      try {
+        exchangeResult = await exchangePromiseTokenResponse(ctx, rawPromiseToken, promisePair);
+      } catch (error) {
+        log.error('serenity bulk tags: promise token exchange failed', { error: error?.message });
+        throw new ErrorWithStatusCode('Invalid or expired promise token', 401);
+      }
+      const imsToken = exchangeResult.access_token;
+      const rotatedPromiseToken = {
+        promise_token: exchangeResult.promise_token,
+        expires_in: exchangeResult.promise_token_expires_in,
+        ...(exchangeResult.token_type ? { token_type: exchangeResult.token_type } : {}),
+      };
+      const transport = buildTransport(ctx, imsToken);
+      const callerId = resolveCallerId(ctx);
+      const idempotencyKey = headerValue(ctx?.pathInfo?.headers, 'idempotency-key');
+      const result = auth.mode === 'subworkspace'
+        ? await handleBulkTagsSubworkspace(
+          ctx,
+          transport,
+          /** @type {string} */ (auth.brandUuid),
+          /** @type {string} */ (ctx?.params?.spaceCatId),
+          /** @type {string} */ (auth.workspaceId),
+          ctx.data || {},
+          callerId,
+          idempotencyKey,
+          log,
+          rotatedPromiseToken,
+          /** @type {string} */ (promisePair),
+        )
+        : await handleBulkTags(
+          ctx,
+          transport,
+          ctx.dataAccess,
+          /** @type {string} */ (auth.brandUuid),
+          /** @type {string} */ (ctx?.params?.spaceCatId),
+          /** @type {string} */ (auth.workspaceId),
+          ctx.data || {},
+          callerId,
+          idempotencyKey,
+          log,
+          rotatedPromiseToken,
+          /** @type {string} */ (promisePair),
+        );
+      return createResponse(result.body, result.status);
     } catch (e) {
       return mapError(e, log, reqCtxOf(ctx, auth));
     }
@@ -922,6 +1241,12 @@ function SerenityController(context, log, env) {
         // Optional prompt/topic generation for this market, defaulting to off so
         // the endpoint's behavior is unchanged unless the caller opts in.
         const genMarketTopics = effectiveBody.generatePrompts === true;
+        // Async prompt generation (flag-gated, #3194): when on, the market is
+        // created WITHOUT synchronous generation, and prompts are generated by the
+        // async DRS-backed producer after the 201 below (additive `promptGeneration`
+        // handle). Default off → unchanged synchronous behavior.
+        const asyncGenMarket = isAsyncPromptGenEnabled(ctx.env) && genMarketTopics;
+        const syncGenMarketTopics = genMarketTopics && !asyncGenMarket;
         // LLMO-6554: this brand is already active, so its sub-workspace (and
         // likely other markets) already exists — mirror whichever models those
         // markets already track, falling back to the canonical net-new default
@@ -944,8 +1269,8 @@ function SerenityController(context, log, env) {
           brandPointerReloader(ctx, auth.brandUuid),
           {
             modelIds: newMarketModelIds,
-            generateTopics: genMarketTopics,
-            topicCap: genMarketTopics ? MAX_TOPICS_ON_CREATE : 0,
+            generateTopics: syncGenMarketTopics,
+            topicCap: syncGenMarketTopics ? MAX_TOPICS_ON_CREATE : 0,
             brandAliases,
             brandUrlSources,
             competitors,
@@ -1051,6 +1376,45 @@ function SerenityController(context, log, env) {
               generatePrompts: genMarketTopics,
               promptCount: successBody.promptCount,
             });
+          }
+
+          // Async prompt generation: enqueue the DRS-backed producer for this
+          // just-created market and annotate the response so the UI can poll.
+          if (asyncGenMarket && projectId) {
+            // Best-effort: an async-generation enqueue failure must never 500 (or
+            // otherwise fail) a market that was already created + published — the
+            // same fault isolation activate/createBrandForOrg use. The market simply
+            // stands without a promptGeneration handle; the user can retry.
+            try {
+              const successBody2 = /** @type {MarketCreateSuccessBody} */ (result.body);
+              const org = await ctx.dataAccess.Organization.findById(ctx?.params?.spaceCatId);
+              const promptGeneration = await maybeEnqueueMarketGeneration(ctx, {
+                enabled: true,
+                generateRequested: true,
+                producerParams: {
+                  transport,
+                  brandId: auth.brandUuid,
+                  siteId: suppliedSiteId ?? undefined,
+                  imsOrgId: org?.getImsOrgId?.() ?? ctx?.params?.spaceCatId,
+                  workspaceId: successBody2.workspaceId ?? auth.workspaceId,
+                  geoTargetId: successBody2.geoTargetId,
+                  languageCode: successBody2.languageCode,
+                  market: effectiveBody.market,
+                  brandDomain: effectiveBody.brandDomain,
+                  baseUrl: effectiveBody.primaryUrl ?? effectiveBody.brandDomain,
+                  brand: resolveBrandName(effectiveBody),
+                  aliases: collectAliasNames(brandAliases, effectiveBody.market),
+                  callerId: resolveCallerId(ctx),
+                },
+              });
+              if (promptGeneration) {
+                result.body = /** @type {any} */ ({ ...result.body, promptGeneration });
+              }
+            } catch (e) {
+              log?.warn?.('serenity create-market: async prompt-generation enqueue failed (non-fatal)', {
+                brandId: auth.brandUuid, market: effectiveBody.market, error: e?.message,
+              });
+            }
           }
         }
       } else {
@@ -1174,6 +1538,55 @@ function SerenityController(context, log, env) {
     }
   };
 
+  const searchTags = async (ctx) => {
+    let auth;
+    try {
+      const imsToken = await resolveSemrushImsToken(ctx);
+      auth = await authorize(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const runtimeEnv = { ...(env ?? {}), ...(ctx.env ?? {}) };
+      // These checks run after the normal org/brand authorization gate but
+      // before transport construction and project/market resolution.
+      if (isTagSearchDisabled(runtimeEnv)) {
+        throw tagSearchUnavailableError('Tag search is disabled in this environment');
+      }
+      // Same brand-level flag that unlocks arbitrary-depth authoring: search and
+      // deep authoring roll out together (LLMO/serenity_tag_multi_dimension).
+      if (!await isTagMultiDimensionActiveForBrand(
+        ctx,
+        ctx.params.spaceCatId,
+        /** @type {string} */ (auth.brandUuid),
+        log,
+      )) {
+        return notFound('Tag search is not active for this brand');
+      }
+      const budgets = resolveTagTreeBudgets(runtimeEnv, log);
+      const transport = buildTransport(ctx, imsToken);
+      const result = auth.mode === 'subworkspace'
+        ? await handleSearchTagsSubworkspace(
+          transport,
+          /** @type {string} */ (auth.workspaceId),
+          extractQuery(ctx),
+          log,
+          budgets,
+        )
+        : await handleSearchTags(
+          transport,
+          ctx.dataAccess,
+          /** @type {string} */ (auth.brandUuid),
+          /** @type {string} */ (auth.workspaceId),
+          extractQuery(ctx),
+          log,
+          budgets,
+        );
+      return createResponse(result, 200);
+    } catch (e) {
+      return mapError(e, log, reqCtxOf(ctx, auth));
+    }
+  };
+
   /**
    * POST /serenity/tags — register a bare-named prompt tag beneath a dimension
    * root, on a single market (the (geoTargetId, languageCode) slice in the body).
@@ -1194,6 +1607,12 @@ function SerenityController(context, log, env) {
         return auth.error;
       }
       const transport = buildTransport(ctx, imsToken);
+      const unboundedTagAuthoring = await isTagMultiDimensionActiveForBrand(
+        ctx,
+        ctx.params.spaceCatId,
+        /** @type {string} */ (auth.brandUuid),
+        log,
+      );
       // authorize() guarantees brandUuid (404s a missing brand) and, in flat
       // mode, a non-null workspaceId (404s 'no semrush_workspace_id'); assert
       // the invariant for the typed handler, mirroring activate().
@@ -1203,6 +1622,7 @@ function SerenityController(context, log, env) {
           /** @type {string} */ (auth.workspaceId),
           ctx.data || {},
           log,
+          unboundedTagAuthoring,
         )
         : await handleCreateTag(
           transport,
@@ -1211,6 +1631,7 @@ function SerenityController(context, log, env) {
           /** @type {string} */ (auth.workspaceId),
           ctx.data || {},
           log,
+          unboundedTagAuthoring,
         );
       return createResponse(result.body, result.status);
     } catch (e) {
@@ -1238,6 +1659,12 @@ function SerenityController(context, log, env) {
         return auth.error;
       }
       const transport = buildTransport(ctx, imsToken);
+      const unboundedTagAuthoring = await isTagMultiDimensionActiveForBrand(
+        ctx,
+        ctx.params.spaceCatId,
+        /** @type {string} */ (auth.brandUuid),
+        log,
+      );
       const result = auth.mode === 'subworkspace'
         ? await handleUpdateTagSubworkspace(
           transport,
@@ -1245,6 +1672,7 @@ function SerenityController(context, log, env) {
           tagId,
           ctx.data || {},
           log,
+          unboundedTagAuthoring,
         )
         : await handleUpdateTag(
           transport,
@@ -1254,6 +1682,7 @@ function SerenityController(context, log, env) {
           tagId,
           ctx.data || {},
           log,
+          unboundedTagAuthoring,
         );
       return createResponse(result.body, result.status);
     } catch (e) {
@@ -1280,6 +1709,7 @@ function SerenityController(context, log, env) {
         return auth.error;
       }
       const transport = buildTransport(ctx, imsToken);
+      const ifMatch = headerValue(ctx?.pathInfo?.headers, 'if-match');
       if (auth.mode === 'subworkspace') {
         await handleDeleteTagSubworkspace(
           transport,
@@ -1287,6 +1717,7 @@ function SerenityController(context, log, env) {
           tagId,
           parsedQuery(ctx),
           log,
+          ifMatch,
         );
       } else {
         await handleDeleteTag(
@@ -1297,9 +1728,46 @@ function SerenityController(context, log, env) {
           tagId,
           parsedQuery(ctx),
           log,
+          ifMatch,
         );
       }
       return noContent();
+    } catch (e) {
+      return mapError(e, log, reqCtxOf(ctx, auth));
+    }
+  };
+
+  const getTagImpact = async (ctx) => {
+    let auth;
+    try {
+      const imsToken = await resolveSemrushImsToken(ctx);
+      const { tagId } = ctx?.params || {};
+      if (!hasText(tagId)) {
+        throw new ErrorWithStatusCode('Missing tagId', 400);
+      }
+      auth = await authorize(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const transport = buildTransport(ctx, imsToken);
+      const result = auth.mode === 'subworkspace'
+        ? await handleTagImpactSubworkspace(
+          transport,
+          /** @type {string} */ (auth.workspaceId),
+          tagId,
+          parsedQuery(ctx),
+          log,
+        )
+        : await handleTagImpact(
+          transport,
+          ctx.dataAccess,
+          /** @type {string} */ (auth.brandUuid),
+          /** @type {string} */ (auth.workspaceId),
+          tagId,
+          parsedQuery(ctx),
+          log,
+        );
+      return createResponse(result.body, result.status, { ETag: result.body.revision });
     } catch (e) {
       return mapError(e, log, reqCtxOf(ctx, auth));
     }
@@ -1396,7 +1864,7 @@ function SerenityController(context, log, env) {
         return forbidden('User does not have access to this organization');
       }
       const transport = buildTransport(ctx, imsToken);
-      const result = await listLanguageCatalog(transport);
+      const result = await listLanguageCatalog(transport, log);
       return createResponse(result, 200);
     } catch (e) {
       // Org-level route: no authorize()/workspace resolution here.
@@ -1477,6 +1945,11 @@ function SerenityController(context, log, env) {
       // default false preserves the historical activate behavior (projects
       // published without generated prompts).
       const generatePrompts = body.generatePrompts === true;
+      // Async prompt generation (flag-gated, #3194): when on, markets publish
+      // without synchronous generation and the DRS-backed producer is enqueued
+      // per live market after the loop. Default off → unchanged behavior.
+      const asyncGenActivate = isAsyncPromptGenEnabled(ctx.env) && generatePrompts;
+      const syncGenPrompts = generatePrompts && !asyncGenActivate;
       const wasPending = brand.getStatus?.() === 'pending';
       // The Semrush project domain: the request's brandDomain.
       // SITES-49448 retired the pending_semrush_provisioning stash, so brandDomain
@@ -1718,8 +2191,10 @@ function SerenityController(context, log, env) {
               modelIds: marketModelIds,
               // Generate topics/prompts only when the brand opted in. When false
               // the project is published empty (no prompts) — today's default.
-              generateTopics: generatePrompts,
-              topicCap: generatePrompts ? MAX_TOPICS_ON_CREATE : 0,
+              // Under async generation the synchronous path is skipped here and
+              // the producer runs after the loop.
+              generateTopics: syncGenPrompts,
+              topicCap: syncGenPrompts ? MAX_TOPICS_ON_CREATE : 0,
               // SITES-49206: Semrush no longer enforces AI limits, so an empty-units
               // publish no longer 405s — every market now publishes with 'require'
               // regardless of whether it has models/prompts attached.
@@ -1826,6 +2301,52 @@ function SerenityController(context, log, env) {
         // one resolved primary URL and thus one mirror Site, so by-brand picks
         // up every row this batch wrote (including 409/already-live ones).
         await linkSiteToLiveRows(ctx.dataAccess, auth.brandUuid, linkedSiteId, log);
+      }
+
+      // Async prompt generation: enqueue the DRS-backed producer per freshly-created
+      // market (status 201; a 409 is an already-live idempotent re-activate whose
+      // prompts were handled at first create). Best-effort — a producer hiccup must
+      // never downgrade a live market. Annotates each market's body so the UI polls.
+      if (asyncGenActivate) {
+        const org = await ctx.dataAccess.Organization.findById(ctx?.params?.spaceCatId);
+        const imsOrgId = org?.getImsOrgId?.() ?? ctx?.params?.spaceCatId;
+        const aliasByMarket = (mkt) => collectAliasNames(brandAliases, mkt);
+        for (const r of results) {
+          if (r.status !== 201 || !r.body || !('geoTargetId' in r.body)) {
+            // eslint-disable-next-line no-continue
+            continue;
+          }
+          const successBody = /** @type {MarketCreateSuccessBody} */ (r.body);
+          try {
+            // eslint-disable-next-line no-await-in-loop
+            const promptGeneration = await maybeEnqueueMarketGeneration(ctx, {
+              enabled: true,
+              generateRequested: true,
+              producerParams: {
+                transport,
+                brandId: auth.brandUuid,
+                siteId: linkedSiteId ?? undefined,
+                imsOrgId,
+                workspaceId: successBody.workspaceId ?? workspaceId,
+                geoTargetId: successBody.geoTargetId,
+                languageCode: successBody.languageCode,
+                market: r.market,
+                brandDomain,
+                baseUrl: brandPrimaryUrl ?? brandDomain,
+                brand: resolveBrandName(body),
+                aliases: aliasByMarket(r.market),
+                callerId,
+              },
+            });
+            if (promptGeneration) {
+              r.body = /** @type {any} */ ({ ...r.body, promptGeneration });
+            }
+          } catch (e) {
+            log?.warn?.('serenity activate: async prompt-generation enqueue failed (non-fatal)', {
+              market: r.market, languageCode: r.languageCode, error: e?.message,
+            });
+          }
+        }
       }
 
       let fullySucceeded = allMarketsLive && siteLinked;
@@ -2053,12 +2574,35 @@ function SerenityController(context, log, env) {
       if (!job || jobBrandId !== auth.brandUuid) {
         return notFound(`Job not found: ${jobId}`);
       }
+      const metadata = job.getMetadata?.() ?? {};
+      /** @type {'classifyPrompts' | 'bulkTags' | 'tagImpact'} */
+      let publicJobType = 'classifyPrompts';
+      if (metadata.jobType === BULK_TAGS_JOB_TYPE) {
+        publicJobType = BULK_TAGS_PUBLIC_JOB_TYPE;
+      } else if (metadata.jobType === 'serenity-tag-impact') {
+        publicJobType = 'tagImpact';
+      }
+      const query = parsedQuery(ctx);
+      const failureLimit = typeof query.failureLimit === 'number'
+        ? query.failureLimit
+        : undefined;
+      const status = job.getStatus();
+      const rawResult = status === 'COMPLETED' ? job.getResult?.() ?? null : null;
+      const result = publicJobType === BULK_TAGS_PUBLIC_JOB_TYPE && rawResult
+        ? pageBulkFailures(
+          rawResult,
+          typeof query.failureCursor === 'string' ? query.failureCursor : undefined,
+          failureLimit,
+        )
+        : rawResult;
+      const error = status === 'FAILED' ? publicJobError(job.getError?.()) : null;
       return createResponse(
         {
           jobId: job.getId(),
-          status: job.getStatus(),
-          result: job.getResult?.() ?? null,
-          error: job.getError?.() ?? null,
+          jobType: publicJobType,
+          status,
+          result,
+          error,
         },
         200,
       );
@@ -2067,19 +2611,170 @@ function SerenityController(context, log, env) {
     }
   };
 
+  /**
+   * GET .../serenity/markets/generation/jobs/:jobId — poll an async Semrush-market
+   * prompt-generation job (#3194). Guarded by the shared `loadJobScopedToCaller`
+   * primitive (SEC-5): a jobType allowlist + site-ownership scoping, so a caller
+   * holding an arbitrary job UUID can never read another tenant's job or a
+   * token-bearing job of a different type. Returns a strict, token-SAFE DTO.
+   */
+  const getSemrushMarketGenerationJobStatus = async (ctx) => {
+    let auth;
+    try {
+      auth = await authorize(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const { jobId } = ctx?.params || {};
+      if (!isValidUUID(jobId)) {
+        return createResponse({ error: 'invalidRequest', message: 'jobId must be a UUID' }, 400);
+      }
+      const { job, error: accessError } = await loadJobScopedToCaller(ctx, {
+        jobId,
+        allowedJobTypes: [SEMRUSH_MARKET_GENERATION_JOB_TYPE],
+        resolveOwnerSiteId: (j) => j.getMetadata?.()?.siteId,
+      });
+      if (accessError) {
+        return accessError;
+      }
+      // Additional brand scoping on the serenity surface (the route is brand-scoped).
+      // The producer stamps `metadata.siteId` (from the brand's base site), so
+      // `loadJobScopedToCaller` already enforced site-level ownership. Since #3232
+      // hardened that primitive fail-closed, a resolver-supplied job with NO siteId is
+      // DENIED (404) there before reaching here — so this brand-match is a
+      // defense-in-depth SECONDARY control on top of the site-ownership check, not a
+      // fallback for siteless jobs.
+      if (job.getMetadata?.()?.brandId !== auth.brandUuid) {
+        return notFound(`Job not found: ${jobId}`);
+      }
+      return createResponse(toGenerationJobDto(job), 200);
+    } catch (e) {
+      return mapError(e, log, reqCtxOf(ctx, auth));
+    }
+  };
+
+  /**
+   * POST .../serenity/markets/generation/jobs/:jobId/reauth — re-authenticate a
+   * generation job whose promise token IMS rejected (`NEEDS_REAUTH`), Gap 6.
+   * STRICT, fail-closed authorization: the caller must be the SAME IMS user
+   * (single stable `user_id` claim) that originally enqueued the job — never the
+   * permissive display-identity resolver. Accepts a replacement token ONLY with
+   * the explicit Semrush pair, updates the record atomically, and re-enqueues the
+   * SAME job id.
+   */
+  const reauthSemrushMarketGenerationJob = async (ctx) => {
+    let auth;
+    try {
+      auth = await authorize(ctx);
+      if (auth.error) {
+        return auth.error;
+      }
+      const { jobId } = ctx?.params || {};
+      if (!isValidUUID(jobId)) {
+        return createResponse({ error: 'invalidRequest', message: 'jobId must be a UUID' }, 400);
+      }
+      const { job, error: accessError } = await loadJobScopedToCaller(ctx, {
+        jobId,
+        allowedJobTypes: [SEMRUSH_MARKET_GENERATION_JOB_TYPE],
+        resolveOwnerSiteId: (j) => j.getMetadata?.()?.siteId,
+      });
+      if (accessError) {
+        return accessError;
+      }
+      const metadata = job.getMetadata?.() ?? {};
+      // Brand scoping (the route is brand-scoped). Site-level ownership was already
+      // enforced by loadJobScopedToCaller (the producer stamps metadata.siteId; a
+      // resolver-supplied job with no siteId is denied fail-closed there since #3232).
+      // This brand-match is a defense-in-depth secondary control (see the poll note).
+      if (metadata.brandId !== auth.brandUuid) {
+        return notFound(`Job not found: ${jobId}`);
+      }
+
+      // Strict, fail-closed identity check — the re-authenticating caller must be
+      // the original enqueuer (one stable claim only).
+      if (!callerMayReauth(metadata.imsUserId, resolveStableImsUserId(ctx))) {
+        return forbidden('Only the original requester may re-authenticate this job');
+      }
+
+      // Fast pre-check for a clean 409 + to avoid minting a token when the job
+      // plainly is not awaiting reauth. The atomic guarantee is the CAS below.
+      if (job.getStatus() !== 'FAILED' || job.getError?.()?.code !== 'NEEDS_REAUTH') {
+        return createResponse(
+          { error: 'invalidState', message: 'Job is not awaiting re-authentication' },
+          409,
+        );
+      }
+
+      // The replacement token MUST be presented on the explicit Semrush pair.
+      if (resolvePromisePair(ctx) !== PROMISE_PAIR_SEMRUSH) {
+        return createResponse(
+          {
+            error: 'invalidRequest',
+            message: 'Re-authentication requires the Semrush promise pair (x-promise-audience: semrush)',
+          },
+          400,
+        );
+      }
+
+      // Atomic reauth claim (TOCTOU): flip FAILED+NEEDS_REAUTH → IN_PROGRESS with a
+      // conditional PostgREST update. Exactly one of two racing reauth requests wins
+      // and proceeds to mint; the loser gets a 409 and never mints a second token
+      // (which would bank an unexchanged, un-invalidated promise token).
+      const claimed = await claimJobForReauth(ctx, jobId);
+      if (!claimed) {
+        return createResponse(
+          { error: 'invalidState', message: 'Job is not awaiting re-authentication' },
+          409,
+        );
+      }
+      const promiseTokenResponse = await getIMSPromiseToken(ctx, PROMISE_PAIR_SEMRUSH);
+
+      // Persist the fresh token + clear the failure on the SAME record (the CAS
+      // already flipped status to IN_PROGRESS), then re-enqueue the SAME job id.
+      job.setMetadata({
+        ...metadata,
+        promiseToken: promiseTokenResponse,
+        promisePair: PROMISE_PAIR_SEMRUSH,
+      });
+      job.setStatus('IN_PROGRESS');
+      job.setError(null);
+      await job.save();
+      // Re-enqueue onto the DEDICATED market-jobs queue (infra#780), not the
+      // shared classify/bulk-tags queue.
+      await ctx.sqs.sendMessage(ctx.env.SERENITY_MARKET_JOBS_QUEUE_URL, {
+        jobId: job.getId(),
+        type: SEMRUSH_MARKET_GENERATION_JOB_TYPE,
+      });
+
+      return accepted({
+        jobId: job.getId(),
+        jobType: 'generateSemrushMarket',
+        status: job.getStatus(),
+      });
+    } catch (e) {
+      return mapError(e, log, reqCtxOf(ctx, auth));
+    }
+  };
+
   return {
     listPrompts,
     createPrompts,
+    finalizePrompts,
     getPromptsJobStatus,
+    getSemrushMarketGenerationJobStatus,
+    reauthSemrushMarketGenerationJob,
     updatePrompt,
+    bulkTagPrompts,
     bulkDeletePrompts,
     listMarkets,
     getMarket,
     createMarket,
     deleteMarket,
     listTags,
+    searchTags,
     createTag,
     updateTag,
+    getTagImpact,
     deleteTag,
     listModels,
     listOrgModels,

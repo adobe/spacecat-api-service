@@ -27,10 +27,23 @@ import {
   validateDeferPublish,
   validateAsync,
   reconcilePublishErrors,
+  listAllProjectPrompts,
+  listFacetedPrompts,
+  normalizePromptTagSelection,
+  resolveFacetedTagFilter,
   resolveCallerId,
   buildCreateMetadata,
   buildUpdateMetadata,
   resolveSort,
+  validateTagIds,
+  capUpdateTagIds,
+  parseUpdatePromptBody,
+  MAX_PROMPT_TEXT_LENGTH,
+  FACETED_PROMPT_LIST_MAX_PAGES,
+  buildTargetedPromptIndex,
+  buildExistingPromptIndex,
+  MAX_PAGE_LIMIT,
+  MAX_PROMPT_INDEX_PAGES,
 } from '../../../../src/support/serenity/handlers/prompts.js';
 import { ErrorWithStatusCode } from '../../../../src/support/utils.js';
 import { SerenityTransportError } from '../../../../src/support/serenity/rest-transport.js';
@@ -51,6 +64,368 @@ use(sinonChai);
 
 const BRAND = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
 const WORKSPACE = 'workspace-1';
+
+function fakeLog() {
+  return {
+    debug: sinon.stub(),
+    info: sinon.stub(),
+    warn: sinon.stub(),
+    error: sinon.stub(),
+  };
+}
+
+function promptTagSnapshot() {
+  const item = (id, name, depth, fullPath, compatibility = {
+    state: 'canonical',
+    reason: null,
+  }) => ({
+    id,
+    name,
+    parentId: fullPath.at(-2)?.id ?? null,
+    rootName: 'tag',
+    rootId: 'tag-root',
+    depth,
+    fullPath,
+    childrenCount: 0,
+    promptsCount: 0,
+    compatibility,
+  });
+  const root = { id: 'tag-root', name: 'tag' };
+  const familyA = { id: 'family-a', name: 'Family A' };
+  const familyB = { id: 'family-b', name: 'Family B' };
+  const familyC = { id: 'family-c', name: 'Family C' };
+  const middleC = { id: 'middle-c', name: 'Middle C' };
+  const items = [
+    item(root.id, root.name, 1, [root]),
+    item(familyA.id, familyA.name, 2, [root, familyA]),
+    item('leaf-a-1', 'Leaf A1', 3, [root, familyA, { id: 'leaf-a-1', name: 'Leaf A1' }]),
+    item('leaf-a-2', 'Leaf A2', 3, [root, familyA, { id: 'leaf-a-2', name: 'Leaf A2' }]),
+    item(familyB.id, familyB.name, 2, [root, familyB]),
+    item('leaf-b', 'Leaf B', 3, [root, familyB, { id: 'leaf-b', name: 'Leaf B' }]),
+    item(familyC.id, familyC.name, 2, [root, familyC]),
+    item(middleC.id, middleC.name, 3, [root, familyC, middleC]),
+    item('too-deep', 'Too Deep', 4, [
+      root,
+      familyC,
+      middleC,
+      { id: 'too-deep', name: 'Too Deep' },
+    ]),
+    item('read-only', 'Bad__Name', 2, [
+      root,
+      { id: 'read-only', name: 'Bad__Name' },
+    ], { state: 'readOnly', reason: 'separatorInName' }),
+  ];
+  return { items, byId: new Map(items.map((entry) => [entry.id, entry])) };
+}
+
+describe('plain tag limits', () => {
+  it('rejects rather than truncates an over-limit tag selection', () => {
+    let thrown;
+    try {
+      validateTagIds(Array.from({ length: 51 }, (_, index) => `tag-${index}`));
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).to.be.instanceOf(ErrorWithStatusCode);
+    expect(thrown.code).to.equal(ERROR_CODES.TAG_LIMIT_EXCEEDED);
+  });
+
+  it('preserves an in-limit PATCH replacement set without reordering or dropping ids', async () => {
+    const tagIds = ['customer-a', TAG_IDS.originHuman, 'customer-b', TAG_IDS.sourceConfig];
+    expect(await capUpdateTagIds(tagIds)).to.deep.equal(tagIds);
+  });
+
+  it('rejects an over-limit PATCH replacement set with tagLimitExceeded', async () => {
+    const tagIds = Array.from({ length: 51 }, (_, index) => `tag-${index}`);
+    await expect(capUpdateTagIds(tagIds)).to.be.rejected.then((error) => {
+      expect(error.status).to.equal(409);
+      expect(error.code).to.equal(ERROR_CODES.TAG_LIMIT_EXCEEDED);
+    });
+  });
+});
+
+describe('faceted prompt guard helpers', () => {
+  afterEach(() => sinon.restore());
+
+  it('fails closed when the complete prompt corpus reaches the 20K ceiling', async () => {
+    const fullPage = Array.from({ length: 200 }, (_, index) => ({ id: `prompt-${index}` }));
+    const listPromptsByTags = sinon.stub().resolves({ items: fullPage });
+
+    await expect(listAllProjectPrompts(
+      { listPromptsByTags },
+      WORKSPACE,
+      'project-1',
+      {},
+      fakeLog(),
+    )).to.be.rejected.then((error) => {
+      expect(error.status).to.equal(503);
+      expect(error.code).to.equal(ERROR_CODES.PROMPT_CORPUS_INCOMPLETE);
+    });
+    expect(listPromptsByTags).to.have.callCount(100);
+  });
+
+  it('fails closed after a caller-supplied maxPages instead of walking to 100 (issue #3283)', async () => {
+    const fullPage = Array.from({ length: 200 }, (_, index) => ({ id: `prompt-${index}` }));
+    const listPromptsByTags = sinon.stub().resolves({ items: fullPage });
+
+    await expect(listAllProjectPrompts(
+      { listPromptsByTags },
+      WORKSPACE,
+      'project-1',
+      { maxPages: FACETED_PROMPT_LIST_MAX_PAGES },
+      fakeLog(),
+    )).to.be.rejected.then((error) => {
+      expect(error.status).to.equal(503);
+      expect(error.code).to.equal(ERROR_CODES.PROMPT_CORPUS_INCOMPLETE);
+    });
+    expect(listPromptsByTags).to.have.callCount(FACETED_PROMPT_LIST_MAX_PAGES);
+  });
+
+  it('succeeds without hitting the ceiling when the corpus finishes exactly at maxPages', async () => {
+    const listPromptsByTags = sinon.stub().callsFake((_workspaceId, _projectId, { page }) => {
+      const isLastPage = page === FACETED_PROMPT_LIST_MAX_PAGES;
+      const size = isLastPage ? 50 : 200;
+      return Promise.resolve({
+        items: Array.from({ length: size }, (_, index) => ({ id: `p-${page}-${index}` })),
+      });
+    });
+
+    const items = await listAllProjectPrompts(
+      { listPromptsByTags },
+      WORKSPACE,
+      'project-1',
+      { maxPages: FACETED_PROMPT_LIST_MAX_PAGES },
+      fakeLog(),
+    );
+
+    expect(listPromptsByTags).to.have.callCount(FACETED_PROMPT_LIST_MAX_PAGES);
+    expect(items).to.have.lengthOf((FACETED_PROMPT_LIST_MAX_PAGES - 1) * 200 + 50);
+  });
+
+  it('walks the full 100-page/20K ceiling when no maxPages override is given (async callers, e.g. bulk-tags-job, are unaffected)', async () => {
+    const fullPage = Array.from({ length: 200 }, (_, index) => ({ id: `prompt-${index}` }));
+    const listPromptsByTags = sinon.stub().resolves({ items: fullPage });
+
+    await expect(listAllProjectPrompts(
+      { listPromptsByTags },
+      WORKSPACE,
+      'project-1',
+      undefined,
+      fakeLog(),
+    )).to.be.rejected.then((error) => {
+      expect(error.code).to.equal(ERROR_CODES.PROMPT_CORPUS_INCOMPLETE);
+    });
+    expect(listPromptsByTags).to.have.callCount(100);
+  });
+
+  it('listFacetedPrompts (the interactive search-as-you-type path) fails fast at FACETED_PROMPT_LIST_MAX_PAGES, not 100, when 2+ tag families are selected (issue #3283)', async () => {
+    const fullPage = Array.from({ length: 200 }, (_, index) => ({ id: `prompt-${index}` }));
+    const listProjectTags = makeListProjectTagsStub();
+    const listPromptsByTags = sinon.stub().resolves({ items: fullPage });
+    const transport = { listProjectTags, listPromptsByTags };
+
+    // Two distinct dimension roots (category, intent) -> two AND-across-family
+    // groups, which is the only case that still requires the full walk after
+    // the 0/1-group fast path was added.
+    await expect(listFacetedPrompts(
+      transport,
+      WORKSPACE,
+      'project-1',
+      {
+        geoTargetId: 2840,
+        languageCode: 'en',
+        page: 1,
+        limit: 50,
+        tagIds: [TAG_IDS.categoryRunningShoes, TAG_IDS.intentInformational],
+      },
+      fakeLog(),
+    )).to.be.rejected.then((error) => {
+      expect(error.status).to.equal(503);
+      expect(error.code).to.equal(ERROR_CODES.PROMPT_CORPUS_INCOMPLETE);
+    });
+    expect(listPromptsByTags).to.have.callCount(FACETED_PROMPT_LIST_MAX_PAGES);
+  });
+
+  it('listFacetedPrompts skips the full corpus walk and issues one upstream call when no tag facets are selected (0 groups)', async () => {
+    const listProjectTags = makeListProjectTagsStub();
+    const page = Array.from({ length: 30 }, (_, index) => ({ id: `prompt-${index}`, name: `Prompt ${index}`, tags: [] }));
+    const listPromptsByTags = sinon.stub().resolves({ items: page, total: 999999 });
+    const transport = { listProjectTags, listPromptsByTags };
+
+    const result = await listFacetedPrompts(
+      transport,
+      WORKSPACE,
+      'project-1',
+      {
+        geoTargetId: 2840,
+        languageCode: 'en',
+        page: 1,
+        limit: 50,
+        tagIds: [],
+      },
+      fakeLog(),
+    );
+
+    expect(listPromptsByTags).to.have.callCount(1);
+    expect(listPromptsByTags.firstCall.args[2]).to.include({ page: 1, limit: 50 });
+    expect(listPromptsByTags.firstCall.args[2].tag_ids).to.deep.equal([]);
+    expect(result.items).to.have.lengthOf(30);
+    // Fewer than `limit` returned -> provably the last (only) page -> exact
+    // count from page math, not the untrustworthy upstream `total`.
+    expect(result.total).to.equal(30);
+  });
+
+  it('listFacetedPrompts skips the full corpus walk and issues one upstream call when exactly one tag family is selected (1 group)', async () => {
+    const listProjectTags = makeListProjectTagsStub();
+    const fullPage = Array.from({ length: 50 }, (_, index) => ({ id: `prompt-${index}`, name: `Prompt ${index}`, tags: [] }));
+    const listPromptsByTags = sinon.stub().resolves({ items: fullPage, total: 500 });
+    const transport = { listProjectTags, listPromptsByTags };
+
+    const result = await listFacetedPrompts(
+      transport,
+      WORKSPACE,
+      'project-1',
+      {
+        geoTargetId: 2840,
+        languageCode: 'en',
+        page: 1,
+        limit: 50,
+        tagIds: [TAG_IDS.categoryRunningShoes],
+      },
+      fakeLog(),
+    );
+
+    expect(listPromptsByTags).to.have.callCount(1);
+    expect(listPromptsByTags.firstCall.args[2]).to.include({ page: 1, limit: 50 });
+    expect(listPromptsByTags.firstCall.args[2].tag_ids).to.include(TAG_IDS.categoryRunningShoes);
+    expect(result.items).to.have.lengthOf(50);
+    // A full page came back -> not provably the last page -> trust upstream's total.
+    expect(result.total).to.equal(500);
+  });
+
+  it('rejects unknown, root, and read-only facet ids while accepting deep tags', async () => {
+    const snapshot = promptTagSnapshot();
+    for (const tagId of ['missing', 'tag-root', 'read-only']) {
+      // eslint-disable-next-line no-await-in-loop
+      await expect(resolveFacetedTagFilter(
+        {},
+        WORKSPACE,
+        'project-1',
+        [tagId],
+        fakeLog(),
+        snapshot,
+      )).to.be.rejected.then((error) => {
+        expect(error.status).to.equal(400);
+        expect(error.code).to.equal(ERROR_CODES.INVALID_TAG_FILTER);
+      });
+    }
+    const deep = await resolveFacetedTagFilter(
+      {},
+      WORKSPACE,
+      'project-1',
+      ['too-deep'],
+      fakeLog(),
+      snapshot,
+    );
+    expect([...deep.groups[0]]).to.deep.equal(['too-deep']);
+  });
+
+  it('expands a selected family into OR alternatives and keeps families as AND groups', async () => {
+    const result = await resolveFacetedTagFilter(
+      {},
+      WORKSPACE,
+      'project-1',
+      ['family-a', 'leaf-b'],
+      fakeLog(),
+      promptTagSnapshot(),
+    );
+
+    expect(result.groups).to.have.lengthOf(2);
+    expect([...result.groups[0]]).to.have.members(['family-a', 'leaf-a-1', 'leaf-a-2']);
+    expect([...result.groups[1]]).to.deep.equal(['leaf-b']);
+    expect(result.candidateIds).to.have.members([
+      'family-a',
+      'leaf-a-1',
+      'leaf-a-2',
+      'leaf-b',
+    ]);
+  });
+
+  it('derives the first-level family and expands a selected deep ancestor', async () => {
+    const result = await resolveFacetedTagFilter(
+      {},
+      WORKSPACE,
+      'project-1',
+      ['middle-c'],
+      fakeLog(),
+      promptTagSnapshot(),
+    );
+
+    expect(result.groups).to.have.lengthOf(1);
+    expect([...result.groups[0]]).to.have.members(['middle-c', 'too-deep']);
+    expect(result.candidateIds).to.have.members(['middle-c', 'too-deep']);
+  });
+
+  it('auto-adds the complete plain-tag ancestor chain on prompt replacement', async () => {
+    const result = await normalizePromptTagSelection(
+      {},
+      WORKSPACE,
+      'project-1',
+      ['leaf-a-1'],
+      fakeLog(),
+      promptTagSnapshot(),
+    );
+
+    expect(result).to.have.members(['leaf-a-1', 'family-a']);
+
+    const deep = await normalizePromptTagSelection(
+      {},
+      WORKSPACE,
+      'project-1',
+      ['too-deep'],
+      fakeLog(),
+      promptTagSnapshot(),
+    );
+    expect(deep).to.have.members(['too-deep', 'middle-c', 'family-c']);
+  });
+
+  it('rejects dimension roots on prompt replacement', async () => {
+    await expect(normalizePromptTagSelection(
+      {},
+      WORKSPACE,
+      'project-1',
+      ['tag-root'],
+      fakeLog(),
+      promptTagSnapshot(),
+    )).to.be.rejected.then((error) => {
+      expect(error.status).to.equal(400);
+      expect(error.code).to.equal(ERROR_CODES.INVALID_TAG_FILTER);
+    });
+  });
+
+  it('enforces MAX_PROMPT_TAG_IDS after required parent insertion', async () => {
+    const tagIds = [
+      'leaf-a-1',
+      ...Array.from({ length: 49 }, (_, index) => `retained-${index}`),
+    ];
+
+    await expect(normalizePromptTagSelection(
+      {},
+      WORKSPACE,
+      'project-1',
+      tagIds,
+      fakeLog(),
+      promptTagSnapshot(),
+    )).to.be.rejected.then((error) => {
+      expect(error.status).to.equal(409);
+      expect(error.code).to.equal(ERROR_CODES.TAG_LIMIT_EXCEEDED);
+      expect(error.details).to.deep.include({
+        attemptedCount: 51,
+        maxPromptTagIds: 50,
+      });
+    });
+  });
+});
 
 // Matches one v3 create item `{ name, metadata }` (LLMO-6289): the create stamp
 // carries all four keys with created_* === updated_*. `by` is the expected
@@ -93,14 +468,6 @@ function makeDataAccess(projects) {
       allByBrandId: sinon.stub().resolves(projects),
       findBySlice: sinon.stub(),
     },
-  };
-}
-
-function fakeLog() {
-  return {
-    info: sinon.stub(),
-    warn: sinon.stub(),
-    error: sinon.stub(),
   };
 }
 
@@ -209,7 +576,11 @@ describe('handlers/prompts.js — handleListPrompts', () => {
 
     expect(result.items[0].semrushPromptId).to.equal('');
     expect(result.items[0].tags).to.deep.equal([{
-      id: '', name: 'consideration', parentId: null, path: null,
+      id: '',
+      name: 'consideration',
+      parentId: null,
+      path: null,
+      compatibility: { state: 'unverified', reason: 'taxonomyNotLoaded' },
     }]);
   });
 
@@ -283,7 +654,11 @@ describe('handlers/prompts.js — handleListPrompts', () => {
       // A ROOT tag omits parent_id/path upstream, so its parentage is null and
       // its own name is its dimension.
       tags: [{
-        id: 't-1', name: 'awareness', parentId: null, path: null,
+        id: 't-1',
+        name: 'awareness',
+        parentId: null,
+        path: null,
+        compatibility: { state: 'unverified', reason: 'taxonomyNotLoaded' },
       }],
       createdAt: null,
       createdBy: null,
@@ -391,6 +766,109 @@ describe('handlers/prompts.js — handleListPrompts', () => {
     expect(body.tag_ids).to.deep.equal([]);
   });
 
+  it('passes the request log through the flat faceted listing path', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(project);
+    const transport = {
+      listProjectTags: makeListProjectTagsStub(),
+      listPromptsByTags: sinon.stub().resolves({
+        items: [{
+          id: 'sem-1',
+          name: 'prompt',
+          tags: [{
+            id: TAG_IDS.categoryRunningShoes,
+            name: 'Running Shoes',
+            parent_id: TAG_IDS.categoryRoot,
+            path: [{ id: TAG_IDS.categoryRoot, name: 'category' }],
+          }],
+        }],
+      }),
+    };
+    const log = fakeLog();
+
+    // Two distinct dimension families (category, intent) so the request still
+    // walks listAllProjectPrompts, and this test can keep verifying `log` is
+    // threaded through to it. A single family now takes the fast path added
+    // for issue #3283's follow-up and never reaches that walk.
+    await handleListPrompts(
+      transport,
+      dataAccess,
+      BRAND,
+      WORKSPACE,
+      {
+        geoTargetId: 2840,
+        languageCode: 'en',
+        tagIds: [TAG_IDS.categoryRunningShoes, TAG_IDS.intentInformational],
+        tagFilterMode: 'faceted-v1',
+      },
+      log,
+    );
+
+    expect(log.debug).to.have.been.calledWith(
+      'listAllProjectPrompts: faceted prompt page read',
+      sinon.match({ projectId: 'proj-us-en', upstreamPromptsScanned: 1 }),
+    );
+  });
+
+  it('loads one complete taxonomy and returns authoritative compatibility without selected facets', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-faceted-empty-tags', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([]);
+    dataAccess.BrandSemrushProject.findBySlice.resolves(project);
+    const levels = dimensionTreeLevels();
+    levels[TAG_IDS.categoryRoot] = [
+      ...levels[TAG_IDS.categoryRoot],
+      {
+        id: 'read-only-category',
+        name: 'Read__Only',
+        parent_id: TAG_IDS.categoryRoot,
+        path: [{ id: TAG_IDS.categoryRoot, name: 'category' }],
+      },
+    ];
+    const listProjectTags = makeListProjectTagsStub(levels);
+    const transport = {
+      listProjectTags,
+      listPromptsByTags: sinon.stub().resolves({
+        items: [{
+          id: 'sem-1',
+          name: 'prompt',
+          tags: [
+            {
+              id: TAG_IDS.categoryRunningShoes,
+              name: 'Running Shoes',
+              parent_id: TAG_IDS.categoryRoot,
+              path: [{ id: TAG_IDS.categoryRoot, name: 'category' }],
+            },
+            {
+              id: 'read-only-category',
+              name: 'Read__Only',
+              parent_id: TAG_IDS.categoryRoot,
+              path: [{ id: TAG_IDS.categoryRoot, name: 'category' }],
+            },
+          ],
+        }],
+      }),
+    };
+
+    const result = await handleListPrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      geoTargetId: 2840,
+      languageCode: 'en',
+      tagFilterMode: 'faceted-v1',
+    });
+
+    expect(result.items[0].tags.map((tag) => tag.compatibility)).to.deep.equal([
+      { state: 'canonical', reason: null },
+      { state: 'readOnly', reason: 'separatorInName' },
+    ]);
+    // One complete snapshot walks each populated tree level once. The fixture
+    // has roots, category, intent, origin, type, and one category child level.
+    expect(listProjectTags).to.have.callCount(6);
+  });
+
   it('buildTagsOf: skips null/non-object entries and objects without name; coerces numeric id', async () => {
     const project = makeProject({
       semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
@@ -423,18 +901,30 @@ describe('handlers/prompts.js — handleListPrompts', () => {
 
     expect(result.items[0].tags).to.deep.equal([
       {
-        id: '', name: 'name-only', parentId: null, path: null,
+        id: '',
+        name: 'name-only',
+        parentId: null,
+        path: null,
+        compatibility: { state: 'unverified', reason: 'taxonomyNotLoaded' },
       },
       {
-        id: '42', name: 'valid', parentId: null, path: null,
+        id: '42',
+        name: 'valid',
+        parentId: null,
+        path: null,
+        compatibility: { state: 'unverified', reason: 'taxonomyNotLoaded' },
       },
       {
-        id: '', name: 'string-tag', parentId: null, path: null,
+        id: '',
+        name: 'string-tag',
+        parentId: null,
+        path: null,
+        compatibility: { state: 'unverified', reason: 'taxonomyNotLoaded' },
       },
     ]);
   });
 
-  it('slices tagIds to MAX_TAG_IDS (50) before forwarding', async () => {
+  it('rejects tagIds over MAX_TAG_IDS instead of truncating', async () => {
     const project = makeProject({
       semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
     });
@@ -446,14 +936,12 @@ describe('handlers/prompts.js — handleListPrompts', () => {
     };
     const tooMany = Array.from({ length: 55 }, (_, i) => `tag-${i}`);
 
-    await handleListPrompts(transport, dataAccess, BRAND, WORKSPACE, {
+    await expect(handleListPrompts(transport, dataAccess, BRAND, WORKSPACE, {
       geoTargetId: 2840, languageCode: 'en', tagIds: tooMany,
+    })).to.be.rejected.then((error) => {
+      expect(error.code).to.equal(ERROR_CODES.INVALID_TAG_FILTER);
     });
-
-    const [, , body] = transport.listPromptsByTags.firstCall.args;
-    expect(body.tag_ids).to.have.lengthOf(50);
-    expect(body.tag_ids[0]).to.equal('tag-0');
-    expect(body.tag_ids[49]).to.equal('tag-49');
+    expect(transport.listPromptsByTags).to.not.have.been.called;
   });
 
   it('uses resp.total when returned item count equals the page limit', async () => {
@@ -499,7 +987,10 @@ describe('handlers/prompts.js — handleListPrompts', () => {
 
 describe('handlers/prompts.js — handleCreatePrompts', () => {
   it('400s on empty prompts array (no upstream call)', async () => {
-    const transport = { createPromptsWithMetadata: sinon.stub() };
+    const transport = {
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
+      createPromptsWithMetadata: sinon.stub(),
+    };
     const dataAccess = makeDataAccess([]);
 
     await expect(handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
@@ -512,7 +1003,10 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
   // prevents an authenticated caller from submitting 10k+ items inside API
   // Gateway's request envelope. Defense-in-depth, not a correctness gate.
   it('400s when the prompts array exceeds maxItems=500', async () => {
-    const transport = { createPromptsWithMetadata: sinon.stub() };
+    const transport = {
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
+      createPromptsWithMetadata: sinon.stub(),
+    };
     const dataAccess = makeDataAccess([]);
     const tooMany = Array.from({ length: 501 }, (_, i) => ({
       text: `prompt ${i}`,
@@ -524,6 +1018,29 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
     await expect(handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
       prompts: tooMany,
     }, fakeLog())).to.be.rejectedWith(ErrorWithStatusCode, /maxItems=500/);
+    expect(transport.createPromptsWithMetadata).not.to.have.been.called;
+  });
+
+  it('rejects an over-limit CREATE tag set before project lookup or tag injection', async () => {
+    const transport = { createPromptsWithMetadata: sinon.stub() };
+    const dataAccess = makeDataAccess([]);
+
+    await expect(handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      prompts: [{
+        text: 'over limit',
+        tagIds: Array.from({ length: 51 }, (_, index) => `tag-${index}`),
+        geoTargetId: 2840,
+        languageCode: 'en',
+      }],
+    }, fakeLog())).to.be.rejected.then((error) => {
+      expect(error.status).to.equal(409);
+      expect(error.code).to.equal(ERROR_CODES.TAG_LIMIT_EXCEEDED);
+      expect(error.details).to.deep.equal({
+        attemptedCount: 51,
+        maxPromptTagIds: 50,
+      });
+    });
+    expect(dataAccess.BrandSemrushProject.allByBrandId).not.to.have.been.called;
     expect(transport.createPromptsWithMetadata).not.to.have.been.called;
   });
 
@@ -539,7 +1056,10 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
   // `projects || []` fallback kicks in and every input is skipped.
   it('skips every input when allByBrandId returns null', async () => {
     const dataAccess = makeDataAccess(null);
-    const transport = { createPromptsWithMetadata: sinon.stub() };
+    const transport = {
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
+      createPromptsWithMetadata: sinon.stub(),
+    };
 
     const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
       prompts: [{
@@ -557,7 +1077,10 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
   // returns null and the row lands in `skipped` with `text: ''`.
   it('skips inputs with no text field (raw.text undefined → empty string)', async () => {
     const dataAccess = makeDataAccess([]);
-    const transport = { createPromptsWithMetadata: sinon.stub() };
+    const transport = {
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
+      createPromptsWithMetadata: sinon.stub(),
+    };
 
     const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
       prompts: [{ geoTargetId: 2840, languageCode: 'en', tagIds: ['tag-1'] }],
@@ -576,6 +1099,7 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
     const dataAccess = makeDataAccess([project]);
     const transport = {
       listProjectTags: makeListProjectTagsStub(),
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
       createPromptsWithMetadata: sinon.stub().rejects(new Error('opaque failure')),
       publishProject: sinon.stub().resolves(),
     };
@@ -590,7 +1114,10 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
   });
 
   it('skips inputs missing required fields', async () => {
-    const transport = { createPromptsWithMetadata: sinon.stub() };
+    const transport = {
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
+      createPromptsWithMetadata: sinon.stub(),
+    };
     const dataAccess = makeDataAccess([]);
 
     const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
@@ -608,6 +1135,7 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
     const dataAccess = makeDataAccess([project]);
     const transport = {
       listProjectTags: makeListProjectTagsStub(),
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
       createPromptsWithMetadata: sinon.stub().resolves({
         page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'hello' }], existing_count: 0,
       }),
@@ -630,15 +1158,108 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
       geoTargetId: 2840,
       languageCode: 'en',
       text: 'hello',
-      tagIds: ['tag-cat-1', 'tag-child-1', TAG_IDS.sourceConfig, TAG_IDS.intentInformational],
+      tagIds: [
+        'tag-cat-1', 'tag-child-1', TAG_IDS.originHuman,
+        TAG_IDS.sourceConfig, TAG_IDS.intentInformational,
+      ],
     });
     expect(transport.createPromptsWithMetadata).to.have.been.calledOnceWithExactly(
       WORKSPACE,
       'proj-us-en',
       [createItemMatch('hello', undefined)],
-      ['tag-cat-1', 'tag-child-1', TAG_IDS.sourceConfig, TAG_IDS.intentInformational],
+      [
+        'tag-cat-1', 'tag-child-1', TAG_IDS.originHuman,
+        TAG_IDS.sourceConfig, TAG_IDS.intentInformational,
+      ],
     );
     expect(transport.publishProject).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en');
+  });
+
+  it('uses a trusted service-principal origin without changing source/config', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([project]);
+    const transport = {
+      listProjectTags: makeListProjectTagsStub(),
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
+      createPromptsWithMetadata: sinon.stub().resolves({
+        page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'generated prompt' }],
+      }),
+      publishProject: sinon.stub().resolves(),
+    };
+
+    const result = await handleCreatePrompts(
+      transport,
+      dataAccess,
+      BRAND,
+      WORKSPACE,
+      {
+        prompts: [{
+          text: 'generated prompt',
+          geoTargetId: 2840,
+          languageCode: 'en',
+          tagIds: ['customer-tag'],
+        }],
+      },
+      fakeLog(),
+      undefined,
+      undefined,
+      undefined,
+      'service-caller',
+      { originValue: ORIGIN_VALUE.AI },
+    );
+
+    expect(result.created[0].tagIds).to.include.members([
+      TAG_IDS.originAi,
+      TAG_IDS.sourceConfig,
+    ]);
+    expect(result.created[0].tagIds).to.not.include(TAG_IDS.originHuman);
+  });
+
+  // Regression: deleting `deriveSource` didn't just restore `origin` — it also
+  // reverted the `source` dimension's fold, so a Track-flow per-item
+  // `source: 'llm-generated'` override (a valid SOURCE_VALUES entry, accepted
+  // by normalizePromptInput's per-item override validator) now stamps a literal
+  // `llm-generated` source tag instead of the old `ai-onboarding` fold target.
+  // This path had zero coverage before (review finding).
+  it('stamps a literal llm-generated source tag for a per-item override, independent of origin', async () => {
+    const project = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+    });
+    const dataAccess = makeDataAccess([project]);
+    const transport = {
+      listProjectTags: makeListProjectTagsStub(dimensionTreeLevels({
+        [TAG_IDS.sourceRoot]: [
+          {
+            id: 'source-llm-generated',
+            name: 'llm-generated',
+            parent_id: TAG_IDS.sourceRoot,
+            path: [{ id: TAG_IDS.sourceRoot, name: 'source' }],
+          },
+        ],
+      })),
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
+      createPromptsWithMetadata: sinon.stub().resolves({
+        page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'chat prompt' }],
+      }),
+      publishProject: sinon.stub().resolves(),
+    };
+
+    const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      prompts: [{
+        text: 'chat prompt',
+        geoTargetId: 2840,
+        languageCode: 'en',
+        tagIds: ['tag-cat-1'],
+        source: 'llm-generated',
+      }],
+    }, fakeLog());
+
+    expect(result.created[0].tagIds).to.include.members([
+      'source-llm-generated',
+      TAG_IDS.originHuman,
+    ]);
   });
 
   // LLMO-5492 — deferred publish: with { publish: false } the prompt is still
@@ -653,6 +1274,7 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
     const dataAccess = makeDataAccess([project]);
     const transport = {
       listProjectTags: makeListProjectTagsStub(),
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
       createPromptsWithMetadata: sinon.stub().resolves({
         items: [{ id: 'new-sem-id', name: 'hello' }],
       }),
@@ -679,7 +1301,10 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
       semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
     });
     const dataAccess = makeDataAccess([project]);
-    const transport = { createPromptsWithMetadata: sinon.stub() };
+    const transport = {
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
+      createPromptsWithMetadata: sinon.stub(),
+    };
 
     const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
       prompts: [{
@@ -696,7 +1321,10 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
       semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
     });
     const dataAccess = makeDataAccess([project]);
-    const transport = { createPromptsWithMetadata: sinon.stub() };
+    const transport = {
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
+      createPromptsWithMetadata: sinon.stub(),
+    };
 
     const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
       prompts: [{
@@ -718,7 +1346,10 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
       semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
     });
     const dataAccess = makeDataAccess([project]);
-    const transport = { createPromptsWithMetadata: sinon.stub() };
+    const transport = {
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
+      createPromptsWithMetadata: sinon.stub(),
+    };
 
     const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
       prompts: [{
@@ -737,6 +1368,7 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
     const dataAccess = makeDataAccess([project]);
     const transport = {
       listProjectTags: makeListProjectTagsStub(),
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
       createPromptsWithMetadata: sinon.stub().resolves({
         page: 1, total: 0, items: [], existing_count: 1,
       }),
@@ -750,8 +1382,15 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
     }, fakeLog());
 
     expect(result.created[0].semrushPromptId).to.equal('');
-    expect(result.created[0].tagIds).to.deep.equal(['keep', TAG_IDS.sourceConfig, TAG_IDS.intentInformational]);
-    expect(transport.createPromptsWithMetadata).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', [createItemMatch('hello', undefined)], ['keep', TAG_IDS.sourceConfig, TAG_IDS.intentInformational]);
+    expect(result.created[0].tagIds).to.deep.equal([
+      'keep', TAG_IDS.originHuman, TAG_IDS.sourceConfig, TAG_IDS.intentInformational,
+    ]);
+    expect(transport.createPromptsWithMetadata).to.have.been.calledOnceWithExactly(
+      WORKSPACE,
+      'proj-us-en',
+      [createItemMatch('hello', undefined)],
+      ['keep', TAG_IDS.originHuman, TAG_IDS.sourceConfig, TAG_IDS.intentInformational],
+    );
   });
 
   it('returns empty semrushPromptId (not the string "undefined") when createPromptsWithMetadata returns an item with no id', async () => {
@@ -761,6 +1400,7 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
     const dataAccess = makeDataAccess([project]);
     const transport = {
       listProjectTags: makeListProjectTagsStub(),
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
       createPromptsWithMetadata: sinon.stub().resolves({
         page: 1, total: 1, items: [{ name: 'hello' }],
       }),
@@ -783,6 +1423,7 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
     const dataAccess = makeDataAccess([project]);
     const transport = {
       listProjectTags: makeListProjectTagsStub(),
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
       createPromptsWithMetadata: sinon.stub().resolves({
         page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'hello' }],
       }),
@@ -799,17 +1440,25 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
       }],
     }, fakeLog());
 
-    expect(result.created[0].tagIds).to.deep.equal(['keep', TAG_IDS.sourceConfig, TAG_IDS.intentInformational]);
-    expect(transport.createPromptsWithMetadata).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', [createItemMatch('hello', undefined)], ['keep', TAG_IDS.sourceConfig, TAG_IDS.intentInformational]);
+    expect(result.created[0].tagIds).to.deep.equal([
+      'keep', TAG_IDS.originHuman, TAG_IDS.sourceConfig, TAG_IDS.intentInformational,
+    ]);
+    expect(transport.createPromptsWithMetadata).to.have.been.calledOnceWithExactly(
+      WORKSPACE,
+      'proj-us-en',
+      [createItemMatch('hello', undefined)],
+      ['keep', TAG_IDS.originHuman, TAG_IDS.sourceConfig, TAG_IDS.intentInformational],
+    );
   });
 
-  it('caps a bulk-create tagIds array at MAX_TAG_IDS (50), mirroring the list-read query cap', async () => {
+  it('never truncates a bulk-create tagIds array above MAX_TAG_IDS (50)', async () => {
     const project = makeProject({
       semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
     });
     const dataAccess = makeDataAccess([project]);
     const transport = {
       listProjectTags: makeListProjectTagsStub(),
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
       createPromptsWithMetadata: sinon.stub().resolves({
         page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'hello' }],
       }),
@@ -817,24 +1466,19 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
     };
     const tooMany = Array.from({ length: 55 }, (_, i) => `tag-${i}`);
 
-    const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+    await expect(handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
       prompts: [{
         text: 'hello', geoTargetId: 2840, languageCode: 'en', tagIds: tooMany,
       }],
-    }, fakeLog());
-
-    // The MAX_TAG_IDS cap bounds the CALLER's tags (50); the server-derived
-    // producing `source` (config) and classified `intent` (Informational) are
-    // injected on top (`origin` no longer gets its own tag,
-    // tag-display-names.md §3), so the stored set is the 50 capped tags plus
-    // those two computed ids.
-    expect(result.created[0].tagIds).to.have.lengthOf(52);
-    expect(result.created[0].tagIds).to.deep.equal(
-      [
-        ...tooMany.slice(0, 50),
-        TAG_IDS.sourceConfig, TAG_IDS.intentInformational,
-      ],
-    );
+    }, fakeLog())).to.be.rejected.then((error) => {
+      expect(error.status).to.equal(409);
+      expect(error.code).to.equal(ERROR_CODES.TAG_LIMIT_EXCEEDED);
+      expect(error.details).to.deep.equal({
+        attemptedCount: 55,
+        maxPromptTagIds: 50,
+      });
+    });
+    expect(transport.createPromptsWithMetadata).not.to.have.been.called;
   });
 
   it('skips a create row when tagIds sanitizes to empty (every entry malformed)', async () => {
@@ -842,7 +1486,10 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
       semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
     });
     const dataAccess = makeDataAccess([project]);
-    const transport = { createPromptsWithMetadata: sinon.stub() };
+    const transport = {
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
+      createPromptsWithMetadata: sinon.stub(),
+    };
 
     const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
       prompts: [{
@@ -861,6 +1508,7 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
     const dataAccess = makeDataAccess([usEn]);
     const transport = {
       listProjectTags: makeListProjectTagsStub(),
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
       createPromptsWithMetadata: sinon.stub().resolves({
         page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'good' }],
       }),
@@ -899,6 +1547,7 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
     const err = Object.assign(new Error('rate limited'), { status: 429 });
     const transport = {
       listProjectTags: makeListProjectTagsStub(),
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
       createPromptsWithMetadata: sinon.stub().rejects(err),
       publishProject: sinon.stub().resolves(),
     };
@@ -932,6 +1581,7 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
     const dataAccess = makeDataAccess([project]);
     const transport = {
       listProjectTags: makeListProjectTagsStub(),
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
       createPromptsWithMetadata: sinon.stub().resolves({
         page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'ok' }],
       }),
@@ -964,6 +1614,7 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
     const dataAccess = makeDataAccess([project]);
     const transport = {
       listProjectTags: makeListProjectTagsStub(),
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
       createPromptsWithMetadata: sinon.stub().resolves({
         page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'ok' }],
       }),
@@ -997,6 +1648,7 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
     const log = fakeLog();
     const transport = {
       listProjectTags: makeListProjectTagsStub(),
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
       createPromptsWithMetadata: sinon.stub().resolves({
         page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'ok' }],
       }),
@@ -1049,6 +1701,31 @@ describe('handlers/prompts.js — handleCreatePrompts', () => {
 });
 
 describe('handlers/prompts.js — handleUpdatePrompt', () => {
+  it('returns 409 tagLimitExceeded before resolving the project for an over-limit tag set', async () => {
+    const dataAccess = makeDataAccess([]);
+    const result = await handleUpdatePrompt(
+      {},
+      dataAccess,
+      BRAND,
+      WORKSPACE,
+      'prompt-1',
+      {
+        text: 'updated',
+        tagIds: Array.from({ length: 51 }, (_, index) => `tag-${index}`),
+        geoTargetId: 2840,
+        languageCode: 'en',
+      },
+      fakeLog(),
+    );
+
+    expect(result.status).to.equal(409);
+    expect(result.body).to.deep.include({
+      error: ERROR_CODES.TAG_LIMIT_EXCEEDED,
+      details: { attemptedCount: 51, maxPromptTagIds: 50 },
+    });
+    expect(dataAccess.BrandSemrushProject.findBySlice).not.to.have.been.called;
+  });
+
   // Regression guard for the "drop slow path" decision: PATCH treats the
   // body as the full next state, so omitting either text or tagIds is a
   // client error. Previously omitting tags meant "preserve" and forced a
@@ -1250,6 +1927,7 @@ describe('handlers/prompts.js — handleUpdatePrompt', () => {
       patchPrompt: sinon.stub().resolves({ id: 'sem-1', name: 'next', is_updated: true }),
       updatePromptTagsByIds: sinon.stub().resolves(null),
       deletePromptsByIds: sinon.stub(),
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
       createPromptsWithMetadata: sinon.stub(),
       publishProject: sinon.stub().resolves(),
     };
@@ -2189,7 +2867,14 @@ describe('handlers/prompts.js — tag cache invalidation (Important #6)', () => 
     listPromptsByTags.onFirstCall().resolves({
       items: initialTags.map((t, i) => ({ id: `p${i}`, name: `q${i}`, tags: [t] })),
     });
-    listPromptsByTags.onSecondCall().resolves({
+    // EVERY later call answers with the mutated set, rather than pinning call 2.
+    // handleCreatePrompts now lists the project once more of its own accord (the
+    // upsert index that decides create-vs-replace), so a positional `onSecondCall`
+    // would mean the create test and its PATCH/bulk-delete siblings — which share
+    // this setup but make no such call — disagree about which call is the
+    // post-invalidation re-fetch. Neither set contains the text the create test
+    // writes, so the index build takes the create path under either answer.
+    listPromptsByTags.resolves({
       items: mutatedTags.map((t, i) => ({ id: `m${i}`, name: `q${i}`, tags: [t] })),
     });
 
@@ -2234,8 +2919,9 @@ describe('handlers/prompts.js — tag cache invalidation (Important #6)', () => 
     }, fakeLog());
 
     expect(refetched.items.map((t) => t.name)).to.deep.equal(['new-tag']);
-    // Two upstream walks: the initial cache populate + the post-invalidation re-fetch.
-    expect(transport.listPromptsByTags).to.have.callCount(2);
+    // Three upstream walks: the initial cache populate, handleCreatePrompts'
+    // upsert index build, and the post-invalidation re-fetch.
+    expect(transport.listPromptsByTags).to.have.callCount(3);
   });
 
   it('PATCH /prompts/:id invalidates the cached tag set', async () => {
@@ -2334,6 +3020,7 @@ describe('handlers/prompts.js — unified type classification (serenity-docs#31)
       const transport = {
         listProjectTags: makeListProjectTagsStub(),
         createProjectTags: sinon.stub(),
+        listPromptsByTags: sinon.stub().resolves({ items: [] }),
         createPromptsWithMetadata: sinon.stub().resolves({
           page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'is Acme good?' }],
         }),
@@ -2351,7 +3038,7 @@ describe('handlers/prompts.js — unified type classification (serenity-docs#31)
       }, fakeLog(), classifyByBrandMention);
 
       expect(result.created[0].tagIds).to.deep.equal([
-        TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded,
+        TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded, TAG_IDS.originHuman,
         TAG_IDS.sourceConfig, TAG_IDS.intentInformational,
       ]);
       expect(transport.createPromptsWithMetadata).to.have.been.calledOnceWithExactly(
@@ -2359,7 +3046,7 @@ describe('handlers/prompts.js — unified type classification (serenity-docs#31)
         'proj-us-en',
         [createItemMatch('is Acme good?', undefined)],
         [
-          TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded,
+          TAG_IDS.categoryRunningShoes, TAG_IDS.typeBranded, TAG_IDS.originHuman,
           TAG_IDS.sourceConfig, TAG_IDS.intentInformational,
         ],
       );
@@ -2371,6 +3058,7 @@ describe('handlers/prompts.js — unified type classification (serenity-docs#31)
       const dataAccess = makeDataAccess([project()]);
       const transport = {
         listProjectTags: makeListProjectTagsStub(),
+        listPromptsByTags: sinon.stub().resolves({ items: [] }),
         createPromptsWithMetadata: sinon.stub().resolves({
           page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'best running shoes' }],
         }),
@@ -2387,7 +3075,7 @@ describe('handlers/prompts.js — unified type classification (serenity-docs#31)
       }, fakeLog(), classifyByBrandMention);
 
       expect(result.created[0].tagIds).to.deep.equal([
-        TAG_IDS.categoryRunningShoes, TAG_IDS.typeNonBranded,
+        TAG_IDS.categoryRunningShoes, TAG_IDS.typeNonBranded, TAG_IDS.originHuman,
         TAG_IDS.sourceConfig, TAG_IDS.intentInformational,
       ]);
     });
@@ -2411,6 +3099,7 @@ describe('handlers/prompts.js — unified type classification (serenity-docs#31)
       ];
       const transport = {
         listProjectTags: makeListProjectTagsStub(levels),
+        listPromptsByTags: sinon.stub().resolves({ items: [] }),
         createPromptsWithMetadata: sinon.stub().resolves({
           page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'is Acme good?' }],
         }),
@@ -2427,7 +3116,7 @@ describe('handlers/prompts.js — unified type classification (serenity-docs#31)
       }, fakeLog(), classifyByBrandMention);
 
       expect(result.created[0].tagIds).to.deep.equal([
-        decoyCategoryId, TAG_IDS.typeBranded,
+        decoyCategoryId, TAG_IDS.typeBranded, TAG_IDS.originHuman,
         TAG_IDS.sourceConfig, TAG_IDS.intentInformational,
       ]);
     });
@@ -2440,6 +3129,7 @@ describe('handlers/prompts.js — unified type classification (serenity-docs#31)
       const transport = {
         listProjectTags,
         createProjectTags,
+        listPromptsByTags: sinon.stub().resolves({ items: [] }),
         createPromptsWithMetadata: sinon.stub().resolves({
           page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'is Acme good?' }],
         }),
@@ -2452,29 +3142,26 @@ describe('handlers/prompts.js — unified type classification (serenity-docs#31)
         }],
       }, fakeLog(), classifyByBrandMention);
 
-      // The five roots are created at the root level (`origin` is still
-      // provisioned as a root — its retirement is a later, per-project fleet
-      // pass, tag-display-names.md §3 — but nothing is ever minted beneath it
-      // by this write path any more), then `branded` beneath the
-      // freshly-minted `type` root, then `config` beneath the `source` root —
-      // the create path stamps the derived SOURCE (via `deriveSource`, not a
-      // separate `origin` tag) as well as the computed type.
+      // The registered roots are created at the root level, then `branded` beneath the
+      // freshly-minted `type` root, then independent `origin=human` and
+      // `source=config` values beneath their respective roots.
       expect(createProjectTags.firstCall.args[2]).to.deep.equal([
-        'category', INTENT_ROOT_NAME, 'origin', 'type', 'source',
+        'category', 'tag', INTENT_ROOT_NAME, 'origin', 'type', 'source',
       ]);
       expect(createProjectTags.firstCall.args[3]).to.deep.equal({});
       expect(createProjectTags.secondCall.args[2]).to.deep.equal(['branded']);
       expect(createProjectTags.secondCall.args[3]).to.deep.equal({ parentId: 'created::type' });
-      // source injection mints the derived `config` beneath `source` next (no
-      // `origin`-root create in between any more)...
-      expect(createProjectTags.thirdCall.args[2]).to.deep.equal(['config']);
-      expect(createProjectTags.thirdCall.args[3]).to.deep.equal({ parentId: 'created::source' });
-      // ...then intent injection mints the default `Informational` beneath `intent`.
-      expect(createProjectTags.getCall(3).args[2]).to.deep.equal(['Informational']);
-      expect(createProjectTags.getCall(3).args[3])
+      expect(createProjectTags.thirdCall.args[2]).to.deep.equal(['human']);
+      expect(createProjectTags.thirdCall.args[3]).to.deep.equal({ parentId: 'created::origin' });
+      expect(createProjectTags.getCall(3).args[2]).to.deep.equal(['config']);
+      expect(createProjectTags.getCall(3).args[3]).to.deep.equal({ parentId: 'created::source' });
+      // Intent remains an independent classified dimension.
+      expect(createProjectTags.getCall(4).args[2]).to.deep.equal(['Informational']);
+      expect(createProjectTags.getCall(4).args[3])
         .to.deep.equal({ parentId: `created::${INTENT_ROOT_NAME}` });
       expect(result.created[0].tagIds).to.deep.equal([
         'tag-cat-1', 'created:created::type:branded',
+        'created:created::origin:human',
         'created:created::source:config', `created:created::${INTENT_ROOT_NAME}:Informational`,
       ]);
     });
@@ -2745,6 +3432,7 @@ describe('handlers/prompts.js — deferPublish (serenity-docs#32 CSV-chunking)',
     const dataAccess = makeDataAccess([project()]);
     const transport = {
       listProjectTags: makeListProjectTagsStub(),
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
       createPromptsWithMetadata: sinon.stub().resolves({
         page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'hi' }],
       }),
@@ -2767,6 +3455,7 @@ describe('handlers/prompts.js — deferPublish (serenity-docs#32 CSV-chunking)',
     const dataAccess = makeDataAccess([project()]);
     const transport = {
       listProjectTags: makeListProjectTagsStub(),
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
       createPromptsWithMetadata: sinon.stub().resolves({
         page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'hi' }],
       }),
@@ -2800,6 +3489,7 @@ describe('handlers/prompts.js — deferPublish (serenity-docs#32 CSV-chunking)',
     // neither the success nor the failure triggers a publish.
     const transport = {
       listProjectTags: makeListProjectTagsStub(),
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
       createPromptsWithMetadata: sinon.stub().callsFake(async (_ws, _pid, items) => {
         const { name } = items[0];
         if (name === 'boom') {
@@ -2833,25 +3523,124 @@ describe('handlers/prompts.js — deferPublish (serenity-docs#32 CSV-chunking)',
   });
 });
 
-// tag-display-names.md §3: `origin` no longer gets its own tag — every writer
-// that used to stamp one has stopped, and the authorship fact it used to carry
-// now folds into `source` via `deriveSource(source, origin)`. `originValue`
-// survives ONLY as an input to that fold (the Serenity-proxy path has no
-// Postgres row to read `origin` back from), never as a tag id of its own.
-describe('handlers/prompts.js — origin retirement (tag-display-names.md §3)', () => {
+// LLMO-7533 / serenity-docs#472: mixed-result containment and publish
+// truthfulness for the CSV-import path.
+describe('handlers/prompts.js — mixed-result containment (LLMO-7533)', () => {
+  const projectA = () => makeProject({
+    semrushProjectId: 'proj-a', geoTargetId: 2840, languageCode: 'en',
+  });
+  const projectB = () => makeProject({
+    semrushProjectId: 'proj-b', geoTargetId: 2276, languageCode: 'de',
+  });
+
+  it('contains an existing-prompt index read failure to its own project — the other project\'s '
+    + 'inputs still process (serenity-docs#472 §2)', async () => {
+    const dataAccess = makeDataAccess([projectA(), projectB()]);
+    const transport = {
+      listProjectTags: makeListProjectTagsStub(),
+      listPromptsByTags: sinon.stub().callsFake(async (ws, projectId) => {
+        if (projectId === 'proj-a') {
+          throw Object.assign(new Error('upstream 502'), { status: 502 });
+        }
+        return { items: [] };
+      }),
+      createPromptsWithMetadata: sinon.stub().callsFake(async (ws, pid, items) => {
+        const { name } = items[0];
+        return { page: 1, total: 1, items: [{ id: `new-${name}`, name }] };
+      }),
+      publishProject: sinon.stub().resolves(),
+    };
+
+    const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      prompts: [
+        {
+          text: 'a-prompt', geoTargetId: 2840, languageCode: 'en', tagIds: ['tag-cat-1'],
+        },
+        {
+          text: 'b-prompt', geoTargetId: 2276, languageCode: 'de', tagIds: ['tag-cat-1'],
+        },
+      ],
+    }, fakeLog());
+
+    // proj-a's input is failed with the upstream status, NOT thrown — the whole
+    // request must not abort with a bare outer 502.
+    expect(result.failed).to.have.lengthOf(1);
+    expect(result.failed[0].text).to.equal('a-prompt');
+    expect(result.failed[0].status).to.equal(502);
+    // proj-b is unaffected and still creates normally.
+    expect(result.created).to.have.lengthOf(1);
+    expect(result.created[0].text).to.equal('b-prompt');
+  });
+
+  it('returns published:false when publishing one of the affected projects fails '
+    + '(serenity-docs#472 §6)', async () => {
+    const dataAccess = makeDataAccess([projectA(), projectB()]);
+    const transport = {
+      listProjectTags: makeListProjectTagsStub(),
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
+      createPromptsWithMetadata: sinon.stub().callsFake(async (ws, pid, items) => {
+        const { name } = items[0];
+        return { page: 1, total: 1, items: [{ id: `new-${name}`, name }] };
+      }),
+      publishProject: sinon.stub().callsFake(async (ws, projectId) => {
+        if (projectId === 'proj-b') {
+          throw Object.assign(new Error('publish failed'), { status: 500 });
+        }
+      }),
+    };
+
+    const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      prompts: [
+        {
+          text: 'a-prompt', geoTargetId: 2840, languageCode: 'en', tagIds: ['tag-cat-1'],
+        },
+        {
+          text: 'b-prompt', geoTargetId: 2276, languageCode: 'de', tagIds: ['tag-cat-1'],
+        },
+      ],
+    }, fakeLog());
+
+    // Both prompts were created (publish is a separate step from the write) —
+    // but the batch as a whole must NOT be reported as published, since one of
+    // the two affected projects failed to publish.
+    expect(result.created).to.have.lengthOf(2);
+    expect(result.published).to.equal(false);
+  });
+
+  it('reports published:true when every affected project publishes successfully', async () => {
+    const dataAccess = makeDataAccess([projectA()]);
+    const transport = {
+      listProjectTags: makeListProjectTagsStub(),
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
+      createPromptsWithMetadata: sinon.stub().resolves({
+        page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'a-prompt' }],
+      }),
+      publishProject: sinon.stub().resolves(),
+    };
+
+    const result = await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      prompts: [{
+        text: 'a-prompt', geoTargetId: 2840, languageCode: 'en', tagIds: ['tag-cat-1'],
+      }],
+    }, fakeLog());
+
+    expect(result.published).to.equal(true);
+  });
+});
+
+// PR26: origin (authorship) and source (producing system) remain independent
+// live dimensions. A create writes both; an update preserves both from the
+// caller's complete replacement set.
+describe('handlers/prompts.js — independent origin and source dimensions', () => {
   const project = () => makeProject({
     semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
   });
 
-  // The create/update asymmetry `origin` used to carry now lives entirely in
-  // `source`'s derivation: a user-authenticated create derives the human
-  // default (`config`, unfolded — the producer wins over a generic `human`
-  // origin), never touching whatever origin-dimension id a caller happens to
-  // pass in `tagIds` (the dimension is no longer server-managed on this path).
-  it('create no longer strips or injects an origin tag, and derives source=config for a human create', async () => {
+  it('create stamps origin=human and source=config independently', async () => {
     const dataAccess = makeDataAccess([project()]);
     const transport = {
       listProjectTags: makeListProjectTagsStub(),
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
       createPromptsWithMetadata: sinon.stub().resolves({
         page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'best shoes' }],
       }),
@@ -2863,26 +3652,20 @@ describe('handlers/prompts.js — origin retirement (tag-display-names.md §3)',
         text: 'best shoes',
         geoTargetId: 2840,
         languageCode: 'en',
-        // A caller-supplied origin-root id rides through untouched — the
-        // injector no longer reasons about the `origin` dimension at all.
+        // A caller-supplied origin value is replaced by the authenticated
+        // create authorship while source is managed independently.
         tagIds: [TAG_IDS.categoryRunningShoes, TAG_IDS.originAi],
       }],
     }, fakeLog(), classifyByBrandMention);
 
     expect(result.created[0].tagIds).to.deep.equal([
-      TAG_IDS.categoryRunningShoes, TAG_IDS.originAi, TAG_IDS.typeNonBranded,
+      TAG_IDS.categoryRunningShoes, TAG_IDS.typeNonBranded, TAG_IDS.originHuman,
       TAG_IDS.sourceConfig, TAG_IDS.intentInformational,
     ]);
-    expect(result.created[0].tagIds).to.not.include(TAG_IDS.originHuman);
+    expect(result.created[0].tagIds).to.not.include(TAG_IDS.originAi);
   });
 
-  // Exit-criteria test (SITES-50446): a service-principal Serenity create —
-  // no Postgres row, `originValue` derived from the principal as `ai` — lands
-  // under the `ai-onboarding` slug (today's identity-mapped equivalent of
-  // "AI Onboarding"), not `config`'s slug. This is real, structural wiring
-  // (deriveSource operates on slugs), independent of display strings.
-  it('a service-principal create (originValue=ai, sourceValue=config) derives ai-onboarding, not config', async () => {
-    const AI_ONBOARDING_TAG_ID = 'created:root-source:ai-onboarding';
+  it('a service-principal create retains origin=ai beside source=config', async () => {
     const transport = {
       listProjectTags: makeListProjectTagsStub(),
       createProjectTags: sinon.stub().callsFake((ws, pid, names, opts) => Promise.resolve(
@@ -2897,39 +3680,21 @@ describe('handlers/prompts.js — origin retirement (tag-display-names.md §3)',
       text: 'best shoes', geoTargetId: 2840, tagIds: [TAG_IDS.categoryRunningShoes],
     });
 
-    // `ai-onboarding` does not pre-exist on the fixture tree (it is a fresh
-    // slug), so resolving it proves the derivation actually ran rather than
-    // coincidentally matching a pre-seeded id.
-    expect(transport.createProjectTags).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', ['ai-onboarding'], { parentId: TAG_IDS.sourceRoot });
-    expect(out.tagIds).to.include(AI_ONBOARDING_TAG_ID);
-    expect(out.tagIds).to.not.include(TAG_IDS.sourceConfig);
+    expect(transport.createProjectTags).to.not.have.been.called;
+    expect(out.tagIds).to.include(TAG_IDS.originAi);
+    expect(out.tagIds).to.include(TAG_IDS.sourceConfig);
   });
 
-  // Defense-in-depth: on a MID-RENAME project the `source` root still means
-  // authorship, so ensureDimensionRoots leaves the producing `source` key
-  // undefined. The create-path source injection must FAIL LOUD rather than let an
-  // undefined root id degrade into a stranded root-level `config` tag. (This state
-  // is externally gated out of prod by the WP-O6 deploy gate; the guard is what
-  // makes a gate bypass fail visibly instead of corrupting the tree.)
-  it('create fails loud (no stranded root-level tag) when the source root is unprovisioned (mid-rename)', async () => {
+  it('provisions missing origin and source roots independently', async () => {
     const dataAccess = makeDataAccess([project()]);
-    const createProjectTags = sinon.stub();
+    const { listProjectTags, createProjectTags } = makeProvisioningTransportStubs();
     const transport = {
-      // Legacy `source` root (ai/human), no `origin` root → source key undefined.
-      listProjectTags: makeListProjectTagsStub({
-        '': [
-          { id: 'root-category', name: 'category', children_count: 0 },
-          { id: 'root-intent', name: INTENT_ROOT_NAME, children_count: 5 },
-          { id: 'root-source', name: 'source', children_count: 2 },
-          { id: 'root-type', name: 'type', children_count: 2 },
-        ],
-        'root-source': [
-          { id: 'legacy-ai', name: 'ai', parent_id: 'root-source' },
-          { id: 'legacy-human', name: 'human', parent_id: 'root-source' },
-        ],
-      }),
+      listProjectTags,
       createProjectTags,
-      createPromptsByIds: sinon.stub().resolves({ page: 1, total: 1, items: [{ id: 's', name: 'x' }] }),
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
+      createPromptsWithMetadata: sinon.stub().resolves({
+        items: [{ id: 's', name: 'best shoes' }],
+      }),
       publishProject: sinon.stub().resolves(),
     };
 
@@ -2939,12 +3704,10 @@ describe('handlers/prompts.js — origin retirement (tag-display-names.md §3)',
       }],
     }, fakeLog());
 
-    // The input fails cleanly — `ensureChildren` throws when the stub cannot echo
-    // back the created `origin` node, propagating a 502 before any prompt write.
-    expect(result.created).to.have.lengthOf(0);
-    expect(result.failed).to.have.lengthOf(1);
-    expect(result.failed[0].status).to.equal(502);
-    expect(transport.createPromptsByIds).to.not.have.been.called;
+    expect(result.created).to.have.lengthOf(1);
+    expect(createProjectTags.firstCall.args[2]).to.include.members(['origin', 'source']);
+    expect(result.created[0].tagIds).to.include('created:created::origin:human');
+    expect(result.created[0].tagIds).to.include('created:created::source:config');
   });
 
   // Gate 7: editing a prompt must not relabel it. The stored origin the caller
@@ -2990,8 +3753,8 @@ describe('handlers/prompts.js — origin retirement (tag-display-names.md §3)',
     );
   });
 
-  describe('makePromptTagInjector no longer manages origin', () => {
-    it('create (originValue set): leaves a caller-supplied origin id untouched — only source is derived/appended', async () => {
+  describe('makePromptTagInjector manages origin and source independently', () => {
+    it('create replaces caller origin with the computed authorship and appends source', async () => {
       const transport = { listProjectTags: makeListProjectTagsStub() };
       const inject = makePromptTagInjector(transport, WORKSPACE, undefined, fakeLog(), {
         originValue: ORIGIN_VALUE.HUMAN, sourceValue: PROXY_CREATE_SOURCE_VALUE,
@@ -3002,7 +3765,7 @@ describe('handlers/prompts.js — origin retirement (tag-display-names.md §3)',
       });
 
       expect(out.tagIds).to.deep.equal([
-        TAG_IDS.categoryRunningShoes, TAG_IDS.originAi, TAG_IDS.sourceConfig,
+        TAG_IDS.categoryRunningShoes, TAG_IDS.originHuman, TAG_IDS.sourceConfig,
       ]);
     });
 
@@ -3018,7 +3781,7 @@ describe('handlers/prompts.js — origin retirement (tag-display-names.md §3)',
       expect(transport.listProjectTags).to.not.have.been.called;
     });
 
-    it('memoizes the derived-source resolution per (project, derived value) across a batch', async () => {
+    it('memoizes origin and source resolution across a batch', async () => {
       const transport = {
         listProjectTags: makeListProjectTagsStub(),
         createProjectTags: sinon.stub(),
@@ -3031,9 +3794,76 @@ describe('handlers/prompts.js — origin retirement (tag-display-names.md §3)',
       const readsAfterFirst = transport.listProjectTags.callCount;
       await inject('proj-1', { text: 'b', geoTargetId: 2840, tagIds: ['y'] });
 
-      // Same project + same derived value => served from the source cache.
+      // Same project + same values => served from the dimension caches.
       expect(transport.listProjectTags.callCount).to.equal(readsAfterFirst);
       expect(transport.createProjectTags).to.not.have.been.called;
+    });
+  });
+});
+
+// LLMO-7533 §6: prompt-text length/character validation, rejected into
+// skipped[] (create) / 400 (update) BEFORE any Semrush call. MAX_PROMPT_TEXT_LENGTH
+// is a placeholder pending the confirmed Semrush contract — see its definition.
+describe('handlers/prompts.js — prompt-text length/character validation (LLMO-7533 §6)', () => {
+  const base = {
+    languageCode: 'en', geoTargetId: 2840, tagIds: ['t1'],
+  };
+
+  describe('normalizePromptInput', () => {
+    it('accepts text at exactly MAX_PROMPT_TEXT_LENGTH', () => {
+      const text = 'x'.repeat(MAX_PROMPT_TEXT_LENGTH);
+      const { value, reason } = normalizePromptInput({ ...base, text });
+      expect(reason).to.equal(null);
+      expect(value.text).to.equal(text);
+    });
+
+    it('rejects text one character over MAX_PROMPT_TEXT_LENGTH, into skipped (no upstream call)', () => {
+      const text = 'x'.repeat(MAX_PROMPT_TEXT_LENGTH + 1);
+      const { value, reason } = normalizePromptInput({ ...base, text });
+      expect(value).to.equal(null);
+      expect(reason).to.match(/exceeds the maximum length/);
+    });
+
+    it('rejects a disallowed control character in the text', () => {
+      const { value, reason } = normalizePromptInput({
+        ...base, text: `hello${String.fromCharCode(1)}world`,
+      });
+      expect(value).to.equal(null);
+      expect(reason).to.match(/disallowed control characters/);
+    });
+
+    it('accepts ordinary whitespace (newline, tab) and unicode/emoji in the text', () => {
+      const text = 'line one\nline two\tcol — café 🎉';
+      const { value, reason } = normalizePromptInput({ ...base, text });
+      expect(reason).to.equal(null);
+      expect(value.text).to.equal(text);
+    });
+  });
+
+  describe('parseUpdatePromptBody', () => {
+    const updateBase = { geoTargetId: 2840, languageCode: 'en', tagIds: ['t1'] };
+
+    it('accepts text at exactly MAX_PROMPT_TEXT_LENGTH', () => {
+      const text = 'x'.repeat(MAX_PROMPT_TEXT_LENGTH);
+      const result = parseUpdatePromptBody({ ...updateBase, text });
+      expect(result.ok).to.equal(true);
+    });
+
+    it('400s text one character over MAX_PROMPT_TEXT_LENGTH', () => {
+      const text = 'x'.repeat(MAX_PROMPT_TEXT_LENGTH + 1);
+      const result = parseUpdatePromptBody({ ...updateBase, text });
+      expect(result.ok).to.equal(false);
+      expect(result.status).to.equal(400);
+      expect(result.body.message).to.match(/exceeds the maximum length/);
+    });
+
+    it('400s a disallowed control character in the text', () => {
+      const result = parseUpdatePromptBody({
+        ...updateBase, text: `hello${String.fromCharCode(1)}world`,
+      });
+      expect(result.ok).to.equal(false);
+      expect(result.status).to.equal(400);
+      expect(result.body.message).to.match(/disallowed control characters/);
     });
   });
 });
@@ -3182,6 +4012,7 @@ describe('handlers/prompts.js — intent classify/lookup key alignment (serenity
     const dataAccess = makeDataAccess([project()]);
     const transport = {
       listProjectTags: makeListProjectTagsStub(),
+      listPromptsByTags: sinon.stub().resolves({ items: [] }),
       createPromptsWithMetadata: sinon.stub().resolves({
         page: 1, total: 1, items: [{ id: 'new-sem-id', name: 'buy now' }],
       }),
@@ -3403,6 +4234,7 @@ describe('handlers/prompts.js — authorship metadata (LLMO-6289)', () => {
       const dataAccess = makeDataAccess([project]);
       const transport = {
         listProjectTags: makeListProjectTagsStub(),
+        listPromptsByTags: sinon.stub().resolves({ items: [] }),
         createPromptsWithMetadata: sinon.stub().resolves({ items: [{ id: 'new-id', name: 'hi' }] }),
         publishProject: sinon.stub().resolves(),
       };
@@ -3417,7 +4249,12 @@ describe('handlers/prompts.js — authorship metadata (LLMO-6289)', () => {
       // from origin=`human` — tag-display-names.md §3, `origin` no longer gets
       // its own tag) and the default intent (Informational) alongside the
       // caller's tag; the metadata carries the stamped caller id (LLMO-6289).
-      expect(transport.createPromptsWithMetadata).to.have.been.calledOnceWithExactly(WORKSPACE, 'proj-us-en', [createItemMatch('hi', 'caller-42')], ['tag-1', TAG_IDS.sourceConfig, TAG_IDS.intentInformational]);
+      expect(transport.createPromptsWithMetadata).to.have.been.calledOnceWithExactly(
+        WORKSPACE,
+        'proj-us-en',
+        [createItemMatch('hi', 'caller-42')],
+        ['tag-1', TAG_IDS.originHuman, TAG_IDS.sourceConfig, TAG_IDS.intentInformational],
+      );
     });
 
     it('stamps updated_* = the caller id on an edit (created_* untouched)', async () => {
@@ -3458,5 +4295,461 @@ describe('handlers/prompts.js — authorship metadata (LLMO-6289)', () => {
       const tagArgs = transport.updatePromptTagsByIds.firstCall.args;
       expect(tagArgs[2][0]).to.not.have.property('metadata');
     });
+  });
+});
+// LLMO CSV re-import: POST /prompts is an UPSERT, not a create-only write.
+//
+// The bug these lock: the upstream create folds a repeated text into
+// `existing_count` but still ATTACHES the tag_ids it was handed, so re-importing
+// a CSV with a changed category left the prompt carrying BOTH categories. The UI
+// renders the first category tag upstream returns, so the first import appeared
+// to work and the change could never be reverted (Sony, Brand-A / CH-de: 42 of
+// 910 prompts had accumulated 2-4 categories, and 888 had two `source` tags).
+describe('handlers/prompts.js — create is an upsert (existing text replaces tags)', () => {
+  const PROMPT_ID = 'sem-existing-1';
+
+  const dimTag = (rootId, rootName) => (id, name) => ({
+    id, name, parent_id: rootId, path: [{ id: rootId, name: rootName }],
+  });
+  const categoryTag = dimTag(TAG_IDS.categoryRoot, 'category');
+  const sourceTag = dimTag(TAG_IDS.sourceRoot, 'source');
+  const originTag = dimTag(TAG_IDS.originRoot, 'origin');
+
+  const storedPrompt = ({ id = PROMPT_ID, name = 'best shoes', tags = [] } = {}) => ({ id, name, tags });
+
+  function setup(items, overrides = {}) {
+    const project = makeProject({
+      semrushProjectId: 'proj-us-en', geoTargetId: 2840, languageCode: 'en',
+    });
+    return {
+      dataAccess: makeDataAccess([project]),
+      transport: {
+        listProjectTags: makeListProjectTagsStub(),
+        listPromptsByTags: sinon.stub().resolves({ items }),
+        createPromptsWithMetadata: sinon.stub().resolves({
+          page: 1, total: 1, items: [{ id: 'sem-new', name: 'new' }],
+        }),
+        updatePromptTagsByIds: sinon.stub().resolves(),
+        patchPromptsMetadataBatch: sinon.stub().resolves(),
+        deletePromptsByIds: sinon.stub().resolves(),
+        publishProject: sinon.stub().resolves(),
+        ...overrides,
+      },
+    };
+  }
+
+  const importRow = (text, tagIds) => ({
+    text, geoTargetId: 2840, languageCode: 'en', tagIds,
+  });
+  const runImport = (transport, dataAccess, prompts) => handleCreatePrompts(
+    transport,
+    dataAccess,
+    BRAND,
+    WORKSPACE,
+    { prompts },
+    fakeLog(),
+  );
+  const referencesOf = (transport) => transport
+    .updatePromptTagsByIds.firstCall.args[2][0].references;
+
+  it('REPLACES an existing prompt\'s tags instead of creating it again', async () => {
+    const { transport, dataAccess } = setup([
+      storedPrompt({ tags: [categoryTag('cat-old', 'Old Category')] }),
+    ]);
+
+    const result = await runImport(transport, dataAccess, [importRow('best shoes', ['cat-new'])]);
+
+    // The create path must NOT run — that is the additive attach being removed.
+    expect(transport.createPromptsWithMetadata).to.not.have.been.called;
+    expect(result.created).to.be.an('array').that.is.empty;
+    expect(result.updated).to.have.lengthOf(1);
+    expect(result.updated[0].semrushPromptId).to.equal(PROMPT_ID);
+
+    const [, , items] = transport.updatePromptTagsByIds.firstCall.args;
+    expect(items[0]).to.include({ id: PROMPT_ID, replace: true });
+    expect(items[0].references).to.include('cat-new');
+    // The stale category is GONE, not merely outnumbered — this is the whole fix.
+    expect(items[0].references).to.not.include('cat-old');
+    // An edit stamps the re-submitter without disturbing created_*.
+    expect(transport.patchPromptsMetadataBatch).to.have.been.calledOnce;
+  });
+
+  it('carries stored origin + source through the replace, collapsing a duplicate', async () => {
+    // Both are CREATE-only facts an edit never re-derives, and a CSV row carries
+    // neither, so without an explicit carry-over the full replace would strip a
+    // prompt's authorship or relabel an AI-onboarded prompt as `human`/`config`.
+    // Carrying exactly one per dimension is also what heals the 888 prompts that
+    // had accumulated a second `source` tag.
+    const { transport, dataAccess } = setup([
+      storedPrompt({
+        tags: [
+          originTag(TAG_IDS.originAi, 'ai'),
+          sourceTag('source-ai', 'ai'),
+          sourceTag('source-config', 'config'),
+        ],
+      }),
+    ]);
+
+    await runImport(transport, dataAccess, [importRow('best shoes', ['cat-new'])]);
+
+    const references = referencesOf(transport);
+    expect(references).to.include.members([TAG_IDS.originAi, 'source-ai', 'cat-new']);
+    expect(references).to.not.include(TAG_IDS.originHuman);
+    expect(references.filter((id) => String(id).startsWith('source-'))).to.deep.equal(['source-ai']);
+  });
+
+  it('drops a per-item `source` override on the update path, so the dimension keeps one value', async () => {
+    // `source` is a per-item CREATE override (LLMO-6556). Left on the input it would
+    // make the injector resolve and append ITS source id beside the carried-over
+    // stored one — two values in a dimension that must hold exactly one.
+    const { transport, dataAccess } = setup([
+      storedPrompt({ tags: [sourceTag('source-stored', 'semrush')] }),
+    ]);
+
+    await runImport(transport, dataAccess, [
+      { ...importRow('best shoes', ['cat-new']), source: 'config' },
+    ]);
+
+    const references = referencesOf(transport);
+    expect(references).to.include('source-stored');
+    expect(references).to.not.include(TAG_IDS.sourceConfig);
+  });
+
+  it('collapses two rows carrying the same text into ONE replace item, last row winning', async () => {
+    // Both rows resolve to the SAME stored prompt. Sending two items for one id in a
+    // single atomic replace batch has no pinned upstream tie-break, so the surviving
+    // tag set would be arbitrary — and `updated` would count one prompt as two.
+    const { transport, dataAccess } = setup([storedPrompt()]);
+
+    const result = await runImport(transport, dataAccess, [
+      importRow('best shoes', ['cat-first']),
+      importRow('best shoes', ['cat-last']),
+    ]);
+
+    expect(result.updated).to.have.lengthOf(1);
+    const [, , items] = transport.updatePromptTagsByIds.firstCall.args;
+    expect(items).to.have.lengthOf(1);
+    expect(items[0].references).to.include('cat-last');
+    expect(items[0].references).to.not.include('cat-first');
+  });
+
+  it('warns when a stored prompt has tags but resolves no origin/source to carry over', async () => {
+    // Breadcrumb drift: without `path`, the dimension cannot be read, the carry-over
+    // silently misses, and the replace strips authorship. Fails open — so it must log.
+    const log = fakeLog();
+    const { transport, dataAccess } = setup([
+      storedPrompt({ tags: [{ id: 'orphan', name: 'ai' }] }),
+    ]);
+
+    await handleCreatePrompts(transport, dataAccess, BRAND, WORKSPACE, {
+      prompts: [importRow('best shoes', ['cat-new'])],
+    }, log);
+
+    expect(log.warn).to.have.been.calledWithMatch(
+      sinon.match(/resolved no origin\/source tag/),
+    );
+  });
+
+  it('still CREATES a text the project does not hold', async () => {
+    const { transport, dataAccess } = setup([storedPrompt({ name: 'something else' })]);
+
+    const result = await runImport(transport, dataAccess, [importRow('brand new prompt', ['cat-new'])]);
+
+    expect(result.created).to.have.lengthOf(1);
+    expect(result.updated).to.be.an('array').that.is.empty;
+    expect(transport.updatePromptTagsByIds).to.not.have.been.called;
+  });
+
+  it('never rolls an updated prompt back — a quota-rejected publish must not DELETE pre-existing data', async () => {
+    // reconcilePublishErrors undoes a quota-rejected project by deleting what the
+    // request staged. An updated prompt pre-existed the request, so deleting it
+    // would destroy customer data — hence updates carry no `rollbackProjectId`.
+    const quota = new SerenityTransportError('quota', 405, 'text/html', '<html>quota</html>');
+    const { transport, dataAccess } = setup([storedPrompt()], {
+      publishProject: sinon.stub().rejects(quota),
+    });
+
+    const result = await runImport(transport, dataAccess, [importRow('best shoes', ['cat-new'])]);
+
+    expect(transport.deletePromptsByIds).to.not.have.been.called;
+    expect(result.updated).to.have.lengthOf(1);
+  });
+
+  it('moves updates into `failed` when the batched tag write throws', async () => {
+    const { transport, dataAccess } = setup([storedPrompt()], {
+      updatePromptTagsByIds: sinon.stub().rejects(new Error('upstream 500')),
+    });
+
+    const result = await runImport(transport, dataAccess, [importRow('best shoes', ['cat-new'])]);
+
+    // Never report an update that did not land.
+    expect(result.updated).to.be.an('array').that.is.empty;
+    expect(result.failed).to.have.lengthOf(1);
+    expect(result.failed[0].text).to.equal('best shoes');
+  });
+
+  // Targeted lookup (default, kill-switch ON): one `search` per distinct input
+  // text, exact-match only, cost independent of corpus size.
+  it('targeted lookup issues one search per distinct text and matches EXACTLY, not by substring', async () => {
+    const listPromptsByTags = sinon.stub().callsFake((_ws, _pid, { search }) => Promise.resolve({
+      // A substring over-match sits alongside the exact row; only the exact one upserts.
+      items: search === 'best shoes'
+        ? [
+          storedPrompt({ id: 'sem-substr', name: 'best shoes for running' }),
+          storedPrompt({ id: PROMPT_ID, name: 'best shoes' }),
+        ]
+        : [],
+    }));
+    const { transport, dataAccess } = setup([], { listPromptsByTags });
+
+    const result = await runImport(transport, dataAccess, [
+      importRow('best shoes', ['cat-a']), // exists -> upsert to the EXACT row
+      importRow('brand new', ['cat-b']), // absent -> create
+    ]);
+
+    // Cost scales with input, not corpus: one search per distinct (projectId, text).
+    expect(listPromptsByTags).to.have.callCount(2);
+    expect(listPromptsByTags.firstCall.args[2]).to.include({ page: 1, limit: 25 });
+    expect(listPromptsByTags.firstCall.args[2].tag_ids).to.deep.equal([]);
+    expect(result.updated).to.have.lengthOf(1);
+    expect(result.updated[0].semrushPromptId).to.equal(PROMPT_ID); // exact, not the substring row
+    expect(result.created).to.have.lengthOf(1);
+  });
+
+  it('targeted lookup matches case-INSENSITIVELY (stored "Best Shoes" upserts for input "best shoes", never create-as-new)', async () => {
+    // Upstream dedupe/search is case-insensitive; a case-sensitive === here would
+    // send the variant down the create path and re-attach the tag (the additive bug).
+    const listPromptsByTags = sinon.stub().callsFake((_ws, _pid, { search }) => Promise.resolve({
+      items: search === 'best shoes'
+        ? [storedPrompt({ id: PROMPT_ID, name: 'Best Shoes' })]
+        : [],
+    }));
+    const { transport, dataAccess } = setup([], { listPromptsByTags });
+
+    const result = await runImport(transport, dataAccess, [importRow('best shoes', ['cat-a'])]);
+
+    expect(transport.createPromptsWithMetadata).to.not.have.been.called;
+    expect(result.created).to.be.an('array').that.is.empty;
+    expect(result.updated).to.have.lengthOf(1);
+    expect(result.updated[0].semrushPromptId).to.equal(PROMPT_ID);
+  });
+
+  it('targeted lookup: a search failure degrades the WHOLE project (inputs fail itemized, never treated as new)', async () => {
+    const listPromptsByTags = sinon.stub().rejects(Object.assign(new Error('upstream 502'), { status: 502 }));
+    const { transport, dataAccess } = setup([], { listPromptsByTags });
+
+    const result = await runImport(transport, dataAccess, [importRow('best shoes', ['cat-a'])]);
+
+    // The dangerous direction — treating an existing prompt as new — must NOT happen.
+    expect(transport.createPromptsWithMetadata).to.not.have.been.called;
+    expect(result.created).to.be.an('array').that.is.empty;
+    expect(result.failed).to.have.lengthOf(1);
+    expect(result.failed[0].status).to.equal(502);
+  });
+
+  it('targeted lookup: a full page with no exact hit degrades the project (never a false "new")', async () => {
+    // 25 non-matching rows fill the page; the row could be on page 2, so "not found"
+    // is not safe to conclude — the project degrades rather than tag-stack.
+    const fullPage = Array.from({ length: 25 }, (_, i) => storedPrompt({ id: `x${i}`, name: `other ${i}` }));
+    const listPromptsByTags = sinon.stub().resolves({ items: fullPage });
+    const { transport, dataAccess } = setup([], { listPromptsByTags });
+
+    const result = await runImport(transport, dataAccess, [importRow('best shoes', ['cat-a'])]);
+
+    expect(transport.createPromptsWithMetadata).to.not.have.been.called;
+    expect(result.failed).to.have.lengthOf(1);
+    expect(result.failed[0].status).to.equal(502);
+  });
+
+  it('marks inputs failed (503) when the write budget is already exhausted (2xx partial, no half-write)', async () => {
+    const listPromptsByTags = sinon.stub().resolves({ items: [] });
+    const { transport, dataAccess } = setup([], { listPromptsByTags });
+    const pastDeadline = Date.now() - 1;
+
+    const result = await handleCreatePrompts(
+      transport,
+      dataAccess,
+      BRAND,
+      WORKSPACE,
+      { prompts: [importRow('anything', ['cat-a'])] },
+      fakeLog(),
+      undefined, // classifyPromptType
+      undefined, // env
+      pastDeadline, // writeDeadline
+    );
+
+    expect(transport.createPromptsWithMetadata).to.not.have.been.called;
+    expect(result.failed).to.have.lengthOf(1);
+    expect(result.failed[0].status).to.equal(503);
+  });
+
+  it('fixed walk (kill-switch off) pages the index concurrently, so a prompt past page 1 is still recognised', async () => {
+    // Kill-switch OFF -> bounded-concurrency corpus walk. A project larger than one
+    // page would otherwise look empty from page 2 on and tag-stack every later row.
+    const firstPage = Array.from({ length: 1000 }, (_, i) => storedPrompt({ id: `p${i}`, name: `q${i}` }));
+    const pageItems = {
+      1: firstPage,
+      2: [storedPrompt({ id: 'sem-page2', name: 'on page two' })],
+    };
+    const listPromptsByTags = sinon.stub()
+      .callsFake((_ws, _pid, { page }) => Promise.resolve({ items: pageItems[page] ?? [] }));
+    const { transport, dataAccess } = setup([], { listPromptsByTags });
+
+    const result = await handleCreatePrompts(
+      transport,
+      dataAccess,
+      BRAND,
+      WORKSPACE,
+      { prompts: [importRow('on page two', ['cat-new'])] },
+      fakeLog(),
+      undefined, // classifyPromptType
+      { SERENITY_TARGETED_CREATE_LOOKUP: 'false' }, // env: kill-switch off -> walk
+    );
+
+    expect(result.updated[0].semrushPromptId).to.equal('sem-page2');
+    // One concurrency batch of BULK_CREATE_CONCURRENCY pages — page 2 is short, so
+    // the walk stops after the first batch (8 pages), never a serial page-at-a-time.
+    expect(listPromptsByTags).to.have.callCount(8);
+  });
+
+  it('targeted lookup: an exact-name match with no usable id degrades the project (never a false "new")', async () => {
+    // Exact name matches but the row carries no id — storing nothing would let the
+    // input fall through to create-as-new and tag-stack. It must degrade instead.
+    const listPromptsByTags = sinon.stub().resolves({ items: [{ name: 'best shoes' }] });
+    const { transport, dataAccess } = setup([], { listPromptsByTags });
+
+    const result = await runImport(transport, dataAccess, [importRow('best shoes', ['cat-a'])]);
+
+    expect(transport.createPromptsWithMetadata).to.not.have.been.called;
+    expect(result.failed).to.have.lengthOf(1);
+    expect(result.failed[0].status).to.equal(502);
+    // Redaction-safe client message — no page-size constant / internal wording.
+    expect(result.failed[0].message).to.equal('existing-prompt lookup unavailable');
+  });
+
+  it('targeted lookup: the full-page degrade surfaces a redaction-safe client message (no internal wording)', async () => {
+    const fullPage = Array.from({ length: 25 }, (_, i) => storedPrompt({ id: `x${i}`, name: `other ${i}` }));
+    const listPromptsByTags = sinon.stub().resolves({ items: fullPage });
+    const { transport, dataAccess } = setup([], { listPromptsByTags });
+
+    const result = await runImport(transport, dataAccess, [importRow('best shoes', ['cat-a'])]);
+
+    expect(result.failed[0].status).to.equal(502);
+    expect(result.failed[0].message).to.equal('existing-prompt lookup unavailable');
+  });
+
+  it('targeted lookup: collapses duplicate input texts to a single search (cost dedup)', async () => {
+    const listPromptsByTags = sinon.stub().resolves({ items: [] });
+    const { transport, dataAccess } = setup([], { listPromptsByTags });
+
+    await runImport(transport, dataAccess, [
+      importRow('same text', ['cat-a']),
+      importRow('same text', ['cat-b']),
+    ]);
+
+    // new Set over the project's texts -> one lookup for the two identical inputs.
+    expect(listPromptsByTags).to.have.callCount(1);
+  });
+
+  it('per-item deadline guard: budget crossed AFTER the index builds fails later items (never a half-write)', async () => {
+    // The index builds while the deadline is in the future; the deadline is then
+    // crossed before the create fan-out runs, so the per-item guard (not the
+    // build-phase guard) must fire and fail the input rather than create-as-new.
+    const clock = sinon.useFakeTimers({ now: 1_000_000, toFake: ['Date'] });
+    try {
+      const deadline = 1_000_050;
+      const listPromptsByTags = sinon.stub().callsFake(() => {
+        clock.tick(60); // advance PAST the deadline once the (clean) build has read
+        return Promise.resolve({ items: [] });
+      });
+      const { transport, dataAccess } = setup([], { listPromptsByTags });
+
+      const result = await handleCreatePrompts(
+        transport,
+        dataAccess,
+        BRAND,
+        WORKSPACE,
+        { prompts: [importRow('anything', ['cat-a'])] },
+        fakeLog(),
+        undefined, // classifyPromptType
+        undefined, // env
+        deadline, // writeDeadline: future at build, past at fan-out
+      );
+
+      expect(transport.createPromptsWithMetadata).to.not.have.been.called;
+      expect(result.failed).to.have.lengthOf(1);
+      expect(result.failed[0].status).to.equal(503);
+      // The later per-item guard, distinct from the build-phase 'during'/'before lookup' messages.
+      expect(result.failed[0].message).to.equal('write budget exhausted before processing');
+    } finally {
+      clock.restore();
+    }
+  });
+
+  it('buildTargetedPromptIndex throws 503 when the write budget is already spent (build-phase deadline guard)', async () => {
+    const listPromptsByTags = sinon.stub().resolves({ items: [] });
+    await expect(buildTargetedPromptIndex({ listPromptsByTags }, WORKSPACE, 'proj-us-en', ['a text'], fakeLog(), { writeDeadline: Date.now() - 1 })).to.be.rejectedWith(ErrorWithStatusCode, /write budget exhausted during existing-prompt lookup/);
+    expect(listPromptsByTags).to.not.have.been.called;
+  });
+
+  it('buildExistingPromptIndex (fixed walk) throws 503 when the write budget is already spent (build-phase deadline guard)', async () => {
+    const listPromptsByTags = sinon.stub().resolves({ items: [] });
+    await expect(buildExistingPromptIndex({ listPromptsByTags }, WORKSPACE, 'proj-us-en', fakeLog(), { writeDeadline: Date.now() - 1 })).to.be.rejectedWith(ErrorWithStatusCode, /write budget exhausted during existing-prompt lookup/);
+    expect(listPromptsByTags).to.not.have.been.called;
+  });
+
+  it('fixed walk (kill-switch off): recognises a prompt PAST the old 20-page cap (upsert, not tag-stack)', async () => {
+    // Old cap was 20 pages; the target lives on page 21. With the cap raised to 100
+    // the walk still reaches it, so it upserts instead of silently tag-stacking.
+    const fullPage = Array.from({ length: MAX_PAGE_LIMIT }, (_, i) => storedPrompt({ id: `p${i}`, name: `q${i}` }));
+    const target = [storedPrompt({ id: 'sem-page21', name: 'deep prompt' })];
+    const pageItems = (page) => {
+      if (page < 21) {
+        return fullPage;
+      }
+      return page === 21 ? target : [];
+    };
+    const listPromptsByTags = sinon.stub()
+      .callsFake((_ws, _pid, { page }) => Promise.resolve({ items: pageItems(page) }));
+    const { transport, dataAccess } = setup([], { listPromptsByTags });
+
+    const result = await handleCreatePrompts(
+      transport,
+      dataAccess,
+      BRAND,
+      WORKSPACE,
+      { prompts: [importRow('deep prompt', ['cat-x'])] },
+      fakeLog(),
+      undefined,
+      { SERENITY_TARGETED_CREATE_LOOKUP: 'false' },
+    );
+
+    expect(result.updated).to.have.lengthOf(1);
+    expect(result.updated[0].semrushPromptId).to.equal('sem-page21');
+    expect(transport.createPromptsWithMetadata).to.not.have.been.called;
+  });
+
+  it('fixed walk (kill-switch off): warns when the 100-page cap is hit (index incomplete)', async () => {
+    // Every page full -> the walk never sees a short page and runs to the cap.
+    const fullPage = Array.from({ length: MAX_PAGE_LIMIT }, (_, i) => storedPrompt({ id: `p${i}`, name: `q${i}` }));
+    const listPromptsByTags = sinon.stub().resolves({ items: fullPage });
+    const { transport, dataAccess } = setup([], { listPromptsByTags });
+    const log = fakeLog();
+
+    await handleCreatePrompts(
+      transport,
+      dataAccess,
+      BRAND,
+      WORKSPACE,
+      { prompts: [importRow('never found', ['cat-x'])] },
+      log,
+      undefined,
+      { SERENITY_TARGETED_CREATE_LOOKUP: 'false' },
+    );
+
+    expect(log.warn).to.have.been.calledWithMatch(
+      sinon.match(/prompt index hit the page cap/),
+    );
+    expect(listPromptsByTags).to.have.callCount(MAX_PROMPT_INDEX_PAGES);
   });
 });

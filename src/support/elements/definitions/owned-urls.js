@@ -10,8 +10,9 @@
  * governing permissions and limitations under the License.
  */
 
-import { resolveElementModel } from '../constants.js';
+import { resolveElementModels, buildModelOrFilter } from '../constants.js';
 import { dateToIsoWeek } from '../week-utils.js';
+import { buildFacetedTagFilters } from './prompts.js';
 
 /* c8 ignore start -- LLMO-6086 POC endpoint; unit tests intentionally deferred */
 
@@ -26,7 +27,8 @@ import { dateToIsoWeek } from '../week-utils.js';
  * `domain_type='Owned'` selection is applied client-side in the transform.
  *
  * @param {object} params
- * @param {string} [params.model] - AI model (Semrush engine or UI platform code).
+ * @param {string} [params.model] - AI model (Semrush engine or UI platform code), or a
+ *   comma-separated subset (`a,b`) → an N-member CBF_model OR (LLMO-7553).
  * @param {string} [params.platform] - Legacy alias for `model`; `model` wins.
  * @param {string} params.startDate - ISO date (YYYY-MM-DD).
  * @param {string} params.endDate - ISO date (YYYY-MM-DD).
@@ -35,17 +37,22 @@ import { dateToIsoWeek } from '../week-utils.js';
  * @param {string} [params.projectId] - Semrush project id (region scope, top-level).
  */
 export function buildOwnedUrlsStatsPayload({
-  model, platform, startDate, endDate, category, projectId,
+  model, platform, startDate, endDate, category, tagPaths, projectId,
 } = {}) {
-  const resolvedModel = resolveElementModel(model || platform);
+  // `model`/`platform` may be a comma-separated subset (LLMO-7553); a single value yields
+  // the same one-member CBF_model OR as before. STATS_PER_URL returns one row per
+  // (URL, project, model), so a multi-member OR sums ACROSS MODELS in
+  // transformOwnedUrlsResponse. For `citations` (distinct events) that sum is correct; for
+  // `promptsCited` it is additive-not-distinct across models — see the Major-1 note on
+  // transformOwnedUrlsResponse. Not dedupable here (the element exposes counts, not a
+  // per-prompt list), so no caller-side dedup is added.
+  const models = resolveElementModels(model || platform);
   const advancedFilters = [
-    { op: 'or', filters: [{ op: 'eq', val: resolvedModel, col: 'CBF_model' }] },
+    buildModelOrFilter(models),
     { op: 'gte', val: startDate, col: 'CBF_date__start' },
     { op: 'lte', val: endDate, col: 'CBF_date__end' },
   ];
-  if (category) {
-    advancedFilters.push({ op: 'eq', val: category, col: 'CBF_tags' });
-  }
+  advancedFilters.push(...buildFacetedTagFilters({ tagPaths, category }));
   return {
     ...(projectId && { project_id: projectId }),
     comparison_data_formatting: 'union',
@@ -67,17 +74,18 @@ export function buildOwnedUrlsStatsPayload({
  * could exceed its totals.
  */
 export function buildOwnedUrlsTrendPayload({
-  model, platform, startDate, endDate, category, projectId,
+  model, platform, startDate, endDate, category, tagPaths, projectId,
 } = {}) {
-  const resolvedModel = resolveElementModel(model || platform);
+  // Multi-model subset support mirrors buildOwnedUrlsStatsPayload (LLMO-7553); single value
+  // is byte-identical. Kept in lockstep so the weekly sparklines and the aggregate totals
+  // share the same CBF_model filter set.
+  const models = resolveElementModels(model || platform);
   const advancedFilters = [
-    { op: 'or', filters: [{ op: 'eq', val: resolvedModel, col: 'CBF_model' }] },
+    buildModelOrFilter(models),
     { op: 'gte', val: startDate, col: 'CBF_date__start' },
     { op: 'lte', val: endDate, col: 'CBF_date__end' },
   ];
-  if (category) {
-    advancedFilters.push({ op: 'eq', val: category, col: 'CBF_tags' });
-  }
+  advancedFilters.push(...buildFacetedTagFilters({ tagPaths, category }));
   return {
     ...(projectId && { project_id: projectId }),
     comparison_data_formatting: 'union',
@@ -95,9 +103,21 @@ export function buildOwnedUrlsTrendPayload({
  *
  * Field mapping (verified against live element rows):
  *   url             ← stats.source
- *   citations       ← stats.citations           (summed across a URL's projects)
+ *   citations       ← stats.citations           (summed across a URL's projects AND, for a
+ *                                                multi-model subset, across models — correct,
+ *                                                each citation is a distinct event)
  *   promptsCited    ← stats.prompts_with_citation
  *   contentType     ← stats.domain_type         (used only for the owned filter)
+ *
+ * ⚠️ Major-1 (LLMO-7553, subset multi-model): `promptsCited` is summed across the selected
+ * models, so a prompt that cited this URL under 2 selected models is counted TWICE. This is
+ * additive-not-distinct and is NEW to subset multi-model — it was NOT reachable before this
+ * change, where owned-urls always resolved to exactly ONE model (`resolveElementModel`,
+ * default `search-gpt`; there was no all-models or multi-model path). It is NOT fixable in
+ * this transform: STATS_PER_URL returns aggregate counts, not a per-prompt list to dedupe.
+ * `citations` is unaffected (distinct events). Whether additive-across-models is the intended
+ * `promptsCited` metric is a product question (raised on #3272); the single-model path — the
+ * only one the UI exercises today outside an explicit subset — is unchanged.
  *   regions         ← the region code of each project the URL appears in
  *   weeklyCitations ← trend rows grouped by legend(=url): { week: ISO, value: y__mentions }
  * Gaps with NO Semrush source (stubbed, see LLMO-6086 notes / cf LLMO-6071):

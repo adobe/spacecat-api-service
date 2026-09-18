@@ -91,7 +91,12 @@ import {
 import { updateModifiedByDetails } from './llmo-config-metadata.js';
 import { notifyOptInIfNeeded } from './cdn-opt-in-notification.js';
 import { handleLlmoRationale } from './llmo-rationale.js';
-import { handleBrandClaims, handleRequestBrandClaims } from './brand-claims.js';
+import {
+  handleBrandClaims,
+  handleBrandClaimsFeedback,
+  handleBrandClaimsWeeks,
+  handleRequestBrandClaims,
+} from './brand-claims.js';
 import { handleDemoBrandPresence, handleDemoRecommendations } from './opportunity-workspace-demo.js';
 import { notifyStrategyChanges } from '../../support/opportunity-workspace-notifications.js';
 
@@ -1415,6 +1420,25 @@ function LlmoController(ctx) {
     }
   };
 
+  // Lists the ISO weeks with an available brand claims run (newest first)
+  const getBrandClaimsWeeks = async (context) => {
+    const { log } = context;
+    const { siteId } = context.params;
+    try {
+      // Validate site and LLMO access
+      const siteValidation = await getSiteAndValidateLlmo(context);
+      if (siteValidation.status) {
+        return siteValidation;
+      }
+
+      // Delegate to the brand claims weeks handler for the actual processing
+      return await handleBrandClaimsWeeks(context);
+    } catch (error) {
+      log.error(`Error listing brand claims weeks for site ${siteId}: ${error.message}`);
+      return badRequest(cleanupHeaderValue(error.message));
+    }
+  };
+
   // Handles on-demand Brand Claims trigger requests (LLMO-7263, trial customers)
   const requestBrandClaims = async (context) => {
     const { log } = context;
@@ -1430,6 +1454,24 @@ function LlmoController(ctx) {
     } catch (error) {
       log.error(`Error requesting brand claims for site ${siteId}: ${error.message}`);
       return badRequest(cleanupHeaderValue(error.message));
+    }
+  };
+
+  const submitBrandClaimsFeedback = async (context) => {
+    const { log } = context;
+    const { siteId } = context.params;
+    try {
+      const site = await context.dataAccess.Site.findById(siteId);
+      if (!site) {
+        return notFound(`Site not found: ${siteId}`);
+      }
+      if (!await accessControlUtil.hasAccess(site)) {
+        return forbidden('Only users belonging to the organization can view its sites');
+      }
+      return await handleBrandClaimsFeedback(context, site);
+    } catch (error) {
+      log.error(`Error submitting Brand Claims feedback for site ${siteId}: ${error.message}`);
+      return internalServerError('Unable to submit Brand Claims feedback');
     }
   };
 
@@ -2299,7 +2341,9 @@ function LlmoController(ctx) {
     patchLlmoDataRow,
     getLlmoRationale,
     getBrandClaims,
+    getBrandClaimsWeeks,
     requestBrandClaims,
+    submitBrandClaimsFeedback,
     getDemoBrandPresence,
     getDemoRecommendations,
     createOrUpdateEdgeConfig,

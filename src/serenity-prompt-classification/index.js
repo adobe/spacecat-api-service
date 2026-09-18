@@ -15,7 +15,7 @@
 import * as helixWrapPkg from '@adobe/helix-shared-wrap';
 import { helixStatus } from '@adobe/helix-status';
 import vaultSecrets from '@adobe/spacecat-shared-vault-secrets';
-import { sqsEventAdapter, logWrapper } from '@adobe/spacecat-shared-utils';
+import { sqsEventAdapter, logWrapper, hasText } from '@adobe/spacecat-shared-utils';
 import * as imsClientPkg from '@adobe/spacecat-shared-ims-client';
 import { ok } from '@adobe/spacecat-shared-http-utils';
 
@@ -24,12 +24,30 @@ import sqs from '../support/sqs.js';
 import {
   exchangeAndPersistPromiseToken,
   invalidateJobPromiseToken,
+  isRetryableJobError,
   NeedsReauthError,
 } from '../support/serenity/async-job-runner.js';
+import {
+  claimJobLease,
+  clearJobLease,
+  newLeaseToken,
+} from '../support/serenity/job-lease.js';
 import {
   classifyPromptsHandler,
   CLASSIFY_PROMPTS_JOB_TYPE,
 } from '../support/serenity/handlers/classify-prompts-job.js';
+import {
+  bulkTagsHandler,
+  BULK_TAGS_JOB_TYPE,
+} from '../support/serenity/handlers/bulk-tags-job.js';
+import {
+  semrushMarketGenerationHandler,
+  SEMRUSH_MARKET_GENERATION_JOB_TYPE,
+} from '../support/serenity/handlers/semrush-market-generation-job.js';
+import {
+  isRateLimited,
+  isSemrushTransportError,
+} from '../support/serenity/errors.js';
 
 // `wrap`'s runtime default export and `imsClientWrapper`'s runtime named export
 // both exist (`@adobe/helix-shared-wrap/src/wrap.js`,
@@ -96,12 +114,106 @@ export const vaultOpts = {
  * `../support/serenity/handlers/classify-prompts-job.js` and is registered
  * below.
  *
+ * A deferred-exchange handler receives a null token and exchanges it itself.
  * @type {Record<string, (context: object, job: object,
- *   accessToken: string) => Promise<object>>}
+ *   accessToken: any) => Promise<object>>}
  */
 const HANDLERS = {
   [CLASSIFY_PROMPTS_JOB_TYPE]: classifyPromptsHandler,
+  [BULK_TAGS_JOB_TYPE]: bulkTagsHandler,
+  [SEMRUSH_MARKET_GENERATION_JOB_TYPE]: semrushMarketGenerationHandler,
 };
+
+/**
+ * Job types that MUST hold an atomic per-job lease before processing (Gap 4 — a
+ * security control against promise-token replay + double-write to Semrush under
+ * SQS at-least-once delivery). A delivery that cannot win the lease is dropped;
+ * a delivery that cannot even attempt the claim (no PostgREST client / query
+ * error) fails closed and is redelivered rather than processed unguarded.
+ */
+const LEASE_REQUIRED_JOB_TYPES = new Set([SEMRUSH_MARKET_GENERATION_JOB_TYPE]);
+
+/**
+ * Job types whose write-scoped access token is exchanged INSIDE the handler,
+ * AFTER a downstream call (DRS generation) returns — not by the runner up front.
+ * The runner passes these handlers a null access token; the handler owns the
+ * exchange. (The runner still invalidates the token on terminal state.)
+ */
+const DEFERRED_EXCHANGE_JOB_TYPES = new Set([SEMRUSH_MARKET_GENERATION_JOB_TYPE]);
+
+const TRANSIENT_NETWORK_ERROR_CODES = new Set([
+  'EAI_AGAIN',
+  'ECONNREFUSED',
+  'ECONNRESET',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+  'ENOTFOUND',
+  'EPIPE',
+  'ETIMEDOUT',
+  'UND_ERR_BODY_TIMEOUT',
+  'UND_ERR_CONNECT_TIMEOUT',
+  'UND_ERR_HEADERS_TIMEOUT',
+  'UND_ERR_SOCKET',
+]);
+const TRANSIENT_NETWORK_ERROR_NAMES = new Set(['AbortError', 'TimeoutError']);
+
+/**
+ * Recognises only explicit network/timeout signals, including a fetch TypeError
+ * whose cause carries the actual socket code. Plain TypeError/RangeError and
+ * arbitrary application errors deliberately do not match.
+ *
+ * @param {unknown} error
+ * @returns {boolean}
+ */
+function isTransientNetworkError(error) {
+  let current = error;
+  const seen = new Set();
+  for (let depth = 0; depth < 4 && current && typeof current === 'object'; depth += 1) {
+    if (seen.has(current)) {
+      return false;
+    }
+    seen.add(current);
+    const candidate = /** @type {{ code?: unknown, name?: unknown, cause?: unknown }} */ (
+      current
+    );
+    if (isRateLimited(current)) {
+      return true;
+    }
+    if (isSemrushTransportError(current)) {
+      const { status } = current;
+      if (typeof status === 'number' && Number.isInteger(status) && status >= 500) {
+        return true;
+      }
+    }
+    const code = typeof candidate.code === 'string' ? candidate.code : '';
+    const name = typeof candidate.name === 'string' ? candidate.name : '';
+    if (TRANSIENT_NETWORK_ERROR_CODES.has(code) || TRANSIENT_NETWORK_ERROR_NAMES.has(name)) {
+      return true;
+    }
+    current = candidate.cause;
+  }
+  return false;
+}
+
+/**
+ * Public retryability is intentionally narrower than "not a 4xx": only typed
+ * upstream 5xx/rate-limit failures and known transport/network failures qualify.
+ *
+ * @param {unknown} error
+ * @returns {boolean}
+ */
+function isRetryableFailure(error) {
+  if (isRateLimited(error)) {
+    return true;
+  }
+  if (isSemrushTransportError(error)) {
+    const { status } = error;
+    return typeof status === 'number' && Number.isInteger(status)
+      ? status >= 500
+      : isTransientNetworkError(error);
+  }
+  return isTransientNetworkError(error);
+}
 
 /**
  * @param {object} message - the SQS message body (already JSON-parsed by
@@ -128,30 +240,80 @@ export async function run(message, context) {
     return ok();
   }
 
-  let accessToken;
-  try {
-    // Exchange first, before any other work: every exchange resets the
-    // promise token's TTL from that moment (see async-job-runner.js).
-    accessToken = await exchangeAndPersistPromiseToken(context, job);
-  } catch (error) {
-    if (error instanceof NeedsReauthError) {
-      log.warn(`[serenity-job-runner] Job ${jobId} needs re-authentication: ${error.message}`);
-      job.setStatus('FAILED');
-      job.setError({ code: error.code, message: error.message });
-      await job.save();
-      return ok();
-    }
-    throw error;
+  // Dispatch on the STORED jobType, never the message `type` (worker dispatch
+  // integrity): the record is authoritative, and a message whose `type`
+  // contradicts it is poisoned/spoofed and must not steer the job onto a
+  // different handler. Reject the mismatched message; the job record is
+  // untouched and a correctly-typed redelivery still runs.
+  const storedJobType = job.getMetadata?.()?.jobType;
+  if (hasText(type) && hasText(storedJobType) && type !== storedJobType) {
+    log.error(`[serenity-job-runner] Message type '${type}' does not match stored jobType '${storedJobType}' for job ${jobId}; dropping mismatched message`);
+    return ok();
   }
 
-  const handler = HANDLERS[type];
+  const handler = HANDLERS[storedJobType];
   if (!handler) {
-    log.warn(`[serenity-job-runner] No handler registered for job type: ${type}`);
+    log.warn(`[serenity-job-runner] No handler registered for job type: ${storedJobType}`);
     job.setStatus('FAILED');
-    job.setError({ code: 'UNKNOWN_JOB_TYPE', message: `No handler for job type: ${type}` });
+    job.setError({
+      code: 'UNKNOWN_JOB_TYPE',
+      message: `No handler for job type: ${storedJobType}`,
+      retryable: false,
+    });
     await invalidateJobPromiseToken(context, job);
     await job.save();
     return ok();
+  }
+
+  // Atomic per-job lease (Gap 4) for lease-required job types — a security
+  // control: exactly one concurrent delivery may process a token-bearing write
+  // job. A claim-query failure fails closed (throw → SQS redelivers) rather than
+  // process unguarded; a lost claim drops the duplicate.
+  const leaseToken = LEASE_REQUIRED_JOB_TYPES.has(storedJobType) ? newLeaseToken() : null;
+  if (leaseToken) {
+    let won;
+    try {
+      won = await claimJobLease(context, job, { leaseToken });
+    } catch (error) {
+      log.warn(`[serenity-job-runner] Job ${jobId} lease claim errored; leaving for redelivery: ${error.message}`);
+      throw error;
+    }
+    if (!won) {
+      log.info(`[serenity-job-runner] Job ${jobId} lease held by another delivery; dropping duplicate`);
+      return ok();
+    }
+  }
+
+  // Token exchange: default "exchange first" (every exchange resets the promise
+  // token's TTL). Deferred for job types that must exchange AFTER a downstream
+  // call (e.g. the DRS generation invoke) — those handlers exchange themselves.
+  let accessToken = null;
+  if (!DEFERRED_EXCHANGE_JOB_TYPES.has(storedJobType)) {
+    try {
+      accessToken = await exchangeAndPersistPromiseToken(context, job);
+    } catch (error) {
+      if (error instanceof NeedsReauthError) {
+        log.warn(`[serenity-job-runner] Job ${jobId} needs re-authentication: ${error.message}`);
+        job.setStatus('FAILED');
+        job.setError({ code: error.code, message: error.message, retryable: false });
+        if (leaseToken) {
+          clearJobLease(job);
+        }
+        await job.save();
+        return ok();
+      }
+      // Release the lease on a rethrown (retryable) exchange failure so the
+      // redelivery can re-claim; the job stays IN_PROGRESS. A failed release is
+      // logged (not swallowed silently): the stale lease then blocks redelivery
+      // until its ~930s TTL, which on-call needs to be able to see.
+      if (leaseToken) {
+        clearJobLease(job);
+        await job.save().catch((saveError) => {
+          log.warn(`[serenity-job-runner] Job ${jobId} failed to release lease after exchange error: ${saveError.message}`);
+        });
+      }
+      throw error;
+    }
   }
 
   let tokenOwnershipTransferred = false;
@@ -166,14 +328,36 @@ export async function run(message, context) {
     // would also kill the requeued job's copy before it ever runs.
     tokenOwnershipTransferred = Boolean(result?.requeuedJobId);
   } catch (error) {
+    if (isRetryableJobError(error)) {
+      log.warn(`[serenity-job-runner] Job ${jobId} remains IN_PROGRESS for SQS retry: ${error.message}`);
+      // Release the lease so the redelivery can re-claim and resume from the
+      // handler's own checkpoints; keep the token (retained for retry). A failed
+      // release is logged, not swallowed — the stale lease blocks redelivery until
+      // its ~930s TTL.
+      if (leaseToken) {
+        clearJobLease(job);
+        await job.save().catch((saveError) => {
+          log.warn(`[serenity-job-runner] Job ${jobId} failed to release lease after retryable failure: ${saveError.message}`);
+        });
+      }
+      throw error;
+    }
     log.error(`[serenity-job-runner] Job ${jobId} failed: ${error.message}`);
     job.setStatus('FAILED');
-    job.setError({ code: 'JOB_FAILED', message: error.message });
+    job.setError({
+      code: error.code ?? 'JOB_FAILED',
+      message: error.message,
+      retryable: isRetryableFailure(error),
+    });
   }
 
   if (!tokenOwnershipTransferred) {
     await invalidateJobPromiseToken(context, job);
   }
+  // Scrub the lease on every terminal path (defense-in-depth): unconditional so a
+  // stale lease left on the record by a prior crashed attempt is cleared even if
+  // this delivery did not itself claim one (`clearJobLease` is a no-op when absent).
+  clearJobLease(job);
   await job.save();
 
   return ok();

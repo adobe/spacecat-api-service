@@ -64,6 +64,9 @@ function createContext(params = {}, data = {}, overrides = {}) {
       params: { spaceCatId: ORG_ID, brandId: 'all', ...params },
       data: { siteId: SITE_ID, ...data },
       log: { error: sinon.stub(), info: sinon.stub(), warn: sinon.stub() },
+      attributes: {
+        authInfo: { isS2SConsumer: () => overrides.isS2SConsumer ?? false },
+      },
       dataAccess: {
         Site: { postgrestService: client },
         Organization: {
@@ -1677,6 +1680,8 @@ describe('URL Inspector Handlers', () => {
     let resolveBrandUuidStub;
     let resolveBrandWorkspaceStub;
     let getUrlPromptsStub;
+    let createElementsTransportStub;
+    let resolveSemrushImsTokenStub;
     let createUrlInspectorPromptsByUrlHandler;
 
     beforeEach(async () => {
@@ -1687,6 +1692,8 @@ describe('URL Inspector Handlers', () => {
         parentWorkspaceId: PARENT_WORKSPACE_ID,
       });
       getUrlPromptsStub = sinon.stub().resolves([]);
+      createElementsTransportStub = sinon.stub().returns({ fetchElement: sinon.stub() });
+      resolveSemrushImsTokenStub = sinon.stub().resolves('test-ims-token');
 
       ({ createUrlInspectorPromptsByUrlHandler } = await esmock(
         '../../../src/controllers/llmo/llmo-url-inspector.js',
@@ -1698,13 +1705,13 @@ describe('URL Inspector Handlers', () => {
             resolveBrandWorkspace: resolveBrandWorkspaceStub,
           },
           '../../../src/support/elements/elements-transport.js': {
-            createElementsTransport: sinon.stub().returns({ fetchElement: sinon.stub() }),
+            createElementsTransport: createElementsTransportStub,
           },
           '../../../src/support/elements/elements-service.js': {
             createElementsService: sinon.stub().returns({ getUrlPrompts: getUrlPromptsStub }),
           },
           '../../../src/support/utils.js': {
-            resolveSemrushImsToken: sinon.stub().resolves('test-ims-token'),
+            resolveSemrushImsToken: resolveSemrushImsTokenStub,
           },
         },
       ));
@@ -1795,16 +1802,19 @@ describe('URL Inspector Handlers', () => {
       expect(body.prompts[0].citations).to.equal(0);
     });
 
-    it('returns internalServerError when the Semrush service throws a non-Error value', async () => {
+    it('falls back to Mysticat when the Semrush service throws a non-Error value', async () => {
       // eslint-disable-next-line prefer-promise-reject-errors -- covers e?.message||e fallback
       getUrlPromptsStub.callsFake(() => Promise.reject('semrush boom'));
-      const { context } = createContext(
+      const { context, rpcStub } = createContext(
         { brandId: BRAND_UUID },
         { url: 'https://example.com/a' },
       );
       const handler = createUrlInspectorPromptsByUrlHandler(getOrgAndValidateAccess());
       const response = await handler(context);
-      expect(response.status).to.equal(500);
+      expect(response.status).to.equal(200);
+      expect(rpcStub).to.have.been.calledWith('rpc_url_inspector_prompts_by_url', sinon.match({
+        p_url: 'https://example.com/a',
+      }));
     });
 
     it('returns forbidden when site does not belong to org', async () => {
@@ -1839,6 +1849,39 @@ describe('URL Inspector Handlers', () => {
       }));
       // Semrush path never touches the Mysticat RPC.
       expect(rpcStub).to.not.have.been.called;
+    });
+
+    it('skips IMS token resolution and builds an S2S transport for an S2S consumer', async () => {
+      getUrlPromptsStub.resolves([]);
+      const { context } = createContext(
+        { brandId: BRAND_UUID },
+        { url: 'https://example.com/a' },
+        { isS2SConsumer: true },
+      );
+      const handler = createUrlInspectorPromptsByUrlHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+
+      expect(response.status).to.equal(200);
+      expect(resolveSemrushImsTokenStub).to.not.have.been.called;
+      expect(createElementsTransportStub).to.have.been.calledWith(
+        sinon.match({ isS2SConsumer: true, imsToken: undefined }),
+      );
+    });
+
+    it('builds a regular (non-S2S) transport and resolves an IMS token for a normal caller', async () => {
+      getUrlPromptsStub.resolves([]);
+      const { context } = createContext(
+        { brandId: BRAND_UUID },
+        { url: 'https://example.com/a' },
+      );
+      const handler = createUrlInspectorPromptsByUrlHandler(getOrgAndValidateAccess());
+      const response = await handler(context);
+
+      expect(response.status).to.equal(200);
+      expect(resolveSemrushImsTokenStub).to.have.been.calledOnce;
+      expect(createElementsTransportStub).to.have.been.calledWith(
+        sinon.match({ isS2SConsumer: false, imsToken: 'test-ims-token' }),
+      );
     });
 
     it('passes the raw (un-normalized) model to Semrush, not the Mysticat-enum value', async () => {
@@ -1989,31 +2032,37 @@ describe('URL Inspector Handlers', () => {
       expect(context.log.error.firstCall.args[0]).to.include('sub-workspace equals org parent workspace');
     });
 
-    it('returns internalServerError when the Semrush service call throws', async () => {
+    it('falls back to Mysticat when the Semrush service call throws', async () => {
       getUrlPromptsStub.rejects(new Error('semrush boom'));
-      const { context } = createContext(
+      const { context, rpcStub } = createContext(
         { brandId: BRAND_UUID },
         { url: 'https://example.com/a' },
       );
       const handler = createUrlInspectorPromptsByUrlHandler(getOrgAndValidateAccess());
       const response = await handler(context);
-      expect(response.status).to.equal(500);
+      expect(response.status).to.equal(200);
+      expect(rpcStub).to.have.been.calledWith('rpc_url_inspector_prompts_by_url', sinon.match({
+        p_url: 'https://example.com/a',
+      }));
     });
 
-    it('logs the status code when the Semrush call throws an ErrorWithStatusCode', async () => {
+    it('falls back to Mysticat and logs the status code when the Semrush call throws an ErrorWithStatusCode (e.g. 401 for a non-IMS caller)', async () => {
       const err = new Error('Invalid or expired promise token');
       err.status = 401;
       getUrlPromptsStub.rejects(err);
-      const { context } = createContext(
+      const { context, rpcStub } = createContext(
         { brandId: BRAND_UUID },
         { url: 'https://example.com/a' },
       );
       const handler = createUrlInspectorPromptsByUrlHandler(getOrgAndValidateAccess());
       const response = await handler(context);
 
-      expect(response.status).to.equal(500);
-      expect(context.log.error).to.have.been.calledWith(
-        sinon.match(/Invalid or expired promise token.*\[status=401\]/),
+      expect(response.status).to.equal(200);
+      expect(rpcStub).to.have.been.calledWith('rpc_url_inspector_prompts_by_url', sinon.match({
+        p_url: 'https://example.com/a',
+      }));
+      expect(context.log.warn).to.have.been.calledWith(
+        sinon.match(/falling back to DRS.*Invalid or expired promise token.*\[status=401\]/i),
       );
     });
 

@@ -108,11 +108,11 @@ describe('finalizeSerenityProjects (publish-after-populate)', () => {
     expect(pArgs[6]).to.equal(classify);
     // env (7) + writeDeadline (8) are threaded from options (undefined here),
     // then the resolved callerId (9, no controller ctx on this trigger-driven
-    // path so it degrades to 'unknown'), then the { publish: false } option (10).
+    // path so it degrades to 'unknown'), then the service-authored origin option (10).
     expect(pArgs[7]).to.equal(undefined);
     expect(pArgs[8]).to.equal(undefined);
     expect(pArgs[9]).to.equal('unknown');
-    expect(pArgs[10]).to.deep.equal({ publish: false });
+    expect(pArgs[10]).to.deep.equal({ publish: false, originValue: 'ai' });
     // models set with publish deferred
     expect(handleUpdateModels.firstCall.args[6]).to.deep.equal({ publish: false });
     // single publish + confirm
@@ -133,6 +133,22 @@ describe('finalizeSerenityProjects (publish-after-populate)', () => {
     expect(transport.publishProject).to.not.have.been.called;
     expect(out.publishSkipped).to.deep.equal([{ projectId: 'proj-1', reason: 'noPrompts' }]);
     expect(out.published).to.be.empty;
+  });
+
+  it('still publishes when every prompt UPSERTED rather than being created', async () => {
+    // handleCreatePrompts is an upsert, so a re-fire against a brand whose prompts
+    // already exist reports them in `updated` with `created` empty. Gating on
+    // `created` alone would read a fully populated project as "every push failed".
+    handleCreatePrompts.resolves({
+      created: [], updated: [{ text: 'q' }], skipped: [], failed: [],
+    });
+    const body = {
+      prompts: [{ text: 'q', geoTargetId: 2840, languageCode: 'en' }],
+      models: [{ geoTargetId: 2840, languageCode: 'en', modelIds: ['m1'] }],
+    };
+    const out = await finalizeSerenityProjects(transport, dataAccess, BRAND, WS, body, noopLog);
+    expect(transport.publishProject).to.have.been.calledOnceWith(WS, 'proj-1');
+    expect(out.publishSkipped).to.be.empty;
   });
 
   it('skips publish for a project with no models set (noModels)', async () => {

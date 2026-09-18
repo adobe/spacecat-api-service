@@ -96,6 +96,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
     stubs.rumApiClientCreateFromStub.returns({ retrieveDomainkey: stubs.rumRetrieveDomainkeyStub });
     stubs.updateRumConfigStub.resolves(true);
     stubs.detectBotBlockerStub.resolves({ crawlable: true });
+    stubs.detectAuthWallStub.resolves({ authenticated: false, signal: null });
     stubs.detectLocaleStub.resolves({ language: 'en', region: 'US' });
     stubs.resolveCanonicalUrlStub.resolves('https://example.com');
     createOrFindOrganizationStub.resolves(mockOrganization);

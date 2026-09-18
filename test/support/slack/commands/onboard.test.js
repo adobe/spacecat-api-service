@@ -813,7 +813,7 @@ describe('OnboardCommand', () => {
 
   describe('Batch Onboarding from CSV', () => {
     beforeEach(() => {
-      slackContext.files = [{ name: 'test.csv', url_private: 'https://mock-csv.com' }];
+      slackContext.files = [{ name: 'test.csv', url_private: 'https://files.slack.com/files-pri/T1-F2/test.csv' }];
       slackContext.botToken = 'test-token';
     });
 
@@ -823,7 +823,13 @@ describe('OnboardCommand', () => {
         ['https://example2.com', '000000000000000000000000@AdobeOrg'],
       ];
 
-      parseCSVStub.withArgs('https://mock-csv.com', 'test-token').resolves(mockCSVData);
+      // parseCSV receives the Slack file OBJECT (not its URL) plus the bot token. Matching on
+      // the object is what makes this stub actually apply -- a URL-string matcher silently
+      // never matched, so the test previously fell through to the default `[]` stub and
+      // asserted nothing about the valid-CSV path.
+      parseCSVStub
+        .withArgs(sinon.match({ url_private: 'https://files.slack.com/files-pri/T1-F2/test.csv' }), 'test-token')
+        .resolves(mockCSVData);
 
       dataAccessStub.Organization.findByImsOrgId.resolves({ organizationId: 'existing-org-123' });
       dataAccessStub.Organization.create.resolves(null);
@@ -834,12 +840,21 @@ describe('OnboardCommand', () => {
         getBaseURL: () => 'https://example1.com',
       });
 
-      const args = ['default'];
+      // 'demo' is a real profile in static/onboard/profiles.json. The previous 'default' does
+      // not exist, so loadProfileConfig threw and the batch loop never ran -- which the old
+      // `expect(say.called)` assertion could not detect.
+      const args = ['demo'];
       const command = OnboardCommand(context);
 
       await command.handleExecution(args, slackContext);
 
-      // Verify that the function executed successfully
+      // Assert the real side effect of the valid-CSV path: both rows were onboarded, and the
+      // file object (not a URL string) was handed to parseCSV.
+      expect(parseCSVStub.calledWith(
+        sinon.match({ url_private: 'https://files.slack.com/files-pri/T1-F2/test.csv' }),
+        'test-token',
+      )).to.be.true;
+      expect(onboardSingleSiteStub.callCount).to.equal(mockCSVData.length);
       expect(slackContext.say.called).to.be.true;
     });
 

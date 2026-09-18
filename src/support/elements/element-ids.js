@@ -84,7 +84,8 @@ export const ELEMENT_IDS = Object.freeze({
   //     closest_date, url_cbf }.
   // Scoped by `CBF_source` = the full URL string (placed in BOTH simple and
   // advanced — unique to this element) + date (`CBF_date__start`/`__end`) +
-  // `CBF_model`. Brand scoping is via the sub-workspace (no CBF_brand filter).
+  // `CBF_model`. Brand scoping is via the sub-workspace (no CBF_brand filter) —
+  // premise DISPROVEN for PROMPTS_BY_TOPIC (see topic-prompts.js), unverified here.
   // Does NOT return category/topic/region. Verified live 2026-07-29.
   URL_PROMPTS: 'b4f1ead7-4aea-41ea-b1ce-311004715d63',
 
@@ -135,6 +136,10 @@ export const ELEMENT_IDS = Object.freeze({
   PROMPTS_BY_TOPIC: '78864493-90a7-449a-89ab-1ba3d09a712e',
   SOURCES: '553cd819-d507-460d-a8ff-e34486bad3e1',
   SOURCES_DATES: '404fb017-7e44-41ec-896f-7138f731da60',
+
+  // Combined Brand Claims execution feed: one row includes prompt, response, date, model,
+  // per-execution sources, response count, and tags.
+  BRAND_CLAIMS_RESPONSES: '55e89619-4b02-4319-be91-590e58da8815',
 
   // Prompt Details
   PROMPT_AI_ANSWERS: '45d6251f-15cd-4b33-a7f6-de97925e900e',

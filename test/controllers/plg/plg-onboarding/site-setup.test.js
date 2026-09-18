@@ -42,6 +42,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
   let rumRetrieveDomainkeyStub;
   let composeBaseURLStub;
   let detectBotBlockerStub;
+  let detectAuthWallStub;
   let detectLocaleStub;
   let resolveCanonicalUrlStub;
   let createOrFindOrganizationStub;
@@ -100,6 +101,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
       updateRumConfigStub,
       composeBaseURLStub,
       detectBotBlockerStub,
+      detectAuthWallStub,
       detectLocaleStub,
       resolveCanonicalUrlStub,
       createOrFindOrganizationStub,
@@ -132,6 +134,7 @@ describe('PlgOnboardingController', function describePlgOnboarding() {
     stubs.rumApiClientCreateFromStub.returns({ retrieveDomainkey: rumRetrieveDomainkeyStub });
     updateRumConfigStub.resolves(true);
     detectBotBlockerStub.resolves({ crawlable: true });
+    detectAuthWallStub.resolves({ authenticated: false, signal: null });
     detectLocaleStub.resolves({ language: 'en', region: 'US' });
     resolveCanonicalUrlStub.resolves('https://example.com');
     createOrFindOrganizationStub.resolves(mockOrganization);

@@ -79,3 +79,28 @@ export function isValidTagIdFormat(id) {
   }
   return true;
 }
+
+// TAB/LF/CR are ordinary whitespace a human-authored prompt legitimately
+// carries — unlike isValidTagIdFormat's opaque-id check (above), a prompt-text
+// check must not reject them.
+const ALLOWED_WHITESPACE_CONTROL_CODES = new Set([9, 10, 13]);
+
+/**
+ * True if `text` contains a C0 control character (other than TAB/LF/CR) or
+ * DEL — bytes that have no legitimate place in human-authored prompt text
+ * regardless of what Semrush's own length/character contract turns out to be
+ * (LLMO-7533 §6). Reuses the same control-code range `isValidTagIdFormat`
+ * bounds against, but does NOT reject general whitespace.
+ *
+ * @param {string} text
+ */
+export function hasDisallowedControlChars(text) {
+  for (let i = 0; i < text.length; i += 1) {
+    const code = text.charCodeAt(i);
+    if ((code <= MAX_C0_CONTROL_CODE && !ALLOWED_WHITESPACE_CONTROL_CODES.has(code))
+      || code === DEL_CONTROL_CODE) {
+      return true;
+    }
+  }
+  return false;
+}

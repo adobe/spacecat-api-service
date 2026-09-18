@@ -11,6 +11,7 @@
  */
 
 import { resolveElementModel } from '../constants.js';
+import { buildFacetedTagFilters } from './prompts.js';
 
 /**
  * Definitions for the Data Insights "Prompts by Topic" element
@@ -33,9 +34,21 @@ import { resolveElementModel } from '../constants.js';
  *  - Date range → `filters.simple.start_date`/`end_date` (YYYY-MM-DD) when provided;
  *    omitted → the element applies its own default window.
  *  - `comparison_data_formatting: 'join'` matches the live MFE (NOT 'union').
- *  - Brand scoping comes from targeting the brand's sub-workspace (resolved in the
- *    controller), so `CBF_brand`/`CBF_brand_urls` (which the MFE also sends) are not
- *    duplicated here.
+ *  - Brand scoping needs `CBF_brand` (the brand display name) — the sub-workspace ALONE
+ *    is NOT enough. This file previously claimed the opposite ("the sub-workspace already
+ *    scopes the brand, so CBF_brand is not duplicated here"); that premise is FALSE for
+ *    this element and was disproven live: topic "3 ft Bean Bag" (Lovesac, chatgpt,
+ *    2026-08-17..2026-08-23) scored visibility 14.29 / mentions 1 off a ChatGPT answer
+ *    that named Pottery Barn and never mentioned Lovesac, while the Brand Presence MFE —
+ *    which DOES send `CBF_brand` — correctly showed 0. Without the filter the element
+ *    counts ANY tracked brand appearing in the topic's responses, so competitor mentions
+ *    inflate the brand's mentions/visibility/citations. The column is `CBF_brand`, NOT
+ *    `CBF_ws_brand`. `CBF_brand_urls` remains un-sent (it scopes URL lists, not mentions).
+ *  - `CBF_brand` is an ATTRIBUTION filter, not a row filter: it changes each row's
+ *    mentions/citations/visibility but never the row set. Verified twice — an all-topics
+ *    probe returned the same 1520 rows with and without it, and the case/alias probe
+ *    returned an identical 45-row set for a matching name, a non-matching name and an
+ *    alias. So `totalCount`, `promptCount` and pagination are unaffected by brand scoping.
  */
 
 /**
@@ -64,16 +77,44 @@ function toNumberOrNull(value) {
  * @param {string} [params.projectId] - Single Semrush project id to scope to (`CBF_project`).
  * @param {string[]} [params.projectIds] - Multiple Semrush project ids to OR together
  *   (`CBF_project`); takes precedence over `projectId` when both are given.
+ * @param {string} [params.brandName] - Brand display name to scope mentions/visibility/
+ *   citations to this brand (`CBF_brand`). Omitted, blank or whitespace-only →
+ *   brand-agnostic (counts any tracked brand in the topic's responses).
+ *   VERIFIED live 2026-09-08 (Lovesac, topic "Lovesac Furniture and Accessories",
+ *   2026-08-17..2026-08-23): matching is **exact and CASE-SENSITIVE**, and registered
+ *   aliases are **NOT** resolved — `Lovesac` → 315 mentions, while `lovesac` → 0 and the
+ *   registered alias `PillowSac` → 0, over an identical 45-row set. So this value must be
+ *   the brand's exact Semrush-tracked name: any casing/rename/alias divergence between
+ *   `brands.name` and Semrush silently zeroes the counts, which is indistinguishable from
+ *   a genuine "no presence". That is why a blank name falls back to brand-agnostic rather
+ *   than sending a value that cannot match.
  * @returns {object} Semrush element request payload.
  */
 export function buildTopicPromptsPayload({
-  topic, model, platform, startDate, endDate, projectId, projectIds,
+  topic, model, platform, startDate, endDate, tagPaths, category, projectId, projectIds,
+  brandName,
 } = {}) {
   const resolvedModel = resolveElementModel(model || platform);
 
   const advancedFilters = [
     { op: 'or', filters: [{ op: 'eq', val: resolvedModel, col: 'CBF_model' }] },
   ];
+  // Brand scoping: restrict mentions/visibility/citations to THIS brand via CBF_brand.
+  // Without it the element counts ANY tracked brand in the topic's responses, so a
+  // competitor mentioned in an answer where the brand is absent inflates the numbers
+  // (verified live against the Brand Presence MFE, which sends this filter — see the
+  // module header). Wrapped in a single-value `or` block to match the CBF_model/
+  // CBF_topic/CBF_project shape below; functionally identical to the MFE's bare `eq`.
+  //
+  // Trimmed here, and treated as absent when the result is empty, so the invariant holds
+  // for EVERY caller: a blank or whitespace-only name must fall back to brand-agnostic
+  // rather than send `CBF_brand: "   "`, which matches no brand and would silently zero
+  // the counts — indistinguishable from a real "no presence". Note `hasText` does NOT
+  // trim (`!!str && isString(str)`), so guarding with it here would not catch "   ".
+  const scopedBrand = typeof brandName === 'string' ? brandName.trim() : '';
+  if (scopedBrand) {
+    advancedFilters.push({ op: 'or', filters: [{ op: 'eq', val: scopedBrand, col: 'CBF_brand' }] });
+  }
   // Topic scoping: the bare topic name on CBF_topic (verified live). Absent → all topics.
   if (topic) {
     advancedFilters.push({ op: 'or', filters: [{ op: 'eq', val: topic, col: 'CBF_topic' }] });
@@ -88,6 +129,7 @@ export function buildTopicPromptsPayload({
       filters: ids.map((id) => ({ op: 'eq', val: id, col: 'CBF_project' })),
     });
   }
+  advancedFilters.push(...buildFacetedTagFilters({ tagPaths, category }));
 
   const filters = { advanced: { op: 'and', filters: advancedFilters } };
   // Only send a date window when the caller provided one; otherwise let the element
@@ -111,6 +153,7 @@ export function buildTopicPromptsPayload({
  *     sentiment, volume, project_title, days, model, model_project_cbf }
  * where `citations`/`mentions` may be null, `position === -1` means unranked, and
  * `sentiment === null` means no sentiment. `config.data` is null (no column metadata).
+ * `days` (the per-window execution count) is surfaced in the clean contract as `executions`.
  *
  * @param {object} raw - Raw element response.
  * @returns {Array<object>} One row per prompt.
@@ -131,6 +174,12 @@ export function transformTopicPromptsResponse(raw) {
       position: position === NO_POSITION ? null : position,
       sentiment: toNumberOrNull(row?.sentiment),
       volume: Number(row?.volume) || 0,
+      // `days` = the number of executions in the window (Semrush runs a prompt at most once
+      // per model/date/project), surfaced as `executions` so consumers can compute a true
+      // per-execution citation rate (citations / executions) rather than citations / mentions.
+      // VERIFIED live 2026-09-07 (Lovesac, one topic, 30-day window, 100 rows): days <= window
+      // with 0 violations, and mentions <= days universally.
+      executions: Number(row?.days) || 0,
     };
   });
 }

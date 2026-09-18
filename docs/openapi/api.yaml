@@ -162,20 +162,32 @@ paths:
     $ref: './prompts-v2-api.yaml#/v2-prompts-by-brand-bulk-delete'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/prompts:
     $ref: './serenity-api.yaml#/v2-serenity-prompts'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/prompts/finalize:
+    $ref: './serenity-api.yaml#/v2-serenity-prompts-finalize'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/prompts/{semrushPromptId}:
     $ref: './serenity-api.yaml#/v2-serenity-prompt-by-id'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/prompts/bulk-delete:
     $ref: './serenity-api.yaml#/v2-serenity-prompts-bulk-delete'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/prompts/bulk-tags:
+    $ref: './serenity-api.yaml#/v2-serenity-prompts-bulk-tags'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/prompts/jobs/{jobId}:
     $ref: './serenity-api.yaml#/v2-serenity-prompts-job-by-id'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/markets:
     $ref: './serenity-api.yaml#/v2-serenity-markets'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/markets/generation/jobs/{jobId}:
+    $ref: './serenity-api.yaml#/v2-serenity-market-generation-job-by-id'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/markets/generation/jobs/{jobId}/reauth:
+    $ref: './serenity-api.yaml#/v2-serenity-market-generation-job-reauth'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/markets/{geoTargetId}/{languageCode}:
     $ref: './serenity-api.yaml#/v2-serenity-market-by-slice'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/tags:
     $ref: './serenity-api.yaml#/v2-serenity-tags'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/tags/search:
+    $ref: './serenity-api.yaml#/v2-serenity-tag-search'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/tags/{tagId}:
     $ref: './serenity-api.yaml#/v2-serenity-tag-by-id'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/tags/{tagId}/impact:
+    $ref: './serenity-api.yaml#/v2-serenity-tag-impact'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/models:
     $ref: './serenity-api.yaml#/v2-serenity-models'
   /v2/orgs/{spaceCatId}/serenity/models:
@@ -200,6 +212,8 @@ paths:
     $ref: './serenity-api.yaml#/v2-serenity-brand-presence-access'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/sentiment-overview:
     $ref: './serenity-api.yaml#/v2-serenity-brand-presence-sentiment-overview'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/responses:
+    $ref: './serenity-api.yaml#/v2-serenity-brand-presence-responses'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/subreddits:
     $ref: './serenity-api.yaml#/v2-serenity-brand-presence-subreddits'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/reddit-threads:
@@ -218,6 +232,12 @@ paths:
     $ref: './serenity-api.yaml#/v2-serenity-url-inspector-prompts-count'
   /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/url-inspector/url-prompts:
     $ref: './serenity-api.yaml#/v2-serenity-url-inspector-url-prompts'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/url-inspector/owned-urls:
+    $ref: './serenity-api.yaml#/v2-serenity-url-inspector-owned-urls'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/url-inspector/cited-domains:
+    $ref: './serenity-api.yaml#/v2-serenity-url-inspector-cited-domains'
+  /v2/orgs/{spaceCatId}/brands/{brandId}/serenity/brand-presence/url-inspector/domain-urls:
+    $ref: './serenity-api.yaml#/v2-serenity-url-inspector-domain-urls'
   /organizations/{organizationId}/sites:
     $ref: './sites-api.yaml#/sites-for-organization'
   /organizations/{organizationId}/entitlements:
@@ -273,6 +293,10 @@ paths:
     $ref: './preflight-api.yaml#/preflight-jobs'
   /preflight/jobs/{jobId}:
     $ref: './preflight-api.yaml#/preflight-job-status'
+  /oae-validation/jobs:
+    $ref: './oae-validation-api.yaml#/oae-validation-jobs'
+  /oae-validation/jobs/{jobId}:
+    $ref: './oae-validation-api.yaml#/oae-validation-job-status'
   /sites/detect/jobs:
     $ref: './site-detection-api.yaml#/site-detection-jobs'
   /sites/detect/jobs/{jobId}:
@@ -341,6 +365,10 @@ paths:
     $ref: './site-api.yaml#/site-page-relationships-search'
   /sites/{siteId}/opportunities:
     $ref: './site-opportunities.yaml#/site-opportunities'
+  /sites/{siteId}/opportunities/by-urls:
+    $ref: './site-opportunities.yaml#/site-opportunities-by-urls'
+  /sites/{siteId}/suggestions/by-urls:
+    $ref: './site-opportunities.yaml#/site-suggestions-by-urls'
   /sites/{siteId}/opportunities/by-status/{status}:
     $ref: './site-opportunities.yaml#/site-opportunities-by-status'
   /sites/{siteId}/opportunities/{opportunityId}:
@@ -567,10 +595,14 @@ paths:
     $ref: './site-metrics-api.yaml#/site-metrics-by-source'
   /sites/{siteId}/metrics/{metric}/{source}/by-url/{base64PageUrl}:
     $ref: './site-metrics-api.yaml#/page-metrics-by-source'
+  /sites/{siteId}/keyword-cpc:
+    $ref: './site-metrics-api.yaml#/site-keyword-cpc'
   /sites/{siteId}/experiments:
     $ref: './experiments-api.yaml#/experiments'
   /sites/{siteId}/fixes:
     $ref: './site-opportunities.yaml#/site-fixes'
+  /sites/{siteId}/deployed-opportunities:
+    $ref: './site-opportunities.yaml#/site-deployed-opportunities'
   /sites/{siteId}/opportunities/{opportunityId}/fixes:
     $ref: './site-opportunities.yaml#/site-opportunity-fixes'
   /sites/{siteId}/opportunities/{opportunityId}/fixes/by-status/{status}:
@@ -728,8 +760,12 @@ paths:
     $ref: './llmo-api.yaml#/llmo-opportunities-reviewed'
   /sites/{siteId}/llmo/brand-claims:
     $ref: './llmo-api.yaml#/llmo-brand-claims'
+  /sites/{siteId}/llmo/brand-claims/weeks:
+    $ref: './llmo-api.yaml#/llmo-brand-claims-weeks'
   /sites/{siteId}/llmo/brand-claims/request:
     $ref: './llmo-api.yaml#/llmo-brand-claims-request'
+  /sites/{siteId}/llmo/brand-claims/feedback:
+    $ref: './llmo-api.yaml#/llmo-brand-claims-feedback'
   /sites/{siteId}/llmo/strategy/demo/brand-presence:
     $ref: './llmo-api.yaml#/llmo-opportunity-workspace-demo-brand-presence'
   /sites/{siteId}/llmo/strategy/demo/recommendations:

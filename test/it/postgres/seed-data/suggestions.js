@@ -12,11 +12,13 @@
 
 /**
  * Immutable baseline suggestions for IT tests.
- * All under OPPTY_1 (SITE_1, accessible).
+ * All under OPPTY_1 (SITE_1, accessible), except SUGG_4.
  *
  * - SUGG_1: CODE_CHANGE, NEW — base suggestion, linked to FIX_1
  * - SUGG_2: REDIRECT_UPDATE, APPROVED — different status for by-status filter
  * - SUGG_3: CODE_CHANGE, NEW — extra for list count assertions
+ * - SUGG_4: under OPPTY_3 (SITE_3, denied to the `user` persona) — used by the
+ *   OAE validation IT to assert cross-tenant job reads 404 (no existence disclosure).
  *
  * Format: snake_case (v3 / PostgreSQL / PostgREST)
  */
@@ -52,5 +54,13 @@ export const suggestions = [
     rank: 3,
     status: 'NEW',
     data: { title: 'Lazy load images', from: 'eager', to: 'lazy' },
+  },
+  {
+    id: 'bb444444-4444-4444-a444-444444444444',
+    opportunity_id: 'aa333333-3333-4333-b333-333333333333',
+    type: 'REDIRECT_UPDATE',
+    rank: 1,
+    status: 'NEW',
+    data: { title: 'Denied-tenant suggestion', from: '/old', to: '/new' },
   },
 ];

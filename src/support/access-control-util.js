@@ -27,7 +27,8 @@ import { listResourceIdsWithCapability } from './state-access-mapping-utils.js';
 import routeFacsCapabilities from '../routes/facs-capabilities.js';
 
 const ANONYMOUS_ENDPOINTS = [
-  /^GET \/slack\/events$/,
+  // NOTE: no `GET /slack/events` — the route was removed (VULN-39365). Slack only ever POSTs,
+  // and a GET carries no body to sign, so it could never be signature-verified.
   /^POST \/slack\/events$/,
   /^POST \/hooks\/site-detection.+/,
 ];
@@ -45,6 +46,17 @@ export default class AccessControlUtil {
     }
 
     return new AccessControlUtil(context);
+  }
+
+  /**
+   * Whether the current request was authenticated as an S2S consumer (`is_s2s_consumer`
+   * JWT claim) - a lightweight, context-only check usable before/without constructing a
+   * full `AccessControlUtil` instance (e.g. to decide whether to skip IMS token resolution).
+   * @param {object} context - Request context.
+   * @returns {boolean}
+   */
+  static isS2SConsumer(context) {
+    return context?.attributes?.authInfo?.isS2SConsumer?.() ?? false;
   }
 
   constructor(context) {

@@ -11,6 +11,7 @@
  */
 
 import { resolveElementModel } from '../constants.js';
+import { buildFacetedTagFilters } from './prompts.js';
 
 // Legacy default window is a rolling 28 days (see defaultDateRange in
 // llmo-brand-presence.js). Kept inline here so this definition stays pure and does
@@ -55,7 +56,7 @@ function defaultDateRange() {
  *   when a caller selects more than one project.
  */
 export function buildCitedDomainsPayload({
-  model, platform, startDate, endDate, category, projectId,
+  model, platform, startDate, endDate, category, tagPaths, projectId,
 } = {}) {
   const resolvedModel = resolveElementModel(model || platform);
   const defaults = defaultDateRange();
@@ -70,9 +71,7 @@ export function buildCitedDomainsPayload({
   // Category is a namespaced Semrush tag (`category__<label>`). Verified honored by this
   // element (unlike region/brand/content-type filters, which it ignores). Callers already
   // include the `category__` prefix, so the value is sent straight through unmodified.
-  if (category) {
-    advancedFilters.push({ op: 'eq', val: category, col: 'CBF_tags' });
-  }
+  advancedFilters.push(...buildFacetedTagFilters({ tagPaths, category }));
 
   return {
     // Project scoping: a Semrush project == one (brand, market). Selecting it via the

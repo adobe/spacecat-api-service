@@ -63,7 +63,7 @@ function buildContext({
     data,
     attributes: { authInfo: { getProfile: () => profile } },
     dataAccess: {
-      Site: { findById: sinon.stub().resolves({ getId: () => SITE_ID }) },
+      Site: { findById: sinon.stub().resolves({ getId: () => SITE_ID, getBaseURL: () => 'https://example.com' }) },
       services: { postgrestClient: client || buildClient() },
     },
     log: {
@@ -527,6 +527,67 @@ describe('AuditPolicyController — exclusions add/remove', () => {
     expect(res.status).to.equal(200);
     expect(client.rpc).to.have.been.calledWith(UPSERT_RPC, sinon.match({
       p_exclusion_globs: ['/checkout/*'],
+    }));
+  });
+
+  it('add: submitting the fully-qualified equivalent of an already-stored bare-path glob is deduped against the RPC-normalized value (SITES-51200 defense in depth)', async () => {
+    const client = buildSequencedClient({
+      selectQueue: [{ data: ROW_V5, error: null }],
+      rpcQueue: [{ data: { ...ROW_V5, version: 6 }, error: null }],
+    });
+    const controller = loadController();
+    await controller.addExclusions(buildContext({
+      client, data: { values: ['https://example.com/checkout/*'], reason: 'cross-representation no-op add' },
+    }));
+    expect(client.rpc).to.have.been.calledWith(UPSERT_RPC, sinon.match({
+      p_exclusion_globs: ['/checkout/*'],
+    }));
+    expect(client.rpc).to.have.been.calledOnce;
+  });
+
+  it('add: submitting the bare-path equivalent of an already-stored fully-qualified glob is deduped (reverse direction)', async () => {
+    const row = { ...ROW_V5, exclusion_globs: ['https://example.com/checkout/*'] };
+    const client = buildSequencedClient({
+      selectQueue: [{ data: row, error: null }],
+      rpcQueue: [{ data: { ...row, version: 6 }, error: null }],
+    });
+    const controller = loadController();
+    await controller.addExclusions(buildContext({
+      client, data: { values: ['/checkout/*'], reason: 'reverse cross-representation no-op add' },
+    }));
+    expect(client.rpc).to.have.been.calledWith(UPSERT_RPC, sinon.match({
+      p_exclusion_globs: ['https://example.com/checkout/*'],
+    }));
+    expect(client.rpc).to.have.been.calledOnce;
+  });
+
+  it('remove: a fully-qualified value removes an already-stored bare-path equivalent (normalized set-difference)', async () => {
+    const row = { ...ROW_V5, exclusion_globs: ['/checkout/*', '/account/*'] };
+    const client = buildSequencedClient({
+      selectQueue: [{ data: row, error: null }],
+      rpcQueue: [{ data: { ...row, version: 6, exclusion_globs: ['/account/*'] }, error: null }],
+    });
+    const controller = loadController();
+    const res = await controller.removeExclusions(buildContext({
+      client, data: { values: ['https://example.com/checkout/*'], reason: 'cross-representation remove' },
+    }));
+    expect(res.status).to.equal(200);
+    expect(client.rpc).to.have.been.calledWith(UPSERT_RPC, sinon.match({
+      p_exclusion_globs: ['/account/*'],
+    }));
+  });
+
+  it('add: a wildcard-prefixed glob is treated as a plain distinct entry, unaffected by normalization', async () => {
+    const client = buildSequencedClient({
+      selectQueue: [{ data: ROW_V5, error: null }],
+      rpcQueue: [{ data: { ...ROW_V5, version: 6 }, error: null }],
+    });
+    const controller = loadController();
+    await controller.addExclusions(buildContext({
+      client, data: { values: ['*/legacy/**'], reason: 'wildcard glob add' },
+    }));
+    expect(client.rpc).to.have.been.calledWith(UPSERT_RPC, sinon.match({
+      p_exclusion_globs: ['/checkout/*', '*/legacy/**'],
     }));
   });
 });

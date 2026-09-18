@@ -141,7 +141,8 @@ Single method: `fetchElement(workspaceId, elementId, payload)`.
 - Reads base URL from `env.SEMRUSH_PROJECTS_BASE_URL` (same secret used by the Serenity transport)
 - Enforces HTTPS — throws `ErrorWithStatusCode(503)` if misconfigured
 - Authenticates with the caller's IMS bearer token forwarded unchanged
-- `AbortController` timeout at 15 seconds — throws `ElementsTransportError(504)` on timeout
+- `AbortController` timeout defaults to 30 seconds and covers response headers plus complete body consumption — throws `ElementsTransportError(504)` on timeout
+- Brand Claims overrides this to 20 seconds with no in-request 429 retry, keeping the synchronous route below API Gateway's integration ceiling; the consumer retries a failed page as a separate bounded request
 - Parses response body as JSON (falls back to raw text)
 - Throws `ElementsTransportError(status, message, body)` for non-2xx responses
 
@@ -358,7 +359,7 @@ Follow these steps in order. Steps 1–4 are contained within `src/support/eleme
    export function buildMyNewElementPayload({ ...params }) {
      return { /* Semrush payload shape */ };
    }
-   
+
    export function transformMyNewElementResponse(raw) {
      return (raw?.blocks?.data ?? []).map(item => ({ /* typed fields */ }));
    }
@@ -461,6 +462,38 @@ Upstream error bodies are **never forwarded to clients** — they are logged ser
 
 | Variable | Source | Used by |
 |---|---|---|
-| `SEMRUSH_PROJECTS_BASE_URL` | Vault `dx_mysticat/<env>/api-service` | `elements-transport.js` `baseUrl()` — the Elements API base host (e.g. `https://www.semrush.com`) |
+| `SEMRUSH_PROJECTS_BASE_URL` | Vault `dx_mysticat/<env>/api-service` | `elements-transport.js` `baseUrl()` — the Elements API base host (e.g. `https://www.semrush.com`) for regular (IMS-authenticated) callers |
+| `SEO_API_BASE_URL` | Vault `dx_mysticat/<env>/api-service` | `elements-transport.js` `s2sBaseUrl()` — the v4-raw external-api host (`https://api.semrush.com`) used for S2S-consumer calls |
+| `SEMRUSH_ADMIN_ELEMENT_API_KEY` | Vault `dx_mysticat/<env>/api-service` | `elements-transport.js` `buildS2SHeaders()` — the `Apikey` credential used to authenticate S2S-consumer calls to the Elements API |
+| `BRAND_CLAIMS_MAX_UPSTREAM_BYTES` | Optional environment override; default 8 MiB | Maximum decompressed `55e89619` response body read before the transport cancels and fails with 502 |
+| `BRAND_CLAIMS_MAX_OUTBOUND_BYTES` | Optional environment override; default 5 MiB | Maximum serialized Brand Claims API envelope before the controller fails with 502 |
 
-No additional secrets are required. The Elements transport reuses the same `SEMRUSH_PROJECTS_BASE_URL` already configured for the Serenity (prompts/markets) transport.
+The Elements transport reuses the same `SEMRUSH_PROJECTS_BASE_URL` already configured for the Serenity (prompts/markets) transport for regular callers. S2S consumers (see [S2S Elements Access](#s2s-elements-access) below) use a different upstream gateway and credential entirely.
+
+### S2S Elements Access
+
+An S2S consumer holding the `brand:read` capability can call all 21 Elements/brand-presence routes, exactly like a regular user — there is no dedicated cross-tenant capability (no `organization:readAll`/`brand:readAll`) for this feature. Authorization works in two layers:
+
+1. **Layer 1** (`s2sAuthWrapper`, `src/routes/required-capabilities.js`): the consumer's registered `capabilities` (in its `Consumer` DB row) must include `brand:read` — every one of the 21 routes requires it.
+2. **Layer 2** (`authorizeOrgAccess` in `controllers/elements.js`): the same, **unmodified** `AccessControlUtil.hasAccess(organization)` check a human session-token user goes through. This checks whether the target `:spaceCatId`'s IMS org ID appears in the caller's own JWT `tenants` claim. An S2S consumer must be issued a session token (via `POST /auth/s2s/login`, naming the target customer's `imsOrgId`) for this to succeed — see `docs/s2s/SEMRUSH_SERENITY_ACCESS_GUIDE.md` for the full consumer-facing flow.
+
+Once authorized, the upstream request shape differs from the regular (IMS) path:
+
+| | Regular (IMS bearer) | S2S consumer |
+|---|---|---|
+| Base URL | `SEMRUSH_PROJECTS_BASE_URL` | `SEO_API_BASE_URL` (`https://api.semrush.com`) |
+| Path | `/enterprise/pages/api/v3/workspaces/{workspaceId}/products/ai/elements/{elementId}/data` | `/apis/v4-raw/external-api/v1/workspaces/{workspaceId}/products/ai/elements/{elementId}` (no trailing `/data`) |
+| `Authorization` header | `Bearer <ims-token>` | `Apikey <SEMRUSH_ADMIN_ELEMENT_API_KEY>` |
+| Request body | `payload` | `{ "render_data": payload }` |
+| Response shape | unchanged | unchanged |
+
+`workspaceId` and `elementId` are the same values either way. The S2S vs. regular branch is decided once per request in `ElementsController.buildService()` (`ctx.attributes.authInfo.isS2SConsumer()`) and threaded into `createElementsTransport({ isS2SConsumer })`; `elements-service.js` is unaware of the distinction and calls `transport.fetchElement(...)` identically in both cases.
+
+A missing `SEMRUSH_ADMIN_ELEMENT_API_KEY` is treated as a server-side config gap (503), not a caller auth failure (401) — consistent with how a missing `SEO_API_BASE_URL`/`SEMRUSH_PROJECTS_BASE_URL` is handled.
+
+**Other routes depending on the Elements transport.** Two routes outside this controller also call `createElementsTransport`/`createElementsService` — both in `src/controllers/llmo/llmo-url-inspector.js` (`createUrlInspectorPromptsByUrlHandler`), and only conditionally (when the caller passes a `url` query param **and** the brand is Semrush-eligible; otherwise they fall back to Mysticat/Postgres data and never touch this transport):
+
+- `GET /org/:spaceCatId/brands/all/brand-presence/url-inspector/prompts-by-url` — requires `organization:read` (returns org-wide, cross-brand data)
+- `GET /org/:spaceCatId/brands/:brandId/brand-presence/url-inspector/prompts-by-url` — requires `brand:read` (`:brandId`-scoped, like the elements.js routes above)
+
+Both now have the same `isS2SConsumer` branch as `ElementsController.buildService()`: S2S callers skip IMS token resolution and get the `Apikey`/v4-raw transport instead. Authorization for the `all` variant still goes through `getOrgAndValidateAccess` → `AccessControlUtil.hasAccess(organization, '', 'LLMO')` (same tenant-claim mechanism as the elements.js routes, plus an `x-product: LLMO` header check satisfied by calling via the LLMO host).

@@ -15,6 +15,36 @@ import { resolveElementModel } from '../constants.js';
 /** Max parallel intent-filtered PROMPTS calls when enriching `userIntent`. */
 export const INTENT_ENRICH_CONCURRENCY = 5;
 
+export function buildFacetedTagFilters({
+  tagPaths = [],
+  category,
+  column = 'CBF_tags',
+  operator = 'eq',
+} = {}) {
+  if ((!Array.isArray(tagPaths) || tagPaths.length === 0) && category) {
+    return [{ op: operator, val: category, col: column }];
+  }
+  const paths = [
+    ...(Array.isArray(tagPaths) ? tagPaths : []),
+    ...(category ? [category] : []),
+  ];
+  const families = new Map();
+  for (const path of [...new Set(paths)]) {
+    const parts = String(path).split('__');
+    if (parts.length >= 2 && parts.every((part) => part)) {
+      const family = parts.slice(0, 2).join('__');
+      if (!families.has(family)) {
+        families.set(family, []);
+      }
+      families.get(family).push(path);
+    }
+  }
+  return [...families.values()].map((values) => ({
+    op: 'or',
+    filters: values.map((value) => ({ op: operator, val: value, col: column })),
+  }));
+}
+
 /**
  * Builds the payload for the Prompts element ({@link ELEMENT_IDS.PROMPTS}).
  *
@@ -55,7 +85,7 @@ export const INTENT_ENRICH_CONCURRENCY = 5;
  *   Empty/omitted → all projects in the (sub-)workspace.
  */
 export function buildPromptsPayload({
-  model, platform, tags = [], projectIds = [],
+  model, platform, tags = [], tagPaths = [], category, projectIds = [],
 } = {}) {
   const resolvedModel = resolveElementModel(model || platform);
   const filters = [
@@ -65,6 +95,12 @@ export function buildPromptsPayload({
   for (const tag of tags) {
     filters.push({ op: 'contains', val: tag, col: 'tags' });
   }
+  filters.push(...buildFacetedTagFilters({
+    tagPaths,
+    category,
+    column: 'tags',
+    operator: 'contains',
+  }));
 
   if (projectIds.length > 0) {
     filters.push({

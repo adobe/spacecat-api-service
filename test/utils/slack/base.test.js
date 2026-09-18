@@ -415,7 +415,7 @@ describe('Base Slack Utils', () => {
   });
 
   describe('fetchFile', () => {
-    const baseUrl = 'https://fake-url.com';
+    const baseUrl = 'https://files.slack.com';
     const filePath = '/file.csv';
     const fileUrl = `${baseUrl}${filePath}`;
     const token = 'test-bot-token';
@@ -504,7 +504,7 @@ describe('Base Slack Utils', () => {
   });
 
   describe('parseCSV', () => {
-    const baseUrl = 'https://fake-url.com';
+    const baseUrl = 'https://files.slack.com';
     const filePath = '/file.csv';
     const fileUrl = `${baseUrl}${filePath}`;
     const token = 'test-bot-token';

@@ -1755,6 +1755,18 @@ describe('AI Visibility – brands handlers', () => {
       expect(clients.topicClient.brandTopics.firstCall.args[0].searchType).to.equal(SEARCH_TYPE_ENUM.DOMAIN);
     });
 
+    it('handleBrandTopics resolves search_type SUBFOLDER for a subpath and passes the full path as target', async () => {
+      await handleBrandTopics(
+        new URLSearchParams('domain=coca-cola.com%2Fus%2Fen%2Fbrands%2Fsmartwater'),
+        clients,
+      );
+      const req = clients.topicClient.brandTopics.firstCall.args[0];
+      expect(req.searchType).to.equal(SEARCH_TYPE_ENUM.SUBFOLDER);
+      expect(req.target.domain).to.equal('coca-cola.com/us/en/brands/smartwater');
+      expect(clients.topicClient.brandTopicsTotals.firstCall.args[0].searchType)
+        .to.equal(SEARCH_TYPE_ENUM.SUBFOLDER);
+    });
+
     it('handleBrandCompetitors resolves search_type DOMAIN for an apex domain', async () => {
       await handleBrandCompetitors(new URLSearchParams('domain=intuit.com'), clients);
       expect(clients.competitorClient.brandCompetitors.firstCall.args[0].searchType).to.equal(SEARCH_TYPE_ENUM.DOMAIN);
@@ -1798,6 +1810,20 @@ describe('AI Visibility – brands handlers', () => {
       await handleBrandSourceOpportunities(new URLSearchParams('domain=quickbooks.intuit.com'), clients);
       expect(clients.sourceClient.gapSourceDomains.firstCall.args[0].searchType).to.equal(SEARCH_TYPE_ENUM.SUBDOMAIN);
       expect(clients.sourceClient.gapSourceDomainsTotals.firstCall.args[0].searchType).to.equal(SEARCH_TYPE_ENUM.SUBDOMAIN);
+    });
+
+    it('handleBrandCitedSources rejects a subfolder target (SourceDomainsRequest has no search_type)', async () => {
+      const res = await handleBrandCitedSources(new URLSearchParams('domain=coca-cola.com%2Fus%2Fen&country=us'), clients);
+      expect(res.status).to.equal(400);
+      expect(res.body.error).to.equal('unsupported_target');
+      expect(clients.sourceClient.sourceDomains.called).to.equal(false);
+    });
+
+    it('handleBrandTopBrands passes the full path target + SUBFOLDER (TopBrandsByDomainRequest is scopable)', async () => {
+      await handleBrandTopBrands(new URLSearchParams('domain=coca-cola.com%2Fus%2Fen%2Fbrands%2Fsmartwater&country=us'), clients);
+      const arg = clients.brandClient.topBrandsByDomain.firstCall.args[0];
+      expect(arg.brandDomain).to.equal('coca-cola.com/us/en/brands/smartwater');
+      expect(arg.searchType).to.equal(SEARCH_TYPE_ENUM.SUBFOLDER);
     });
   });
 

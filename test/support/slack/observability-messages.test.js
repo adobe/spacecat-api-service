@@ -13,10 +13,26 @@
 import { expect } from 'chai';
 import {
   enqueuedParentText,
+  escapeSlack,
   skippedStandaloneText,
 } from '../../../src/support/slack/observability-messages.js';
 
 describe('observability-messages', () => {
+  describe('escapeSlack', () => {
+    it('escapes &, <, and > so user-influenced text cannot inject mrkdwn/mentions', () => {
+      expect(escapeSlack('<!here> & <b>bold</b>'))
+        .to.equal('&lt;!here&gt; &amp; &lt;b&gt;bold&lt;/b&gt;');
+    });
+
+    it('leaves plain text untouched', () => {
+      expect(escapeSlack('Acme Inc')).to.equal('Acme Inc');
+    });
+
+    it('coerces a non-string input', () => {
+      expect(escapeSlack(404)).to.equal('404');
+    });
+  });
+
   describe('enqueuedParentText', () => {
     it('formats the enqueued parent message with a linked PR ref', () => {
       const text = enqueuedParentText({

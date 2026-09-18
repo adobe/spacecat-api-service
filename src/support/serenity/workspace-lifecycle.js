@@ -38,6 +38,10 @@ import { clearBrandWorkspaceCache } from './workspace-resolver.js';
 // tests run without real delays.
 const DEFAULT_POLL_ATTEMPTS = 30;
 const DEFAULT_POLL_INTERVAL_MS = 1000;
+const TERMINAL_WORKSPACE_STATUSES = new Set([
+  'creation failed',
+  'invalid subscription',
+]);
 const defaultSleep = (ms) => new Promise((resolve) => {
   setTimeout(resolve, ms);
 });
@@ -82,21 +86,54 @@ function subworkspaceTitle(brand) {
   return name;
 }
 
-/** @param {SerenityTransport} transport */
-export async function pollUntilCreated(transport, workspaceId, { attempts, intervalMs, sleep }) {
+function subworkspaceCreationFailedError() {
+  const error = new ErrorWithStatusCode('Subworkspace creation failed', 502);
+  error.code = ERROR_CODES.SUBWORKSPACE_CREATION_FAILED;
+  return error;
+}
+
+function subworkspaceCreationTimeoutError() {
+  const error = new ErrorWithStatusCode('Subworkspace creation timed out', 504);
+  error.code = ERROR_CODES.SUBWORKSPACE_CREATION_TIMEOUT;
+  return error;
+}
+
+/**
+ * @param {SerenityTransport} transport
+ * @param {string} workspaceId
+ * @param {{ attempts: number, intervalMs: number, sleep: function }} timing
+ * @param {object} log
+ */
+export async function pollUntilCreated(
+  transport,
+  workspaceId,
+  { attempts, intervalMs, sleep },
+  log,
+) {
+  let lastObservedStatus;
   for (let i = 0; i < attempts; i += 1) {
     // eslint-disable-next-line no-await-in-loop
     const status = await transport.getWorkspaceStatus(workspaceId);
-    if (status?.status === 'created') {
+    const observedStatus = status?.status;
+    lastObservedStatus = observedStatus;
+    if (observedStatus === 'created') {
       return;
+    }
+    if (TERMINAL_WORKSPACE_STATUSES.has(observedStatus)) {
+      log.error('pollUntilCreated: SUBWORKSPACE_CREATION_FAILED: terminal status observed', {
+        workspaceId,
+        status: observedStatus,
+      });
+      throw subworkspaceCreationFailedError();
     }
     // eslint-disable-next-line no-await-in-loop
     await sleep(intervalMs);
   }
-  throw new ErrorWithStatusCode(
-    `Subworkspace ${workspaceId} did not settle to 'created' in time`,
-    504,
+  log.error(
+    'pollUntilCreated: SUBWORKSPACE_CREATION_TIMEOUT: readiness attempts exhausted',
+    { workspaceId, status: lastObservedStatus },
   );
+  throw subworkspaceCreationTimeoutError();
 }
 
 // The user-manager family endpoint (GET /v1/workspaces/{id}/family) returns a
@@ -150,8 +187,8 @@ async function claimedBrandId(brandCollection, workspaceId) {
  * to mis-adopt, so it does not need one.
  *
  * Status filter (issue #2718): a Semrush child create can be 200-acked and then
- * fail provisioning asynchronously, leaving a stub permanently stuck at
- * `status: 'not ready'` ("invalid subscription") that we cannot delete. Such a
+ * fail provisioning asynchronously, leaving a family-list stub in a non-created
+ * status such as the exact values `not ready` or `invalid subscription`. Such a
  * zombie also has `projectCount 0`, so a title+empty-only match would (a) adopt
  * it as the brand's workspace (then immediately re-time-out at pollUntilCreated)
  * and (b) once ≥2 accumulate, inflate the multiple-match `409` and wedge the
@@ -317,7 +354,15 @@ async function adoptFromFamily(transport, parentWorkspaceId, title, log, claim) 
  */
 export async function deleteAllProjects(transport, workspaceId, parentWorkspaceId) {
   assertNotParent(workspaceId, parentWorkspaceId);
-  const listing = await transport.listProjects(workspaceId);
+  let listing;
+  try {
+    listing = await transport.listProjects(workspaceId);
+  } catch (e) {
+    if (isUpstreamGone(e)) {
+      return 0;
+    }
+    throw e;
+  }
   const projects = Array.isArray(listing?.items) ? listing.items : [];
   for (const project of projects) {
     const projectId = project?.id;
@@ -409,7 +454,7 @@ export async function ensureSubworkspace(
     assertNotParent(existing, parentWorkspaceId);
     // Settle before handing the workspace back: the caller may create/publish projects against it
     // immediately, and an op against a workspace that is not yet `created` can 500.
-    await pollUntilCreated(transport, existing, poll);
+    await pollUntilCreated(transport, existing, poll, log);
     return existing;
   }
 
@@ -468,7 +513,7 @@ export async function ensureSubworkspace(
   // market-add later settles it (existing-sub-workspace branch) before creating a project. Any
   // other value keeps the legacy poll. See @param options.createReadiness.
   if (createReadiness !== 'skip') {
-    await pollUntilCreated(transport, workspaceId, poll);
+    await pollUntilCreated(transport, workspaceId, poll, log);
   }
 
   // Concurrency guard (defense-in-depth against a lost-update orphan): a

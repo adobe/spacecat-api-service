@@ -264,7 +264,9 @@ describe('Access Control Util', () => {
   });
 
   // Test anonymous endpoints
-  it('handles anonymous Slack endpoints', () => {
+  it('does NOT treat GET /slack/events as anonymous (VULN-39365)', () => {
+    // The GET route was removed. It must no longer be granted an anonymous (admin-equivalent)
+    // AuthInfo, otherwise this registry drifts from routes/index.js and authWrapper.
     const slackContext = {
       log: { info: logSpy },
       pathInfo: {
@@ -273,9 +275,7 @@ describe('Access Control Util', () => {
       },
     };
 
-    const util = AccessControlUtil.fromContext(slackContext);
-    expect(util.authInfo).to.exist;
-    expect(util.authInfo.getProfile().user_id).to.equal('anonymous');
+    expect(() => AccessControlUtil.fromContext(slackContext)).to.throw('Missing authInfo');
   });
 
   it('handles anonymous site detection endpoints', () => {

@@ -12,6 +12,7 @@
 
 import { hasText, isNonEmptyObject } from '@adobe/spacecat-shared-utils';
 import crypto from 'crypto';
+import { BRAND_GUIDANCE_MAX_LENGTH, sanitizeGuidanceText } from './brand-guidance.js';
 
 /**
  * Default verticals list for migration/initialization.
@@ -42,8 +43,6 @@ const DEFAULT_VERTICALS = [
   'Government & Public Services',
 ];
 
-const BRAND_GUIDANCE_MAX_LENGTH = 4000;
-
 function normalizeBrandGuidance(value) {
   if (value === undefined) {
     return undefined;
@@ -54,12 +53,20 @@ function normalizeBrandGuidance(value) {
   if (typeof value !== 'string') {
     return undefined;
   }
-  const trimmed = value.trim();
+  // Strip unsafe control/invisible/bidi chars, matching the storage write path
+  // (brands-storage.js) — this migration path writes via writeCustomerConfigV2ToPostgres,
+  // which does NOT route through normalizeNullableText, so it must sanitize here too.
+  const trimmed = sanitizeGuidanceText(value).trim();
   if (!hasText(trimmed)) {
     return null;
   }
-  return trimmed.length > BRAND_GUIDANCE_MAX_LENGTH
-    ? trimmed.slice(0, BRAND_GUIDANCE_MAX_LENGTH)
+  // Truncate on code-point boundaries (spread, not slice): a plain slice(0, n) counts
+  // UTF-16 code units and can cut an emoji / non-BMP CJK char in half, leaving a lone
+  // surrogate that is invalid UTF-8 and breaks Postgres/JSON downstream. This is a bulk
+  // migration path, so it truncates (rather than rejecting) to never hard-fail an import.
+  const codePoints = [...trimmed];
+  return codePoints.length > BRAND_GUIDANCE_MAX_LENGTH
+    ? codePoints.slice(0, BRAND_GUIDANCE_MAX_LENGTH).join('')
     : trimmed;
 }
 

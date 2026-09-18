@@ -17,6 +17,32 @@
 import { SuggestionDto } from './suggestion.js';
 
 /**
+ * Back-fills the legacy top-level `changeDetails.documentPath` from the v2
+ * canonical shape's `changeDetails.target.documentPath` (SITES-49140, ADR
+ * mysticat-architecture#200) when a writer has migrated to `schemaVersion: 2`
+ * but the top-level field a client already reads (e.g. the "Open in AEM
+ * Editor" UI action, added in #1835) is absent.
+ *
+ * The v2 Joi schema is `additionalProperties: false` at the top level, so a
+ * v2 writer cannot itself emit both `documentPath` and `schemaVersion: 2` —
+ * this normalization has to happen at the read/DTO boundary instead.
+ *
+ * @param {object} [changeDetails]
+ * @returns {object|undefined} changeDetails, with `documentPath` present at
+ *   the top level when resolvable from either shape.
+ */
+export function withLegacyDocumentPath(changeDetails) {
+  if (!changeDetails || changeDetails.documentPath !== undefined) {
+    return changeDetails;
+  }
+  const targetDocumentPath = changeDetails.target?.documentPath;
+  if (targetDocumentPath === undefined) {
+    return changeDetails;
+  }
+  return { ...changeDetails, documentPath: targetDocumentPath };
+}
+
+/**
  * Data transfer object for Fix.
  */
 export const FixDto = {
@@ -51,7 +77,7 @@ export const FixDto = {
       executedAt: fix.getExecutedAt(),
       deployedAt: fix.getDeployedAt(),
       publishedAt: fix.getPublishedAt(),
-      changeDetails: fix.getChangeDetails(),
+      changeDetails: withLegacyDocumentPath(fix.getChangeDetails()),
       status: fix.getStatus(),
       origin: fix.getOrigin(),
     };
@@ -74,5 +100,36 @@ export const FixDto = {
     }
 
     return result;
+  },
+
+  /**
+   * Projects a FixEntity into a single deployment entry for the deployed-opportunities
+   * timeline (`GET /sites/:siteId/fixes` deploy overlay). `deployedAt` carries the caller-
+   * supplied deploy anchor (`deployedAt ?? executedAt`), and the opportunity title is joined
+   * by the controller since it is not on the FixEntity.
+   *
+   * @param {Readonly<FixEntity>} fix - FixEntity object.
+   * @param {string|null} opportunityTitle - resolved opportunity title (null if unresolved).
+   * @param {string} anchor - the deploy anchor timestamp (ISO string).
+   * @returns {{
+   *  opportunityId: string
+   *  opportunityTitle: string|null
+   *  type: string
+   *  status: string
+   *  fixId: string
+   *  deployedAt: string
+   *  changeDetails: object
+   * }} JSON object.
+   */
+  toDeployedOpportunityJSON(fix, opportunityTitle, anchor) {
+    return {
+      opportunityId: fix.getOpportunityId(),
+      opportunityTitle: opportunityTitle ?? null,
+      type: fix.getType(),
+      status: fix.getStatus(),
+      fixId: fix.getId(),
+      deployedAt: anchor,
+      changeDetails: withLegacyDocumentPath(fix.getChangeDetails()),
+    };
   },
 };

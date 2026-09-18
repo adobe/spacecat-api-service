@@ -73,6 +73,34 @@ describe('prompts definitions', () => {
       ]);
     });
 
+    it('ORs paths within one family and ANDs independent tag families', () => {
+      const payload = buildPromptsPayload({
+        tagPaths: [
+          'tag__Campaign__Q1',
+          'tag__Campaign__Q2',
+          'tag__Audience__Enterprise',
+        ],
+      });
+      const facets = advancedFilters(payload).filter(
+        (filter) => filter.filters?.some((clause) => clause.col === 'tags'),
+      );
+      expect(facets).to.deep.equal([
+        {
+          op: 'or',
+          filters: [
+            { op: 'contains', val: 'tag__Campaign__Q1', col: 'tags' },
+            { op: 'contains', val: 'tag__Campaign__Q2', col: 'tags' },
+          ],
+        },
+        {
+          op: 'or',
+          filters: [
+            { op: 'contains', val: 'tag__Audience__Enterprise', col: 'tags' },
+          ],
+        },
+      ]);
+    });
+
     it('omits the project clause when no projectIds are provided (workspace-wide)', () => {
       const payload = buildPromptsPayload();
       const hasProjectClause = advancedFilters(payload)

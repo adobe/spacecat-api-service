@@ -50,6 +50,14 @@ describe('AI Visibility – competitors handlers', () => {
       expect(res.body.error).to.equal('missing_competitors');
     });
 
+    it('rejects a subfolder (path) target — ai-cr cannot scope it', async () => {
+      const sp = new URLSearchParams('domain=coca-cola.com%2Fus%2Fen&competitor=a.com');
+      const res = await handleCompetitorsMetrics(sp, clients);
+      expect(res.status).to.equal(400);
+      expect(res.body.error).to.equal('unsupported_target');
+      expect(clients.crMetricsClient.stats.called).to.equal(false);
+    });
+
     it('returns 200 with competitor metrics', async () => {
       clients.crMetricsClient.stats.resolves({
         byBrand: [

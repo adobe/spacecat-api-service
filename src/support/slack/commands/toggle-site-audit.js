@@ -19,6 +19,7 @@ import { Readable } from 'stream';
 import { parse } from 'csv';
 import BaseCommand from './base.js';
 import { extractURLFromSlackInput, loadProfileConfig } from '../../../utils/slack/base.js';
+import { isSlackFileUrl } from '../../../utils/slack/file-url.js';
 
 const PHRASE = 'audit';
 const SUCCESS_MESSAGE_PREFIX = ':white_check_mark: ';
@@ -231,6 +232,13 @@ export default (context) => {
       }
 
       const file = files[0];
+
+      // Only ever send the bot token to a Slack-owned host (VULN-39365). Do not echo the
+      // rejected URL back into Slack -- it is attacker-controlled.
+      if (!isSlackFileUrl(file.url_private)) {
+        await say(`${ERROR_MESSAGE_PREFIX}Refusing to download file: URL is not a Slack-hosted https URL.`);
+        return;
+      }
 
       const response = await fetch(file.url_private, {
         headers: {

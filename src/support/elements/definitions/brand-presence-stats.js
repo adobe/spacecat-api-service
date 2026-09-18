@@ -11,6 +11,7 @@
  */
 
 import { buildModelFilter } from '../constants.js';
+import { buildFacetedTagFilters } from './prompts.js';
 
 /**
  * Payload builders + response transformers backing `GET .../brand-presence/stats`
@@ -63,7 +64,7 @@ export function transformStatsSimpleNumericResponse(raw) {
  * @param {string[]} [params.projectIds] - Semrush project UUIDs to OR together.
  */
 export function buildStatsTotalExecutionsPayload({
-  model, platform, startDate, endDate, projectIds, brandName,
+  model, platform, startDate, endDate, projectIds, brandName, tagPaths, category,
 }) {
   const modelFilter = buildModelFilter(model || platform);
   const filters = [
@@ -76,6 +77,7 @@ export function buildStatsTotalExecutionsPayload({
   if (projectFilter) {
     filters.push(projectFilter);
   }
+  filters.push(...buildFacetedTagFilters({ tagPaths, category }));
   return { filters: { simple: { start_date: startDate, end_date: endDate }, advanced: { op: 'and', filters } } };
 }
 
@@ -93,7 +95,7 @@ export const transformStatsTotalExecutionsResponse = transformStatsSimpleNumeric
  * @param {string[]} [params.projectIds] - Semrush project UUIDs to OR together.
  */
 export function buildStatsMentionsPayload({
-  model, platform, startDate, endDate, projectIds, brandName,
+  model, platform, startDate, endDate, projectIds, brandName, tagPaths, category,
 }) {
   const modelFilter = buildModelFilter(model || platform, { wrap: false });
   const filters = [
@@ -106,6 +108,7 @@ export function buildStatsMentionsPayload({
   if (projectFilter) {
     filters.push(projectFilter);
   }
+  filters.push(...buildFacetedTagFilters({ tagPaths, category }));
   return { filters: { simple: { start_date: startDate, end_date: endDate }, advanced: { op: 'and', filters } } };
 }
 
@@ -119,7 +122,7 @@ export const transformStatsMentionsResponse = transformStatsSimpleNumericRespons
  * @param {object} params - Same shape as {@link buildStatsMentionsPayload}.
  */
 export function buildStatsVisibilityPayload({
-  model, platform, startDate, endDate, projectIds, brandName,
+  model, platform, startDate, endDate, projectIds, brandName, tagPaths, category,
 }) {
   const modelFilter = buildModelFilter(model || platform);
   const filters = [
@@ -132,6 +135,7 @@ export function buildStatsVisibilityPayload({
   if (projectFilter) {
     filters.push(projectFilter);
   }
+  filters.push(...buildFacetedTagFilters({ tagPaths, category }));
   return { filters: { simple: { start_date: startDate, end_date: endDate }, advanced: { op: 'and', filters } } };
 }
 
@@ -151,7 +155,7 @@ export function transformStatsVisibilityResponse(raw) {
  * @param {object} params - Same shape as {@link buildStatsMentionsPayload}.
  */
 export function buildStatsCitationsPayload({
-  model, platform, startDate, endDate, projectIds, brandName,
+  model, platform, startDate, endDate, projectIds, brandName, tagPaths, category,
 }) {
   const modelFilter = buildModelFilter(model || platform, { wrap: false });
   const filters = [
@@ -164,6 +168,7 @@ export function buildStatsCitationsPayload({
   if (projectFilter) {
     filters.push(projectFilter);
   }
+  filters.push(...buildFacetedTagFilters({ tagPaths, category }));
   return { filters: { simple: { start_date: startDate, end_date: endDate }, advanced: { op: 'and', filters } } };
 }
 

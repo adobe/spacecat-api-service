@@ -11,6 +11,7 @@
  */
 
 import { isAllPlatforms, resolveElementModel } from '../constants.js';
+import { buildFacetedTagFilters } from './prompts.js';
 
 /**
  * Builds the payload for the Stats-per-URL element (9af5ed83, `table`) scoped to a
@@ -34,7 +35,7 @@ import { isAllPlatforms, resolveElementModel } from '../constants.js';
  * @param {string} [params.projectId] - Semrush project id (region scope, top-level).
  */
 export function buildDomainUrlsPayload({
-  model, platform, startDate, endDate, category, projectId,
+  model, platform, startDate, endDate, category, tagPaths, projectId,
 } = {}) {
   const requestedModel = model || platform;
   const advancedFilters = [
@@ -45,9 +46,7 @@ export function buildDomainUrlsPayload({
     const resolvedModel = resolveElementModel(requestedModel);
     advancedFilters.unshift({ op: 'or', filters: [{ op: 'eq', val: resolvedModel, col: 'CBF_model' }] });
   }
-  if (category) {
-    advancedFilters.push({ op: 'eq', val: category, col: 'CBF_tags' });
-  }
+  advancedFilters.push(...buildFacetedTagFilters({ tagPaths, category }));
   return {
     ...(projectId && { project_id: projectId }),
     comparison_data_formatting: 'union',

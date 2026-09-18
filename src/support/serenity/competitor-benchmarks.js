@@ -39,7 +39,10 @@ import { resolveProjects } from './resolve-projects.js';
  * `settings.ci.competitors` approach, which targets a Competitive-Intelligence
  * project feature that AIO projects do not have (their `settings.ci` is null, so
  * the CI PUT was a silent no-op). A competitor here is `{ name, domain }`; the
- * created benchmark is `main_brand: false` (the create API cannot set it).
+ * created benchmark is `main_brand: false` because it is created unflagged — a
+ * competitor is never the own brand — not because the create API is incapable
+ * of setting the flag (it is; see `rest-transport.js` `createBenchmarks` and
+ * `brand-urls.js` `ensureOwnBrandBenchmark`, LLMO-7421).
  */
 
 /**

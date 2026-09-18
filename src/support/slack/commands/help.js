@@ -27,6 +27,16 @@ Greetings, I am SpaceCat, an emerging Slack bot. Within my limited abilities, I 
 `;
 
 /**
+ * Slack rejects a chat.postMessage whose `blocks` array exceeds 50 entries, or whose section
+ * `text` exceeds 3000 characters, with an `invalid_blocks` API error - so the whole message is
+ * dropped. Emitting one section block per command overflowed the 50-block limit once the command
+ * list grew past ~49, silently breaking the help reply. Packing several commands per section block
+ * keeps the message well within both limits.
+ * @type {number}
+ */
+const SLACK_SECTION_TEXT_LIMIT = 3000;
+
+/**
  * Creates a HelpCommand instance.
  *
  * @param {Object} context - The context object.
@@ -61,15 +71,25 @@ function HelpCommand(context) {
       },
     }];
 
+    // Pack command descriptions into as few section blocks as possible, keeping each section's
+    // text under Slack's 3000-char limit, so the message stays within the 50-block cap regardless
+    // of how many commands are registered (see SLACK_SECTION_TEXT_LIMIT).
+    let section = '';
+    const flushSection = () => {
+      if (section.length > 0) {
+        blocks.push({ type: 'section', text: { type: 'mrkdwn', text: section } });
+        section = '';
+      }
+    };
+
     for (const command of commands) {
-      blocks.push({
-        type: 'section',
-        text: {
-          type: 'mrkdwn',
-          text: `*${command.name}*\n${command.usage()}\n${command.description}\n\n`,
-        },
-      });
+      const entry = `*${command.name}*\n${command.usage()}\n${command.description}\n\n`;
+      if (section.length > 0 && section.length + entry.length > SLACK_SECTION_TEXT_LIMIT) {
+        flushSection();
+      }
+      section += entry;
     }
+    flushSection();
 
     await say({ blocks });
   };

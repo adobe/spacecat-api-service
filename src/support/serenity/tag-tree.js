@@ -45,7 +45,14 @@
  */
 
 import { ErrorWithStatusCode } from '../utils.js';
-import { listProjectTagTree } from './handlers/markets.js';
+import { ERROR_CODES } from './errors.js';
+import {
+  cacheTagTreeSnapshot,
+  deleteCachedTagTreeSnapshotIfSame,
+  getCachedTagTreeSnapshot,
+  invalidateTagCacheForProject,
+  listProjectTagTree,
+} from './handlers/markets.js';
 import {
   DIMENSION,
   DIMENSION_PROVISION_ORDER,
@@ -57,8 +64,28 @@ import {
   displayNameOfValue,
   valueSlugOfDisplayName,
 } from './prompt-tags.js';
+import { classifyTagCompatibility } from './tag-compatibility.js';
+import {
+  MAX_TREE_CONCURRENCY,
+  MAX_TREE_DURATION_MS,
+  MAX_TREE_NODES,
+  MAX_TREE_PARENT_READS,
+} from './tag-search-constants.js';
 
 /** @typedef {import('./rest-transport.js').SerenityTransport} SerenityTransport */
+/**
+ * @typedef {object} TagTreeSnapshotItem
+ * @property {string} id
+ * @property {string} name
+ * @property {string | null} parentId
+ * @property {number} childrenCount
+ * @property {number} promptsCount
+ * @property {string} rootName
+ * @property {string} rootId
+ * @property {number} depth
+ * @property {Array<{ id: string, name: string }>} fullPath
+ * @property {{ state: 'canonical' | 'readOnly', reason: string | null }} compatibility
+ */
 
 /**
  * Where one tag sits in the dimension tree.
@@ -85,7 +112,86 @@ import {
  * call. Nothing caps a level's width on purpose: truncating a level would report
  * a tag that exists as absent, which is a wrong answer rather than a slow one.
  */
-const MAX_TREE_READS = 200;
+export {
+  MAX_TREE_CONCURRENCY,
+  MAX_TREE_DURATION_MS,
+  MAX_TREE_NODES,
+  MAX_TREE_PARENT_READS,
+};
+// Backward-compatible name retained for existing callers/tests.
+export const MAX_TREE_READS = MAX_TREE_PARENT_READS;
+
+function treeReadError(message, code, details) {
+  const error = new ErrorWithStatusCode(message, 503);
+  error.code = code;
+  if (details) {
+    /** @type {any} */ (error).details = details;
+  }
+  return error;
+}
+
+/**
+ * The 503 `TAG_TREE_LIMIT_EXCEEDED` a traversal-duration budget breach always
+ * raises, shared by the synchronous {@link assertTraversalDeadline} check and
+ * the {@link raceAgainstDeadline}-based abort below so both paths produce the
+ * identical error shape regardless of which one actually fires first.
+ */
+function durationBudgetExceededError(maxDurationMs) {
+  return treeReadError(
+    'Unable to read the complete tag tree within the traversal time budget',
+    ERROR_CODES.TAG_TREE_LIMIT_EXCEEDED,
+    { budget: 'duration', maximum: maxDurationMs },
+  );
+}
+
+function assertTraversalDeadline(startedAt, maxDurationMs) {
+  if (Date.now() - startedAt >= maxDurationMs) {
+    throw durationBudgetExceededError(maxDurationMs);
+  }
+}
+
+/**
+ * Races `promise` against `signal`: if `signal` ABORTS before `promise`
+ * settles, the returned promise rejects immediately with `onAbort()`'s error
+ * — regardless of whether `promise` is still pending. This is the difference
+ * between a deadline that only gates the NEXT page request (the synchronous
+ * `onBeforePage`/`assertTraversalDeadline` checks) and one that also BOUNDS an
+ * already-in-flight request: a page fetch already sent to a sleeping/retrying
+ * shared client cannot be made to resolve early, but the traversal itself must
+ * still stop waiting on it once its time budget is spent.
+ *
+ * `signal` is ALSO threaded down into the raced call itself (see
+ * `listProjectTagTree`'s `paging.signal`), so the same deadline additionally
+ * asks the underlying `fetch` to abort the actual HTTP request — this
+ * wrapper's own rejection does not depend on that succeeding, since a mock
+ * transport or a client that ignores the signal would otherwise hang the
+ * traversal forever.
+ *
+ * @template T
+ * @param {Promise<T>} promise
+ * @param {AbortSignal} signal
+ * @param {() => Error} onAbort
+ * @returns {Promise<T>}
+ */
+function raceAgainstDeadline(promise, signal, onAbort) {
+  if (signal.aborted) {
+    return Promise.reject(onAbort());
+  }
+  return new Promise((resolve, reject) => {
+    const onAbortEvent = () => reject(onAbort());
+    signal.addEventListener('abort', onAbortEvent, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener('abort', onAbortEvent);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener('abort', onAbortEvent);
+        reject(error);
+      },
+    );
+  });
+}
 
 /**
  * Bounds the total id count {@link collectSubtreeIds} forwards into a single
@@ -167,6 +273,8 @@ export async function indexLevelByName(transport, semrushWorkspaceId, projectId,
  *   spellings that, if already present at this level, resolve a wanted name
  *   without creating it. Defaults to "no aliases" — every pre-existing caller
  *   is unaffected.
+ * @param {Map<string, string>} [initialExisting] - a level index already read
+ *   by the caller, reused to avoid a duplicate upstream read.
  * @returns {Promise<{ byName: Map<string, string>, createdNames: string[] }>}
  *   `byName` maps every wanted name (and any literal tree name it did not ask
  *   for) to its tag id.
@@ -179,8 +287,10 @@ export async function ensureChildren(
   wanted,
   log,
   aliasesOf = () => [],
+  initialExisting = undefined,
 ) {
-  const existing = await indexLevelByName(transport, semrushWorkspaceId, projectId, parentId, log);
+  const existing = initialExisting
+    ?? await indexLevelByName(transport, semrushWorkspaceId, projectId, parentId, log);
   const missing = [];
   for (const name of wanted) {
     if (existing.has(name)) {
@@ -209,7 +319,9 @@ export async function ensureChildren(
       missing,
       parentId ? { parentId } : {},
     );
+    invalidateTagCacheForProject(semrushWorkspaceId, projectId);
   } catch (e) {
+    invalidateTagCacheForProject(semrushWorkspaceId, projectId);
     // Upstream answers 500 on a duplicate (parent, name). Between our read and
     // our create, a concurrent writer — possibly another resolution inside this
     // same request — may have minted exactly the names we asked for. Re-read
@@ -227,6 +339,11 @@ export async function ensureChildren(
 
   // createProjectTags resolves to a LIST of the created nodes, in request order.
   const nodes = Array.isArray(echoed) ? echoed : [];
+  if (!Array.isArray(echoed)
+    || nodes.length === 0
+    || nodes.some((node) => !(node && typeof node.id === 'string' && node.id))) {
+    throw new ErrorWithStatusCode('upstream created the tag but echoed no id', 502);
+  }
   for (const node of nodes) {
     if (node && typeof node.id === 'string' && node.id && typeof node.name === 'string') {
       existing.set(node.name, node.id);
@@ -287,7 +404,7 @@ const LEGACY_SOURCE_ROOT_NAME = 'source';
  * The dimensions whose ROOT may carry a display rename (tag-display-names.md
  * §1 item 4) — `category`, `type`, `source`. `intent` is excluded (its root is
  * `$abv_tags$intent` forever, no display rename) and `origin` is excluded
- * (retired by remap, not renamed) — both already have their OWN dedicated
+ * because its root name remains unchanged — both already have their OWN dedicated
  * split-root guardrails above/below, so they are deliberately not folded into
  * this generalized one.
  */
@@ -339,7 +456,7 @@ function valueAliasesOf(dimension) {
 }
 
 /**
- * Resolves the five dimension roots, creating any that a project is missing.
+ * Resolves the registered dimension roots, creating any that a project is missing.
  * Older projects predate this taxonomy entirely, so this is the seam that brings
  * them forward on first touch.
  *
@@ -372,6 +489,20 @@ function valueAliasesOf(dimension) {
  * @returns {Promise<Map<string, string>>} dimension → tag id, in provisioning order.
  */
 export async function ensureDimensionRoots(transport, semrushWorkspaceId, projectId, log) {
+  const rootLevel = await indexLevelByName(transport, semrushWorkspaceId, projectId, '', log);
+  const caseVariantTagRoot = [...rootLevel.keys()]
+    .find((name) => name.toLowerCase() === DIMENSION.TAG && name !== DIMENSION.TAG);
+  if (!rootLevel.has(DIMENSION.TAG) && caseVariantTagRoot) {
+    const error = new ErrorWithStatusCode(
+      `The project has a case-variant "${caseVariantTagRoot}" root; refusing to create "tag"`,
+      409,
+    );
+    error.code = ERROR_CODES.INCOMPATIBLE_TAG_TAXONOMY;
+    /** @type {any} */ (error).details = {
+      reason: 'caseVariantRoot', path: [caseVariantTagRoot],
+    };
+    throw error;
+  }
   const { byName, createdNames } = await ensureChildren(
     transport,
     semrushWorkspaceId,
@@ -380,6 +511,7 @@ export async function ensureDimensionRoots(transport, semrushWorkspaceId, projec
     DIMENSION_PROVISION_ORDER.map(rootNameOfDimension),
     log,
     rootAliasesOf,
+    rootLevel,
   );
 
   // Observability guardrail (no tolerance, no behavior change): freshly minting `origin`
@@ -551,7 +683,9 @@ export async function findTagsInTree(transport, semrushWorkspaceId, projectId, t
         visited.add(node.id);
         reads += 1;
         if (reads > MAX_TREE_READS) {
-          throw new ErrorWithStatusCode('tag tree too large to resolve', 502);
+          const error = new ErrorWithStatusCode('Unable to read the complete tag tree', 503);
+          error.code = ERROR_CODES.TAG_TREE_READ_INCOMPLETE;
+          throw error;
         }
         // Sequential by design: stop as soon as every wanted id is placed rather
         // than fanning out every node's children concurrently.
@@ -576,6 +710,7 @@ export async function findTagsInTree(transport, semrushWorkspaceId, projectId, t
         if (found.size === wanted.size) {
           return found;
         }
+
         next.push(...children.items
           .filter((t) => t.childrenCount > 0)
           .map((child) => ({ node: child, rootName, ancestorIds: [...ancestorIds, child.id] })));
@@ -591,6 +726,334 @@ export async function findTagsInTree(transport, semrushWorkspaceId, projectId, t
     }
   }
   return found;
+}
+
+/**
+ * Reads the complete draft taxonomy once and derives stable path and
+ * compatibility metadata without modifying non-canonical Project Engine data.
+ *
+ * Resource budgets bound every caller, strict or not — they guard against a
+ * pathological tree regardless of who is reading it — but their configuration
+ * and compatibility impact differ:
+ *  - `maxParents` predates the `strict` split: the parent-expansion cap has
+ *    always bounded these walks. Only its error token changed with unbounded
+ *    nesting (`tagTreeReadIncomplete` -> `tagTreeLimitExceeded`, with a
+ *    `details.budget` discriminator).
+ *  - `maxNodes` and `maxDurationMs` are NEW, and deliberately apply to the
+ *    existing tolerant mutation/filter callers too: a tree that large or that
+ *    slow was already on course for a Lambda timeout, so a retryable 503
+ *    `tagTreeLimitExceeded` is the better outcome than an unbounded walk. The
+ *    cost is a behavior change on already-shipped POST/PATCH `/serenity/tags`
+ *    reads, which now fail closed at >`maxNodes` nodes or >`maxDurationMs`
+ *    instead of (slowly) succeeding.
+ *  - Tag search supplies environment-resolved overrides for all budgets,
+ *    including concurrency and pages per parent. Existing mutation/filter
+ *    callers intentionally omit those overrides and retain compiled defaults.
+ *
+ * `strict` gates only the NEW fail-closed data-integrity behavior added
+ * alongside unbounded nesting, and the request concurrency:
+ *  - non-strict (default): the prior tolerant behavior every existing
+ *    mutation/filter caller (via {@link readTagTreeSnapshot} with no
+ *    `rootName`) already relied on — a revisited tag id is skipped rather
+ *    than treated as a cycle, an upstream-supplied `path` is trusted over the
+ *    parent's own recorded path, and parent reads are issued one at a time
+ *    (`concurrency` defaults to 1).
+ *  - strict (tag search only): ambiguous/case-variant `tag` roots, a
+ *    repeated tag id, a `parentId` that disagrees with the read parent, and a
+ *    supplied `path` that disagrees with the parent's own path all fail
+ *    closed with `TAG_TREE_DATA_INTEGRITY`, and parent reads fan out up to
+ *    {@link MAX_TREE_CONCURRENCY} at once. Search needs both: it is the one
+ *    reader that must never silently return an incomplete or inconsistent
+ *    result, and its cacheless full-tree read is the one that benefits from
+ *    concurrent pagination.
+ *
+ * @param {SerenityTransport} transport
+ * @param {string} semrushWorkspaceId
+ * @param {string} projectId
+ * @param {object} [log]
+ * @param {object} [options]
+ * @param {string} [options.rootName]
+ * @param {number} [options.maxParents]
+ * @param {number} [options.maxNodes]
+ * @param {number} [options.concurrency]
+ * @param {number} [options.maxDurationMs]
+ * @param {number} [options.maxPagesPerParent]
+ * @param {boolean} [options.strict=false]
+ * @returns {Promise<{
+ *   items: TagTreeSnapshotItem[],
+ *   byId: Map<string, TagTreeSnapshotItem>,
+ * }>}
+ */
+export async function loadTagTreeSnapshot(
+  transport,
+  semrushWorkspaceId,
+  projectId,
+  log,
+  {
+    rootName,
+    maxParents = MAX_TREE_READS,
+    maxNodes = MAX_TREE_NODES,
+    concurrency,
+    maxDurationMs = MAX_TREE_DURATION_MS,
+    maxPagesPerParent,
+    strict = false,
+  } = {},
+) {
+  const effectiveConcurrency = concurrency ?? (strict ? MAX_TREE_CONCURRENCY : 1);
+  const startedAt = Date.now();
+  // A NUMBER >= 0 is required by AbortSignal.timeout; every caller here passes
+  // one (the constant default or a test override), so this is not re-validated.
+  const deadline = AbortSignal.timeout(maxDurationMs);
+  const onDeadlineAborted = () => durationBudgetExceededError(maxDurationMs);
+  const onBeforePage = () => assertTraversalDeadline(startedAt, maxDurationMs);
+  const roots = await raceAgainstDeadline(
+    listProjectTagTree(
+      transport,
+      semrushWorkspaceId,
+      projectId,
+      '',
+      log,
+      undefined,
+      { onBeforePage, signal: deadline, maxPages: maxPagesPerParent },
+    ),
+    deadline,
+    onDeadlineAborted,
+  );
+  assertTraversalDeadline(startedAt, maxDurationMs);
+  let selectedRoots = roots.items;
+  if (strict) {
+    const canonicalTagRoots = roots.items.filter((root) => root.name === DIMENSION.TAG);
+    const caseVariantRoot = roots.items.find((root) => root.name.toLowerCase() === DIMENSION.TAG
+      && root.name !== DIMENSION.TAG);
+    if (canonicalTagRoots.length > 1) {
+      throw treeReadError(
+        'Unable to establish a consistent tag tree',
+        ERROR_CODES.TAG_TREE_DATA_INTEGRITY,
+        { reason: 'ambiguousRoot', rootName: DIMENSION.TAG },
+      );
+    }
+    if (caseVariantRoot && (rootName === DIMENSION.TAG || canonicalTagRoots.length > 0)) {
+      throw treeReadError(
+        'Unable to establish a consistent tag tree',
+        ERROR_CODES.TAG_TREE_DATA_INTEGRITY,
+        { reason: 'caseVariantRoot', rootName: caseVariantRoot.name },
+      );
+    }
+  }
+  if (rootName !== undefined) {
+    selectedRoots = roots.items.filter((root) => dimensionOfRootName(root.name) === rootName);
+    if (strict && selectedRoots.length > 1) {
+      throw treeReadError(
+        'Unable to establish a consistent tag tree',
+        ERROR_CODES.TAG_TREE_DATA_INTEGRITY,
+        { reason: 'ambiguousRoot', rootName },
+      );
+    }
+  }
+  const nodes = selectedRoots.map((root) => ({
+    ...root,
+    rootName: root.name,
+    rootId: root.id,
+    depth: 1,
+    fullPath: [{ id: root.id, name: root.name }],
+  }));
+  const seenIds = new Set(nodes.map((node) => node.id));
+  if (nodes.length > maxNodes) {
+    throw treeReadError(
+      'Unable to read the complete tag tree within the node budget',
+      ERROR_CODES.TAG_TREE_LIMIT_EXCEEDED,
+      { budget: 'nodes', maximum: maxNodes },
+    );
+  }
+  let frontier = nodes.filter((node) => node.childrenCount > 0);
+  let parentReads = 0;
+  while (frontier.length > 0) {
+    const next = [];
+    for (let offset = 0; offset < frontier.length; offset += effectiveConcurrency) {
+      assertTraversalDeadline(startedAt, maxDurationMs);
+      const parents = frontier.slice(offset, offset + effectiveConcurrency);
+      if (parentReads + parents.length > maxParents) {
+        throw treeReadError(
+          'Unable to read the complete tag tree within the parent expansion budget',
+          ERROR_CODES.TAG_TREE_LIMIT_EXCEEDED,
+          { budget: 'parents', maximum: maxParents },
+        );
+      }
+      parentReads += parents.length;
+      // eslint-disable-next-line no-await-in-loop
+      const levels = await raceAgainstDeadline(
+        Promise.all(parents.map(async (parent) => ({
+          parent,
+          children: await listProjectTagTree(
+            transport,
+            semrushWorkspaceId,
+            projectId,
+            parent.id,
+            log,
+            undefined,
+            { onBeforePage, signal: deadline, maxPages: maxPagesPerParent },
+          ),
+        }))),
+        deadline,
+        onDeadlineAborted,
+      );
+      assertTraversalDeadline(startedAt, maxDurationMs);
+      for (const { parent, children } of levels) {
+        for (const child of children.items) {
+          if (seenIds.has(child.id)) {
+            if (strict) {
+              throw treeReadError(
+                'Unable to establish a consistent tag tree',
+                ERROR_CODES.TAG_TREE_DATA_INTEGRITY,
+                { reason: 'repeatedTagId', tagId: child.id },
+              );
+            }
+            // Legacy tolerant behavior: a revisited id is skipped rather than
+            // expanded again — it does not newly break a caller that already
+            // lived with occasional upstream drift.
+            // eslint-disable-next-line no-continue
+            continue;
+          }
+          const suppliedPath = Array.isArray(child.path) && child.path.length > 0
+            ? child.path
+            : null;
+          if (strict) {
+            if (child.parentId && child.parentId !== parent.id) {
+              throw treeReadError(
+                'Unable to establish a consistent tag tree',
+                ERROR_CODES.TAG_TREE_DATA_INTEGRITY,
+                { reason: 'parentMismatch', tagId: child.id },
+              );
+            }
+            if (suppliedPath
+              && (suppliedPath.length !== parent.fullPath.length
+                || suppliedPath.some((part, index) => (
+                  part.id !== parent.fullPath[index]?.id
+                  || part.name !== parent.fullPath[index]?.name
+                )))) {
+              throw treeReadError(
+                'Unable to establish a consistent tag tree',
+                ERROR_CODES.TAG_TREE_DATA_INTEGRITY,
+                { reason: 'pathMismatch', tagId: child.id },
+              );
+            }
+          }
+          // Non-strict trusts an upstream-supplied path over the parent's own
+          // recorded path (the pre-existing tolerant behavior); strict always
+          // derives the path from the parent it was just read under, since
+          // that agreement is exactly what strict has already verified above.
+          const fullPath = strict || !suppliedPath
+            ? [...parent.fullPath, { id: child.id, name: child.name }]
+            : [...suppliedPath, { id: child.id, name: child.name }];
+          const node = {
+            ...child,
+            parentId: child.parentId ?? parent.id,
+            rootName: strict ? parent.rootName : (fullPath[0]?.name ?? parent.rootName),
+            rootId: strict ? parent.rootId : (fullPath[0]?.id ?? parent.rootId),
+            depth: fullPath.length,
+            fullPath,
+          };
+          seenIds.add(node.id);
+          nodes.push(node);
+          if (nodes.length > maxNodes) {
+            throw treeReadError(
+              'Unable to read the complete tag tree within the node budget',
+              ERROR_CODES.TAG_TREE_LIMIT_EXCEEDED,
+              { budget: 'nodes', maximum: maxNodes },
+            );
+          }
+          if (node.childrenCount > 0) {
+            next.push(node);
+          }
+        }
+      }
+    }
+    frontier = next;
+  }
+
+  const items = classifyTagCompatibility(nodes);
+  return {
+    items,
+    byId: new Map(items.map((item) => [item.id, item])),
+  };
+}
+
+/**
+ * Reads the complete draft taxonomy, reusing a short-lived project-keyed
+ * in-flight/completed snapshot when safe. Mutation handlers invalidate the
+ * project entry. Safety-critical worker drift validation passes
+ * `forceRefresh: true`, which bypasses and replaces any cached snapshot.
+ *
+ * @param {SerenityTransport} transport
+ * @param {string} semrushWorkspaceId
+ * @param {string} projectId
+ * @param {object} [log]
+ * @param {object} [options]
+ * @param {boolean} [options.forceRefresh=false]
+ * @param {boolean} [options.cacheResult=true]
+ * @param {string} [options.rootName]
+ * @param {boolean} [options.strict=false] - see {@link loadTagTreeSnapshot}.
+ *   Tag search is the only caller that passes `strict: true`; every other
+ *   (mutation/filter) caller keeps the prior tolerant, serial behavior.
+ * @param {object} [options.budgets] - optional traversal budget overrides
+ *   (`maxParents`/`maxNodes`/`maxDurationMs`/`concurrency`/
+ *   `maxPagesPerParent`). Tag search supplies runtime environment values via
+ *   {@link import('./tag-search-constants.js').resolveTagTreeBudgets}; legacy
+ *   mutation/filter callers omit this object and retain compiled defaults.
+ * @returns {Promise<{
+ *   items: TagTreeSnapshotItem[],
+ *   byId: Map<string, TagTreeSnapshotItem>,
+ * }>}
+ */
+export async function readTagTreeSnapshot(
+  transport,
+  semrushWorkspaceId,
+  projectId,
+  log,
+  {
+    forceRefresh = false, cacheResult = true, rootName, strict = false, budgets,
+  } = {},
+) {
+  if (!forceRefresh && rootName === undefined) {
+    const cached = getCachedTagTreeSnapshot(semrushWorkspaceId, projectId);
+    if (cached) {
+      return /** @type {ReturnType<typeof loadTagTreeSnapshot>} */ (cached);
+    }
+  }
+  const pending = loadTagTreeSnapshot(
+    transport,
+    semrushWorkspaceId,
+    projectId,
+    log,
+    { ...(budgets ?? {}), rootName, strict },
+  );
+  if (cacheResult && rootName === undefined) {
+    cacheTagTreeSnapshot(semrushWorkspaceId, projectId, pending);
+  }
+  try {
+    return await pending;
+  } catch (error) {
+    if (cacheResult && rootName === undefined) {
+      deleteCachedTagTreeSnapshotIfSame(semrushWorkspaceId, projectId, pending);
+    }
+    throw error;
+  }
+}
+
+export function incompatibleTaxonomyError(items) {
+  const error = new ErrorWithStatusCode(
+    'The requested tag belongs to an incompatible read-only taxonomy branch',
+    409,
+  );
+  error.code = ERROR_CODES.INCOMPATIBLE_TAG_TAXONOMY;
+  /** @type {any} */ (error).details = {
+    tags: items.map((item) => ({
+      id: item.id,
+      path: item.fullPath?.map((part) => part.name) ?? [],
+      reason: item.compatibility?.reason ?? 'ambiguousPath',
+    })),
+  };
+  return error;
 }
 
 /**
@@ -649,7 +1112,9 @@ export async function collectSubtreeIds(transport, semrushWorkspaceId, projectId
     for (const nodeId of frontier) {
       reads += 1;
       if (reads > MAX_TREE_READS) {
-        throw new ErrorWithStatusCode('tag subtree too large to resolve', 502);
+        const error = new ErrorWithStatusCode('Unable to read the complete tag subtree', 503);
+        error.code = ERROR_CODES.TAG_TREE_READ_INCOMPLETE;
+        throw error;
       }
       // Sequential by design — see findTagsInTree for the same rationale.
       // eslint-disable-next-line no-await-in-loop
@@ -663,7 +1128,9 @@ export async function collectSubtreeIds(transport, semrushWorkspaceId, projectId
       for (const child of items) {
         ids.push(child.id);
         if (ids.length > MAX_SUBTREE_DELETE_SIZE) {
-          throw new ErrorWithStatusCode('tag subtree too large to delete', 502);
+          const error = new ErrorWithStatusCode('Unable to read the complete tag subtree', 503);
+          error.code = ERROR_CODES.TAG_TREE_READ_INCOMPLETE;
+          throw error;
         }
         if (child.childrenCount > 0) {
           next.push(child.id);

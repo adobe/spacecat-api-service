@@ -22,6 +22,17 @@
  *
  * Ported (1:1) from the edge_optimize POC's rules_builder.py. Everything here is deterministic
  * and dependency-free so it can be unit-tested and previewed offline (no Akamai credentials).
+ *
+ * The routing rule is split into two tiers (Routing Edge + Routing Parent) keyed on the requestType
+ * CLIENT_REQ criterion, so the parent-tier re-evaluation cannot self-fail the api-key loop guard.
+ *
+ * Failover model: a single `x-edgeoptimize-edge-routed` marker is injected at the edge and PERSISTS
+ * across every parent tier (never stripped on the forward path), so multi-hop requests reach Edge
+ * Optimize at any tiered-distribution depth. The marker is removed only on the failover recreation
+ * — which Akamai re-enters at the edge as a CLIENT_REQ already carrying the injected api-key — by a
+ * "Cleanup" rule scoped to `CLIENT_REQ AND api-key EXISTS`. That recreation-only strip breaks the
+ * failover loop without dropping the marker on normal forward hops (the old parent-strip broke
+ * multi-hop). Cleanup and Routing Edge are mutually exclusive (api-key EXISTS vs DOES_NOT_EXIST).
  */
 
 // Edge-tier guard: the api-key header the "Routing Edge" rule injects. On the client-facing edge
@@ -80,9 +91,9 @@ export const EDGE_OPTIMIZE_DEFAULTS = Object.freeze({
   removeIncomingResponseHeaders: ['Age'],
   ruleNames: {
     parent: 'ABV - Optimize at Edge',
+    cleanup: 'EdgeOptimize Failover - Cleanup',
     routingEdge: 'Routing Edge',
     routingParent: 'Routing Parent',
-    removeMarker: `remove ${EDGE_ROUTED_MARKER_HEADER}`,
     failoverTest: 'EdgeOptimize Failover - Test Header',
   },
 });
@@ -373,9 +384,14 @@ export function buildRoutingEdgeRule(cfg) {
 /**
  * "Routing Parent": the parent-tier / internally-recreated pass (`requestType IS_NOT CLIENT_REQ`)
  * that carries the `x-edgeoptimize-edge-routed=true` marker the edge rule set. Re-applies the
- * origin/cache behaviors (they don't persist across the tier), strips the marker before origin, and
- * fails over on origin trouble. Does NOT re-inject the credential headers — those were set at the
- * edge and persist.
+ * origin/cache behaviors (they don't persist across the tier) and fails over on origin trouble.
+ * Does NOT re-inject the credential headers — those were set at the edge and persist.
+ *
+ * The marker is intentionally NOT stripped here: it must PERSIST across every parent tier so that
+ * multi-hop requests (edge -> parent -> parent -> ... -> origin) keep matching this rule and reach
+ * Edge Optimize at any tiered-distribution depth. Stripping it at the parent (the old design) broke
+ * multi-hop by dropping the marker at the first parent. The marker is removed only on the failover
+ * recreation, by buildFailoverCleanupRule.
  * @param {object} cfg
  * @returns {object}
  */
@@ -388,28 +404,36 @@ export function buildRoutingParentRule(cfg) {
     ],
     criteriaMustSatisfy: 'all',
     behaviors: buildCommonRoutingBehaviors(cfg),
-    // eslint-disable-next-line no-use-before-define
-    children: [buildRemoveMarkerRule(cfg)],
+    children: [],
     comments: MANAGED_COMMENT_ROUTING,
   };
 }
 
 /**
- * Child of "Routing Parent" that strips the internal `x-edgeoptimize-edge-routed` marker from the
- * request before it is forwarded to origin, so the marker never reaches Edge Optimize. No criteria
- * (always runs for the parent rule).
+ * "EdgeOptimize Failover - Cleanup": strips the internal `x-edgeoptimize-edge-routed` marker from
+ * the FAILOVER RECREATION so the parent tier will not re-route it back to Edge Optimize (which
+ * would loop). Scoped to `requestType IS CLIENT_REQ AND x-edgeoptimize-api-key EXISTS`: the api-key
+ * header is injected at the edge and PERSISTS into Akamai's failover recreate, so it is present
+ * ONLY on the recreation — a fresh client request arrives without it. This edge-level,
+ * recreation-only strip lets the marker persist across parent tiers (fixing multi-hop) while still
+ * breaking the failover loop. It never fires on the same request as "Routing Edge" (which requires
+ * the api-key ABSENT), so this marker delete and the marker injection there are mutually exclusive.
  * @param {object} cfg
  * @returns {object}
  */
-export function buildRemoveMarkerRule(cfg) {
+export function buildFailoverCleanupRule(cfg) {
   return {
-    name: cfg.ruleNames.removeMarker,
-    criteria: [],
+    name: cfg.ruleNames.cleanup,
+    criteria: [
+      criterionRequestType('IS'),
+      criterionRequestHeader(LOOP_GUARD_HEADER, 'EXISTS'),
+    ],
     criteriaMustSatisfy: 'all',
     behaviors: [behaviorRemoveIncomingRequestHeader(EDGE_ROUTED_MARKER_HEADER)],
     children: [],
-    comments: 'Managed by Adobe Brand Visibility (Optimize at Edge). Removes the internal '
-      + 'edge-routed marker header before the origin fetch.',
+    comments: 'Managed by Adobe Brand Visibility (Optimize at Edge). On the failover recreation '
+      + '(a CLIENT_REQ that already carries the api-key), strips the internal edge-routed marker so '
+      + 'the parent tier will not re-route it back to Edge Optimize — breaks the failover loop.',
   };
 }
 
@@ -468,13 +492,18 @@ export function buildParentRule(cfg) {
     criteriaMustSatisfy: 'all',
     behaviors: [],
     children: [
+      // Cleanup runs first (top-down): on the failover recreation it strips the edge-routed marker
+      // before Routing Edge/Parent are evaluated, so the recreation is not re-routed back to EO.
+      buildFailoverCleanupRule(cfg),
       buildRoutingEdgeRule(cfg),
       buildRoutingParentRule(cfg),
       buildSiteFailoverRule(cfg),
       buildFailoverTestRule(cfg),
     ],
     comments: 'Managed by Adobe Brand Visibility (Optimize at Edge). Routes AI-bot HTML traffic to '
-      + 'live.edgeoptimize.net via a two-tier (edge/parent) split, with per-rule site failover.',
+      + 'live.edgeoptimize.net via a two-tier (edge/parent) split. A single edge-routed marker '
+      + 'persists across parent tiers (multi-hop safe) and is stripped only on the failover '
+      + 'recreation by the Cleanup rule; native per-rule site failover.',
   };
 }
 

@@ -43,6 +43,11 @@ describe('SiteDetectionController', () => {
     getUpdatedAt: sandbox.stub().returns('2025-01-01T00:00:01Z'),
     getResult: sandbox.stub().returns(null),
     getError: sandbox.stub().returns(null),
+    getMetadata: sandbox.stub().returns({
+      jobType: 'site-detection',
+      payload: { domain: 'www.example.com', hlxVersion: 5 },
+      tags: ['site-detection'],
+    }),
     remove: sandbox.stub().resolves(),
     setStatus: sandbox.stub(),
     setError: sandbox.stub(),
@@ -331,6 +336,27 @@ describe('SiteDetectionController', () => {
 
       const resp = await controller.getSiteDetectionJobStatus({ params: { jobId: JOB_ID } });
       expect(resp.status).to.equal(500);
+    });
+
+    // ── SEC-5: jobType scoping — this reader must not fetch other job types ─────
+    it('returns 404 for a non-site-detection (e.g. token-bearing) job and never leaks its metadata', async () => {
+      const PROMISE_TOKEN = 'SECRET-PROMISE-TOKEN-do-not-leak';
+      mockDataAccess.AsyncJob.findById.resolves({
+        getId: () => JOB_ID,
+        getStatus: () => 'IN_PROGRESS',
+        getResult: () => null,
+        getError: () => null,
+        getMetadata: () => ({
+          jobType: 'serenity-classify-prompts',
+          promiseToken: PROMISE_TOKEN,
+          payload: {},
+        }),
+      });
+
+      const resp = await controller.getSiteDetectionJobStatus({ params: { jobId: JOB_ID } });
+      expect(resp.status).to.equal(404);
+      const body = await resp.json();
+      expect(JSON.stringify(body)).to.not.include(PROMISE_TOKEN);
     });
   });
 });

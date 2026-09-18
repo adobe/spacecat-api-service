@@ -35,6 +35,7 @@ import {
 
 import { ErrorWithStatusCode, getImsUserToken, resolveSemrushImsToken } from '../support/utils.js';
 import { hostnameFromUrlString } from '../support/url-utils.js';
+import { BRAND_GUIDANCE_MAX_LENGTH, codePointLength } from '../support/brand-guidance.js';
 import {
   STATUS_BAD_REQUEST,
 } from '../utils/constants.js';
@@ -69,6 +70,8 @@ import {
 import { listViewableResourceIds } from '../support/state-access-mapping-utils.js';
 import { isFacsRebacResource } from '../routes/facs-capabilities.js';
 import { provisionBrandSubworkspace, provisionBrandSubworkspaceBare, emptyProvisionedWorkspace } from '../support/serenity/brand-provisioning.js';
+import { isAsyncPromptGenEnabled, maybeEnqueueMarketGeneration } from '../support/serenity/async-prompt-gen.js';
+import { resolveCallerId } from '../support/serenity/handlers/prompts.js';
 import { computeWriteDeadline } from '../support/serenity/intent-classification.js';
 import { ensureMarketSite } from '../support/serenity/site-linkage.js';
 import {
@@ -80,7 +83,7 @@ import { isSemrushTransportError, unwrapTransportCause } from '../support/sereni
 import { logUpstreamError } from '../support/serenity/upstream-log.js';
 import { buildBrandMarketsResponse } from '../support/serenity/brand-markets.js';
 import { syncBrandUrlsAcrossMarkets } from '../support/serenity/brand-urls.js';
-import { syncBrandAliasesAcrossMarkets } from '../support/serenity/brand-aliases.js';
+import { syncBrandAliasesAcrossMarkets, collectAliasNames } from '../support/serenity/brand-aliases.js';
 import { resolveProjects } from '../support/serenity/resolve-projects.js';
 import {
   isSerenityActiveForBrand,
@@ -119,7 +122,6 @@ import {
 } from '../support/topics-storage.js';
 
 const HEADER_ERROR = 'x-error';
-const BRAND_GUIDANCE_MAX_LENGTH = 4000;
 const BRAND_GUIDANCE_FIELDS = ['brandContext', 'mentionSentimentGuidance'];
 
 /**
@@ -400,9 +402,11 @@ function BrandsController(ctx, log, env) {
         if (typeof value !== 'string') {
           return badRequest(`${field} must be a string or null`);
         }
-        // Validate the trimmed length: storage trims before persisting, so this
-        // mirrors what is actually stored (and the schema's maxLength).
-        if (value.trim().length > BRAND_GUIDANCE_MAX_LENGTH) {
+        // Validate the trimmed length in code points: storage trims before persisting,
+        // so this mirrors what is actually stored, and code-point counting matches the
+        // storage backstop (codePointLength) so both layers agree on "4000 characters"
+        // for non-BMP input (e.g. emoji count as one, not two UTF-16 units).
+        if (codePointLength(value.trim()) > BRAND_GUIDANCE_MAX_LENGTH) {
           return badRequest(`${field} must be at most ${BRAND_GUIDANCE_MAX_LENGTH} characters`);
         }
       }
@@ -1772,6 +1776,12 @@ function BrandsController(ctx, log, env) {
       // generatePrompts (default false) gates topic/prompt generation for a supplied
       // market ONLY; it no longer signals Semrush mode (see below).
       const generatePrompts = brandData.generatePrompts === true;
+      // Async prompt generation (flag-gated, #3194): when on, the initial market is
+      // provisioned WITHOUT synchronous generation and the DRS-backed producer is
+      // enqueued after provisioning. Default off → unchanged synchronous behavior.
+      const asyncGenBrand = isAsyncPromptGenEnabled(context.env) && generatePrompts;
+      // Collected below when async generation is enqueued, merged into the 201 body.
+      let brandPromptGeneration = null;
       // Semrush-mode detection (LLMO-6405). Mode is the ORG's serenity rollout flag,
       // NOT the create body: market-scoped inputs (market, AI models, generate-prompts)
       // have moved out of brand creation into market creation, so in a serenity-active
@@ -1868,7 +1878,7 @@ function BrandsController(ctx, log, env) {
             brandDomain,
             primaryUrl: provisionedBrandPrimaryUrl,
             modelIds,
-            generateTopics: generatePrompts,
+            generateTopics: generatePrompts && !asyncGenBrand,
             brandAliases,
             brandUrlSources,
             // Competitors ("other brands to track") are merged into the initial
@@ -1884,6 +1894,38 @@ function BrandsController(ctx, log, env) {
             geoTargetId: provisioned.geoTargetId,
             languageCode: provisioned.languageCode,
           };
+          // Async prompt generation: enqueue the DRS-backed producer for the
+          // just-provisioned initial market (best-effort; a producer hiccup must
+          // never fail the brand create). Annotates the 201 body so the UI polls.
+          if (asyncGenBrand && provisioned.projectId) {
+            try {
+              const imsToken = await resolveSemrushImsToken(context, log, 'brands');
+              const transport = createSerenityTransport({ env: context.env, imsToken });
+              brandPromptGeneration = await maybeEnqueueMarketGeneration(context, {
+                enabled: true,
+                generateRequested: true,
+                producerParams: {
+                  transport,
+                  brandId: provisionedBrandId,
+                  siteId: undefined,
+                  imsOrgId: organization.getImsOrgId?.() ?? spaceCatId,
+                  workspaceId: provisioned.semrushSubWorkspaceId,
+                  geoTargetId: provisioned.geoTargetId,
+                  languageCode: provisioned.languageCode,
+                  market,
+                  brandDomain,
+                  baseUrl: provisionedBrandPrimaryUrl ?? brandDomain,
+                  brand: brandData.name,
+                  aliases: collectAliasNames(brandAliases, market),
+                  callerId: resolveCallerId(context),
+                },
+              });
+            } catch (e) {
+              log?.warn?.('createBrandForOrg: async prompt-generation enqueue failed (non-fatal)', {
+                brandId: provisionedBrandId, error: e?.message,
+              });
+            }
+          }
         } else {
           // B (LLMO-6405): sub-workspace-only active create — no market supplied, so
           // no project is provisioned. Markets are added afterwards from the Markets
@@ -1979,7 +2021,13 @@ function BrandsController(ctx, log, env) {
         await linkSiteToLiveRows(context.dataAccess, provisionedBrandId, linkedSiteId, log);
       }
 
-      return createResponse(withSerenityState(created, serenityScopes), 201);
+      const createdBody = withSerenityState(created, serenityScopes);
+      return createResponse(
+        brandPromptGeneration
+          ? { ...createdBody, promptGeneration: brandPromptGeneration }
+          : createdBody,
+        201,
+      );
     } catch (error) {
       if (error.code === 'brand_status_demotion_not_allowed') {
         emitBrandDemotionBlocked(context, 'createBrand');
@@ -2378,6 +2426,7 @@ function BrandsController(ctx, log, env) {
         updates,
         postgrestClient,
         updatedBy,
+        log,
       });
 
       if (!updatedRow) {
@@ -2771,6 +2820,7 @@ function BrandsController(ctx, log, env) {
         updates: { status: 'active', baseSiteId },
         postgrestClient,
         updatedBy,
+        log,
       });
       if (!updated) {
         return notFound(`Brand not found: ${brandId}`);

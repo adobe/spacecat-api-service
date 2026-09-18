@@ -4,7 +4,7 @@ This document is the runtime reference for the `/v2/orgs/:spaceCatId/brands/:bra
 
 ## Architecture in one paragraph
 
-api-service exposes nine endpoints that front the Adobe-hosted Semrush AIO API at `https://www.semrush.com`. Authentication is IMS-bearer-only: the client sends an `Authorization: Bearer <ims_user_token>`, api-service forwards that header verbatim to Semrush, and the Adobe gateway exchanges the IMS token for Semrush's internal credential server-side. There are no Semrush cookies, API keys, or service accounts in api-service — every outbound request carries the caller's IMS user token. The brand-to-project mapping lives in the `brand_to_semrush_projects` table in mysticat-data-service; the Semrush workspace per org is read from `organizations.semrush_workspace_id` (already in place since PR #2403).
+api-service exposes the Serenity endpoint surface documented in OpenAPI and fronts the Adobe-hosted Semrush AIO API at `https://www.semrush.com`. Authentication is IMS-bearer-only: the client sends an `Authorization: Bearer <ims_user_token>`, api-service forwards that header verbatim to Semrush, and the Adobe gateway exchanges the IMS token for Semrush's internal credential server-side. There are no Semrush cookies, API keys, or service accounts in api-service — every outbound request carries the caller's IMS user token. The brand-to-project mapping lives in the `brand_to_semrush_projects` table in mysticat-data-service; the Semrush workspace per org is read from `organizations.semrush_workspace_id` (already in place since PR #2403).
 
 ## Environment configuration
 
@@ -14,6 +14,16 @@ api-service exposes nine endpoints that front the Adobe-hosted Semrush AIO API a
 |---|---|---|---|
 | `SEMRUSH_PROJECTS_BASE_URL` | yes (no source default) | Vault `dx_mysticat/<env>/api-service`; locally `.env` | Upstream host for the Semrush AIO REST API. Must be `https://…`. Trailing slashes are stripped. Per-environment value so the production target can differ from the hackathon host without a code change. |
 | `PROMPT_INTENT_CLASSIFICATION_DEPLOYMENT_NAME` | no (falls back to `AZURE_OPEN_AI_API_DEPLOYMENT_NAME`) | Vault `dx_mysticat/<env>/api-service`; locally `.env` | Classifier-scoped Azure OpenAI deployment (model) name for server-side prompt-intent classification (serenity-docs#32). Takes precedence over the shared `AZURE_OPEN_AI_API_DEPLOYMENT_NAME` other Azure consumers use (e.g. `org-detector`), so intent classification can target a different model without affecting them. Unset ⇒ shared deployment; behavior unchanged until explicitly configured. |
+| `SERENITY_TARGETED_CREATE_LOOKUP` | no (**default ON**) | Vault `dx_mysticat/<env>/api-service`; locally `.env` | Kill-switch for the create/upsert-path existing-prompt dedup strategy. See the subsection below. |
+
+### Create-path dedup kill-switch (`SERENITY_TARGETED_CREATE_LOOKUP`)
+
+Prompt create/upsert (`POST /v2/orgs/:id/brands/:id/serenity/prompts`, flat and sub-workspace) must decide, per input, whether a prompt already exists so it upserts (reactivates / replaces tags) instead of re-creating — a re-create folds into the upstream `existing_count` but still attaches the given tags, silently stacking a tag on the live prompt.
+
+- **ON (default; unset, empty, or any value other than the literal `'false'`):** the dedup index is built with a **per-input `search` lookup** — one `by_tags` call per distinct input text. Cost scales with the *input*, not the brand's corpus, so large-corpus brands (e.g. Adobe Helpx, ~38k prompts) no longer time out at the Fastly edge.
+- **`'false'`:** falls back to a **bounded-concurrency, capped corpus walk** (`MAX_PROMPT_INDEX_PAGES` pages at `BULK_CREATE_CONCURRENCY`). This is a corrected walk — never the pre-fix serial-unbounded walk — so a flag flip is a safe revert, not a return to the incident.
+
+The flag is read **per request** from `context.env`, so it is a per-brand canary / instant-rollback lever: enable/verify on one brand before widening (see the per-brand rollout guidance for the activation flag below). **Observability:** the create-completed log line carries `targetedLookup` (which path ran) and `upstreamCallCount` (per-request `by_tags` calls) — watch both when canarying or rolling back. This is a temporary kill-switch; it (and the fallback walk) are slated for removal after a soak with `targetedLookup=true` across brands and zero degradation alerts.
 
 ### Vault writes (dev / stage / prod)
 
@@ -257,26 +267,215 @@ curl -X DELETE "${API_BASE}/organizations/${ORG_ID}/feature-flags/llmo/serenity_
   -H "x-api-key: ${SPACECAT_ADMIN_KEY}"
 ```
 
+## Multi-dimension custom tags (`LLMO/serenity_tag_multi_dimension`)
+
+One brand-level `feature_flags` row (`product='LLMO'`,
+`flag_name='serenity_tag_multi_dimension'`, resolved brand-override-first like
+`LLMO/serenity`) governs the whole multi-dimension custom-tag capability:
+
+- **arbitrary-depth `tag` authoring** — `POST /serenity/tags` and
+  `PATCH /serenity/tags/:tagId` beyond the legacy depth-2/depth-3 boundary;
+- **cross-level tag search** — `GET /serenity/tags/search`.
+
+It replaces the two flags that shipped earlier (`serenity_unbounded_tag_authoring`
+and `serenity_tag_search`). They were merged because they cannot be rolled out
+independently: deep authoring without search lets a customer create tags they
+cannot find again, and search without deep authoring pays for a complete-tree
+walk over a taxonomy that is still depth-capped. **Neither old name is read any
+more** — rows carrying them have no effect, so a brand/org already enrolled must
+be re-enrolled on the new name (and the stale rows deleted). That re-enrolment is
+a required **pre-deploy** step, not a manual follow-up: see "Pre-deploy migration
+off the two retired flags" below for the script and the exact commands.
+
+Default **OFF**: an absent or unreadable flag keeps the legacy authoring depth
+limits (a deeper create/re-parent returns `400 invalidRequest`) and keeps search
+unavailable (`404`). The gate is authoring-and-search only — existing deeper
+tags stay readable, searchable once search is on, assignable to prompts, and are
+never removed by turning the flag off. Baseline `LLMO/serenity` gating is
+unchanged and still decides whether the `/serenity/*` surface is served at all.
+
+The environment-wide `SERENITY_TAG_SEARCH_DISABLED=true` kill switch is
+**independent** of this flag and disables the search endpoint alone
+(`503 tagSearchUnavailable`); it never disables deep authoring.
+
+| `LLMO/serenity_tag_multi_dimension` | `SERENITY_TAG_SEARCH_DISABLED` | deep authoring | `GET /serenity/tags/search` |
+| --- | --- | --- | --- |
+| off / absent | any | `400 invalidRequest` beyond depth 2/3 | `404` (not active for brand) |
+| on | unset / `false` | allowed at any depth | served |
+| on | `true` | allowed at any depth | `503 tagSearchUnavailable` |
+
+Flip it with the same admin endpoint as the other LLMO flags. That endpoint
+writes the organization's own row — the default for every brand with no
+override of its own; a brand-scoped override row is written directly to
+`feature_flags` (`brand_id` set), exactly as for `LLMO/serenity`:
+
+```bash
+# Enrol an org in multi-dimension custom tags (deep authoring + search)
+curl -X PUT "${API_BASE}/organizations/${ORG_ID}/feature-flags/llmo/serenity_tag_multi_dimension" \
+  -H "x-api-key: ${SPACECAT_ADMIN_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{"value": true}'
+
+# Back out (existing deep tags are preserved and stay readable/assignable)
+curl -X DELETE "${API_BASE}/organizations/${ORG_ID}/feature-flags/llmo/serenity_tag_multi_dimension" \
+  -H "x-api-key: ${SPACECAT_ADMIN_KEY}"
+```
+
+### Pre-deploy migration off the two retired flags
+
+**The deploy that ships the merged flag makes every `serenity_unbounded_tag_authoring`
+and `serenity_tag_search` row inert**, at org scope and at brand scope alike, so
+every org/brand already enrolled loses deep authoring and search unless its
+enrollment is carried forward first. `scripts/serenity-tag-flag-migration.mjs` is
+that step. It **previews by default and writes nothing** without `--apply`.
+
+Mapping — OR over the **resolved** value of each old flag, per scope:
+
+```
+serenity_tag_multi_dimension(scope) := resolve(serenity_unbounded_tag_authoring, scope)
+                                    OR resolve(serenity_tag_search, scope)
+```
+
+where `resolve` is the brand-override-first rule above (brand row, else org row,
+else OFF). Resolving *before* OR-ing is the correctness argument: an org row
+`serenity_unbounded_tag_authoring=true` with a brand override
+`serenity_tag_search=false` must leave that brand **on** — a naive row-by-row OR
+would write the brand a `false` override and revoke authoring it has today. The
+script prints the derivation of every scope (`=true(org)` / `=false(brand)`) so
+that inheritance is auditable. A scope whose two old flags both resolve `false`
+is written as an explicit `false`, because dropping a brand's `false` override
+would let it inherit an enabled org row and switch the brand **on**.
+
+**Which scopes are evaluated.** Every scope carrying an old-flag row, plus every
+brand that carries *only* a pre-existing `serenity_tag_multi_dimension` override
+while its organization still has old rows — that brand inherits the
+organization's old state, so its merged value is checked against the derived one
+(reported `already-migrated` or `CONFLICT`, never `insert`, and it has nothing to
+delete). A scope with no old state anywhere — no rows of its own and no
+organization row to inherit — needs no migration and is deliberately absent from
+the plan.
+
+**Conflicts stop everything.** A scope that already carries a
+`serenity_tag_multi_dimension` row with a different value is **never
+overwritten**, and its presence aborts the whole run: `--apply` (with or without
+`--delete-stale`) reports every conflict, writes nothing, deletes nothing and
+exits 1. There is deliberately **no option to migrate "the rest"** — the scopes
+are not independent, so migrating and then deleting an organization's old rows
+would change what a still-unresolved brand scope derives on the next run, and the
+conflict would resolve itself against a value nobody reviewed. Resolve each
+conflicting row by hand (delete it, or correct its value to the derived one) and
+re-run; `--org-id` narrows a rehearsal to one organization without ever partially
+migrating one. Everything is idempotent, so **recovery from any interruption is
+re-running the same command**.
+
+PostgREST gives one transaction per request and no multi-statement one (the only
+transactional seam in this repo is a `wrpc_*` function in mysticat-data-service —
+see `src/support/slack/llmo-org-move.js`), so the script instead fails safe by
+ordering: every new row is re-read and value-checked **before any old row is
+deleted**, and a failed verification aborts the run with the old rows intact.
+Deletion is a separate opt-in for the same reason it runs *after* the deploy: old
+rows still present are what makes a rollback of the deploy a no-op.
+
+| step | command | effect if the deploy is rolled back |
+| --- | --- | --- |
+| 1 | preview (default) | nothing written |
+| 2 | `--apply` | new rows are ignored by the deployed code; old rows still govern |
+| 3 | deploy | merged flag governs |
+| 4 | `--apply --delete-stale` | old rows are already inert |
+
+```bash
+# 0) Credentials from the target env's Lambda config — never hard-code them.
+#    Reads work as postgrest_anon; --apply needs the postgrest_writer key.
+export POSTGREST_URL=$(aws lambda get-function-configuration \
+  --function-name spacecat-api-service-<env> \
+  --query 'Environment.Variables.POSTGREST_URL' --output text)
+export POSTGREST_API_KEY=$(aws lambda get-function-configuration \
+  --function-name spacecat-api-service-<env> \
+  --query 'Environment.Variables.POSTGREST_API_KEY' --output text)
+
+# 1) PREVIEW (writes nothing). Keep this output: the counts block plus the
+#    per-scope derivation lines are the pre-deploy evidence.
+node scripts/serenity-tag-flag-migration.mjs | tee /tmp/tag-flag-migration-preview.txt
+
+# 1b) Optional rehearsal on a single organization first
+node scripts/serenity-tag-flag-migration.mjs --org-id <org-uuid>
+
+# 2) APPLY — writes and verifies the merged rows, KEEPS the old ones.
+#    Safe before the deploy: the running code does not read the new flag name.
+node scripts/serenity-tag-flag-migration.mjs --apply | tee /tmp/tag-flag-migration-apply.txt
+
+# 3) VERIFY independently of the script, before deploying.
+#    Every scope from the preview must appear here with the derived value.
+curl -s "${POSTGREST_URL}/feature_flags?product=eq.LLMO\
+&flag_name=eq.serenity_tag_multi_dimension\
+&select=organization_id,brand_id,flag_value,updated_by" \
+  -H "apikey: ${POSTGREST_API_KEY}" -H "Authorization: Bearer ${POSTGREST_API_KEY}"
+
+#    Old rows are still present at this point (expected) — count them:
+curl -s -I "${POSTGREST_URL}/feature_flags?product=eq.LLMO\
+&flag_name=in.(serenity_unbounded_tag_authoring,serenity_tag_search)&select=id" \
+  -H "apikey: ${POSTGREST_API_KEY}" -H "Authorization: Bearer ${POSTGREST_API_KEY}" \
+  -H "Prefer: count=exact" -H "Range: 0-0" | grep -i content-range
+
+# 4) Deploy the merged-flag code.
+
+# 5) AFTER the deploy — delete the now-inert old rows. Re-verifies every scope
+#    first and only deletes the rows of scopes that verified.
+node scripts/serenity-tag-flag-migration.mjs --apply --delete-stale
+
+# 6) Post-deploy verification: zero old rows left, and a re-run is a clean no-op
+#    (0 scopes to migrate).
+curl -s -I "${POSTGREST_URL}/feature_flags?product=eq.LLMO\
+&flag_name=in.(serenity_unbounded_tag_authoring,serenity_tag_search)&select=id" \
+  -H "apikey: ${POSTGREST_API_KEY}" -H "Authorization: Bearer ${POSTGREST_API_KEY}" \
+  -H "Prefer: count=exact" -H "Range: 0-0" | grep -i content-range
+node scripts/serenity-tag-flag-migration.mjs
+```
+
+Exit status is `0` only when no scope conflicts; `1` covers conflicts, a failed
+verification, a bad invocation, or a read/write error. A conflict means nothing
+was written or deleted **anywhere**; a failed verification means no stale row of
+an unverified scope was deleted. The admin endpoint
+above cannot replace this: its `DELETE` sets the org row to `false` rather than
+removing it, and neither `PUT` nor `DELETE` can address a brand-scoped override.
+
+One production scope to sanity-check the preview against (an example, not a
+special case — the script is generic over every row and scope): org
+`a6286f15-86c3-4f18-b4ee-f5f37c894248` (PAT03) carries both old flags `true` at
+org scope today, so it must come out as a single
+`serenity_tag_multi_dimension=true` org row.
+
+
 ## Endpoint surface
 
 All `/serenity/*` endpoints require `Authorization: Bearer <ims_user_token>` and `organization:read` (GET) or `organization:write` (mutating) capability. (The S2S brand-markets read documented at the end of this section is the exception: it is reachable without an IMS user token, though it still requires `organization:read`.) The `:brandId` path param is UUID-only on this surface — name-based brand lookup is rejected with 400. The slice key for everything is `(brandId, geoTargetId, languageCode)`; the upstream workspace id and per-project upstream identifier are resolved server-side and never leak into request/response shapes.
 
 | Method | Path | Purpose | OperationId |
 |---|---|---|---|
-| GET | `/serenity/prompts?geoTargetId=&languageCode=&page=&limit=&search=&tagIds=` | List prompts for one slice. geoTargetId and languageCode required. tagIds is repeatable (OR semantics, max 50). | `listSerenityPrompts` |
-| POST | `/serenity/prompts` | Bulk create prompts grouped by (geoTargetId, languageCode); each input carries a non-empty `tagIds` (upstream ids, id-based write path). A `tags` (name-based) key is rejected with 400. | `createSerenityPrompts` |
+| GET | `/serenity/prompts?geoTargetId=&languageCode=&page=&limit=&search=&tagIds=` | List prompts for one slice. geoTargetId and languageCode required. `tagFilterMode=faceted-v1` enables authoritative native id-based faceting; plain rows mark otherwise-compatible tags `unverified` because they do not load the complete taxonomy. | `listSerenityPrompts` |
+| POST | `/serenity/prompts` | Bulk create prompts grouped by (geoTargetId, languageCode); each input carries 1–50 caller-supplied `tagIds` (upstream ids, id-based write path). More than 50 returns 409 `tagLimitExceeded` before server-managed tags are injected; ids are never truncated. A `tags` (name-based) key is rejected with 400. | `createSerenityPrompts` |
 | PATCH | `/serenity/prompts/:semrushPromptId` | Update a prompt; body carries slice + text + a non-empty `tagIds`. A `tags` (name-based) key is rejected with 400. | `updateSerenityPrompt` |
 | POST | `/serenity/prompts/bulk-delete` | Delete prompts; body is `{ prompts: [{semrushPromptId, geoTargetId, languageCode}] }` | `bulkDeleteSerenityPrompts` |
+| POST | `/serenity/prompts/finalize` | Publish any pending draft state for up to 50 caller-supplied (geoTargetId, languageCode) slices, resolved through the same org/brand/workspace authorization as prompt creation. Idempotent per slice: `live` is a no-op, `draft`/`live_with_unpublished_updates` publish (then bounded-confirm), `publishing` is polled without a second publish, `initial_publish_failed` is terminal. Recovery surface for CSV imports whose deferred-publish batches were left stranded unpublished. | `finalizeSerenityPrompts` |
+| POST | `/serenity/prompts/bulk-tags` | Validate mutation ids, freeze the normalized faceted filter, and enqueue an assign/remove set operation without scanning prompts synchronously. The worker force-refreshes taxonomy and resolves the worker-time cohort under the 20,000-prompt ceiling; per-item over-limit sets fail loudly. Optional `Idempotency-Key` replays the same canonical request for 24 hours. Publish runs only after an update or an explicitly marked prior failed-publish recovery. | `bulkTagSerenityPrompts` |
+| GET | `/serenity/prompts/jobs/:jobId` | Poll classify/bulk jobs. `COMPLETED` is terminal processing; for bulk tags, `result.outcome=PARTIAL_FAILURE` explicitly reports item or publish failure and `failureCursor`/`failureLimit` page failures. | `getSerenityPromptsJobStatus` |
 | GET | `/serenity/markets` | List markets configured for the brand (incl. live `status`) | `listSerenityMarkets` |
 | POST | `/serenity/markets` | Onboard a new (brand, geoTargetId, languageCode) slice (accepts `siteId` in place of `brandDomain`) | `createSerenityMarket` |
 | DELETE | `/serenity/markets/:geoTargetId/:languageCode` | Remove a slice (idempotent; upstream-first, DB-second) | `deleteSerenityMarket` |
 | GET | `/serenity/tags?geoTargetId=&languageCode=` | Unique tag names for one slice. Add `parentId` (present, even empty) to switch to the nested-tree read instead: `parentId=''` returns root categories with `childrenCount`, `parentId=<tagId>` returns that root's children with a `path` breadcrumb. | `listSerenityTags` |
-| POST | `/serenity/tags` | Create/resolve a tag on one slice; body is `{ type, name, geoTargetId, languageCode, parentId? }`. `name` is always BARE — a `:` is rejected, as is a reserved dimension-root name. `type` names the dimension the value belongs to: `category` (open — customer-authored at any depth; `parentId` must be the `category` root or one of its descendants, and defaults to the root) or `intent`/`source`/`type` (closed — `name` must match the fixed enum, `parentId` is not allowed, resolve-before-create is idempotent, and the response is `200 { ..., created }` not `201`). | `createSerenityTag` |
-| PATCH | `/serenity/tags/:tagId` | Rename and/or re-parent a tag by its upstream id. `name` is a bare value. `parentId`: an id RE-PARENTS within the tag's own dimension, omitted preserves the current parent, and an explicit `null` is rejected — the root level is reserved for the four dimension roots. The new parent may be neither the tag itself nor one of its descendants (400): upstream stores a parent pointer rather than a tree and would accept the edge, leaving the tag's subtree reachable from no root, and so unreachable and unrepairable through this API. The proxy always re-sends a parent upstream, because a PATCH that omits one promotes the tag to a root. A dimension root (400), a closed dimension's value (400), and an unknown id (404 `tagNotFound`) are all refused. | `updateSerenityTag` |
+| POST | `/serenity/tags` | Create/resolve a tag on one slice; body is `{ type, name, geoTargetId, languageCode, parentId? }`. `name` is always BARE — a `:` is rejected, as is a reserved dimension-root name. `category` and `tag` are customer-owned open dimensions. `source` is server-owned open. `intent`, `origin`, and `type` are server-owned closed dimensions with fixed enums. Server-owned values reject `parentId` and use idempotent resolve-before-create. | `createSerenityTag` |
+| PATCH | `/serenity/tags/:tagId` | Rename and/or re-parent a tag by its upstream id. `name` is a bare value. `parentId`: an id RE-PARENTS within the tag's own dimension, omitted preserves the current parent, and an explicit `null` is rejected — the root level is reserved for the six dimension roots. The new parent may be neither the tag itself nor one of its descendants (400): upstream stores a parent pointer rather than a tree and would accept the edge, leaving the tag's subtree reachable from no root, and so unreachable and unrepairable through this API. The proxy always re-sends a parent upstream, because a PATCH that omits one promotes the tag to a root. A dimension root (400), a closed dimension's value (400), and an unknown id (404 `tagNotFound`) are all refused. | `updateSerenityTag` |
+| GET | `/serenity/tags/:tagId/impact?geoTargetId=&languageCode=` | Return the complete subtree, distinct affected-prompt count, and quoted revision used by guarded delete. Roots, server-owned tags, and read-only taxonomy branches are refused. | `getSerenityTagImpact` |
+| GET | `/serenity/tags/search?geoTargetId=&languageCode=&q=&limit=&cursor=` | Search the plain `tag` dimension (never `category`/other dimensions) for names/paths containing `q` (NFKC-normalized, case-insensitive), ranked exact > prefix > substring > path. **Rollout:** default-off per brand behind `LLMO/serenity_tag_multi_dimension` — the SAME flag that unlocks arbitrary-depth custom `tag` authoring (create/rename/re-parent beyond depth 2/3), since cross-level search and deep authoring ship as one capability; the environment-wide `SERENITY_TAG_SEARCH_DISABLED=true` switch is an independent emergency backout for this endpoint alone and never disables deep authoring. **Cost profile:** every call — including each subsequent cursor page — re-walks the complete tag tree from Semrush with no caching (up to `SERENITY_TAG_TREE_MAX_PARENTS` parent reads and `SERENITY_TAG_TREE_MAX_PAGES_PER_PARENT` pages per parent at concurrency `SERENITY_TAG_TREE_CONCURRENCY`, bounded by `SERENITY_TAG_TREE_MAX_DURATION_MS`), so a type-ahead client MUST debounce. A `200` is never budget-truncated — budget exhaustion and traversal failures fail closed with `503` (`tagTreeLimitExceeded` for configured ceilings, `tagTreeReadIncomplete` when an upstream level cannot be proven complete, and `tagTreeDataIntegrity` for contradictory tree relationships) instead of returning partial matches — but it is a level-by-level read, not a point-in-time transaction: a tag created into an already-visited level mid-walk is simply absent until the next call, and `complete: true` asserts only "not truncated". Returns an opaque, versioned base64url JSON `cursor` for the next page (`null` once exhausted), bound to the normalized query and taxonomy revision. The cursor carries no organization, brand, workspace, project, or authorization authority: every page reauthenticates, resolves the project server-side, and re-reads the taxonomy; a revision change returns `409 tagSearchSnapshotChanged`. The emergency environment switch returns `503 tagSearchUnavailable` after normal org/brand authorization and before Semrush project resolution or traversal. | `searchSerenityTags` |
 | GET | `/serenity/models?geoTargetId=&languageCode=` | AI models for one slice (catalog mode when no params) | `listSerenityModels` |
 | PUT | `/serenity/models` | Replace the AI-model set for one slice (publishes after change) | `updateSerenityModels` |
 | POST | `/serenity/activate` | Activate into sub-workspace mode. A **pending** brand activates sub-workspace-only (ensure sub-workspace + flip active, no markets); an already-**active** brand's body-supplied markets are provisioned (reactivation) | `activateSerenityBrand` |
 | POST | `/serenity/deactivate` | Deactivate: decommission the sub-workspace + disconnect the brand back to flat mode | `deactivateSerenityBrand` |
+
+Elements analytics uses root-first `tagPath` values rather than native tag ids.
+Those routes require `tagFilterMode=elements-faceted-v1`; the distinct token
+prevents clients from treating the incompatible native and Elements filter
+engines as the same contract.
 
 The above are prefixed with `/v2/orgs/:spaceCatId/brands/:brandId`.
 
@@ -295,7 +494,7 @@ This differs from `GET /serenity/markets` in three ways: it carries no live/draf
 
 ## The onboarding flow
 
-`POST /serenity/markets` writes a row to `brand_to_semrush_projects` **only after all three upstream calls succeed**. The order is strict and the `findBySlice` 409 gate runs before any upstream call so safe retries are free:
+`POST /serenity/markets` writes a row to `brand_to_semrush_projects` **only after every blocking step below succeeds — create, the primary_url PATCH, the main-brand benchmark invariant, and publish**. The order is strict and the `findBySlice` 409 gate runs before any upstream call so safe retries are free:
 
 ```
 1. validate body                                  -> 400 on missing/invalid fields
@@ -305,8 +504,12 @@ This differs from `GET /serenity/markets` in three ways: it carries no live/draf
    `/v1/languages`
 5. POST /v1/workspaces/{ws}/projects              -> 502 envelope on upstream error
 6. PATCH .../projects/{pid} {type, primary_url}   -> 502 envelope, no row written
-7. POST .../publish                               -> 502 envelope, no row written
-8. BrandSemrushProject.create({...})              -> 201 with the new market
+7. ensureOwnBrandBenchmark + assertMainBrandBenchmark (DRAFT view)
+                                                   -> 502 `mainBrandBenchmarkInvariant`,
+                                                      no row written, orphan project
+                                                      deleted best-effort
+8. POST .../publish                               -> 502 envelope, no row written
+9. BrandSemrushProject.create({...})              -> 201 with the new market
 ```
 
 Step 6 is not optional and cannot be folded into step 5. A project carries two URL-ish
@@ -320,7 +523,19 @@ primary_url}`, the shape `model.ProjectUpdateRequest` declares) and read back ne
 `settings.ai.primary_url`. Without it, a brand whose site is `nba.com/kings` is recorded
 against the whole of `nba.com`.
 
-If step 5, 6 or 7 fails, no row is written and the caller may safely retry with the same body. The 409 gate catches the case where a previous attempt succeeded all three upstream calls but failed the DB write — extremely unlikely in practice; covered by the integration tests in `test/it/`.
+Step 7 is a blocking invariant (LLMO-7421), not enrichment: the project must carry exactly
+one `main_brand: true` benchmark before it is allowed to publish, or Brand Presence has no
+customer baseline to score against. `ensureOwnBrandBenchmark` creates the benchmark flagged
+when none exists, and deletes-then-recreates-flagged an existing unflagged own-domain match
+(the flag can only be set at create, never by a PUT); `assertMainBrandBenchmark` then reads
+the DRAFT view and requires the count to be exactly one, throwing `MainBrandBenchmarkInvariantError`
+(502, code `mainBrandBenchmarkInvariant` — see Error envelopes below) otherwise. Checked only
+pre-publish, never post-publish: Semrush publishes asynchronously (a 202 with the project
+transitioning to `live` in the background, no completion webhook), so a published-view read
+taken immediately after step 8 would race that transition and could fail spuriously even on
+success.
+
+If step 5, 6, 7 or 8 fails, no row is written and the caller may safely retry with the same body. The 409 gate catches the case where a previous attempt succeeded all upstream calls but failed the DB write — extremely unlikely in practice; covered by the integration tests in `test/it/`.
 
 **`siteId` is authoritative over `brandDomain` (LLMO-6405 Phase 2).** A market created from an already-onboarded URL can send `siteId` (the SpaceCat Site UUID) instead of, or alongside, a raw `brandDomain`. When `siteId` is supplied, its resolved Site identity is **always** used for the project's Semrush URL values — even if the request also carries a `brandDomain` that differs from it; a mismatch is the normal, intended shape (most brands have markets on Sites other than their apex domain) and is never compared or rejected. `brandDomain` is consulted **only** when no `siteId` was supplied. The server derives **both** Semrush URL values from the resolved Site's `base_url` in one read (`resolveSiteIdentity`): the project `domain` (bare host, the same normalization as every other brand→domain derivation) and the project's tracked `primary_url` (host + path, scheme-less to match the stored upstream form). They come from one read so the two can never describe different URLs; a supplied-but-unresolvable `siteId` is a hard 400, regardless of whether a `brandDomain` was also supplied — it never silently falls back. `primary_url` is always derived server-side and never read from the request body. At least one of `siteId`/`brandDomain` is required. In sub-workspace mode a supplied `siteId` also makes the post-201 mirror link **that** Site directly (skipping the domain→Site find-or-create — see below); the linked `siteId` then surfaces on the market DTO (`GET /serenity/markets[/:slice]`, both modes). The flat handler self-derives (it holds `dataAccess.Site`); the sub-workspace handler relies on the controller (its `dataAccess` is narrowed). Both call sites share one precedence implementation (`resolveMarketIdentity`). When `siteId` is absent, behavior is unchanged: the raw `brandDomain` is used.
 
@@ -361,7 +576,7 @@ For backwards compatibility and integrations, every Semrush market (project) is 
 
 ## Activate / deactivate (sub-workspace dual-mode)
 
-A brand runs in one of two modes, decided entirely by `brands.semrush_workspace_id`:
+A brand runs in one of two modes, decided entirely by `brands.semrush_sub_workspace_id`:
 - **flat** (pointer NULL): markets resolve through the shared org parent workspace via the `BrandSemrushProject` mapping.
 - **subworkspace** (pointer set): the brand has its own Semrush sub-workspace; markets resolve live from it via `listProjects`.
 
@@ -386,7 +601,9 @@ API).** For a brand that is already `active`, the body's markets are provisioned
 1. ensure the sub-workspace ONCE for the whole batch (create + settle, or re-grant)
 2. for each market (from the body; empty + a resolved brandDomain -> one US/en
    fallback project): create-or-resume a draft project, attach models + generated
-   topic prompts + brand URLs + competitor benchmarks, then publish
+   topic prompts, resolve/repair the own-brand benchmark and require exactly one
+   `main_brand: true` benchmark (LLMO-7421, blocking — see The onboarding flow,
+   step 7) + brand URLs + competitor benchmarks, then publish
 3. mirror every live market as a Site + brand_sites row (type='serenity')
 4. the brand is NEVER downgraded — a partial failure returns 207 Multi-Status
    while the brand stays active.
@@ -399,14 +616,14 @@ linked Site per distinct market domain.)
 
 - Body: `{ brandDomain?, brandNames?, brandDisplayName?, markets?: [{ market, languageCode, name? }] }`. **All body fields are optional.** A pending brand's approve sends an empty body (→ sub-workspace-only). For an active brand, `markets` is **capped at 50** (400 above that); an empty `markets` with a resolved `brandDomain` provisions one `US`/`en` fallback project; a body that resolves no markets and no `brandDomain` is a no-op re-ensure.
 - **No stash-driven provisioning (LLMO-6405, SITES-49448).** A pending brand activates sub-workspace-only regardless of `brands.pending_semrush_provisioning`; activation no longer reads OR clears the stash — the column is a deprecated, unwritten remnant, slated for removal once existing legacy drafts drain (serenity-docs post-GA cleanup).
-- Response: **200** — a pending brand's sub-workspace-only activation (flips to `active`), or a fully-succeeded active reactivation. **502 `serenityActivationIncomplete`** — a pending brand whose sub-workspace ensured upstream but whose `active` flip did not persist (stays `pending`, idempotent retry). **207 Multi-Status** — an *already-active* brand re-supplying markets where ≥1 fails; never downgraded, stays `active`.
+- Response: **200** — a pending brand's sub-workspace-only activation (flips to `active`), or a fully-succeeded active reactivation. **502 `serenityActivationIncomplete`** — a pending brand whose sub-workspace ensured upstream but whose `active` flip did not persist (stays `pending`, idempotent retry). **502 `subworkspaceCreationFailed`** — a readiness check observed a terminal sub-workspace status; deactivate the brand before retrying activation. **504 `subworkspaceCreationTimeout`** — the sub-workspace remained transient through the bounded readiness poll. **207 Multi-Status** — an *already-active* brand re-supplying markets where ≥1 fails; never downgraded, stays `active`.
 - Idempotent: a market already live upstream returns 409 `sliceExists` and still counts as live, so a full re-activate of an already-live active brand is a 200.
 
 `POST /serenity/deactivate` moves a brand back to flat mode:
 
 ```
 1. decommission the sub-workspace: delete EVERY project
-2. clear brands.semrush_workspace_id (disconnect → flat mode)
+2. clear `brands.semrush_sub_workspace_id` (disconnect -> flat mode)
 3. set brands.status = 'pending'
 ```
 
@@ -428,6 +645,9 @@ linked Site per distinct market domain.)
 | 404 | `{ message: "Organization has no semrush_workspace_id" }` or `{ error: "marketNotFound" | "promptNotFound" }` | Missing workspace, no `BrandSemrushProject` row for the slice, or upstream prompt id not in the slice |
 | 409 | `{ error: "sliceExists", message }` | `findBySlice` returned a row before the upstream call |
 | 502 | `{ error: "serenityUpstreamError", message }` | Upstream returned a non-2xx; provider-specific detail is logged server-side, not echoed to the client |
+| 502 | `{ error: "subworkspaceCreationFailed", message }` | A readiness check observed the exact terminal status `creation failed` or `invalid subscription`; deactivate the brand before retrying activation |
+| 502 | `{ error: "mainBrandBenchmarkInvariant", message }` | LLMO-7421: market create/publish blocked because the project's DRAFT benchmark state does not carry exactly one `main_brand: true` benchmark (see The onboarding flow, step 7). Retryable — a retry re-attempts the ensure/repair. |
+| 504 | `{ error: "subworkspaceCreationTimeout", message }` | A sub-workspace remained in a transient state through the bounded readiness poll |
 | 500 | `{ message }` | Unexpected error; logged with stack via `log.error` |
 
 Upstream failures surface as one of two typed errors, both carrying the upstream `status` and `body` for server-side logging and both classified by `isSemrushTransportError` (`src/support/serenity/errors.js`): **`ProjectEngineApiError`** (from the shared `@adobe/spacecat-shared-project-engine-client` facade) for Project Engine calls, and **`SerenityTransportError`** (`src/support/serenity/rest-transport.js`) for the User Manager and brand-topics calls. On a Project Engine no-HTTP-response failure (timeout / network / missing-token 401) the original throw is carried as `.cause` and unwrapped at the error→HTTP seam so auth stays 401 and timeouts stay 502. The 502 envelope deliberately does not echo provider details.

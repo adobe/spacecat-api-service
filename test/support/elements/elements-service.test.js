@@ -18,6 +18,14 @@ import { hasText } from '@adobe/spacecat-shared-utils';
 import { createElementsService } from '../../../src/support/elements/elements-service.js';
 import { ELEMENT_IDS } from '../../../src/support/elements/element-ids.js';
 import {
+  RAW_SENTIMENT_WEEK,
+  SENTIMENT_MENTIONS_TOTAL,
+  SENTIMENT_PROMPTS_TOTAL,
+  SENTIMENT_MENTIONS_PCT,
+  SENTIMENT_MENTION_COUNTS,
+  SENTIMENT_PROMPT_COUNTS,
+} from './fixtures/sentiment-overview.js';
+import {
   DIMENSION,
   INTENT_VALUE,
   INTENT_ROOT_NAME,
@@ -1021,6 +1029,92 @@ describe('createElementsService', () => {
         service.getCitedDomains('ws-1', { projectIds: ['proj-a', 'proj-b'] }),
       ).to.be.rejectedWith(upstreamError);
       expect(transport.fetchElement).to.have.been.calledTwice;
+    });
+  });
+
+  // Covers the controller -> service -> transform wiring seam for the `metric`
+  // param (LLMO-7457). The controller writes `metric:` into params and this
+  // service reads `params?.metric` back out; both ends are unit-tested in
+  // isolation, but nothing else asserts the key written matches the key read.
+  // Both sides also sit inside `c8 ignore` blocks, so a mismatch would make
+  // `metric=mentions` a permanent silent no-op with fully green CI — and the
+  // deliberately permissive parse removes the error path that would surface it.
+  describe('getSentimentOverview', () => {
+    const BASE_PARAMS = {
+      model: 'chatgpt',
+      startDate: '2026-08-11',
+      endDate: '2026-09-09',
+      brandName: 'au',
+    };
+
+    beforeEach(() => {
+      transport.fetchElement
+        .withArgs('ws-1', ELEMENT_IDS.SENTIMENT, sinon.match.any)
+        .resolves(RAW_SENTIMENT_WEEK);
+    });
+
+    // Assertion 1: the metric the controller writes actually reaches the transform.
+    it('carries params.metric through to the transform (mentions)', async () => {
+      const params = { ...BASE_PARAMS, metric: 'mentions' };
+      const result = await service.getSentimentOverview('ws-1', params);
+      expect(result.metric).to.equal('mentions');
+      expect(result.weeklyTrends[0].sentimentTotal).to.equal(SENTIMENT_MENTIONS_TOTAL);
+      const pct = Object.fromEntries(
+        result.weeklyTrends[0].sentiment.map((s) => [s.name, s.value]),
+      );
+      expect(pct).to.deep.equal(SENTIMENT_MENTIONS_PCT);
+    });
+
+    it('defaults to prompts when params carries no metric', async () => {
+      const result = await service.getSentimentOverview('ws-1', BASE_PARAMS);
+      expect(result.metric).to.equal('prompts');
+      expect(result.weeklyTrends[0].sentimentTotal).to.equal(SENTIMENT_PROMPTS_TOTAL);
+    });
+
+    // The transform shares its normaliser with the controller, so a direct service
+    // caller passing an un-normalised value resolves the same way an HTTP one does.
+    it('normalises a padded/upper-case metric from a direct service caller', async () => {
+      const result = await service.getSentimentOverview('ws-1', { ...BASE_PARAMS, metric: '  MENTIONS  ' });
+      expect(result.metric).to.equal('mentions');
+      expect(result.weeklyTrends[0].sentimentTotal).to.equal(SENTIMENT_MENTIONS_TOTAL);
+    });
+
+    it('returns both count sets regardless of the metric', async () => {
+      for (const metric of ['prompts', 'mentions']) {
+        // eslint-disable-next-line no-await-in-loop
+        const result = await service.getSentimentOverview('ws-1', { ...BASE_PARAMS, metric });
+        const [wk] = result.weeklyTrends;
+        expect(wk.mentionCounts, `metric=${metric}`).to.deep.equal(SENTIMENT_MENTION_COUNTS);
+        expect(wk.promptCounts, `metric=${metric}`).to.deep.equal(SENTIMENT_PROMPT_COUNTS);
+      }
+    });
+
+    // Assertion 2: `metric` is a presentation-only flag and must never reach
+    // Semrush. This holds today only because buildSentimentOverviewPayload
+    // destructures its params explicitly; nothing else enforces it, so a later
+    // refactor to a spread would start leaking an internal flag upstream.
+    it('sends an identical upstream payload for both metric values', async () => {
+      await service.getSentimentOverview('ws-1', { ...BASE_PARAMS, metric: 'prompts' });
+      await service.getSentimentOverview('ws-1', { ...BASE_PARAMS, metric: 'mentions' });
+
+      const [firstCall, secondCall] = transport.fetchElement.getCalls();
+      expect(secondCall.args[2]).to.deep.equal(firstCall.args[2]);
+      expect(firstCall.args[1]).to.equal(ELEMENT_IDS.SENTIMENT);
+
+      // Assert on KEYS, recursively — a serialised-string check would false-positive
+      // on any nested VALUE that happened to contain the substring.
+      const collectKeys = (node, acc = []) => {
+        if (Array.isArray(node)) {
+          node.forEach((n) => collectKeys(n, acc));
+        } else if (node && typeof node === 'object') {
+          Object.keys(node).forEach((k) => {
+            acc.push(k);
+            collectKeys(node[k], acc);
+          });
+        }
+        return acc;
+      };
+      expect(collectKeys(firstCall.args[2])).to.not.include.members(['metric', 'sentimentMetric', 'sentiment_metric']);
     });
   });
 });
