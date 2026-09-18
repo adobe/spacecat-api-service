@@ -21,6 +21,39 @@ const ORG_ID = 'org-1';
 const ENTITLEMENT_ID = 'ent-aso-1';
 const ETAG = '"d41d8cd98f00b204e9800998ecf8427e"';
 
+// Minimal fake PostgREST client that actually evaluates the recorded .or()/.eq()
+// filters against a fixed row, instead of just returning a canned response. Lets
+// tests prove the OR clause genuinely matches a row missing one field but not
+// the other, rather than only asserting the filter string was built correctly.
+function makeEvaluatingPostgrestClient(row) {
+  const state = { orConditions: [], eqFilters: [] };
+  const client = {
+    from: sinon.stub().callsFake(() => client),
+    select: sinon.stub().callsFake(() => client),
+    or: sinon.stub().callsFake((clause) => {
+      state.orConditions = clause.split(',').map((c) => {
+        const [col, , ...rest] = c.split('.');
+        return [col, rest.join('.')];
+      });
+      return client;
+    }),
+    eq: sinon.stub().callsFake((col, val) => {
+      state.eqFilters.push([col, val]);
+      return client;
+    }),
+    maybeSingle: sinon.stub().callsFake(async () => {
+      const orMatch = state.orConditions.some(
+        ([col, val]) => String(row[col]) === val,
+      );
+      const eqMatch = state.eqFilters.every(
+        ([col, val]) => String(row[col]) === String(val),
+      );
+      return { data: (orMatch && eqMatch) ? { id: row.id } : null, error: null };
+    }),
+  };
+  return client;
+}
+
 /**
  * Authentication for this route is performed upstream by AsoOverlayKeyHandler
  * (see test/support/aso-overlay-key-handler.test.js); by the time the controller
@@ -33,6 +66,7 @@ describe('RedirectsController', () => {
   let mockSite;
   let mockEntitlement;
   let mockDataAccess;
+  let mockPostgrestClient;
   let mockContext;
   let controller;
   let requestContext;
@@ -56,14 +90,26 @@ describe('RedirectsController', () => {
     mockSite = { getId: () => 'site-1', getOrganizationId: () => ORG_ID };
     mockEntitlement = { getId: () => ENTITLEMENT_ID };
 
+    mockPostgrestClient = {
+      from: sandbox.stub().returnsThis(),
+      select: sandbox.stub().returnsThis(),
+      or: sandbox.stub().returnsThis(),
+      eq: sandbox.stub().returnsThis(),
+      maybeSingle: sandbox.stub().resolves({ data: null, error: null }),
+    };
+
     mockDataAccess = {
-      Site: { findByExternalOwnerIdAndExternalSiteId: sandbox.stub().resolves(mockSite) },
+      Site: {
+        findByExternalOwnerIdAndExternalSiteId: sandbox.stub().resolves(mockSite),
+        findById: sandbox.stub().resolves(mockSite),
+      },
       Entitlement: { findByOrganizationIdAndProductCode: sandbox.stub().resolves(mockEntitlement) },
       SiteEnrollment: {
         allBySiteId: sandbox.stub().resolves([
           { getEntitlementId: () => ENTITLEMENT_ID },
         ]),
       },
+      services: { postgrestClient: mockPostgrestClient },
     };
 
     mockContext = {
@@ -541,10 +587,159 @@ describe('RedirectsController', () => {
 
   it('returns 404 (not 403) when no site resolves — no enumeration signal', async () => {
     mockDataAccess.Site.findByExternalOwnerIdAndExternalSiteId.resolves(null);
+    mockPostgrestClient.maybeSingle.resolves({ data: null, error: null });
     const response = await controller.getRedirects(requestContext);
     expect(response.status).to.equal(404);
     expect(response.headers.get('cache-control')).to.equal('no-store');
     expect(mockS3.s3Client.send.called).to.be.false;
+  });
+
+  it('falls back to a direct deliveryConfig lookup when the indexed externalId '
+    + 'lookup misses (e.g. authoringType never set on the site)', async () => {
+    mockDataAccess.Site.findByExternalOwnerIdAndExternalSiteId.resolves(null);
+    mockPostgrestClient.maybeSingle.resolves({ data: { id: 'site-1' }, error: null });
+    mockS3.s3Client.send.resolves({
+      ETag: ETAG,
+      Body: { transformToString: sandbox.stub().resolves('example.com/old https://example.com/new\n') },
+    });
+
+    const response = await controller.getRedirects(requestContext);
+
+    expect(response.status).to.equal(200);
+    expect(mockPostgrestClient.from.calledWith('sites')).to.be.true;
+    expect(mockPostgrestClient.or.calledWith(
+      'authoring_type.eq.cs,authoring_type.eq.cs/crosswalk,delivery_type.eq.aem_cs',
+    )).to.be.true;
+    expect(mockPostgrestClient.eq.calledWith('delivery_config->>programId', '154709')).to.be.true;
+    expect(mockPostgrestClient.eq.calledWith('delivery_config->>environmentId', '1629980')).to.be.true;
+    expect(mockDataAccess.Site.findById.calledWith('site-1')).to.be.true;
+  });
+
+  it('deliveryConfig fallback matches via deliveryType alone when authoringType is missing', async () => {
+    mockDataAccess.Site.findByExternalOwnerIdAndExternalSiteId.resolves(null);
+    mockDataAccess.services.postgrestClient = makeEvaluatingPostgrestClient({
+      id: 'site-1',
+      // authoring_type intentionally absent (undefined) — the real Nutanix gap.
+      delivery_type: 'aem_cs',
+      'delivery_config->>programId': '154709',
+      'delivery_config->>environmentId': '1629980',
+    });
+    mockS3.s3Client.send.resolves({
+      ETag: ETAG,
+      Body: { transformToString: sandbox.stub().resolves('example.com/old https://example.com/new\n') },
+    });
+
+    const response = await controller.getRedirects(requestContext);
+
+    expect(response.status).to.equal(200);
+    expect(mockDataAccess.Site.findById.calledWith('site-1')).to.be.true;
+  });
+
+  it('deliveryConfig fallback matches via authoringType alone when deliveryType is missing', async () => {
+    mockDataAccess.Site.findByExternalOwnerIdAndExternalSiteId.resolves(null);
+    mockDataAccess.services.postgrestClient = makeEvaluatingPostgrestClient({
+      id: 'site-1',
+      authoring_type: 'cs',
+      // delivery_type intentionally absent (undefined) — mirror case of the gap.
+      'delivery_config->>programId': '154709',
+      'delivery_config->>environmentId': '1629980',
+    });
+    mockS3.s3Client.send.resolves({
+      ETag: ETAG,
+      Body: { transformToString: sandbox.stub().resolves('example.com/old https://example.com/new\n') },
+    });
+
+    const response = await controller.getRedirects(requestContext);
+
+    expect(response.status).to.equal(200);
+    expect(mockDataAccess.Site.findById.calledWith('site-1')).to.be.true;
+  });
+
+  it('returns 404 when both the indexed lookup and the deliveryConfig fallback miss', async () => {
+    mockDataAccess.Site.findByExternalOwnerIdAndExternalSiteId.resolves(null);
+    mockPostgrestClient.maybeSingle.resolves({ data: null, error: null });
+    const response = await controller.getRedirects(requestContext);
+    expect(response.status).to.equal(404);
+    expect(mockDataAccess.Site.findById.called).to.be.false;
+  });
+
+  it('returns 404 and logs an error when the deliveryConfig fallback query itself fails '
+    + '(e.g. PostgREST down/misconfigured) — distinct from a legitimate no-match', async () => {
+    mockDataAccess.Site.findByExternalOwnerIdAndExternalSiteId.resolves(null);
+    mockPostgrestClient.maybeSingle.resolves({ data: null, error: { message: 'connection timeout' } });
+
+    const response = await controller.getRedirects(requestContext);
+
+    expect(response.status).to.equal(404);
+    expect(mockDataAccess.Site.findById.called).to.be.false;
+    expect(mockContext.log.error.calledWithMatch(
+      '[aso-overlay] deliveryConfig fallback query failed',
+      sinon.match({ error: { message: 'connection timeout' } }),
+    )).to.be.true;
+  });
+
+  it('does not use the deliveryConfig fallback when the indexed lookup already resolved a site', async () => {
+    await controller.getRedirects(requestContext);
+    expect(mockPostgrestClient.from.called).to.be.false;
+  });
+
+  it('returns 404 when the deliveryConfig fallback finds a row but Site.findById '
+    + 'no longer resolves it (consistency-window race)', async () => {
+    mockDataAccess.Site.findByExternalOwnerIdAndExternalSiteId.resolves(null);
+    mockPostgrestClient.maybeSingle.resolves({ data: { id: 'site-1' }, error: null });
+    mockDataAccess.Site.findById.resolves(null);
+
+    const response = await controller.getRedirects(requestContext);
+
+    expect(response.status).to.equal(404);
+    expect(mockS3.s3Client.send.called).to.be.false;
+  });
+
+  it('does not attempt the deliveryConfig fallback when postgrestClient is unavailable, '
+    + 'and logs an error rather than swallowing it silently', async () => {
+    mockDataAccess.Site.findByExternalOwnerIdAndExternalSiteId.resolves(null);
+    mockDataAccess.services.postgrestClient = null;
+
+    const response = await controller.getRedirects(requestContext);
+
+    expect(response.status).to.equal(404);
+    expect(mockDataAccess.Site.findById.called).to.be.false;
+    expect(mockContext.log.error.calledWithMatch(
+      '[aso-overlay] deliveryConfig fallback unavailable: postgrestClient missing/misconfigured',
+    )).to.be.true;
+  });
+
+  it('returns 404 and logs a distinct error when the deliveryConfig fallback matches '
+    + 'more than one site (PGRST116)', async () => {
+    mockDataAccess.Site.findByExternalOwnerIdAndExternalSiteId.resolves(null);
+    mockPostgrestClient.maybeSingle.resolves({
+      data: null,
+      error: { code: 'PGRST116', message: 'multiple (or no) rows returned' },
+    });
+
+    const response = await controller.getRedirects(requestContext);
+
+    expect(response.status).to.equal(404);
+    expect(mockDataAccess.Site.findById.called).to.be.false;
+    expect(mockContext.log.error.calledWithMatch(
+      '[aso-overlay] deliveryConfig fallback matched multiple sites',
+      sinon.match({ error: sinon.match({ code: 'PGRST116' }) }),
+    )).to.be.true;
+  });
+
+  it('returns 404 and logs an error when Site.findById throws after the '
+    + 'deliveryConfig fallback resolves a row', async () => {
+    mockDataAccess.Site.findByExternalOwnerIdAndExternalSiteId.resolves(null);
+    mockPostgrestClient.maybeSingle.resolves({ data: { id: 'site-1' }, error: null });
+    mockDataAccess.Site.findById.rejects(new Error('connection reset'));
+
+    const response = await controller.getRedirects(requestContext);
+
+    expect(response.status).to.equal(404);
+    expect(mockContext.log.error.calledWithMatch(
+      '[aso-overlay] deliveryConfig fallback Site.findById failed',
+      sinon.match({ siteId: 'site-1' }),
+    )).to.be.true;
   });
 
   it('returns 404 when the site org holds no ASO entitlement', async () => {
