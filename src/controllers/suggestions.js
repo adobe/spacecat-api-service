@@ -3262,11 +3262,21 @@ function SuggestionsController(ctx, sqs, env) {
 
     if (isDeployed && opportunity && isNonEmptyArray(experimentSuggestions)) {
       try {
+        // Re-fetch rather than reusing experimentSuggestions: those entities already went
+        // through one Suggestion.saveMany() above (the unblock step). A model instance that's
+        // been through saveMany once and then has setData() called on it again (as
+        // rollbackSuggestions does, to strip edgeDeployed/tokowakaDeployed) can silently fail to
+        // persist that second change (spacecat-shared-data-access's BaseCollection#_saveMany
+        // reassigns model.record after a save, orphaning the model's Patcher from the object
+        // its getters read from). Fetching fresh instances here sidesteps it by handing
+        // rollbackSuggestions entities that have never been saved before.
+        const rollbackSuggestions = (await Suggestion.allByOpportunityId(opportunityId))
+          .filter((s) => experimentSuggestionIds.includes(s.getId()));
         const tokowakaClient = TokowakaClient.createFrom(context);
         const rollbackResult = await tokowakaClient.rollbackSuggestions(
           site,
           opportunity,
-          experimentSuggestions,
+          rollbackSuggestions,
           { allSuggestions, updatedBy },
         );
         rolledBackSuggestionIds = (rollbackResult.succeededSuggestions || [])
