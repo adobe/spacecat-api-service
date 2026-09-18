@@ -1654,6 +1654,9 @@ function SitesController(ctx, log, env) {
     const siteId = context.params?.siteId;
     const country = context.data?.country;
     const limitParam = context.data?.limit;
+    // Drop branded keywords (the brand's own name) — those carry very high, navigational CPC
+    // that distorts a "category" cost estimate. Opt-in; defaults to including all keywords.
+    const excludeBranded = context.data?.excludeBranded === 'true';
 
     if (!isValidUUID(siteId)) {
       return badRequest('Site ID required');
@@ -1690,6 +1693,9 @@ function SitesController(ctx, log, env) {
       // Semrush databases are lowercase ISO-2 codes; the client defaults to `us` when omitted.
       if (hasText(country)) {
         options.country = country.toLowerCase();
+      }
+      if (excludeBranded) {
+        options.excludeBranded = true;
       }
       const { result } = await seoClient.getOrganicKeywords(baseURL, options);
       const keywords = (result?.keywords ?? []).map((kw) => ({
