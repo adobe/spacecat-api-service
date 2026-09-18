@@ -45,8 +45,11 @@ export const TAG_TREE_BUDGET_ENV_KEYS = Object.freeze({
  * Kill switch for `GET /serenity/tags/search` alone. Default-ON (absent means
  * enabled), so it changes nothing on deploy; setting it to `'true'` takes the
  * endpoint dark per environment without a redeploy, leaving every other
- * `/serenity/*` route — including the unbounded-nesting reads and the
- * separately flagged deep authoring — untouched.
+ * `/serenity/*` route — including the unbounded-nesting reads and the deep
+ * authoring that shares search's brand flag
+ * (`LLMO/serenity_tag_multi_dimension`) — untouched. It is an environment-wide
+ * emergency backout for the read path only: it never disables authoring, and it
+ * is independent of that brand flag in both directions.
  */
 export const TAG_SEARCH_DISABLED_FLAG = 'SERENITY_TAG_SEARCH_DISABLED';
 

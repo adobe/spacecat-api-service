@@ -189,8 +189,7 @@ describe('SerenityController', () => {
   let resolveWorkspaceIdStub;
   let resolveBrandWorkspaceStub;
   let isSerenityActiveStub;
-  let isTagSearchActiveStub;
-  let isUnboundedTagAuthoringActiveStub;
+  let isTagMultiDimensionActiveStub;
   let createTransportStub;
   let resolveBrandUuidStub;
   let getBrandAliasesStub;
@@ -225,8 +224,9 @@ describe('SerenityController', () => {
     // existing assertion that drives a brand-level route reaches its handler.
     // The "serenity inactive" describe overrides this to false.
     isSerenityActiveStub = sinon.stub().resolves(true);
-    isTagSearchActiveStub = sinon.stub().resolves(true);
-    isUnboundedTagAuthoringActiveStub = sinon.stub().resolves(true);
+    // One brand-level flag (LLMO/serenity_tag_multi_dimension) gates BOTH
+    // arbitrary-depth tag authoring and GET /serenity/tags/search.
+    isTagMultiDimensionActiveStub = sinon.stub().resolves(true);
     decommissionStub = sinon.stub().resolves();
     ensureSubworkspaceStub = sinon.stub().resolves(SUBWS);
     clearBrandWorkspaceCacheStub = sinon.stub();
@@ -340,8 +340,7 @@ describe('SerenityController', () => {
       },
       '../../src/support/serenity/serenity-active.js': {
         isSerenityActiveForBrand: isSerenityActiveStub,
-        isTagSearchActiveForBrand: isTagSearchActiveStub,
-        isUnboundedTagAuthoringActiveForBrand: isUnboundedTagAuthoringActiveStub,
+        isTagMultiDimensionActiveForBrand: isTagMultiDimensionActiveStub,
       },
       '../../src/support/access-control-util.js': MockAccessControlUtil,
       '../../src/support/prompts-storage.js': {
@@ -1207,8 +1206,8 @@ describe('SerenityController', () => {
       expect(handlers.handleSearchTags).not.to.have.been.called;
     });
 
-    it('searchTags stays dark until the brand rollout flag is enabled', async () => {
-      isTagSearchActiveStub.resolves(false);
+    it('searchTags stays dark until the multi-dimension brand flag is enabled', async () => {
+      isTagMultiDimensionActiveStub.resolves(false);
       const controller = SerenityController({ env: {} }, fakeLog(), {});
       const ctx = fakeContext();
       ctx.request = { url: 'https://x?geoTargetId=2840&languageCode=en&q=campaign' };
@@ -1217,7 +1216,7 @@ describe('SerenityController', () => {
 
       expect(response.status).to.equal(404);
       expect((await readBody(response)).message).to.equal('Tag search is not active for this brand');
-      expect(isTagSearchActiveStub).to.have.been.calledWith(sinon.match.any, ORG, BRAND);
+      expect(isTagMultiDimensionActiveStub).to.have.been.calledWith(sinon.match.any, ORG, BRAND);
       expect(handlers.handleSearchTags).not.to.have.been.called;
     });
 
@@ -1661,8 +1660,8 @@ describe('SerenityController', () => {
       expect(body.message).to.match(/name is required/);
     });
 
-    it('forwards the disabled unbounded-authoring rollout state to tag mutations', async () => {
-      isUnboundedTagAuthoringActiveStub.resolves(false);
+    it('forwards the disabled multi-dimension rollout state to tag mutations', async () => {
+      isTagMultiDimensionActiveStub.resolves(false);
       handlers.handleCreateTag.resolves({ status: 201, body: {} });
       handlers.handleUpdateTag.resolves({ status: 200, body: {} });
       const controller = SerenityController({ env: {} }, fakeLog(), {});
@@ -1795,6 +1794,122 @@ describe('SerenityController', () => {
       expect(response.status).to.equal(400);
       const body = await readBody(response);
       expect(body.message).to.match(/server-owned "intent" dimension cannot be deleted/);
+    });
+  });
+
+  // LLMO/serenity_tag_multi_dimension replaced the two per-capability flags
+  // (serenity_unbounded_tag_authoring + serenity_tag_search): deep tag authoring
+  // and cross-level tag search cannot be rolled out independently, so ONE brand
+  // flag drives both. The environment kill switch stays independent and disables
+  // search alone.
+  describe('multi-dimension tag rollout matrix (LLMO/serenity_tag_multi_dimension)', () => {
+    async function searchWith(env = {}) {
+      handlers.handleSearchTags.resolves({ items: [], cursor: null, complete: true });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const ctx = fakeContext({ env });
+      ctx.request = { url: 'https://x?geoTargetId=2840&languageCode=en&q=campaign' };
+      return controller.searchTags(ctx);
+    }
+
+    async function authorWith(env = {}) {
+      handlers.handleCreateTag.resolves({ status: 201, body: {} });
+      handlers.handleUpdateTag.resolves({ status: 200, body: {} });
+      const controller = SerenityController({ env: {} }, fakeLog(), {});
+      const createResponse = await controller.createTag(fakeContext({ env }));
+      const updateResponse = await controller.updateTag(fakeContext({
+        env,
+        params: { tagId: 'tag-1' },
+      }));
+      return {
+        createResponse,
+        updateResponse,
+        // The deep-authoring allowance the handlers are told to apply.
+        createAllowsDeep: handlers.handleCreateTag.firstCall.args[6],
+        updateAllowsDeep: handlers.handleUpdateTag.firstCall.args[7],
+      };
+    }
+
+    it('flag OFF: deep authoring is refused AND search is unavailable', async () => {
+      isTagMultiDimensionActiveStub.resolves(false);
+
+      const authoring = await authorWith();
+      expect(authoring.createAllowsDeep).to.equal(false);
+      expect(authoring.updateAllowsDeep).to.equal(false);
+
+      const response = await searchWith();
+      expect(response.status).to.equal(404);
+      expect((await readBody(response)).message)
+        .to.equal('Tag search is not active for this brand');
+      expect(handlers.handleSearchTags).to.not.have.been.called;
+    });
+
+    it('flag MISSING (unreadable row → predicate false): same off behaviour as an explicit false', async () => {
+      // The predicate itself maps an absent/unreadable flag to false; the
+      // controller must treat that exactly like an explicit false.
+      isTagMultiDimensionActiveStub.resolves(undefined);
+
+      const authoring = await authorWith();
+      expect(authoring.createAllowsDeep).to.not.equal(true);
+      expect(authoring.updateAllowsDeep).to.not.equal(true);
+
+      const response = await searchWith();
+      expect(response.status).to.equal(404);
+      expect(handlers.handleSearchTags).to.not.have.been.called;
+    });
+
+    it('flag ON: deep authoring is allowed AND search is served', async () => {
+      isTagMultiDimensionActiveStub.resolves(true);
+
+      const authoring = await authorWith();
+      expect(authoring.createAllowsDeep).to.equal(true);
+      expect(authoring.updateAllowsDeep).to.equal(true);
+
+      const response = await searchWith();
+      expect(response.status).to.equal(200);
+      expect(handlers.handleSearchTags).to.have.been.calledOnce;
+    });
+
+    it('flag ON + SERENITY_TAG_SEARCH_DISABLED=true: authoring still allowed, search 503s', async () => {
+      isTagMultiDimensionActiveStub.resolves(true);
+      const env = { SERENITY_TAG_SEARCH_DISABLED: 'true' };
+
+      const authoring = await authorWith(env);
+      expect(authoring.createResponse.status).to.equal(201);
+      expect(authoring.updateResponse.status).to.equal(200);
+      expect(authoring.createAllowsDeep).to.equal(true);
+      expect(authoring.updateAllowsDeep).to.equal(true);
+
+      const response = await searchWith(env);
+      expect(response.status).to.equal(503);
+      expect((await readBody(response)).error).to.equal('tagSearchUnavailable');
+      expect(handlers.handleSearchTags).to.not.have.been.called;
+    });
+
+    it('flag OFF + SERENITY_TAG_SEARCH_DISABLED=true: the env switch wins for search, authoring stays refused', async () => {
+      isTagMultiDimensionActiveStub.resolves(false);
+      const env = { SERENITY_TAG_SEARCH_DISABLED: 'true' };
+
+      const authoring = await authorWith(env);
+      expect(authoring.createAllowsDeep).to.equal(false);
+
+      const response = await searchWith(env);
+      expect(response.status).to.equal(503);
+      expect(handlers.handleSearchTags).to.not.have.been.called;
+    });
+
+    it('both behaviours read the SAME predicate — no per-capability flag is consulted', async () => {
+      isTagMultiDimensionActiveStub.resolves(true);
+
+      await searchWith();
+      await authorWith();
+
+      // searchTags + createTag + updateTag: three calls, one predicate, same
+      // (org, brand) arguments. There is no second flag read to disagree with.
+      expect(isTagMultiDimensionActiveStub).to.have.been.calledThrice;
+      isTagMultiDimensionActiveStub.getCalls().forEach((call) => {
+        expect(call.args[1]).to.equal(ORG);
+        expect(call.args[2]).to.equal(BRAND);
+      });
     });
   });
 

@@ -61,6 +61,7 @@ export default function brandClaimsFeedbackTests(getHttpClient, resetData) {
         eventId,
         brandId: BRAND_1_ID,
         rating: 'up',
+        entryPoint: 'report_overview',
         comment: 'This report helped prioritize our next steps.',
       });
 
@@ -80,12 +81,50 @@ export default function brandClaimsFeedbackTests(getHttpClient, resetData) {
       expect(record).to.include({
         recordType: 'product_feedback',
         surface: 'brand_claims',
+        feedbackScope: 'report',
+        entryPoint: 'report_overview',
         id: eventId,
         rating: 'up',
         siteId: SITE_1_ID,
         brandId: BRAND_1_ID,
       });
       expect(record.abv_id).to.match(/^abv_[a-f0-9]{12}$/);
+    });
+
+    it('stores claim-cluster feedback with an immutable claim snapshot', async () => {
+      const eventId = crypto.randomUUID();
+      const http = getHttpClient();
+      const res = await http.user.post(PATH(SITE_1_ID), {
+        eventId,
+        brandId: BRAND_1_ID,
+        rating: 'down',
+        feedbackScope: 'claim_cluster',
+        entryPoint: 'claim_inline',
+        clusterId: 'cluster-it-1',
+        claimText: 'The brand is difficult to compare.',
+        model: 'chatgpt',
+        sourceFile: 'brand_claims/llmo/site/2026-W38/data.json.gz',
+      });
+
+      expect(res.status).to.equal(202);
+      const listed = await s3().send(new ListObjectsV2Command({
+        Bucket: BUCKET,
+        Prefix: 'product_feedback/brand_claims/',
+      }));
+      const key = listed.Contents?.find((item) => item.Key?.endsWith(`_${eventId}.json`))?.Key;
+      expect(key).to.be.a('string');
+      const markerKey = `product_feedback/brand_claims/idempotency/${eventId}.json`;
+      eventIds.push({ keys: [key, markerKey] });
+      const object = await s3().send(new GetObjectCommand({ Bucket: BUCKET, Key: key }));
+      const record = JSON.parse(await object.Body.transformToString());
+      expect(record).to.include({
+        feedbackScope: 'claim_cluster',
+        entryPoint: 'claim_inline',
+        clusterId: 'cluster-it-1',
+        claimText: 'The brand is difficult to compare.',
+        model: 'chatgpt',
+        sourceFile: 'brand_claims/llmo/site/2026-W38/data.json.gz',
+      });
     });
 
     it('rejects a site outside the caller organization', async () => {

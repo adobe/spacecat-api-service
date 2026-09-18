@@ -1,3 +1,10 @@
+## [1.824.4](https://github.com/adobe/spacecat-api-service/compare/v1.824.3...v1.824.4) (2026-09-18)
+
+
+### Bug Fixes
+
+* unify multi-level tag rollout flag ([#3318](https://github.com/adobe/spacecat-api-service/issues/3318)) ([64221a9](https://github.com/adobe/spacecat-api-service/commit/64221a90588e0baa73bf90812268abfb62cf28e0))
+
 ## [1.824.3](https://github.com/adobe/spacecat-api-service/compare/v1.824.2...v1.824.3) (2026-09-18)
 
 

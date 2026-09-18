@@ -29,8 +29,25 @@ import { BRAND_CACHE_TTL_MS, MAX_ENTRIES } from './workspace-resolver.js';
  */
 export const SERENITY_FEATURE_FLAG_PRODUCT = 'LLMO';
 export const SERENITY_FEATURE_FLAG_NAME = 'serenity';
-export const SERENITY_UNBOUNDED_TAG_AUTHORING_FEATURE_FLAG_NAME = 'serenity_unbounded_tag_authoring';
-export const SERENITY_TAG_SEARCH_FEATURE_FLAG_NAME = 'serenity_tag_search';
+
+/**
+ * The single brand-level rollout switch for multi-dimension custom tags:
+ * arbitrary-depth `tag` authoring AND `GET /serenity/tags/search`.
+ *
+ * These began as two flags (`serenity_unbounded_tag_authoring` and
+ * `serenity_tag_search`) and were merged because they cannot ship
+ * independently: deep authoring without cross-level search leaves a customer
+ * able to create tags they cannot find again, and search without deep authoring
+ * is a costly complete-tree walk over a taxonomy that is still depth-capped.
+ * One flag means one rollout decision per brand, and no combination that ships
+ * half of the feature. Neither old name is read any more — a brand must be
+ * enrolled on this name.
+ *
+ * The environment-wide `SERENITY_TAG_SEARCH_DISABLED` kill switch stays
+ * independent of this flag and disables the search endpoint alone (see
+ * `tag-search-constants.js`).
+ */
+export const SERENITY_TAG_MULTI_DIMENSION_FEATURE_FLAG_NAME = 'serenity_tag_multi_dimension';
 
 /**
  * The org-wide switch that pins the org's UI to the Serenity experience, set by
@@ -217,10 +234,20 @@ export async function isSerenityActiveForBrand(ctx, spaceCatId, brandUuid, log) 
 }
 
 /**
- * Independent rollout switch for creating, renaming, or re-parenting custom
- * `tag` descendants beyond the legacy depth-2/depth-3 authoring boundary.
- * Reads/searches remain unbounded regardless of this flag so disabling it is a
- * safe authoring backout that preserves existing deep taxonomy and assignments.
+ * Single source of truth for the multi-dimension custom-tag rollout: does this
+ * brand get arbitrary-depth `tag` authoring and the cross-level tag search
+ * endpoint? Both behaviours read this one flag, so a brand can never be enrolled
+ * in one half of the feature.
+ *
+ * Default OFF — an absent flag, an unreadable flag, or anything short of an
+ * explicit `true` keeps the legacy depth-2/depth-3 authoring boundary and keeps
+ * `GET /serenity/tags/search` dark. Reads stay unbounded regardless, so turning
+ * the flag off is a safe backout that preserves existing deep taxonomy and the
+ * prompt assignments hanging off it.
+ *
+ * Search has a second, independent gate: the environment-wide
+ * `SERENITY_TAG_SEARCH_DISABLED` kill switch, which takes only the search
+ * endpoint dark and never touches authoring.
  *
  * @param {object} ctx - Request context.
  * @param {string} spaceCatId - SpaceCat organization UUID.
@@ -228,7 +255,7 @@ export async function isSerenityActiveForBrand(ctx, spaceCatId, brandUuid, log) 
  * @param {object} [log] - Optional logger.
  * @returns {Promise<boolean>} `true` only when explicitly enabled for the brand.
  */
-export async function isUnboundedTagAuthoringActiveForBrand(
+export async function isTagMultiDimensionActiveForBrand(
   ctx,
   spaceCatId,
   brandUuid,
@@ -237,32 +264,7 @@ export async function isUnboundedTagAuthoringActiveForBrand(
   const scopes = await readCachedFlagScopes(
     ctx,
     spaceCatId,
-    SERENITY_UNBOUNDED_TAG_AUTHORING_FEATURE_FLAG_NAME,
-    log,
-  );
-  if (!scopes) {
-    return false;
-  }
-  return resolveFlagRowForBrand(scopes, brandUuid)?.flag_value === true;
-}
-
-/**
- * Independent, default-off rollout switch for the cacheless complete-tree tag
- * search endpoint. This keeps the expensive read path dark until a brand is
- * deliberately enrolled, without coupling search availability to deeper tag
- * authoring.
- *
- * @param {object} ctx - Request context.
- * @param {string} spaceCatId - SpaceCat organization UUID.
- * @param {string} brandUuid - Resolved Postgres brand UUID.
- * @param {object} [log] - Optional logger.
- * @returns {Promise<boolean>} `true` only when explicitly enabled for the brand.
- */
-export async function isTagSearchActiveForBrand(ctx, spaceCatId, brandUuid, log) {
-  const scopes = await readCachedFlagScopes(
-    ctx,
-    spaceCatId,
-    SERENITY_TAG_SEARCH_FEATURE_FLAG_NAME,
+    SERENITY_TAG_MULTI_DIMENSION_FEATURE_FLAG_NAME,
     log,
   );
   if (!scopes) {
