@@ -118,24 +118,18 @@ export function isServicePrincipal(authInfo) {
  * version >= v5.27.0 that includes the `intent` column. Tracked in SITES-39521.
  */
 const intentColumnSupported = new WeakMap();
+const generationIdColumnSupported = new WeakMap();
 
 /**
- * Detects a PostgREST/Postgres error that indicates the `intent` column is
- * absent. Covers the insert/upsert error (`PGRST204`, "Could not find the
- * 'intent' column of 'prompts' in the schema cache") and the select error
- * (`42703`, "column prompts.intent does not exist").
+ * Detects a PostgREST/Postgres error that indicates an optional prompts column
+ * is absent. Covers the insert/upsert error (`PGRST204`, schema cache miss) and
+ * the select error (`42703`, column does not exist).
  *
- * Gated on the two specific error codes first, THEN on the column being
- * `intent`. This deliberately avoids broad message matching: an error that
- * merely mentions "intent" and "column" (e.g. a future check-constraint
- * violation "column intent violates check constraint") must NOT be treated as
- * a missing column, or the fallback would latch off and silently drop the
- * intent the caller sent — the exact data-loss bug this code exists to fix.
- *
- * @param {*} error - Error object from a PostgREST response (`{ message, details, hint, code }`)
- * @returns {boolean} true when the error is specifically about a missing `intent` column
+ * @param {*} error - Error object from a PostgREST response
+ * @param {string} column - Exact optional column name
+ * @returns {boolean} true when the error is specifically about the missing column
  */
-export function isMissingIntentColumnError(error) {
+function isMissingPromptColumnError(error, column) {
   if (!error) {
     return false;
   }
@@ -147,7 +141,27 @@ export function isMissingIntentColumnError(error) {
     .filter((v) => v != null)
     .join(' ')
     .toLowerCase();
-  return haystack.includes('intent');
+  return haystack.includes(column.toLowerCase());
+}
+
+/**
+ * Detects a missing `prompts.intent` column without swallowing other errors.
+ *
+ * @param {*} error - Error object from a PostgREST response (`{ message, details, hint, code }`)
+ * @returns {boolean} true when the error is specifically about a missing `intent` column
+ */
+export function isMissingIntentColumnError(error) {
+  return isMissingPromptColumnError(error, 'intent');
+}
+
+/**
+ * Detects a missing `prompts.generation_id` column without swallowing other errors.
+ *
+ * @param {*} error - Error object from a PostgREST response
+ * @returns {boolean} true when the error is specifically about a missing generation column
+ */
+export function isMissingGenerationIdColumnError(error) {
+  return isMissingPromptColumnError(error, 'generation_id');
 }
 
 /**
@@ -170,14 +184,32 @@ function stripIntent(row) {
  * @param {(includeIntent: boolean) => Promise<object>} run - builds+executes the op
  * @returns {Promise<object>} the PostgREST result
  */
-async function withMissingIntentFallback(postgrestClient, run) {
-  const includeIntent = intentColumnSupported.get(postgrestClient) !== false;
-  const result = await run(includeIntent);
-  if (includeIntent && result?.error && isMissingIntentColumnError(result.error)) {
-    intentColumnSupported.set(postgrestClient, false);
+async function withMissingColumnFallback(postgrestClient, supportCache, isMissing, run) {
+  const includeColumn = supportCache.get(postgrestClient) !== false;
+  const result = await run(includeColumn);
+  if (includeColumn && result?.error && isMissing(result.error)) {
+    supportCache.set(postgrestClient, false);
     return run(false);
   }
   return result;
+}
+
+async function withMissingIntentFallback(postgrestClient, run) {
+  return withMissingColumnFallback(
+    postgrestClient,
+    intentColumnSupported,
+    isMissingIntentColumnError,
+    run,
+  );
+}
+
+async function withMissingGenerationIdFallback(postgrestClient, run) {
+  return withMissingColumnFallback(
+    postgrestClient,
+    generationIdColumnSupported,
+    isMissingGenerationIdColumnError,
+    run,
+  );
 }
 
 // Bound the number of ids per `id=in.(...)` PostgREST GET so the query string
@@ -706,7 +738,7 @@ export async function listPrompts({
     }
   }
 
-  const buildSelect = (includeIntent) => `
+  const buildSelect = (includeIntent, includeGenerationId) => `
     id,
     prompt_id,
     name,
@@ -715,7 +747,7 @@ export async function listPrompts({
     status,
     origin,
     source,${includeIntent ? '\n    intent,' : ''}
-    generation_id,
+    ${includeGenerationId ? 'generation_id,' : ''}
     category_id,
     topic_id,
     brand_id,
@@ -731,10 +763,10 @@ export async function listPrompts({
   // Best-effort against environments where `prompts.intent` is absent (see
   // intentColumnSupported): try with intent, and on a missing-column error
   // remember it for this client and re-run the select without intent.
-  const run = (includeIntent) => {
+  const run = (includeIntent, includeGenerationId) => {
     let baseQuery = postgrestClient
       .from('prompts')
-      .select(buildSelect(includeIntent), { count: 'exact' })
+      .select(buildSelect(includeIntent, includeGenerationId), { count: 'exact' })
       .eq('organization_id', organizationId);
 
     // Sorting
@@ -801,7 +833,13 @@ export async function listPrompts({
     return baseQuery.range(offset, offset + limitNum - 1);
   };
 
-  const { data: rows, error, count } = await withMissingIntentFallback(postgrestClient, run);
+  const { data: rows, error, count } = await withMissingGenerationIdFallback(
+    postgrestClient,
+    (includeGenerationId) => withMissingIntentFallback(
+      postgrestClient,
+      (includeIntent) => run(includeIntent, includeGenerationId),
+    ),
+  );
 
   if (error) {
     throw new Error(`Failed to list prompts: ${error.message}`);
@@ -841,9 +879,8 @@ export async function getPromptById({
     return null;
   }
 
-  // Best-effort against environments where `prompts.intent` is absent: try with
-  // intent, and on a missing-column error remember it and re-run without intent.
-  const run = (includeIntent) => postgrestClient
+  // Best-effort against environments where optional prompt columns are absent.
+  const run = (includeIntent, includeGenerationId) => postgrestClient
     .from('prompts')
     .select(`
       id,
@@ -854,6 +891,7 @@ export async function getPromptById({
       status,
       origin,
       source,${includeIntent ? '\n      intent,' : ''}
+      ${includeGenerationId ? 'generation_id,' : ''}
       category_id,
       topic_id,
       brand_id,
@@ -870,7 +908,13 @@ export async function getPromptById({
     .eq('prompt_id', promptId)
     .maybeSingle();
 
-  const { data, error } = await withMissingIntentFallback(postgrestClient, run);
+  const { data, error } = await withMissingGenerationIdFallback(
+    postgrestClient,
+    (includeGenerationId) => withMissingIntentFallback(
+      postgrestClient,
+      (includeIntent) => run(includeIntent, includeGenerationId),
+    ),
+  );
 
   if (error) {
     throw new Error(`Failed to get prompt: ${error.message}`);
@@ -946,9 +990,10 @@ export async function upsertPrompts({
 
   const [{ data: existing }, lookups] = await Promise.all([
     withMissingIntentFallback(postgrestClient, (includeIntent) => {
+      const generationColumn = generationId ? ',generation_id' : '';
       const cols = includeIntent
-        ? 'id,prompt_id,text,regions,status,source,origin,generation_id,intent'
-        : 'id,prompt_id,text,regions,status,source,origin,generation_id';
+        ? `id,prompt_id,text,regions,status,source,origin${generationColumn},intent`
+        : `id,prompt_id,text,regions,status,source,origin${generationColumn}`;
       const baseQuery = () => postgrestClient
         .from('prompts')
         .select(cols)
@@ -1037,7 +1082,7 @@ export async function upsertPrompts({
       status: p.status || 'active',
       origin: p.origin || 'human',
       source,
-      generation_id: generationId ?? null,
+      ...(generationId ? { generation_id: generationId } : {}),
       intent: normalizeIntent(p.intent),
       updated_by: updatedBy,
     };

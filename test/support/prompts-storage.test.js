@@ -28,6 +28,7 @@ import {
   getPromptStats,
   normalizeIntent,
   isMissingIntentColumnError,
+  isMissingGenerationIdColumnError,
   findPromptsBlockingRegionRemoval,
   reconcilePromptGeneration,
   getIntentsByPromptIds,
@@ -4246,9 +4247,21 @@ describe('prompts-storage', () => {
       code: '42703',
       message: 'column prompts.intent does not exist',
     };
+    const MISSING_GENERATION_SELECT = {
+      code: '42703',
+      message: 'column prompts.generation_id does not exist',
+    };
 
     it('upsertPrompts inserts without intent when the column is missing, then retries clean', async () => {
       const insertStub = sinon.stub();
+      const selectStub = sinon.stub().returns({
+        eq: () => ({
+          eq: () => ({
+            ...thenable({ data: [], error: null }),
+            in: () => thenable({ data: [], error: null }),
+          }),
+        }),
+      });
       // First insert (with intent) -> missing-column error; retry -> success.
       insertStub.onFirstCall().returns({
         select: () => thenable({ data: null, error: MISSING_INTENT_INSERT }),
@@ -4260,14 +4273,7 @@ describe('prompts-storage', () => {
         from: (table) => {
           if (table === 'prompts') {
             return {
-              select: () => ({
-                eq: () => ({
-                  eq: () => ({
-                    ...thenable({ data: [], error: null }),
-                    in: () => thenable({ data: [], error: null }),
-                  }),
-                }),
-              }),
+              select: selectStub,
               insert: insertStub,
               update: () => ({ eq: () => thenable({ error: null }) }),
             };
@@ -4288,6 +4294,9 @@ describe('prompts-storage', () => {
       // First attempt carried intent; retry stripped it.
       expect(insertStub.firstCall.args[0][0]).to.have.property('intent', 'informational');
       expect(insertStub.secondCall.args[0][0]).to.not.have.property('intent');
+      expect(insertStub.firstCall.args[0][0]).to.not.have.property('generation_id');
+      expect(insertStub.secondCall.args[0][0]).to.not.have.property('generation_id');
+      expect(selectStub.firstCall.args[0]).to.not.include('generation_id');
     });
 
     it('upsertPrompts retries the chunked existing-rows select without intent when the column is missing', async () => {
@@ -4568,7 +4577,81 @@ describe('prompts-storage', () => {
       expect(result.intent).to.be.null;
     });
 
-    it('still throws on a non-intent query error (no spurious retry)', async () => {
+    it('listPrompts retries without generation_id when the released schema lacks it', async () => {
+      const row = {
+        prompt_id: PROMPT_ID,
+        text: 'Prompt',
+        regions: [],
+        status: 'active',
+        origin: 'human',
+        brands: { id: BRAND_UUID, name: 'Brand' },
+        categories: null,
+        topics: null,
+      };
+      let promptCall = 0;
+      const client = {
+        from: (table) => {
+          if (table === 'brands') {
+            return makeChain({ data: { id: BRAND_UUID }, error: null });
+          }
+          promptCall += 1;
+          return promptCall === 1
+            ? makeChain({ data: null, error: MISSING_GENERATION_SELECT, count: null })
+            : makeChain({ data: [row], error: null, count: 1 });
+        },
+      };
+
+      const result = await listPrompts({
+        organizationId: ORG_ID,
+        brandId: BRAND_UUID,
+        postgrestClient: client,
+      });
+
+      expect(promptCall).to.equal(2);
+      expect(result.items).to.have.lengthOf(1);
+      expect(result.items[0].generationId).to.be.null;
+    });
+
+    it('getPromptById retries without generation_id when the released schema lacks it', async () => {
+      const row = {
+        id: 'pk-uuid',
+        prompt_id: PROMPT_ID,
+        text: 'Prompt',
+        regions: [],
+        status: 'active',
+        origin: 'human',
+        brands: { id: BRAND_UUID, name: 'Brand' },
+        categories: null,
+        topics: null,
+      };
+      let call = 0;
+      const selectedColumns = [];
+      const client = {
+        from: () => ({
+          select: (columns) => {
+            selectedColumns.push(columns);
+            call += 1;
+            return call === 1
+              ? makeChain({ data: null, error: MISSING_GENERATION_SELECT })
+              : makeChain({ data: { ...row, generation_id: undefined }, error: null });
+          },
+        }),
+      };
+
+      const result = await getPromptById({
+        organizationId: ORG_ID,
+        brandUuid: BRAND_UUID,
+        promptId: PROMPT_ID,
+        postgrestClient: client,
+      });
+
+      expect(call).to.equal(2);
+      expect(selectedColumns[0]).to.include('generation_id');
+      expect(selectedColumns[1]).to.not.include('generation_id');
+      expect(result.generationId).to.be.null;
+    });
+
+    it('still throws on a non-optional-column query error (no spurious retry)', async () => {
       let call = 0;
       const client = {
         from: () => {
@@ -4627,6 +4710,24 @@ describe('prompts-storage', () => {
         expect(isMissingIntentColumnError({
           code: '23514',
           message: 'new row violates check constraint; column intent ...',
+        })).to.be.false;
+      });
+    });
+
+    describe('isMissingGenerationIdColumnError', () => {
+      it('matches only precise missing-generation-column errors', () => {
+        expect(isMissingGenerationIdColumnError(MISSING_GENERATION_SELECT)).to.be.true;
+        expect(isMissingGenerationIdColumnError({
+          code: 'PGRST204',
+          message: "Could not find the 'generation_id' column of 'prompts' in the schema cache",
+        })).to.be.true;
+        expect(isMissingGenerationIdColumnError({
+          code: '42703',
+          message: 'column prompts.intent does not exist',
+        })).to.be.false;
+        expect(isMissingGenerationIdColumnError({
+          code: '23514',
+          message: 'column generation_id violates check constraint',
         })).to.be.false;
       });
     });
