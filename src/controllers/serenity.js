@@ -111,8 +111,7 @@ import {
 import { ensureSubworkspace, decommissionBrandWorkspace } from '../support/serenity/workspace-lifecycle.js';
 import {
   isSerenityActiveForBrand,
-  isTagSearchActiveForBrand,
-  isUnboundedTagAuthoringActiveForBrand,
+  isTagMultiDimensionActiveForBrand,
 } from '../support/serenity/serenity-active.js';
 import { MAX_TOPICS_ON_CREATE } from '../support/serenity/brand-provisioning.js';
 import { resolveDefaultModelIds } from '../support/serenity/default-models.js';
@@ -1553,7 +1552,9 @@ function SerenityController(context, log, env) {
       if (isTagSearchDisabled(runtimeEnv)) {
         throw tagSearchUnavailableError('Tag search is disabled in this environment');
       }
-      if (!await isTagSearchActiveForBrand(
+      // Same brand-level flag that unlocks arbitrary-depth authoring: search and
+      // deep authoring roll out together (LLMO/serenity_tag_multi_dimension).
+      if (!await isTagMultiDimensionActiveForBrand(
         ctx,
         ctx.params.spaceCatId,
         /** @type {string} */ (auth.brandUuid),
@@ -1606,7 +1607,7 @@ function SerenityController(context, log, env) {
         return auth.error;
       }
       const transport = buildTransport(ctx, imsToken);
-      const unboundedTagAuthoring = await isUnboundedTagAuthoringActiveForBrand(
+      const unboundedTagAuthoring = await isTagMultiDimensionActiveForBrand(
         ctx,
         ctx.params.spaceCatId,
         /** @type {string} */ (auth.brandUuid),
@@ -1658,7 +1659,7 @@ function SerenityController(context, log, env) {
         return auth.error;
       }
       const transport = buildTransport(ctx, imsToken);
-      const unboundedTagAuthoring = await isUnboundedTagAuthoringActiveForBrand(
+      const unboundedTagAuthoring = await isTagMultiDimensionActiveForBrand(
         ctx,
         ctx.params.spaceCatId,
         /** @type {string} */ (auth.brandUuid),

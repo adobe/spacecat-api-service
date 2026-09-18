@@ -286,11 +286,11 @@ describe('isSerenityActiveForBrand', () => {
   });
 });
 
-describe('isUnboundedTagAuthoringActiveForBrand', () => {
+describe('isTagMultiDimensionActiveForBrand', () => {
   let readScopesStub;
-  let isUnboundedTagAuthoringActiveForBrand;
+  let isTagMultiDimensionActiveForBrand;
   let clearSerenityFlagCache;
-  let SERENITY_UNBOUNDED_TAG_AUTHORING_FEATURE_FLAG_NAME;
+  let SERENITY_TAG_MULTI_DIMENSION_FEATURE_FLAG_NAME;
 
   beforeEach(async () => {
     readScopesStub = sinon.stub();
@@ -300,86 +300,89 @@ describe('isUnboundedTagAuthoringActiveForBrand', () => {
       },
     });
     ({
-      isUnboundedTagAuthoringActiveForBrand,
+      isTagMultiDimensionActiveForBrand,
       clearSerenityFlagCache,
-      SERENITY_UNBOUNDED_TAG_AUTHORING_FEATURE_FLAG_NAME,
+      SERENITY_TAG_MULTI_DIMENSION_FEATURE_FLAG_NAME,
     } = mod);
     clearSerenityFlagCache();
   });
 
   afterEach(() => sinon.restore());
 
-  it('uses the dedicated LLMO feature flag and resolves brand overrides', async () => {
+  it('uses the single LLMO/serenity_tag_multi_dimension flag and resolves brand overrides', async () => {
     readScopesStub.resolves(scopes({ org: false, brands: { [BRAND]: true } }));
 
-    expect(await isUnboundedTagAuthoringActiveForBrand(fakeCtx(), ORG, BRAND, fakeLog()))
+    expect(await isTagMultiDimensionActiveForBrand(fakeCtx(), ORG, BRAND, fakeLog()))
       .to.equal(true);
-    expect(SERENITY_UNBOUNDED_TAG_AUTHORING_FEATURE_FLAG_NAME)
-      .to.equal('serenity_unbounded_tag_authoring');
+    expect(await isTagMultiDimensionActiveForBrand(fakeCtx(), ORG, OTHER_BRAND, fakeLog()))
+      .to.equal(false);
+    expect(SERENITY_TAG_MULTI_DIMENSION_FEATURE_FLAG_NAME)
+      .to.equal('serenity_tag_multi_dimension');
     expect(readScopesStub.firstCall.args[0]).to.include({
       organizationId: ORG,
       product: 'LLMO',
-      flagName: 'serenity_unbounded_tag_authoring',
+      flagName: 'serenity_tag_multi_dimension',
     });
   });
 
   it('defaults off when the flag is absent or cannot be read', async () => {
     const log = fakeLog();
     readScopesStub.resolves(scopes());
-    expect(await isUnboundedTagAuthoringActiveForBrand(fakeCtx(), ORG, BRAND, log))
+    expect(await isTagMultiDimensionActiveForBrand(fakeCtx(), ORG, BRAND, log))
       .to.equal(false);
 
     clearSerenityFlagCache();
     readScopesStub.rejects(new Error('boom'));
-    expect(await isUnboundedTagAuthoringActiveForBrand(fakeCtx(), ORG, BRAND, log))
+    expect(await isTagMultiDimensionActiveForBrand(fakeCtx(), ORG, BRAND, log))
       .to.equal(false);
   });
-});
 
-describe('isTagSearchActiveForBrand', () => {
-  let readScopesStub;
-  let isTagSearchActiveForBrand;
-  let clearSerenityFlagCache;
-  let SERENITY_TAG_SEARCH_FEATURE_FLAG_NAME;
+  it('answers deep authoring and tag search from ONE flag read (they cannot diverge)', async () => {
+    // Both call sites in the controller resolve the same predicate, so a single
+    // cached read serves them and no combination can enable one half only.
+    readScopesStub.resolves(scopes({ org: true }));
+    const authoringEnabled = await isTagMultiDimensionActiveForBrand(
+      fakeCtx(),
+      ORG,
+      BRAND,
+      fakeLog(),
+    );
+    const searchEnabled = await isTagMultiDimensionActiveForBrand(
+      fakeCtx(),
+      ORG,
+      BRAND,
+      fakeLog(),
+    );
+    expect(authoringEnabled).to.equal(true);
+    expect(searchEnabled).to.equal(true);
+    expect(readScopesStub).to.have.been.calledOnce;
+  });
 
-  beforeEach(async () => {
-    readScopesStub = sinon.stub();
+  it('ignores the retired per-capability flags entirely', async () => {
+    // A brand still carrying only the old rows gets nothing: the merged flag is
+    // the only name read, with no alias fallback.
+    readScopesStub.callsFake(async ({ flagName }) => (
+      flagName === 'serenity_tag_multi_dimension'
+        ? scopes()
+        : scopes({ org: true, brands: { [BRAND]: true } })
+    ));
+
+    expect(await isTagMultiDimensionActiveForBrand(fakeCtx(), ORG, BRAND, fakeLog()))
+      .to.equal(false);
+    expect(readScopesStub).to.have.been.calledOnce;
+    expect(readScopesStub.firstCall.args[0].flagName).to.equal('serenity_tag_multi_dimension');
+  });
+
+  it('no longer exports the retired per-capability predicates or flag names', async () => {
     const mod = await esmock('../../../src/support/serenity/serenity-active.js', {
       '../../../src/support/feature-flags-storage.js': {
         readFeatureFlagScopes: readScopesStub,
       },
     });
-    ({
-      isTagSearchActiveForBrand,
-      clearSerenityFlagCache,
-      SERENITY_TAG_SEARCH_FEATURE_FLAG_NAME,
-    } = mod);
-    clearSerenityFlagCache();
-  });
-
-  afterEach(() => sinon.restore());
-
-  it('uses the dedicated default-off LLMO feature flag', async () => {
-    readScopesStub.resolves(scopes({ org: false, brands: { [BRAND]: true } }));
-
-    expect(await isTagSearchActiveForBrand(fakeCtx(), ORG, BRAND, fakeLog()))
-      .to.equal(true);
-    expect(SERENITY_TAG_SEARCH_FEATURE_FLAG_NAME).to.equal('serenity_tag_search');
-    expect(readScopesStub.firstCall.args[0]).to.include({
-      organizationId: ORG,
-      product: 'LLMO',
-      flagName: 'serenity_tag_search',
-    });
-  });
-
-  it('defaults off when the flag is absent or cannot be read', async () => {
-    const log = fakeLog();
-    readScopesStub.resolves(scopes());
-    expect(await isTagSearchActiveForBrand(fakeCtx(), ORG, BRAND, log)).to.equal(false);
-
-    clearSerenityFlagCache();
-    readScopesStub.rejects(new Error('boom'));
-    expect(await isTagSearchActiveForBrand(fakeCtx(), ORG, BRAND, log)).to.equal(false);
+    expect(mod.isUnboundedTagAuthoringActiveForBrand).to.equal(undefined);
+    expect(mod.isTagSearchActiveForBrand).to.equal(undefined);
+    expect(mod.SERENITY_UNBOUNDED_TAG_AUTHORING_FEATURE_FLAG_NAME).to.equal(undefined);
+    expect(mod.SERENITY_TAG_SEARCH_FEATURE_FLAG_NAME).to.equal(undefined);
   });
 });
 
