@@ -110,10 +110,9 @@ function isStaticRoute(routePattern) {
  * @param {Object} elementsController - Elements API controller (Semrush Elements wrappers).
  * @param {Object} proxyController - URL proxy controller for client-side previews.
  * @param {Object} brand24Controller - Brand24 API proxy controller (POC — Offsite Visibility).
- * @param {Object} brand24MarketTopicsController - Cross-project competitor topic relevance
- *   controller (POC — Market Topics tab).
- * @param {Object} brand24DevxMentionsController - Mentions-by-event/topic proxy against a
- *   separate, unverified Brand24 "devx" host (POC).
+ * @param {Object} brand24MarketTopicsController - Brand24-backed Market Topics tab controller
+ *   (POC): keyword-grouped themes + a 3-month trend per member, same contract shape as
+ *   `semrushMarketTopicsController` so the frontend can switch between the two data sources.
  * @param {Object} semrushMarketTopicsController - Semrush AI-visibility Market Topics
  *   controller (POC — replaces the Brand24-topics-sourced Market Topics tab).
  * @param {Object} taskManagementController - Task-management (Jira ticket creation) controller.
@@ -189,7 +188,6 @@ export default function getRouteHandlers(
   proxyController,
   brand24Controller,
   brand24MarketTopicsController,
-  brand24DevxMentionsController,
   semrushMarketTopicsController,
   taskManagementController,
   onboardingController,
@@ -509,7 +507,6 @@ export default function getRouteHandlers(
     'GET /tools/proxy': proxyController.getPreview,
     'GET /tools/brand24': brand24Controller.getData,
     'GET /tools/brand24/market-topics': brand24MarketTopicsController.getMarketTopics,
-    'GET /tools/brand24-devx/mentions': brand24DevxMentionsController.getMentions,
     'GET /tools/semrush/market-topics': semrushMarketTopicsController.getMarketTopics,
     'GET /monitoring/drs-bp-pg-audit': drsBpPgAuditController.getProjectionAudit,
 

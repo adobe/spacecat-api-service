@@ -14,13 +14,18 @@
  * Keyword-grouped market themes — the same "similar topics" idea as the `brand24` repo's
  * `src/lib/similar-topics.ts` `findSharedThemes`: tokenize topic names, drop stopwords and
  * every compared brand's own name/product words, and treat a significant keyword shared
- * across brands as a "theme" carrying one representative topic per brand. Adapted here to
- * Semrush's field names (`topic`/`topic_volume`; no `description`) and to the market-topics
- * framing: a theme must include the BRAND plus at least one competitor (so it's a topic
- * Lovesac AND the market talk about), rather than brand24's stricter "present in every
- * brand" rule. Keywords that resolve to the same representative topics are merged into one
- * theme (so "sectional" + "sofa" collapse when they point at the same topics), exactly as
- * brand24 merges them.
+ * across brands as a "theme" carrying one representative topic per brand. A theme must
+ * include the BRAND plus at least one competitor (so it's a topic Lovesac AND the market
+ * talk about), rather than brand24's stricter "present in every brand" rule. Keywords that
+ * resolve to the same representative topics are merged into one theme (so "sectional" +
+ * "sofa" collapse when they point at the same topics), exactly as brand24 merges them.
+ *
+ * Source-agnostic: operates on the generic shape `{ topic_id, topic, topic_volume, mentions }`
+ * (originally Semrush's own field names — `topic`/`topic_volume`, no `description`), not any
+ * one upstream API's schema. Both `semrush-market-topics.js` (Semrush `topic`/`topic_volume`
+ * directly) and `brand24-market-topics.js` (mapping Brand24's `topic_name`/`reach` into this
+ * shape first) build their Market Topics tables on this same function, so the two data
+ * sources produce byte-for-byte the same theme/member/trend contract for the frontend.
  */
 
 // Common English function words plus AI-topic-summary filler that never makes a useful

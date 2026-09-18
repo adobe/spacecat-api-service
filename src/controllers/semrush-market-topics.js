@@ -13,36 +13,55 @@
 /**
  * Semrush AI-visibility Market Topics — replaces the Brand24-`topics`-sourced Market
  * Topics tab with Semrush's own `brands/topics/stats` (see `support/semrush/client.js`).
- * Fetches Lovesac's topics for the requested engine/month/country, then the same for
- * each configured competitor, and computes per-competitor shared themes (keyword
+ * Fetches the requested brand's topics for the requested engine/month/country, then the
+ * same for each configured competitor, and computes per-competitor shared themes (keyword
  * overlap on topic names — `findSharedThemes`, ported from the `brand24` repo's
- * "similar topics" feature) so the frontend can show which Lovesac topics have a real
+ * "similar topics" feature) so the frontend can show which brand topics have a real
  * counterpart in a competitor's own AI-visibility topics.
  *
  * `engine` is REQUIRED and NOT defaulted/merged across engines — confirmed live that
  * different engines return materially different topics and volumes for the same
  * domain/month, so the frontend re-requests per engine to let the customer filter,
  * rather than this endpoint silently picking one.
+ *
+ * `domain` is OPTIONAL — defaults to `DEFAULT_BRAND_DOMAIN` (Lovesac, this POC's original
+ * fixed brand) so existing callers keep working unchanged. The frontend's own domain
+ * selector (mirroring the SR AI Visibility "Market Comparison" dashboard's Domain filter)
+ * threads the customer's selected/configured domain through here instead. `brandName` is
+ * an optional display-label override for that domain (Semrush's `brands/topics/stats`
+ * itself never returns one); when omitted for a non-default domain, it's derived from the
+ * domain's own first label (e.g. `acme.com` -> `Acme`) rather than left hardcoded.
  */
 
 import { badRequest, ok } from '@adobe/spacecat-shared-http-utils';
 import { fetchSemrushTopicsStats } from '../support/semrush/client.js';
-import { groupMarketThemes } from '../support/semrush/sharedThemes.js';
+import { groupMarketThemes } from '../support/sharedThemes.js';
 
 const ENGINES = ['chatgpt', 'gemini', 'google_ai_mode', 'google_ai_overview'];
 // `all` aggregates across every engine (see mergeTopicsAcrossEngines).
 const VALID_ENGINE_PARAMS = [...ENGINES, 'all'];
 
-const BRAND_NAME = 'Lovesac';
-const BRAND_DOMAIN = 'lovesac.com';
+const DEFAULT_BRAND_NAME = 'Lovesac';
+const DEFAULT_BRAND_DOMAIN = 'lovesac.com';
 
 // Fixed competitor set for this POC — mirrors the Brand24-based market-topics controller's
-// own DEFAULT_COMPETITOR_PROJECT_NAMES, just addressed by domain instead of Brand24 project name.
+// own DEFAULT_COMPETITOR_PROJECT_NAMES, just addressed by domain instead of Brand24 project
+// name. Not yet selection-driven: the customer's chosen domain becomes the brand row above;
+// these three stay the fixed comparison set regardless of which domain is selected.
 const COMPETITOR_DOMAINS = [
   { domain: 'ikea.com', name: 'Ikea' },
   { domain: 'westelm.com', name: 'West Elm' },
   { domain: 'potterybarn.com', name: 'Pottery Barn' },
 ];
+
+const DOMAIN_PATTERN = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i;
+
+/** `acme.com` -> `Acme`; `my-brand.co.uk` -> `My-brand`. Bare fallback label when the
+ * caller doesn't supply a `brandName` for a non-default domain. */
+function deriveBrandNameFromDomain(domain) {
+  const firstLabel = domain.split('.')[0] ?? domain;
+  return firstLabel.charAt(0).toUpperCase() + firstLabel.slice(1);
+}
 
 const MONTH_PATTERN = /^\d{4}-\d{2}$/;
 // How many months of history to build the per-topic volume trend from (this month + 2 prior).
@@ -94,6 +113,16 @@ function SemrushMarketTopicsController(context, log, env) {
       return badRequest('month is required, format YYYY-MM');
     }
 
+    const rawDomain = params.get('domain');
+    if (rawDomain && !DOMAIN_PATTERN.test(rawDomain)) {
+      return badRequest('domain must be a bare hostname (e.g. acme.com)');
+    }
+    const selectedDomain = rawDomain || DEFAULT_BRAND_DOMAIN;
+    const brandName = params.get('brandName')
+      || (selectedDomain === DEFAULT_BRAND_DOMAIN
+        ? DEFAULT_BRAND_NAME
+        : deriveBrandNameFromDomain(selectedDomain));
+
     const country = params.get('country') || 'us';
     const enginesToFetch = engine === 'all' ? ENGINES : [engine];
     // Descending months [primary, prior, prior-1]; reversed to ascending for the trend series.
@@ -128,17 +157,22 @@ function SemrushMarketTopicsController(context, log, env) {
       return { primary: monthResults[0], byMonth };
     };
 
-    const brandTrend = await fetchDomainTrend(BRAND_DOMAIN);
+    const brandTrend = await fetchDomainTrend(selectedDomain);
     if (!brandTrend.primary.ok) {
-      return badRequest(`Semrush request failed for ${BRAND_DOMAIN}: ${brandTrend.primary.message}`);
+      return badRequest(`Semrush request failed for ${selectedDomain}: ${brandTrend.primary.message}`);
     }
     const brandTopics = brandTrend.primary.topics;
 
     // brand/competitor display name -> its month->topics lookup, for trend enrichment below.
-    const monthlyByName = new Map([[BRAND_NAME, brandTrend.byMonth]]);
+    const monthlyByName = new Map([[brandName, brandTrend.byMonth]]);
+
+    // Drop the selected domain from the fixed competitor set if it collides (e.g. the customer
+    // picks `ikea.com` as their own brand) — otherwise the same domain would show up twice,
+    // once as the brand row and once as a "competitor" of itself.
+    const competitorDomains = COMPETITOR_DOMAINS.filter((c) => c.domain !== selectedDomain);
 
     const competitors = [];
-    for (const competitor of COMPETITOR_DOMAINS) {
+    for (const competitor of competitorDomains) {
       // Sequential across domains (parallel within a domain) to stay well under rate limits.
       // eslint-disable-next-line no-await-in-loop
       const trend = await fetchDomainTrend(competitor.domain);
@@ -163,7 +197,7 @@ function SemrushMarketTopicsController(context, log, env) {
     // one representative topic per participating brand) — the bubble map + expandable table are
     // both keyed on these themes, not individual topics.
     const themes = groupMarketThemes(
-      { name: BRAND_NAME, topics: brandTopics },
+      { name: brandName, topics: brandTopics },
       competitors.filter((c) => !c.unavailable).map((c) => ({ name: c.name, topics: c.topics })),
     );
 
@@ -190,7 +224,7 @@ function SemrushMarketTopicsController(context, log, env) {
       month,
       country,
       trendMonths: ascendingMonths,
-      brand: { domain: BRAND_DOMAIN, name: BRAND_NAME, topics: brandTopics },
+      brand: { domain: selectedDomain, name: brandName, topics: brandTopics },
       competitors,
       themes,
     });

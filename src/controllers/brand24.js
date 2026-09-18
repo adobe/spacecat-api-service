@@ -26,6 +26,7 @@
 import { ok, badRequest, internalServerError } from '@adobe/spacecat-shared-http-utils';
 import { getBrand24Endpoint, buildBrand24Path } from '../support/brand24/endpoints.js';
 import { parsePositiveInt, validateDateRange } from '../support/brand24/validation.js';
+import { filterUsableMentions } from '../support/brand24/mentionsFilter.js';
 
 const BRAND24_BASE_URL = 'https://api-data.brand24.com';
 
@@ -106,7 +107,14 @@ function Brand24Controller(context, log, env) {
     }
 
     if (upstreamBody?.status === 'success') {
-      return ok(upstreamBody.data ?? upstreamBody.message);
+      const data = upstreamBody.data ?? upstreamBody.message;
+      // Filtered here, not by each dashboard consumer, so the Sources and Domains tabs (which
+      // both read this same `results` array) never disagree on what counts as a usable mention —
+      // see mentionsFilter.js for exactly what "usable" means.
+      if (endpointKey === 'mentions' && data && Array.isArray(data.results)) {
+        return ok({ ...data, results: filterUsableMentions(data.results) });
+      }
+      return ok(data);
     }
     const message = typeof upstreamBody?.message === 'string' ? upstreamBody.message : 'Brand24 request failed';
     log.warn(`[brand24] endpoint=${endpointKey} upstreamStatus=${upstreamResponse.status} message=${message}`);

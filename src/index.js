@@ -121,7 +121,6 @@ import ElementsController from './controllers/elements.js';
 import ProxyController from './controllers/proxy.js';
 import Brand24Controller from './controllers/brand24.js';
 import Brand24MarketTopicsController from './controllers/brand24-market-topics.js';
-import Brand24DevxMentionsController from './controllers/brand24-devx-mentions.js';
 import SemrushMarketTopicsController from './controllers/semrush-market-topics.js';
 import OnboardingController from './controllers/onboarding.js';
 import GitHubWebhookHmacHandler from './support/github-webhook-hmac-handler.js';
@@ -307,7 +306,6 @@ async function run(request, context) {
     const proxyController = ProxyController();
     const brand24Controller = Brand24Controller(context, log, context.env);
     const brand24MarketTopicsController = Brand24MarketTopicsController(context, log, context.env);
-    const brand24DevxMentionsController = Brand24DevxMentionsController(context, log, context.env);
     const semrushMarketTopicsController = SemrushMarketTopicsController(context, log, context.env);
     const taskManagementController = TaskManagementController(context);
     const onboardingController = OnboardingController(context, log, context.env);
@@ -379,7 +377,6 @@ async function run(request, context) {
       proxyController,
       brand24Controller,
       brand24MarketTopicsController,
-      brand24DevxMentionsController,
       semrushMarketTopicsController,
       taskManagementController,
       onboardingController,
